@@ -36,7 +36,7 @@ from .privacy import (PhiInspector, PhiFinding, PhiReport,
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
-from .manifest import Manifest, ManifestItem, generate_manifest_file
+from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore
 from .crypto import KeyManager
@@ -3515,8 +3515,13 @@ class DicomSession:
 
         Args:
             output_path (str): The file path where the report should be saved.
-            format (str): The output format ('markdown' or 'md'). Defaults to "markdown".
+            format (str): The output format: `'markdown'`, the one spelling
+                accepted (`'md'` and case variants raise `ValueError` since
+                #26). Defaults to "markdown".
         """
+        # The spelling first (#26, review of #787): a refused format is
+        # known before a report over the whole store is built.
+        renderer = get_renderer(format)
         get_logger().info(f"Generating Compliance Report ({format}) to {output_path}...")
 
         # 1. Gather Statistics
@@ -3806,7 +3811,6 @@ class DicomSession:
             unscanned_instances=unscanned_instances,
         )
 
-        renderer = get_renderer(format)
         renderer.render(report, output_path)
 
     @staticmethod
@@ -3859,8 +3863,13 @@ class DicomSession:
 
         Args:
             output_path (str): The file path where the manifest should be saved.
-            format (str): The output format ('html' or 'json'). Defaults to "html".
+            format (str): The output format: `'html'` or `'json'`, exactly
+                (a case variant raises `ValueError` since #26). Defaults to
+                "html".
         """
+        # The spelling first (#26, review of #787), before every instance
+        # is walked.
+        renderer = get_manifest_renderer(format)
         get_logger().info(f"Generating Manifest ({format}) to {output_path}...")
 
         items = []
@@ -3893,7 +3902,7 @@ class DicomSession:
             project_name=os.path.basename(self.persistence_file)
         )
 
-        generate_manifest_file(manifest, output_path, format)
+        renderer.render(manifest, output_path)
 
     def save_analysis(self, report):
         """

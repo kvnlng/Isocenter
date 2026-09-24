@@ -365,7 +365,7 @@ def _configuration_with_a_rule(tmp_path):
     # #715 the doors write only when asked.
     path = tmp_path / "project.yaml"
     configuration = IsocenterConfiguration(config_path=str(path), auto_save=True)
-    configuration.add_rule("SN1", zones=[[0, 4, 0, 4]])
+    configuration.add_rule("SN1", redaction_zones=[[0, 4, 0, 4]])
     return configuration, path
 
 
@@ -412,7 +412,7 @@ def test_add_rule_refusing_a_replacement_keeps_the_rule_it_would_replace(tmp_pat
     rules_before = yaml.safe_load(yaml.safe_dump(configuration.rules))
     bytes_before = path.read_bytes()
     with pytest.raises(ValueError, match="ROI"):
-        configuration.add_rule("SN1", zones=[[0, 1, 2]])
+        configuration.add_rule("SN1", redaction_zones=[[0, 1, 2]])
     assert configuration.rules == rules_before
     assert path.read_bytes() == bytes_before
 
@@ -423,7 +423,7 @@ def test_add_rule_that_passes_still_replaces_the_serials_rule(tmp_path):
     a second. Kills the moved `delete_rule` call deleted (a probe survivor
     on this branch before this test)."""
     configuration, _ = _configuration_with_a_rule(tmp_path)
-    configuration.add_rule("SN1", zones=[[0, 8, 0, 8]])
+    configuration.add_rule("SN1", redaction_zones=[[0, 8, 0, 8]])
     assert [r["redaction_zones"] for r in configuration.rules] == [[[0, 8, 0, 8]]]
 
 
@@ -443,7 +443,7 @@ def test_add_rule_with_null_metadata_writes_a_file_that_loads(tmp_path):
     (review of #728, finding 1)."""
     path = tmp_path / "project.yaml"
     configuration = IsocenterConfiguration(config_path=str(path), auto_save=True)
-    configuration.add_rule("SN-1", manufacturer=None, model=None, zones=[[0, 4, 0, 4]])
+    configuration.add_rule("SN-1", manufacturer=None, model_name=None, redaction_zones=[[0, 4, 0, 4]])
     configuration.update_rule("SN-1", {"comment": None})
     _, rules, _, _, _ = ConfigLoader.load_unified_config(str(path))
     assert rules[0]["manufacturer"] is None and rules[0]["comment"] is None

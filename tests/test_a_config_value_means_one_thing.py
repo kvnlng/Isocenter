@@ -158,3 +158,36 @@ def test_a_null_name_on_a_sequence_rule_reads_as_absent(tmp_path):
         _patient_with(instance))
     (finding,) = [f for f in findings if f.tag == REFERENCED_STUDY]
     assert finding.field_name == "Unknown Tag"
+
+
+# --- #26: the in-code doors spell a field as the file does -----------------
+
+@pytest.mark.parametrize("old", ["model", "zones"])
+def test_add_rule_takes_the_file_s_key_names(old):
+    """`add_rule(model_name=, redaction_zones=)`, the keys a `machines:`
+    rule is written with (owner ruling on #787). It took `model=` and
+    `zones=` until the 1.0 freeze, so one field had two spellings across
+    the code-to-file boundary, and freezing them would have kept both for
+    every 1.x. The old keywords are deleted, not aliased."""
+    configuration = IsocenterConfiguration()
+    configuration.add_rule("SN26", manufacturer="GE", model_name="Revolution",
+                           redaction_zones=[[0, 4, 0, 4]])
+    assert configuration.get_rule("SN26") == {
+        "serial_number": "SN26", "manufacturer": "GE",
+        "model_name": "Revolution", "redaction_zones": [[0, 4, 0, 4]]}
+    with pytest.raises(TypeError, match=f"unexpected keyword argument '{old}'"):
+        configuration.add_rule("SN27", **{old: None})
+    assert configuration.get_rule("SN27") is None
+
+
+def test_set_phi_tag_takes_value_as_the_file_does():
+    """`set_phi_tag(value=)`: #538 renamed the file key `replacement:` to
+    `value:`, and the loader refuses `replacement:` with rename advice, but
+    the method kept `replacement=` (owner ruling on #787). Deleted, not
+    aliased."""
+    configuration = IsocenterConfiguration()
+    configuration.set_phi_tag(INSTITUTION, "REPLACE", value="SITE")
+    assert configuration.phi_tags[INSTITUTION.lower()]["value"] == "SITE"
+    with pytest.raises(TypeError, match="unexpected keyword argument 'replacement'"):
+        configuration.set_phi_tag(INSTITUTION, "REPLACE", replacement="SITE2")
+    assert configuration.phi_tags[INSTITUTION.lower()]["value"] == "SITE"

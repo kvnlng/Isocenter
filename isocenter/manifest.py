@@ -176,6 +176,24 @@ class HTMLManifestRenderer:
             f.write(html)
 
 
+def get_manifest_renderer(format: str):
+    """The renderer for `generate_manifest(format=)`: `'json'` or `'html'`,
+    exactly.
+
+    Raises:
+        ValueError: For any other spelling, `None` included. A case variant
+            (`'HTML'`) was accepted until the 1.0 freeze (#26); one spelling
+            per behaviour, so it is refused rather than frozen.
+    """
+    if format == "json":
+        return JSONManifestRenderer()
+    if format == "html":
+        return HTMLManifestRenderer()
+    raise ValueError(
+        f"Unsupported manifest format: {format!r}; the accepted "
+        f"spellings are 'html' or 'json'")
+
+
 def generate_manifest_file(manifest: Manifest, output_path: str, format: str = "html"):
     """
     Generates a manifest file in the requested format.
@@ -183,16 +201,9 @@ def generate_manifest_file(manifest: Manifest, output_path: str, format: str = "
     Args:
         manifest (Manifest): The manifest object to export.
         output_path (str): The destination file path.
-        format (str): 'json' or 'html'.
+        format (str): 'json' or 'html', exactly.
 
     Raises:
-        ValueError: If format is unsupported.
+        ValueError: If format is any other spelling (`get_manifest_renderer`).
     """
-    if format.lower() == "json":
-        renderer = JSONManifestRenderer()
-    elif format.lower() == "html":
-        renderer = HTMLManifestRenderer()
-    else:
-        raise ValueError(f"Unsupported manifest format: {format}")
-
-    renderer.render(manifest, output_path)
+    get_manifest_renderer(format).render(manifest, output_path)

@@ -240,7 +240,7 @@ def test_every_nested_item_is_linked_to_its_container(tmp_path):
         assert any("0400,0500" in i.sequences for i in insts)
         session.anonymize(report)
         _assert_all_linked(session, "pass")
-        session.configuration.add_rule(SERIAL, zones=[[0, 4, 0, 4]])
+        session.configuration.add_rule(SERIAL, redaction_zones=[[0, 4, 0, 4]])
         assert session.redact(show_progress=False) == 1
         insts = _assert_all_linked(session, "redact")
         assert any("0008,9215" in i.sequences for i in insts)
@@ -376,7 +376,7 @@ def test_the_ordinary_path_stays_pass(tmp_path):
         session.save(sync=True)
         session.anonymize(session.audit())
         session.save(sync=True)
-        session.configuration.add_rule(SERIAL, zones=[[0, 4, 0, 4]])
+        session.configuration.add_rule(SERIAL, redaction_zones=[[0, 4, 0, 4]])
         assert session.redact(show_progress=False) == 1
         session.save(sync=True)
         reasons, passed, _ds = _graded(session, tmp_path)

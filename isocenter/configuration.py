@@ -428,7 +428,8 @@ class IsocenterConfiguration:
         return len(configuration.rules) < before
 
     def add_rule(self, serial_number: str, manufacturer: str = "Unknown",
-                 model: str = "Unknown", zones: List[Any] = None) -> None:
+                 model_name: str = "Unknown",
+                 redaction_zones: List[Any] = None) -> None:
         """
         Adds a new machine redaction rule.
 
@@ -438,8 +439,13 @@ class IsocenterConfiguration:
         Args:
             serial_number (str): The device serial number.
             manufacturer (str, optional): Metadata for reference.
-            model (str, optional): Metadata for reference.
-            zones (List[Any], optional): List of redaction zones (ROIs).
+            model_name (str, optional): Metadata for reference.
+            redaction_zones (List[Any], optional): List of redaction zones
+                (ROIs).
+
+        The two keywords are spelled as the rule's keys in a `machines:`
+        file. They were `model=` and `zones=` until the 1.0 freeze (#26),
+        and were renamed, not aliased: the old keywords raise `TypeError`.
 
         Raises:
             ValueError: For a rule `load_config` would refuse
@@ -454,8 +460,8 @@ class IsocenterConfiguration:
         new_rule = {
             "serial_number": serial_number,
             "manufacturer": manufacturer,
-            "model_name": model,
-            "redaction_zones": zones or []
+            "model_name": model_name,
+            "redaction_zones": redaction_zones or []
         }
         # Before the delete, not merely before the append: a refusal after
         # it would have lost the serial's existing rule (#712). The
@@ -533,23 +539,25 @@ class IsocenterConfiguration:
             return False
         return self._apply(lambda configuration: self._without_rule(configuration, serial_number))
 
-    def set_phi_tag(self, tag: str, action: str, replacement: str = None) -> None:
+    def set_phi_tag(self, tag: str, action: str, value: str = None) -> None:
         """
         Sets or updates a PHI tag policy.
 
         Args:
             tag (str): The DICOM tag to target (e.g. "0010,0010").
             action (str): The remediation action ('KEEP', 'REMOVE', 'REPLACE', 'JITTER', 'EMPTY').
-            replacement (str, optional): The value `REPLACE` writes, stored
-                as the rule's `value` (#538). Until 0.9.8 it was stored
-                under a `replacement` key nothing read, and `ANONYMIZED`
-                was written.
+            value (str, optional): The value `REPLACE` writes, stored as
+                the rule's `value` (#538), the key a file spells it with.
+                The keyword was `replacement=` until the 1.0 freeze (#26),
+                renamed, not aliased: `replacement=` raises `TypeError`.
+                Until 0.9.8 it was stored under a `replacement` key nothing
+                read, and `ANONYMIZED` was written.
 
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
                 cannot honour (`config_manager.validate_phi_policy`: a
                 Patient ID rule other than KEEP or REPLACE with no value,
-                a `replacement` under an action other than REPLACE,
+                a `value` under an action other than REPLACE,
                 SHIFT/JITTER on a standard tag that is not DA or DT, or
                 REPLACE on a standard tag whose VR cannot hold the value).
                 Raised before the policy or its file is changed. Under
@@ -583,8 +591,8 @@ class IsocenterConfiguration:
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action
         }
-        if replacement:
-            val["value"] = replacement
+        if value:
+            val["value"] = value
 
         # Before the assignment and any write (#456): a refused rule leaves
         # the policy and its file as they were. This refuses an unknown

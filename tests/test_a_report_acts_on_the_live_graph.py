@@ -327,7 +327,7 @@ def _redact(session, modality):
                   for se in st.series if instance in se.instances)
     serial = series.equipment.device_serial_number
     assert serial, modality
-    session.configuration.add_rule(serial, zones=[[0, 4, 0, 4]])
+    session.configuration.add_rule(serial, redaction_zones=[[0, 4, 0, 4]])
     assert session.redact() == 1
     assert instance.sop_instance_uid != instance.attributes["_ISOCENTER_SOURCE_SOP_UID"]
     return instance

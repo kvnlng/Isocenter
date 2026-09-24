@@ -279,6 +279,11 @@ pattern, `PROPER_NOUN` if any was classified as one, and `TEXT` otherwise.
 
 `to_dataframe()` needs only pandas, which Isocenter already depends on.
 
+`filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
+`visualize_heatmap()`, `get_density_matrix()` and `n_sources` are documented but
+internal: they may change in a 1.x release, with a changelog entry naming the old
+spelling and the new ([API stability](docs/api/stability.md)).
+
 **`get_density_matrix()` is not an image-space heatmap, and the difference matters.**
 It bins each candidate's box *centre* into a grid, but it normalises by the largest
 box *origin* among the candidates — not by the image's Rows and Columns. The grid

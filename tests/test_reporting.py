@@ -236,3 +236,39 @@ def test_an_unresolvable_profile_is_not_reported_as_applied(tmp_path):
     assert "no_such_profile" not in content, (
         "the report names a profile that failed to resolve and was never "
         "applied")
+
+
+@pytest.mark.parametrize("spelling", ["md", "MARKDOWN", "Markdown", " markdown", None])
+def test_a_second_spelling_of_the_report_format_is_refused(tmp_path, spelling):
+    """One spelling per behaviour (#26): `generate_report(format=)` takes
+    `'markdown'`, the value `docs/api/stability.md` freezes, and nothing
+    else. `'md'` and every case variant were accepted until the freeze
+    (`format_type.lower() in ["md", "markdown"]`) -- two spellings a 1.x
+    could never remove. Refused before anything is written, and the
+    message names the one spelling that is accepted.
+
+    The control is the frozen spelling, which writes the report: a
+    renderer that refused everything would satisfy the refusal alone.
+    """
+    out = tmp_path / "report.md"
+    with Session(str(tmp_path / "formats.db")) as session:
+        with pytest.raises(ValueError, match="'markdown'"):
+            session.generate_report(str(out), format=spelling)
+        assert not out.exists()
+        session.generate_report(str(out), format="markdown")
+    assert out.exists()
+
+
+def test_a_refused_report_format_is_refused_before_the_report_is_built(
+        tmp_path, monkeypatch):
+    """The spelling is checked first (review of #787): the report reads the
+    whole audit log and walks the store before it renders, and a refused
+    format used to be found only then. Here the first read the build makes
+    raises, so a check left at the end is red."""
+    with Session(str(tmp_path / "early.db")) as session:
+        def not_reached():
+            raise AssertionError("the report was built for a refused format")
+        with monkeypatch.context() as patched:
+            patched.setattr(session.store_backend, "get_audit_summary", not_reached)
+            with pytest.raises(ValueError, match="'markdown'"):
+                session.generate_report(str(tmp_path / "r.md"), format="md")

@@ -414,3 +414,33 @@ def test_a_moved_uid_in_a_store_with_no_secret_still_selects(tmp_path, caplog):
         added = _rows(session)[before:]
     assert list(summary.written_uids) == ["1.2.826.0.1.725.99"]
     assert _count_rows(added) == [] and _warnings(caplog) == [], added
+
+
+def test_a_uid_between_two_regenerations_names_nothing_and_is_counted(tmp_path, caplog):
+    """The documented limit, generalised (review nit on #780, for #26).
+
+    Only the first move of a SOP Instance UID is recorded
+    (`_take_sop_uid`), so an instance is found by the UID it was ingested
+    under, by that UID's `anonymize()` replacement, and by its current
+    one. A UID it held in between is none of those: two
+    `Instance.regenerate_uid()` calls lose the middle one exactly as a
+    `force=True` second redaction loses the first redaction's. The page
+    says so; this pins the outcome it states -- counted, never named --
+    beside the source UID, which still selects.
+    """
+    with _session(tmp_path, "twice") as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        source = instance.sop_instance_uid
+        instance.regenerate_uid("1.2.826.0.1.725.97")
+        instance.regenerate_uid("1.2.826.0.1.725.98")
+        before = len(_rows(session))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            summary = session.export(str(tmp_path / "out"),
+                                     subset=["1.2.826.0.1.725.97", source],
+                                     use_compression=False, show_progress=False)
+        added = _rows(session)[before:]
+    assert list(summary.written_uids) == ["1.2.826.0.1.725.98"]
+    (row,) = _count_rows(added)
+    assert "1 of the 2 UIDs given (position 1," in row[2], row[2]
+    assert "1.2.826.0.1.725.97" not in row[2], "a counted UID is never named"
+    assert len(_warnings(caplog)) == 1, _warnings(caplog)

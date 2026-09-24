@@ -1,4 +1,4 @@
-"""`REPLACE` writes its `value:`, and `set_phi_tag(replacement=)` stores it
+"""`REPLACE` writes its `value:`, and `set_phi_tag(value=)` stores it
 there (#538).
 
 Measured on ac33641: `{action: REPLACE, value: Project-X}` on Institution
@@ -68,7 +68,7 @@ def test_set_phi_tag_replacement_is_the_value(tmp_path):
     with DicomSession(str(tmp_path / "first.db")) as session:
         session.configuration.config_path = str(saved)
         session.configuration.set_phi_tag(INSTITUTION, "REPLACE",
-                                          replacement="RESEARCH STUDY")
+                                          value="RESEARCH STUDY")
         session.configuration.save()
         assert session.configuration.phi_tags[INSTITUTION] == {
             "name": "Custom Tag", "action": "REPLACE", "value": "RESEARCH STUDY"}
