@@ -17,9 +17,8 @@ class ManifestItem:
             from, as `ingest()` walked it (relative when the directory
             given was relative), not a path in any export.
             `Session.generate_manifest` writes `str(instance.file_path)`,
-            so it is `"None"` for an instance `redact()` (or
-            `Instance.regenerate_uid(..., pixels_changed=True)`) detached
-            from its source file.
+            so it is `"None"` for an instance `redact()` detached from its
+            source file; `Instance.regenerate_uid()` does the same.
         file_size_bytes (int): Size of the file in bytes.
         modality (str): Modality code (e.g. CT, MR).
         manufacturer (str): Manufacturer name.
