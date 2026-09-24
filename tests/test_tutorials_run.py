@@ -74,7 +74,10 @@ breaks one is red, never skipped):
 6. **The page cleans up after itself** by calling `session.close()`, as a
    reader must. The runner also closes every `Session` left in the
    namespace when a page stops early, so a red page does not leak worker
-   processes into the rest of the run.
+   processes into the rest of the run. It restores the exporter registry
+   to what it held before the page ran: a page that calls
+   `exporters.register()` (T5) changes a module-global the rest of the
+   test process reads, and the registry has no public way to undo it.
 
 7. **Cost: about 30 s per page, measured on 3.14t.** One parametrised
    test per page, so `pytest --changed` or a shard can take one page.
@@ -349,6 +352,7 @@ def run_page(page, workdir, root=None):
 
     namespace = {"__name__": "__tutorial__"}
     fences = examples = 0
+    registry = _registry_snapshot()
     try:
         for match in _FENCE.finditer(text):
             info, body = match.group(1).strip(), match.group(2)
@@ -392,6 +396,7 @@ def run_page(page, workdir, root=None):
                         "page shows:\n" + "".join(captured)]
     finally:
         _close_sessions(namespace)
+        _registry_restore(registry)
 
     if not fences:
         return [f"{where}: holds no ```python fence, so it runs nothing"]
@@ -399,6 +404,27 @@ def run_page(page, workdir, root=None):
         return [f"{where}: holds no `>>>` example, so it shows no outcome "
                 "that is checked -- a tutorial's claims are its shown output"]
     return []
+
+
+def _registry_snapshot():
+    """The exporter registry as it stands, or None when a synthetic page's
+    run has no `isocenter` to import (convention 6)."""
+    try:
+        from isocenter import exporters
+    except ImportError:
+        return None
+    return dict(exporters._REGISTRY)  # pylint: disable=protected-access
+
+
+def _registry_restore(before):
+    """Put back what `_registry_snapshot` saw, so a format a page
+    registered does not outlive the page (convention 6)."""
+    if before is None:
+        return
+    from isocenter import exporters
+    # pylint: disable=protected-access
+    exporters._REGISTRY.clear()
+    exporters._REGISTRY.update(before)
 
 
 def _close_sessions(namespace):
@@ -508,6 +534,24 @@ def test_a_fence_that_raises_is_red(tmp_path):
         "```python\n>>> 1\n1\n```\n"))
     failures = run_page(page, tmp_path, root=tmp_path)
     assert len(failures) == 1 and "ValueError: boom" in failures[0], failures
+
+
+@pytest.mark.parametrize("stops", [False, True], ids=["passes", "stops"])
+def test_a_format_a_page_registers_does_not_outlive_it(tmp_path, stops):
+    """Convention 6: a page's `register()` is undone when the page ends,
+    whether it passed or stopped at a failing fence."""
+    from isocenter import exporters
+    before = exporters.available_formats()
+    page = _page(tmp_path, _OK_HEADER + (
+        "```python\nfrom isocenter import exporters\n"
+        "class Toy:\n    def export(self, session, folder, **options):\n"
+        "        return []\n"
+        "exporters.register('tutorial-toy', Toy)\n```\n\n"
+        "```python\n>>> 'tutorial-toy' in exporters.available_formats()\n"
+        + ("False" if stops else "True") + "\n```\n"))
+    failures = run_page(page, tmp_path, root=tmp_path)
+    assert bool(failures) is stops, failures
+    assert exporters.available_formats() == before
 
 
 def test_a_page_with_no_shown_output_is_red(tmp_path):
