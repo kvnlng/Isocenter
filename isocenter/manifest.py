@@ -13,7 +13,12 @@ class ManifestItem:
         study_instance_uid (str): The Study Instance UID.
         series_instance_uid (str): The Series Instance UID.
         sop_instance_uid (str): The SOP Instance UID.
-        file_path (str): Relative or absolute path to the exported file.
+        file_path (str): The path of the file the instance was ingested
+            from, as `ingest()` walked it (relative when the directory
+            given was relative), not a path in any export.
+            `Session.generate_manifest` writes `str(instance.file_path)`,
+            so it is `"None"` for an instance `redact()` detached from its
+            source file; `Instance.regenerate_uid()` does the same.
         file_size_bytes (int): Size of the file in bytes.
         modality (str): Modality code (e.g. CT, MR).
         manufacturer (str): Manufacturer name.

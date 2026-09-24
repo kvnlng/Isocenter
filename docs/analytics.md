@@ -38,7 +38,7 @@ The report includes:
 4. **Exceptions & Errors**: every `ERROR` and `WARNING` audit row, plus report-time checks (`COMPLIANCE_CHECK`, `AUDIT_DROP`). Any row here grades the run `REVIEW_REQUIRED`. An `ERROR` means something requested failed -- a file refused at ingest, an instance that failed to write. A `WARNING` means the run did what it should but something about the *source data* could not be honoured or read, or was deliberately held back: a file declined because its SOP Instance UID is already held, an instance `export(check_burned_in=True)` withheld because it still carries an identifier (not written, and nothing failed -- the pipeline declined it; [#536](https://github.com/kvnlng/Isocenter/issues/536)), an instance OCR could not read, a store de-identified before 0.9.6 (see [Migration Tools](migration.md)), a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim, or an ambiguous value representation whose decider the source omits or contradicts -- no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the arm Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared at all ([#674](https://github.com/kvnlng/Isocenter/issues/674), [#681](https://github.com/kvnlng/Isocenter/issues/681)).
 5. **Validation & Verification**: the **Grade Basis** -- every reason this run is not `PASS`, one line each, or a statement that nothing costs it its `PASS` -- then how many `REMEDIATION_*` rows the audit trail holds, what each `scan_pixel_content()` call in this session read and could not read, and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row. Every condition behind it is listed under [How the grade is decided](#how-the-grade-is-decided).
 
-A per-instance manifest is not part of the report; it is a separate document written by `generate_manifest()`. After `anonymize()` it lists each instance's replacement UIDs beside its source file path, so it is a crosswalk from source file to exported UID: keep it with the store, not with an export ([#544](https://github.com/kvnlng/Isocenter/issues/544)).
+A per-instance manifest is not part of the report. It is a separate document, written by `generate_manifest()`; see [Manifests](#manifests).
 
 ### How the grade is decided
 
@@ -117,8 +117,70 @@ The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, 
     writes no audit row, and an empty trail attests nothing -- see
     section 5's Grade Basis.)
 
-!!! tip "Format Options"
-    Currently, Isocenter supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.
+!!! tip "Format"
+    The report is Markdown. `generate_report(output_path, format="markdown")` is the default and the only accepted spelling; any other `format` raises `ValueError` naming it, and no file is written.
+
+## Manifests
+
+`generate_manifest(output_path, format="html")` writes one row per instance the session holds: every instance in `session.store`, whatever an export selected. `format` is `"html"` (the default) or `"json"`, exactly; any other spelling, a case variant included, raises `ValueError` and writes no file.
+
+```python
+session.generate_manifest("manifest.html")
+session.generate_manifest("manifest.json", format="json")
+```
+
+Each row holds the instance's Patient ID, its Study, Series and SOP Instance UIDs, its modality, the manufacturer and model name of its series' equipment, and the path of the file it was ingested from, unless redaction detached it (below). The values are the session's, as they stand when the manifest is written:
+
+- **After `anonymize()`**, the Patient ID is the replacement and the UIDs are the replacement UIDs, next to the source file path. The manifest is then a crosswalk from each source file to the identifiers its export carries. Keep it with the store, not with an export ([#544](https://github.com/kvnlng/Isocenter/issues/544)).
+- **A subject whose files carried no Patient ID** is listed under its key, the value `get_cohort_report()` shows in its `PatientID` column: `\no-patient-id\` followed by the subject's *source* Study Instance UID. No export writes that key ([#584](https://github.com/kvnlng/Isocenter/issues/584)).
+- **The file path** is the path as `ingest()` walked it, so it is relative when the directory you passed was relative. **After `redact()` changes an instance's pixels it is the string `"None"`**, in both formats: the instance no longer matches its source file, so the session stops pointing at it (`Instance.regenerate_uid()` does the same). The manifest then cannot say which file such an instance came from.
+
+The **HTML** manifest is one page: the store file's name, when the manifest was generated, the number of instances, and a table with the columns Patient ID, Study UID, Series UID, Modality, Manufacturer, Model, SOP Instance UID and File Path. It has no column for `anonymized`.
+
+The **JSON** manifest is one object. This one was written after `ingest()`, `audit()`, `anonymize()` and `export()` into a store named `my_project.db`, over pydicom's `CT_small.dcm` and a copy of its `MR_small.dcm` with the Patient ID deleted:
+
+```json
+{
+  "generated_at": "2026-09-23T21:03:55.218090",
+  "project_name": "my_project.db",
+  "total_files": 2,
+  "total_size_bytes": 0,
+  "items": [
+    {
+      "patient_id": "ANON_28e5c87cd169c80d0dd05bfb",
+      "study_instance_uid": "2.25.297990125461744647168780076193196812719",
+      "series_instance_uid": "2.25.188531152787603764149085731129800765062",
+      "sop_instance_uid": "2.25.102433379052112046212620522432915392421",
+      "file_path": "input/CT_small.dcm",
+      "file_size_bytes": 0,
+      "modality": "CT",
+      "manufacturer": "GE MEDICAL SYSTEMS",
+      "model_name": "RHAPSODE",
+      "anonymized": true
+    },
+    {
+      "patient_id": "\\no-patient-id\\1.3.6.1.4.1.5962.1.2.4.20040826185059.5457",
+      "study_instance_uid": "2.25.276106521748935728200388598927172523634",
+      "series_instance_uid": "2.25.163640163259226614858004570992412354281",
+      "sop_instance_uid": "2.25.261339294768423179199607825024297936589",
+      "file_path": "input/MR_noid.dcm",
+      "file_size_bytes": 0,
+      "modality": "MR",
+      "manufacturer": "TOSHIBA_MEC",
+      "model_name": "MRT50H1",
+      "anonymized": true
+    }
+  ]
+}
+```
+
+The pseudonym and the replacement UIDs come from the store's project secret, so another store gives other values.
+
+`generated_at` is local time with no UTC offset, `project_name` is the store file's name, and `total_files` is the number of items. `file_size_bytes` and `total_size_bytes` are always `0`: nothing measures a file for the manifest.
+
+An item's **`anonymized`** is `true` when the last tag-policy PHI scan left no identifier unremediated on the instance's patient, its study or the instance itself, and none of the three has been edited since. It is `false` when the scan never ran on one of them, when one was edited after it, or when a remediation on it was declined in its last pass. It does not mean "`anonymize()` ran": a file the scan found clean reads `true` after `audit()` alone. It says nothing about burned-in text in the pixels, which the tag scan does not read. The series is not consulted, because the scan records no status on a series. `session.phi_status_summary()` gives the same statuses as counts.
+
+`generate_manifest()` and its two formats are frozen at 1.0. The JSON keys, the meaning of `anonymized` and the HTML layout are documented but internal: a 1.x release may change them, with a CHANGELOG entry ([API stability](api/stability.md)).
 
 ---
 

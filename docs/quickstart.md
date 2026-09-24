@@ -24,12 +24,32 @@ session = Session("my_project.db")
 Ingestion builds a lightweight **metadata index** of your DICOM files. Isocenter scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
 
 ```python
-session.ingest("/path/to/dicom/data")
+summary = session.ingest("/path/to/dicom/data")
 session.save() # Persist the index to disk
 
 # Print a summary of the cohort and equipment
 session.examine()
 ```
+
+### What ingest reports
+
+`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary`, the `summary` above, that puts every file it found in exactly one of four places, so check it:
+
+```python
+print(summary.ingested)   # files read into the session
+print(summary.failed)     # files rejected, the same as len(summary.failures)
+for path, reason in summary.failures:
+    print(path, reason)
+print(summary.declined)   # files refused because their SOP Instance UID is already held
+print(summary.skipped)    # files an earlier ingest() already read, not read again
+```
+
+- **`ingested`**: files read into the graph.
+- **`failures`**: one `(path, reason)` pair per rejected file, for example a file that is not DICOM (`ValueError: Missing SOPInstanceUID. Likely not a valid DICOM file.`). `failed` is the count. Each rejected file also writes one `ERROR` audit row naming the path and the reason, so a report on this session grades `REVIEW_REQUIRED` and lists it in section 4. A rejected file is not recorded as read, so the next `ingest()` of the same folder tries it again and rejects it again, with another row.
+- **`declined`**: files whose SOP Instance UID an instance in the session already holds, from this call, an earlier one, or the store. The instance already held is kept, and among files new to the same call, the one whose path sorts first. The declined file is not read into the store, and it writes one `WARNING` audit row naming the UID and both files, which also grades `REVIEW_REQUIRED`. Offering it again declines it again.
+- **`skipped`**: files an earlier `ingest()` into this store already read. They are left as they are and write no row.
+
+A file that makes the worker process reading it exit (the out-of-memory killer, a decoder crash) does not end the call either: the files not yet returned are read again on fresh worker processes, and a file that is rejected for it lands in `failures` like any other (the [`ingest()` reference](api/session.md) says when). The console prints the rejected and declined counts at the end of the call; the returned summary and the audit rows are what a script can check.
 
 ## 3. Configure & Audit
 
