@@ -1256,7 +1256,8 @@ class DicomSession:
 
         All three steps run even if an earlier one raises. If more than
         one fails, the first failure is raised and the later ones are
-        logged. Calling it again does nothing.
+        logged. A second call is safe; it repeats the shutdown messages and
+        the unsaved-instances WARNING.
         """
         print("Closing session persistence...")
         first_exception = None
@@ -2116,7 +2117,9 @@ class DicomSession:
         fresh workers in a row cannot run a trivial task, every file left is
         rejected as "Not read", with a reason naming the causes that do this
         (a script without the main guard among them), and the call returns.
-        Any other failure of the worker pool raises.
+        A worker that ends on a later file had read others first, so those
+        files are not blamed: reading starts again from that file on another
+        fresh worker. Any other failure of the worker pool raises.
 
         Each worker death costs a fresh pool, a few tenths of a second, so
         a run whose deaths do not recur can pay for several. A fatal file
@@ -3345,7 +3348,8 @@ class DicomSession:
         Write the compliance report for the session's store.
 
         The report holds the grade (`PASS` or `REVIEW_REQUIRED`), decided
-        from every audit row the store holds, with the session's counts,
+        from the audit trail the store holds and the graph's PHI statuses
+        (docs/analytics.md, "How the grade is decided"), with the session's counts,
         the audit actions, data loss, exceptions, and the policy in force.
         Generate it after `export()`: an export writes rows of its own, and
         a report generated before any export carries a note saying so.
@@ -3780,8 +3784,9 @@ class DicomSession:
         with several studies carries about one token per study, and each
         instance's token holds that instance's own values.
 
-        Call it **before** `anonymize()` or `redact()` if recovery is
-        required: afterwards there is no original value left to capture.
+        Call it **before** `anonymize()` if recovery is required:
+        afterwards the identifying tags no longer hold their original
+        values, and the lock refuses to capture what a remediation wrote.
 
         Anything but a `str` (an iterable of Patient IDs, a `PhiReport` or
         a list of findings) is handed to `lock_identities_batch()`, with
@@ -5270,7 +5275,9 @@ class DicomSession:
                 console summary has been printed, so a caller that catches
                 it still has a correct object graph and a compliance report
                 that grades `REVIEW_REQUIRED`. `.failures` carries
-                `(sop_uid, detail)` per failed instance. A failed instance is
+                `(sop_uid, detail)` per failed instance. It subclasses
+                `RuntimeError`, so `except RuntimeError` catches it and the
+                `RuntimeError`s below alike. A failed instance is
                 left exactly as it was found: no `DERIVED` flag, no
                 `_ISOCENTER_REDACTION_HASH`, nothing persisted, so a
                 corrected configuration retries it.
