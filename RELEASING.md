@@ -204,11 +204,15 @@ fixes, never features.
    When a pool breaks, the parent SIGTERMs the other workers, and
    coverage's own SIGTERM handler can deadlock one of them, which
    `.coveragerc` already concedes. It hung twice at the v1.0.0rc1 cut, and
-   the owner ruled that step 1's 3.14t run may then be plain `pytest`
-   under `PYTHON_GIL=0`, sharded like the 3.12 run and without coverage.
-   Rebuild the map afterwards, outside the release path. A stall shows as
-   a repeating `Timeout (0:05:00)!` stack dump from the conftest
-   watchdog, which never ends the run: kill only that run's processes.
+   the owner ruled that step 1's 3.14t run may then be plain `pytest`,
+   without coverage, split into shards: `PYTHON_GIL=0 python -m pytest -v
+   --shard=I/N; echo "exit=$?"` for each I from 1 to N, recording every
+   shard's last test line and `exit=`. Rebuild the map afterwards,
+   outside the release path. A stall shows as the conftest watchdog's
+   `ISOCENTER STALL WATCHDOG: nothing has happened for Ns (#250)` banner,
+   repeated every 120 s. It never ends the run, so kill only that run's
+   processes. faulthandler's `Timeout (0:05:00)!` dump is printed once
+   per arming, so its absence after the first does not mean progress.
 
    Also run `python -m scripts.output_fingerprint check --jobs 4 --report
    fp-X.Y.Z-<interpreter>.txt; echo "exit=$?"` on **3.12 and 3.14t** at
@@ -265,18 +269,23 @@ fixes, never features.
    `python -m scripts.output_fingerprint previous-tag --line X.Y` prints.
    The fingerprint is not rewritten at release:
    `git show vX.Y.Z:fingerprint/output.json` is the release's fingerprint.
-   A failure here is fixed on `release/X.Y` by the patch procedure below -- and forward-ported
-   -- and the release commit is made again on top of the fix.
+   A failure here, before the release-commit PR merges, is fixed on
+   `release/X.Y` by the patch procedure below -- and forward-ported --
+   and the release commit is made again on top of the fix.
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
    same way as any other PR.
    `release/*` is branch-protected with **Lock branch** on, so GitHub
    refuses a normal merge into it. Merge an approved PR with
    `gh pr merge N --squash --admin --match-head-commit <sha>` (an admin
    step; `enforce_admins` is off). The lock stays on for everything else.
-   A fix merged into the branch after the release commit, such as a
-   rehearsal failure fixed by the patch procedure, needs no second release
-   commit when the version files are already right. The tag goes on the
-   fix's merge commit instead (v1.0.0rc1, #798).
+   A failure found after the release-commit PR has merged, such as a red
+   step 4 rehearsal, is fixed by a PR into `release/X.Y` developed and
+   forward-ported as in "Patch releases", with one difference: the
+   version is not spent yet, so its changelog entry goes into the
+   existing `[X.Y.Z]` section, not a new `[Unreleased]`. The version files
+   are already right, so there is no second release commit, and step 5
+   tags the last such fix's merge commit (v1.0.0rc1, #798). Rehearse
+   again at that commit.
 4. **Rehearse on TestPyPI**, from the branch, and **do not tag until the
    rehearsal passes**:
    `gh workflow run publish.yml --ref release/X.Y -f target=testpypi`.
@@ -288,7 +297,8 @@ fixes, never features.
    make it go away. A rehearsal consumes the version number on TestPyPI
    only, so a second rehearsal of the same version cannot upload; its
    build gates and test matrix still run.
-5. **Tag** the release commit (an admin step): `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
+5. **Tag** the release commit, or the last fix merged after it (step 3)
+   (an admin step): `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
    `release/X.Y`, then `git push origin vX.Y.Z`. **Pushing the tag deploys
    the documentation** for vX.Y.Z (see below), before the version is on
    PyPI; nothing else runs. That window is why step 4 must pass first.
@@ -335,7 +345,12 @@ a re-tag.
    fix of a patch adds that heading back.
 3. **Forward-port the fix to `main` by cherry-pick**, in an ordinary PR
    into `main`: `git cherry-pick -x <fix commits>` onto a work branch off
-   `main`. Leave out the changelog commit. Resolve any conflict as the code
+   `main`. Leave out the changelog commit. A release-branch PR merges by
+   squash (step 3), so on `release/X.Y` the fix and its changelog entry
+   are one commit: cherry-pick that commit with `-x`, so the line names a
+   commit the release branch keeps, then take `main`'s `CHANGELOG.md`
+   back (`git checkout HEAD~ -- CHANGELOG.md`, or `git checkout --ours
+   CHANGELOG.md` if the pick conflicts there) and amend or continue. Resolve any conflict as the code
    on `main` requires, and have the PR reviewed like any other. If the
    fix does not apply to `main` (the code is gone there), say so in the
    release-branch PR instead. The changelog entry reaches `main` with the
