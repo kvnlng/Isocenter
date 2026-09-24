@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The #250 hang probe is gone: `.github/workflows/hang-probe.yml`, its conftest hooks and the tests that pinned them.** #250 was closed once the hang was traced to the `fork` start method and #260 pinned every pool to `spawn`, and the probe is no longer needed. It was instrumentation, never a gate, and nothing in the release procedure (`RELEASING.md`) dispatches it. Removed with it: the `ISOCENTER_HANG_PROBE_START_METHOD=fork` override and the SIGUSR1 stack-dump registration in `tests/conftest.py` (both existed for the probe), `tests/test_hang_probe_hooks.py`, `tests/test_hang_probe_loop.py`, and the three `test_the_hang_probe_*` tests in `tests/test_packaging_contract.py`. The conftest stall watchdog stays: it serves every run, not the probe. No package code and no exported output change.
+
 ## [1.0.0rc1] - 2026-09-24
 
 ### Breaking
