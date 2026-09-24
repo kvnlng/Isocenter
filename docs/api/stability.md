@@ -156,8 +156,9 @@ before anything is written, with one exception: the two lock methods
 also take a `PhiReport`, and `PhiFinding` elements mixed with IDs, and
 lock the patients those findings name. The report `audit()` returns
 locks every patient with at least one finding, by the Patient ID the
-finding holds; after `anonymize()` those IDs name no patient. A report
-with no findings locks nobody. A patient is selected by its `patient_id`
+finding holds. After `anonymize()` has replaced a patient's ID, the
+report no longer names that patient; lock before `anonymize()`. A
+report with no findings locks nobody. A patient is selected by its `patient_id`
 exactly: after `anonymize()` that is its replacement Patient ID, and a
 subject whose files carried no Patient ID is selected by the key
 `get_cohort_report` shows in its `PatientID` column, not by `""`. An ID

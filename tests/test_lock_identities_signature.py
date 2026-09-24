@@ -307,11 +307,17 @@ def test_a_malformed_key_in_the_working_directory_makes_session_raise(tmp_path):
             pass
 
 
-def test_the_audit_report_names_nobody_after_anonymize(session):
+def test_under_the_default_policy_the_audit_report_names_nobody_after_anonymize(session):
     """D2 of the delta review: the report `audit()` returns selects by the
-    Patient ID each finding holds, the source ID. `anonymize()` replaces
-    it, so the same report locks nobody afterwards -- the order the
-    tutorial on reversible anonymization teaches is lock first."""
+    Patient ID each finding holds, the source ID. Under the default policy
+    `anonymize()` replaces it, so the same report locks nobody afterwards
+    -- the order the tutorial on reversible anonymization teaches is lock
+    first.
+
+    Scoped to the default policy on purpose (E1): an ID-less subject
+    (#584) keeps its synthetic key and a `0010,0020: KEEP` policy keeps the
+    ID, so there the report still names the patient; what the lock then
+    does is not frozen and not pinned here."""
     report = session.audit()
     assert {f.patient_id for f in report.findings} >= {"P1", "P2"}
     session.anonymize(report)

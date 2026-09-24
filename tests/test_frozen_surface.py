@@ -1644,11 +1644,14 @@ def test_the_stability_page_says_what_the_freeze_covers():
     # `test_a_malformed_key_in_the_working_directory_makes_session_raise`.
     assert ("A malformed one makes `Session()` raise its `ValueError`."
             ) in frozen
-    # D2: the report arm locks the patients with a finding, not every
-    # patient scanned, and after `anonymize()` it matches nobody.
+    # D2 and E1: the report arm locks the patients with a finding, not
+    # every patient scanned. After `anonymize()` it names no patient whose
+    # ID was replaced; an ID-less subject (#584) or a KEEP on `0010,0020`
+    # is not replaced, so the sentence says only what holds for all three.
     assert ("The report `audit()` returns locks every patient with at least "
-            "one finding, by the Patient ID the finding holds; after "
-            "`anonymize()` those IDs name no patient.") in frozen
+            "one finding, by the Patient ID the finding holds. After "
+            "`anonymize()` has replaced a patient's ID, the report no longer "
+            "names that patient; lock before `anonymize()`.") in frozen
     assert ("except a SOP Instance UID that is none of these three: the one "
             "the first move of the instance's UID (by `anonymize()`, "
             "`redact()` or `Instance.regenerate_uid()`) left, which is the "
