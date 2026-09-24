@@ -10,7 +10,7 @@ recovery reads item 0)
 recorded in §2, §3 and §4; #410's fix is designed **twice** in §6, once for
 each side of the ruling the owner has not yet made. Owner questions are in
 §9. §12 is the Amendments log, empty until implementation fills it.
-**Superseded in part:** #790 (2026-09-23). §2's "a file written by 0.9.4
+**Superseded in part:** #790 (2026-09-23). §4's "a file written by 0.9.4
 carrying three items stays readable at item 0 ... The promise holds in both
 directions" is no longer true: every release through 0.9.8 wrote the token
 into `(0400,0510)`, the transfer syntax UID's element, and the owner ruled

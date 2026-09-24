@@ -103,8 +103,11 @@ PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-head
 # `(0400,0510)` write, both verified kills; that write was the #790 swap,
 # and the arm now picks each Encrypted Attributes element's VR by type).
 # `test_the_encrypted_attributes_item_is_conformant.py` does the same for
-# that arm (#790): measured, it kills both of its anchored mutants -- a
-# token read back as `str` written as UI, and the UI/OB choice swapped.
+# that arm (#790): measured, it kills a token read back as `str` written
+# as UI, the non-token UI/OB choice swapped, that choice collapsed to
+# `vr = 'UI'`, and the pre-#790 arm (OB forced on 0510, UI on 0520)
+# restored -- the last two only since its foreign-item export test (review
+# of #792, finding 1), before which `vr = 'UI'` survived.
 #
 # That is the whole rule for reach the scan cannot see (#441): the scan
 # stays the only thing the guard demands, and a file beyond it joins a

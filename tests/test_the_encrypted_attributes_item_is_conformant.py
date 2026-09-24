@@ -352,7 +352,9 @@ def test_an_export_passes_a_0_9_x_item_through_and_says_so(tmp_path, source,
     -- each element's bytes as the graph has them, the token as OB
     bytes even where an Implicit VR read gave the graph a `str` -- and
     writes one WARNING row with the count, which grades the report
-    REVIEW_REQUIRED. It is counted in REVERSIBLE_EXPORT too: 0.9.x
+    REVIEW_REQUIRED (pinned alone, by an A/B, in
+    `test_the_layout_row_alone_grades_the_report_review_required`). It
+    is counted in REVERSIBLE_EXPORT too: 0.9.x
     recovers it with the key, so the file is re-identifiable.
 
     `uncompressed -> compressed` is the arm that puts a VR on disk for
@@ -395,3 +397,75 @@ def test_an_export_of_1_0_items_writes_no_layout_row(tmp_path):
     assert not [d for _, d in _audit_rows(db, "WARNING")
                 if "layout Isocenter wrote before 1.0" in d]
     assert len(_audit_rows(db, "REVERSIBLE_EXPORT")) == 1
+
+
+def _grade(session, tmp_path):
+    path = tmp_path / "report.md"
+    session.generate_report(str(path))
+    line = next(line for line in path.read_text().splitlines()
+                if "Validation Status" in line)
+    for grade in ("REVIEW_REQUIRED", "PASS"):
+        if grade in line:
+            return grade
+    return line
+
+
+@pytest.mark.parametrize("earlier", (False, True), ids=("1_0", "0_9_x"))
+def test_the_layout_row_alone_grades_the_report_review_required(tmp_path, earlier):
+    """An A/B with no other WARNING: store A locks and exports without a
+    pass (so store B's pass writes no pseudonym-collision row), CT_small
+    carries no Study Date, and store B audits, anonymizes, exports and
+    reports. A 1.0 item grades PASS; the same file with its item in the
+    earlier layout grades REVIEW_REQUIRED, and the layout row is the only
+    difference (measured so by the review of #792)."""
+    write_ct(tmp_path / "src" / "a" / "x.dcm", PID, "7903", name=NAME,
+             study_date=None)
+    key = str(tmp_path / "k.key")
+    with DicomSession(str(tmp_path / "a.db")) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "src"))
+        session.lock_identities(PID)
+        token = session.reversibility_service.token_of_ours(_only_instance(session))
+        session.save(sync=True)
+        session.export(str(tmp_path / "exp"), use_compression=False,
+                       show_progress=False)
+    [path] = list((tmp_path / "exp").rglob("*.dcm"))
+    if earlier:
+        _as_0_9_x(path, token)
+    with DicomSession(str(tmp_path / "b.db")) as session:
+        session.ingest(str(path.parent))
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "again"), use_compression=False,
+                       show_progress=False)
+        grade = _grade(session, tmp_path)
+    assert grade == ("REVIEW_REQUIRED" if earlier else "PASS"), grade
+
+
+@pytest.mark.parametrize("source", LAYOUTS)
+def test_a_source_files_own_encrypted_attributes_item_is_exported(tmp_path, source):
+    """A foreign, never-locked, conformant item -- a UI in `(0400,0510)`,
+    CMS-shaped bytes in `(0400,0520)` -- that the source file carried is
+    written with the dictionary's VRs under an explicit-VR export. On
+    3fbf8480 this export failed: the old arm forced OB onto the UID and UI
+    onto the bytes, `UnicodeDecodeError` and `ExportError: wrote 0 of 1`
+    (review of #792, finding 1)."""
+    src = tmp_path / "src" / "a" / "x.dcm"
+    write_ct(src, PID, "7904", name=NAME)
+    ds = pydicom.dcmread(str(src))
+    item = Dataset()
+    item.add_new(0x04000510, "UI", "1.2.840.10008.1.2.1")
+    item.add_new(0x04000520, "OB", b"0\x82\x01\x00CMS-envelope-bytes")
+    ds.add_new(0x04000500, "SQ", Sequence([item]))
+    if source == "uncompressed":
+        ds.file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+    ds.save_as(str(src), enforce_file_format=True)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "src"))
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "out"), use_compression=True,
+                       show_progress=False)
+    [written] = list((tmp_path / "out").rglob("*.dcm"))
+    syntax, content = _read_strictly(written)
+    assert (syntax.VR, str(syntax.value)) == ("UI", "1.2.840.10008.1.2.1")
+    assert content.VR == "OB"
+    assert bytes(content.value) == b"0\x82\x01\x00CMS-envelope-bytes"
