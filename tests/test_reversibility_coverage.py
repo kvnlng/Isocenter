@@ -105,7 +105,7 @@ def test_recover_missing_content_item(rev_service, mock_instance, caplog):
     warnings = [r for r in caplog.records
                 if r.name == "isocenter" and r.levelno == logging.WARNING]
     assert len(warnings) == 1, caplog.text
-    assert "0400,0510" in warnings[0].getMessage()
+    assert "(0400,0520)" in warnings[0].getMessage()
 
 def test_recover_decryption_failure(rev_service, mock_instance):
     # Setup valid structure but mock decryption fail

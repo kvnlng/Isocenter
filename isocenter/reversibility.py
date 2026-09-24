@@ -36,6 +36,28 @@ class _TokenOfALaterScheme(_TokenHoldsNoRecord):
     """
 
 
+class _TokenOfAnEarlierLayout(RuntimeError):
+    """A token of ours in `(0400,0510)`, where every release through 0.9.8
+    wrote it, with the transfer syntax UID in `(0400,0520)` (#790).
+
+    Those two tags are the other way round in PS3.6, and the owner ruled
+    that 1.x writes and reads the conformant layout only: compatibility
+    promises begin at 1.0. Recognised by shape, never decrypted, so that
+    recovery and the lock refuse it by name -- read as foreign it would
+    be "no token", and a lock would replace it (#399, #617's silent
+    loss). A `RuntimeError`, so the batch lock collects and numbers it;
+    not a `_TokenHoldsNoRecord`, which says the key *opens* the token,
+    and nothing here was opened.
+    """
+
+
+_EARLIER_LAYOUT_MESSAGE = (
+    "this patient's identity token is in the layout Isocenter wrote before "
+    "1.0 (the token in (0400,0510), where DICOM puts the Encrypted Content "
+    "Transfer Syntax UID), which 1.x does not read; recover it with "
+    "Isocenter 0.9.x and the key it was locked with")
+
+
 class ReversibilityService:
     """
     Handles the embedding and recovery of encrypted original data in DICOM files.
@@ -65,14 +87,28 @@ class ReversibilityService:
     #: naming a scheme above this one is refused (`_TokenOfALaterScheme`).
     TOKEN_SCHEME = 2
 
-    # DICOM Standard Tags for Encrypted Attributes
+    # DICOM Standard Tags for Encrypted Attributes (PS3.6): the sequence,
+    # Encrypted Content Transfer Syntax UID (UI) and Encrypted Content (OB).
+    #
+    # Every release through 0.9.8 had the two item tags the other way
+    # round (#790): the token went into (0400,0510), a UI of at most 64
+    # characters, and the UID into (0400,0520), the OB. Written and read
+    # the PS3.6 way since 1.0, and only that way: the owner's ruling is
+    # that compatibility promises begin at 1.0. An item in the earlier
+    # layout is *recognised* (`_token_content`), by shape alone, only so
+    # that every read can refuse it by name (`_TokenOfAnEarlierLayout`)
+    # -- read as foreign instead, a lock would replace it (#399) and the
+    # identity would be gone under a lock that reported success.
     TAG_ENCRYPTED_ATTRS_SEQ = "0400,0500"
-    TAG_ENCRYPTED_CONTENT = "0400,0510"
-    TAG_TRANSFER_SYNTAX_UID = "0400,0520"
+    TAG_TRANSFER_SYNTAX_UID = "0400,0510"
+    TAG_ENCRYPTED_CONTENT = "0400,0520"
 
-    # Transfer Syntax for the Encrypted Payload (Dataset)
-    # We use Implicit VR Little Endian (Default) as a signal that the decrypted bytes
-    # form a dataset-like structure (even though we wrap JSON, this is metadata).
+    #: What the item's Encrypted Content Transfer Syntax UID holds: Implicit
+    #: VR Little Endian, the value every release has written. It is a
+    #: label and nothing more -- the payload is Fernet over JSON, not a
+    #: CMS-enveloped dataset, so no UID would let a conformant reader
+    #: decode it -- and nothing reads it; an earlier-layout item is told
+    #: apart by where the token is, never by this value (#790).
     PAYLOAD_TRANSFER_SYNTAX = "1.2.840.10008.1.2"
 
     def __init__(self, key_manager: KeyManager):
@@ -206,10 +242,11 @@ class ReversibilityService:
 
     #: The first byte of every Fernet token: the format's version, of
     #: which there is exactly one. A token this library wrote is a Fernet
-    #: token and nothing else it writes into `(0400,0510)` is, so this
-    #: byte is what tells "ours" from a foreign Encrypted Content
+    #: token and nothing else it writes into an Encrypted Attributes item
+    #: is, so this byte is what tells "ours" from a foreign Encrypted
+    #: Content, and a token from the transfer syntax UID beside it
     #: (measured: ours begin `gAAAAAB`; `b"NOT-OUR-TOKEN"` decodes to
-    #: 0x34).
+    #: 0x34; `.` is outside the alphabet, so no UID passes).
     OUR_TOKEN_FIRST_BYTE = 0x80
 
     #: The characters a Fernet token is spelled in. Checked before the
@@ -261,10 +298,17 @@ class ReversibilityService:
         """The Encrypted Content of `instance`'s token item as `bytes`, if
         it is shaped like one of ours; None for no item, no content, or a
         foreign sequence. No key is needed: this is what the lock reads
-        before it decides whether to create one (#617, Q8)."""
+        before it decides whether to create one (#617, Q8).
+
+        Raises:
+            _TokenOfAnEarlierLayout: The item holds a token of ours where
+                releases before 1.0 wrote it (#790).
+        """
         item = self._token_item(instance)
-        content = item.attributes.get(self.TAG_ENCRYPTED_CONTENT) if item else None
-        if not content or not self.is_one_of_ours(content):
+        content = self._token_content(item) if item else None
+        if content is self.EARLIER_LAYOUT:
+            raise _TokenOfAnEarlierLayout(_EARLIER_LAYOUT_MESSAGE) from None
+        if content is None:
             return None
         # `bytes`, whatever the hydration path handed back (a `bytearray`
         # is unhashable, and the lock keys a dict on this), and a `str`
@@ -412,7 +456,8 @@ class ReversibilityService:
                 "was it locked with lock_identities() before anonymize()?")
         return found[1]
 
-    def _token_item(self, instance: Instance):
+    @classmethod
+    def _token_item(cls, instance: Instance):
         """The Encrypted Attributes Sequence item recovery reads, or None.
 
         **Item 0, and not the last item** -- the one spelling of the index
@@ -421,15 +466,59 @@ class ReversibilityService:
         expression on every file it will write again; they are not the
         same on a file written by 0.9.4 or earlier, which carries one item
         per lock and whose *first* one is what that release's recovery
-        answered with. `docs/api/stability.md` promises those files stay
-        recoverable, so this index is a compatibility commitment. It was
+        answered with. Such a file is in the earlier layout, which 1.x
+        refuses by name (#790), and the index that refusal reads is still
+        item 0, so a multi-item sequence is refused rather than read at
+        some other index. It was
         spelled once in each read until review of #615 (F-2) measured
         `items[-1]` in the strict read green on the whole suite;
         `tests/test_relock_identity_token.py` holds it on both reads and
         through `recover_patient_identity()`.
         """
-        seq = instance.sequences.get(self.TAG_ENCRYPTED_ATTRS_SEQ)
+        seq = instance.sequences.get(cls.TAG_ENCRYPTED_ATTRS_SEQ)
         return seq.items[0] if seq is not None and seq.items else None
+
+    #: `_token_content`'s answer for an item in the layout releases before
+    #: 1.0 wrote: a sentinel, never content, so no caller can decrypt it.
+    EARLIER_LAYOUT = object()
+
+    @classmethod
+    def _token_content(cls, item):
+        """The token of ours in `item`'s Encrypted Content `(0400,0520)`;
+        `EARLIER_LAYOUT` when `(0400,0520)` holds none and `(0400,0510)`
+        does, which is where every release through 0.9.8 wrote it (#790);
+        else None -- no content, or a foreign item.
+
+        By shape alone (`is_one_of_ours`), no key and no decrypt: the
+        earlier layout is recognised only so that it can be refused by
+        name, never read. No UID passes the shape test (`.` is outside
+        base64url), so the transfer syntax beside a token is never taken
+        for one.
+        """
+        content = item.attributes.get(cls.TAG_ENCRYPTED_CONTENT)
+        if content and cls.is_one_of_ours(content):
+            return content
+        if cls.is_one_of_ours(item.attributes.get(cls.TAG_TRANSFER_SYNTAX_UID)):
+            return cls.EARLIER_LAYOUT
+        return None
+
+    @classmethod
+    def holds_a_token_of_ours(cls, instance: Instance) -> bool:
+        """Whether `instance` carries a token this library wrote, in either
+        layout. The lock's key-creation sniff (#617, Q8): a key created
+        here opens a 0.9.x token no better than a 1.0 one, so an
+        earlier-layout item counts, and the sniff answers rather than
+        raising the layout refusal for every patient in the session."""
+        item = cls._token_item(instance)
+        return item is not None and cls._token_content(item) is not None
+
+    @classmethod
+    def holds_an_earlier_layout_token(cls, instance: Instance) -> bool:
+        """Whether `instance`'s token is in the layout releases before 1.0
+        wrote (#790): the export's count of files 1.x cannot recover.
+        Shape only, no key."""
+        item = cls._token_item(instance)
+        return item is not None and cls._token_content(item) is cls.EARLIER_LAYOUT
 
     def recover_original_data(self, instance: Instance) -> Optional[Dict[str, Any]]:
         """
@@ -439,7 +528,9 @@ class ReversibilityService:
         Encrypted Content, and deserializes the JSON.
 
         **Item 0, and not the last item**, through `_token_item`, which
-        says why that index is a compatibility commitment.
+        says why. An item in the layout releases before 1.0 wrote
+        (`_TokenOfAnEarlierLayout`, #790) answers None, with the ERROR
+        below naming the cause; it is never decrypted.
 
         Args:
             instance (Instance): The anonymized instance.
@@ -453,11 +544,15 @@ class ReversibilityService:
             if item is None:
                 return None
 
-            # 2. Read its Encrypted Content
+            # 2. Read its Encrypted Content. An item in the layout
+            # releases before 1.0 wrote is refused by name, undecrypted:
+            # the raise lands in the `except` below, which logs it (#790).
+            if self._token_content(item) is self.EARLIER_LAYOUT:
+                raise _TokenOfAnEarlierLayout(_EARLIER_LAYOUT_MESSAGE)
             encrypted_bytes = item.attributes.get(self.TAG_ENCRYPTED_CONTENT)
 
             if not encrypted_bytes:
-                self.logger.warning("EncryptedContent (0400,0510) not found in sequence item.")
+                self.logger.warning("EncryptedContent (0400,0520) not found in sequence item.")
                 return None
 
             # 3. Decrypt

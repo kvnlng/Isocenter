@@ -365,10 +365,10 @@ def test_a_lock_after_anonymize_is_refused_on_the_floor_path(tmp_path):
         session.anonymize(session.audit())
         assert inst.attributes["0010,0010"] == "ANONYMIZED"
         patient = session.store.patients[0]
-        token = inst.sequences["0400,0500"].items[0].attributes["0400,0510"]
+        token = inst.sequences["0400,0500"].items[0].attributes["0400,0520"]
         with pytest.raises(RuntimeError, match=r"0010,0010 \('ANONYMIZED'\)"):
             session.lock_identities(patient.patient_id)
-        assert inst.sequences["0400,0500"].items[0].attributes["0400,0510"] == token
+        assert inst.sequences["0400,0500"].items[0].attributes["0400,0520"] == token
         assert session.reversibility_service.recover_original_data(inst) == first
 
     # The reverse of the documented order, as one call: nothing to stash.

@@ -210,8 +210,8 @@ def test_recovery_tells_a_foreign_sequence_from_a_wrong_key(store, tmp_path, cap
         patient = next(p for p in session.store.patients if p.patient_id == locked)
         inst = patient.studies[0].series[0].instances[0]
         foreign = DicomItem()
-        foreign.set_attr("0400,0510", b"NOT-OUR-TOKEN")
-        foreign.set_attr("0400,0520", "1.2.840.10008.1.2")
+        foreign.set_attr("0400,0520", b"NOT-OUR-TOKEN")
+        foreign.set_attr("0400,0510", "1.2.840.10008.1.2")
         inst.sequences["0400,0500"].items[:] = [foreign]
         with pytest.raises(RuntimeError, match="no encrypted identity token") as caught:
             _recover(session, capsys, caplog, locked, restore=False)

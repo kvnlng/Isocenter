@@ -150,7 +150,7 @@ def test_a_new_token_carries_its_scheme_inside_the_encryption(tmp_path):
                                  "0010,0030", "0010,0040", KEY]
     for path in folder.rglob("*.dcm"):
         ds = pydicom.dcmread(str(path))
-        content = ds[0x04000500].value[0][0x04000510].value
+        content = ds[0x04000500].value[0][0x04000520].value
         assert KEY not in (content if isinstance(content, str)
                            else content.decode("latin-1"))
         assert KEY.encode() not in path.read_bytes()

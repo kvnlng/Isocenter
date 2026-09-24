@@ -429,11 +429,11 @@ def test_a_re_lock_after_anonymize_is_refused_and_the_first_stash_survives(tmp_p
         session.audit()
         session.anonymize()
         patient = session.store.patients[0]
-        token_before = inst.sequences["0400,0500"].items[0].attributes["0400,0510"]
+        token_before = inst.sequences["0400,0500"].items[0].attributes["0400,0520"]
         with pytest.raises(RuntimeError,
                            match=r"already carries a replacement in 0010,0010 \('ANONYMIZED'\)"):
             session.lock_identities(patient.patient_id)
-        assert inst.sequences["0400,0500"].items[0].attributes["0400,0510"] == token_before
+        assert inst.sequences["0400,0500"].items[0].attributes["0400,0520"] == token_before
         assert session.reversibility_service.recover_original_data(inst) == first_stash
         session.recover_patient_identity(patient.patient_id, restore=True)
         assert inst.attributes["0010,0010"] == ORIGINAL_NAME

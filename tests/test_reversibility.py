@@ -64,9 +64,10 @@ def test_reversible_anonymization_flow(tmp_path):
         seq = inst.sequences["0400,0500"]
         assert len(seq.items) > 0
         item = seq.items[0]
-        # 0400,0510 is EncryptedContent
-        assert "0400,0510" in item.attributes
-        assert isinstance(item.attributes["0400,0510"], bytes)
+        # 0400,0520 is Encrypted Content (OB); 0400,0510 is its Transfer
+        # Syntax UID. Through 0.9.8 the two were swapped (#790).
+        assert "0400,0520" in item.attributes
+        assert isinstance(item.attributes["0400,0520"], bytes)
 
         # 3. Simulate Anonymization (Change Name)
         p.patient_name = "ANONYMIZED"
@@ -101,14 +102,12 @@ def test_reversible_anonymization_flow(tmp_path):
         assert len(seq) > 0
         item = seq[0]
 
-        # Encrypted Content (0400,0510)
-        assert (0x0400, 0x0510) in item
-        encrypted_blob = item[0x0400, 0x0510].value
-
-        # Pydicom dictionary quirk: incorrectly thinks 0400,0510 is UI (String), so it decodes it.
-        # We must handle this by encoding back to bytes if needed.
-        if isinstance(encrypted_blob, str):
-            encrypted_blob = encrypted_blob.encode('ascii')
+        # Encrypted Content (0400,0520), an OB. Until #790 the token was
+        # written into (0400,0510), a UI, and this test re-encoded the str
+        # pydicom read it as, calling that a dictionary quirk: the
+        # dictionary was right, and the writer had the tags swapped.
+        assert (0x0400, 0x0520) in item
+        encrypted_blob = item[0x0400, 0x0520].value
 
         assert isinstance(encrypted_blob, bytes)
         assert len(encrypted_blob) > 0

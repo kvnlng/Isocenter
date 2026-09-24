@@ -374,7 +374,9 @@ otherwise.
   without creating one; `ValueError` when no patient holds the ID;
   `RuntimeError` when the patient has no instances or no identity token,
   the key does not decrypt it, or it holds no identity record this
-  library writes. It prints nothing, and no message names a Patient ID.
+  library writes, or the token is in the layout releases before 1.0
+  wrote (#790), in which case nothing on the patient is restored. It
+  prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
   file, creating none. The first `lock_identities()` creates the key,
@@ -408,9 +410,17 @@ default.
 - A store written by 1.0 opens under every 1.x. The sidecar and schema
   *layout* are not frozen; their forward compatibility is.
 - A DICOM file exported with reversible anonymization by 1.0 is
-  recoverable by every 1.x with its key: the tags `(0400,0500)`,
-  `(0400,0510)`, `(0400,0520)` and the key file's format (raw Fernet key
-  bytes).
+  recoverable by every 1.x with its key. Frozen: the Encrypted
+  Attributes Sequence `(0400,0500)`, whose item carries the identity
+  token in Encrypted Content `(0400,0520)` (OB) and `1.2.840.10008.1.2`
+  in Encrypted Content Transfer Syntax UID `(0400,0510)` (UI), as PS3.6
+  lays the item out; and the key file's format (raw Fernet key bytes).
+  The token is Isocenter's own Fernet token over a JSON record, not a
+  CMS envelope, so only Isocenter reads it; the transfer syntax UID is
+  a label. Releases before 1.0 wrote the two item elements the other
+  way round (the token in `(0400,0510)`). 1.x does not read that
+  layout: recovering such a file, or locking over it, raises an error
+  naming the layout, and 0.9.x recovers it with its key (#790).
 - An identity token holds exactly the locked values captured from each
   instance that carries it: a lock writes one token per distinct set of
   values, and a restore gives each instance the values of the token it
