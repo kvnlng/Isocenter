@@ -106,6 +106,7 @@ nav:
       - 'De-identify and read the grade': tutorials/deidentify-and-read-the-grade.md
       - 'Select part of a cohort': tutorials/select-part-of-a-cohort.md
       - 'Keep a way back to the identities': tutorials/reversible-anonymization.md
+      - 'Black out a region of every image': tutorials/redact-burned-in-pixels.md
   - API Reference:
       - 'API stability': api/stability.md
       - 'Session': api/session.md

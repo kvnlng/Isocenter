@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tutorial: "Black out a region of every image from one machine" (#27).** `docs/tutorials/redact-burned-in-pixels.md`, in the Tutorials nav, runs one session over `MR_small.dcm`. It reads the machine's Device Serial Number (`-0000200`) from `get_cohort_report()`, writes a `machines:` rule with one zone over the top ten rows (and says why the serial must be quoted: unquoted, YAML reads it as the octal integer -128 and `load_config()` refuses it), then runs `anonymize()`, `redact()` and `export()`. It reads the exported pixels back beside the source's: the zone is zero, every pixel outside it is unchanged, and Burned In Annotation reads `NO`. The grade is `PASS`. `discover_redaction_zones()` is described in one admonition and not run, because it needs the `ocr` extra and tesseract. Every block runs under `tests/test_tutorials_run.py`, in under a second. No output change, no configuration change.
+
 ### Removed
 
 - **The #250 hang probe is gone: `.github/workflows/hang-probe.yml`, its conftest hooks and the tests that pinned them.** #250 was closed once the hang was traced to the `fork` start method and #260 pinned every pool to `spawn`, and the probe is no longer needed. It was instrumentation, never a gate, and nothing in the release procedure (`RELEASING.md`) dispatches it. Removed with it: the `ISOCENTER_HANG_PROBE_START_METHOD=fork` override and the SIGUSR1 stack-dump registration in `tests/conftest.py` (both existed for the probe), `tests/test_hang_probe_hooks.py`, `tests/test_hang_probe_loop.py`, and the three `test_the_hang_probe_*` tests in `tests/test_packaging_contract.py`. The conftest stall watchdog stays: it serves every run, not the probe. No package code and no exported output change.
