@@ -42,10 +42,6 @@ class Exporter:
     def export(self, session, folder: str, **options):
         """Write the session to `folder`.
 
-        The return type is annotated loosely on purpose: a single
-        `List[str]` here was a promise the registry cannot keep, since
-        each format answers "what did you write" in its own terms.
-
         Args:
             session (DicomSession): The active session.
             folder (str): Output directory. Created if absent.
@@ -55,11 +51,8 @@ class Exporter:
             Any: The format's own result object. `dicom` returns an
                 `io_handlers.ExportSummary`; `wfdb` returns a `List[str]`
                 of paths. **Whatever the shape, it must let a caller
-                detect that nothing was written** -- an empty list, a zero
-                count, a raise. The DICOM exporter returned `None` until
-                #191, so an export that delivered none of its three files
-                was indistinguishable at the call site from one that
-                delivered all three.
+                detect that nothing was written**: an empty list, a zero
+                count, a raise.
         """
         raise NotImplementedError
 

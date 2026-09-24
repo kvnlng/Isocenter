@@ -356,7 +356,7 @@ class DicomItem(TrackedEntity):
     """
     Base class for any entity that holds DICOM attributes and sequences.
 
-    This class provides a dictionary-like interface for managing DICOM attributes
+    This class provides a dictionary-like interface for managing DICOM attributes.
     Persistence state comes from TrackedEntity. Items nested in
     sequences are not stored separately, so the subtree form below reaches
     them.
@@ -463,18 +463,9 @@ class DicomItem(TrackedEntity):
         """
         Sets a generic attribute by its hex tag (e.g., '0010,0010').
 
-        The tag is lowercased first. Ingested keys are always lowercase
-        (`io_handlers.populate_attrs` builds
-        `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), while
-        hand-authored ones are freely written `0008,103E`. Storing both
-        spellings made a lookup in one casing miss a value written in
-        the other, and a missed key reads as *absent* rather than
-        raising -- so the failure looked like ordinary missing data.
-        Two of the three recorded encounters were silent PHI defects:
-        a Basic-profile rule for Series Description that never matched
-        and so never remediated (#41), and a folder-naming helper that
-        dropped descriptions (#40). This is the choke point where
-        hand-authored keys enter the graph. (#51)
+        The tag is lowercased first, so `0008,103E` and `0008,103e` name
+        one attribute: ingested keys are always lowercase, and a key in
+        another casing would read as absent rather than raise.
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
@@ -1490,57 +1481,46 @@ class Instance(DicomItem):
         Sets an attribute, and keeps resident pixels reading as it declares.
 
         Every tag is written as `DicomItem.set_attr` writes it. An edit to
-        a descriptor the sidecar loader reads a frame by -- Rows, Columns,
-        SamplesPerPixel, NumberOfFrames, BitsAllocated,
-        PixelRepresentation -- while pixels are resident also settles the
-        resident array, because a save writes the array's bytes and every
-        later read takes them under the edit. Without this the live
-        session read a set int16 array as int16 while the save, the
-        export and the reopened store all read uint16 after
-        `set_attr(PixelRepresentation, 0)` (#531). **The declaration
-        wins** (Q9):
+        a descriptor a frame is read by (Rows, Columns, SamplesPerPixel,
+        NumberOfFrames, BitsAllocated, PixelRepresentation) while pixels
+        are resident also settles the resident array, because a save writes
+        the array's bytes and every later read takes them under the edit.
+        **The declaration wins:**
 
-        - An edit under which the bytes read as they read now -- the same
-          dtype and shape -- is a plain write.
+        - An edit under which the bytes read as they read now (the same
+          dtype and shape) is a plain write.
         - An array a save has written is released after the write, so the
-          next read rebuilds it from the store under the edit (#417) --
-          or, for an instance read from its source file, from the file,
-          under the edit too (#595). Its bytes are stored; nothing is
-          lost. A memory-only array has
-          nowhere to be reloaded from and stays, as `unload_pixel_data`
-          refuses to drop it.
+          next read rebuilds it from the store under the edit, or, for an
+          instance read from its source file, from the file, under the edit
+          too. Its bytes are stored; nothing is lost. A memory-only array
+          has nowhere to be reloaded from and stays, as
+          `unload_pixel_data` refuses to drop it.
         - An array set through `set_pixel_data()` and not yet written is
           republished as the edit reads its bytes: a view under the new
-          dtype, in the new shape, with the write in the same hold of
-          `PIXEL_STATE_LOCK`, so no read sees the new declaration beside
-          the old array. It stays unwritten, and `discard_pixel_data()`
-          still restores what the set replaced.
+          dtype, in the new shape, published together with the write, so no
+          read sees the new declaration beside the old array. It stays
+          unwritten, and `discard_pixel_data()` still restores what the set
+          replaced.
 
         Each edit is judged alone. Changing a geometry in two steps whose
-        end state the bytes fit -- BitsAllocated 8, then Columns 8, over a
-        4x4 uint16 set -- is refused at the first step; set the array you
-        mean instead, which writes its own descriptors.
+        end state the bytes fit (BitsAllocated 8, then Columns 8, over a
+        4x4 uint16 set) is refused at the first step; set the array you mean
+        instead, which writes its own descriptors.
 
-        A read in flight at the edit -- one that captured the descriptors,
-        and is inside its sidecar read when the edit lands -- is not
-        published under the old declaration: `_publish_loaded_frame`
-        refuses a frame whose capture the instance has since left, and the
-        read arm re-reads under the new descriptors.
+        A read in flight when the edit lands is not published under the old
+        declaration: it reads again under the new descriptors.
 
         Raises:
             ValueError: If the edit is to a described tag, the resident
                 array was set through `set_pixel_data()` and not written
                 since, and the edit reads its bytes as a different number
-                of bytes, or does not parse as an integer -- "BitsAllocated
+                of bytes, or does not parse as an integer: "BitsAllocated
                 would read the unsaved uint16 (4, 4) array set by
                 set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and
                 the array holds 32. Pass the array you mean to
                 set_pixel_data(), which writes its own descriptors." The
-                value is never in the message (see
-                `_unsatisfiable_edit_message`). Raised before anything is
+                value is never in the message. Raised before anything is
                 written: the attribute and the revision are unchanged.
-                Written, the edit saved a frame no read, export or reopen
-                could load.
         """
         tag = _canonical_tag(tag)
         if tag not in _LOADER_DESCRIBED_TAGS:
@@ -1609,58 +1589,26 @@ class Instance(DicomItem):
         """
         Frees the cached pixel_array, but only when it can be brought back.
 
-        Two things have to be true, and the second was missing until #293.
-        There must be somewhere to reload from (`file_path` or
-        `_pixel_loader`), **and** the resident array must not have been
-        replaced through `set_pixel_data()` since it was last written.
-        `set_pixel_data()` deliberately leaves `_pixel_loader` alone, so
-        after a save the loader is still there and still points at the
-        frame the replacement superseded: the old check passed while the
-        array and the stored frame had diverged, and the clear discarded
-        the only copy of the new pixels. The next `save_all` then
-        re-recorded the loader's own offset, length and hash and marked
-        the instance persisted, so store, sidecar, memory and
-        `_pixel_hash` all agreed on the old frame and every integrity
-        check passed.
+        Two things have to be true: there must be somewhere to reload from
+        (the source file, or the store's sidecar), **and** the resident
+        array must not have been replaced through `set_pixel_data()` since
+        it was last written. Otherwise the array is the only copy of those
+        pixels, and it is kept.
 
-        The precondition is stated exactly, because promising more than
-        the flag tracks would be the same defect in the fix: this refuses
-        when the array was **replaced through `set_pixel_data()`** and
-        not since written. An array mutated **in place** diverges too
-        and is not detected. Mutating in place needs a writeable array,
-        and a frame that came from a file or the sidecar is not one --
-        it is `np.frombuffer`-backed, so `arr[...] = 0` on it raises
-        rather than diverging (#323). The reachable shape is a
-        replacement a save has since written: that array *is* writeable
-        and the flag is back to False, so `arr =
-        inst.get_pixel_data(); arr[...] = 0` on it diverges silently.
-        Any caller holding such an array can do it; nothing here is
-        changed by #293.
-
-        **Not `RedactionService._redact_instance_pixels`' writeable
-        arm**, which two versions of this paragraph have now claimed it
-        was -- #293's ("zeroes a file-backed array in place", which
-        cannot happen: a file-backed array is read-only) and #323's
-        first attempt ("the second redaction pass"). Measured: that arm
-        does zero in place and never calls `set_pixel_data()`, but on a
-        reloaded instance it is not entered at all, on any pass, because
-        `get_pixel_data()` hands back a read-only frame and the copying
-        arm takes it every time. When it *is* entered -- a resident
-        writeable array a save has already written -- both callers
-        (`redact_machine_instances` and `execute_redaction_task`)
-        persist the pixels in their `try` (the serial arm's moved there
-        from its `finally` in #474) and then call `discard_pixel_data()`
-        unconditionally in their `finally`, so nothing survives the pass
-        for an unload to drop. With no `store_backend` the persist is
-        skipped and that same discard loses the mutation immediately,
-        which is a different defect with a different fix.
+        An array mutated **in place** is not detected. Only a writeable
+        array can be mutated in place, and a frame read from a file or from
+        the store is read-only (assigning into it raises). The reachable
+        case is a replacement a save has since written: that array is
+        writeable, so `arr = inst.get_pixel_data(); arr[...] = 0` on it
+        diverges from the stored frame, and unloading it then drops the
+        mutation.
 
         Use `discard_pixel_data()` where dropping unsaved pixels is the
-        intent rather than the accident.
+        intent.
 
         Returns:
             bool: True if unloaded (or already absent), False if it was
-                unsafe to unload -- either the data is in memory only and
+                unsafe to unload: either the data is in memory only and
                 nothing could bring it back, or it has diverged from what
                 is stored.
         """
@@ -1690,34 +1638,28 @@ class Instance(DicomItem):
         """
         Frees the cached pixel_array even if it has unwritten changes.
 
-        This is `unload_pixel_data()`'s behaviour before #293, kept under
-        a name that says what it does. It is for the caller who means to
-        throw the resident array away -- the redaction `finally` blocks,
-        where a partially-zeroed array must be dropped so the next
-        `get_pixel_data()` reloads the stored bytes through the loader,
-        read under the instance's current descriptors (#417).
+        For a caller who means to throw the resident array away, so that
+        the next `get_pixel_data()` reloads the stored frame, read under the
+        instance's current descriptors.
 
-        **It undoes the whole `set_pixel_data()` it discards (#434)**: the
-        pixels, and every descriptor that call wrote -- Rows, Columns,
+        **It undoes the whole `set_pixel_data()` it discards**: the pixels,
+        and every descriptor that call wrote (Rows, Columns,
         SamplesPerPixel, NumberOfFrames, PhotometricInterpretation,
         PlanarConfiguration, BitsAllocated, PixelRepresentation and the
-        float/bool dtype carrier -- go back to what they were before the
+        float/bool dtype carrier), go back to what they were before the
         first unwritten replacement, absent ones included. A pixel
         descriptor edited between the set and the discard goes back with
         them: while the replacement is resident, that edit describes the
-        replacement. So the next read is the stored frame as it was
-        stored. Once the replacement is written -- by a save or the
-        redaction swap -- it *is* the stored frame, and there is nothing
-        to undo: the array is dropped and the descriptors, which describe
-        it, stay. A refusal (below) keeps both the array and the
-        descriptors that describe it. Dropping an unwritten replacement
-        leaves the instance dirty, as the set did.
+        replacement. So the next read is the stored frame as it was stored.
+        Once the replacement is written (by a save or by redaction) it *is*
+        the stored frame, and there is nothing to undo: the array is
+        dropped and the descriptors, which describe it, stay. A refusal
+        (below) keeps both the array and the descriptors that describe it.
+        Dropping an unwritten replacement leaves the instance dirty, as the
+        set did.
 
-        Two behaviours, two names. This is not an alias for
-        `unload_pixel_data()` and must not become one: "one spelling per
-        behaviour" is about a single behaviour with two names, and these
-        answer different questions -- "free this if it is safe" and
-        "throw this away".
+        `unload_pixel_data()` answers "free this if it is safe"; this
+        answers "throw this away".
 
         Returns:
             bool: True if discarded (or already absent), False if there
@@ -1782,57 +1724,56 @@ class Instance(DicomItem):
 
     def get_pixel_data(self) -> Optional[np.ndarray]:
         """
-        Returns pixel_array. Loads from disk if not in memory.
+        Returns pixel_array, loading it if it is not in memory.
 
-        This method attempts to:
-            1. Return already cached `pixel_array`.
-            2. Use `_pixel_loader` (Sidecar) if available.
-            3. Read from `file_path` through `io_handlers._decode_pixels`,
-               the decode `ingest()` makes: pydicom, then imagecodecs where
-               pydicom has no plugin. A file ingest refuses is refused here,
-               in the same words (#453). The decoded samples are read under
-               the instance's pixel descriptors where it holds them, as the
-               sidecar's are (#595): the file supplies the samples and any
-               descriptor the instance lacks.
+        In order, it:
+            1. Returns the cached `pixel_array`.
+            2. Loads the frame from the store's sidecar, if it holds one.
+            3. Reads `file_path` with the decode `ingest()` uses: pydicom,
+               then imagecodecs where pydicom has no plugin. A file ingest
+               refuses is refused here, in the same words. The decoded
+               samples are read under the instance's pixel descriptors where
+               it holds them, as the sidecar's are: the file supplies the
+               samples and any descriptor the instance lacks.
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-                when the instance genuinely carries no pixel element. "Could
-                not decode" is *not* None -- it raises (#226).
+                when the instance carries no pixel element. A frame that
+                could not be decoded is not None: it raises.
 
         A read whose decoder returns RGB from a YBR-labelled file says so.
         An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs
-        fallback comes back converted to RGB, as `ingest()` stores it
-        (#464). So does a JPEG 2000 `YBR_RCT`/`YBR_ICT` file, whose codec
-        undoes the colour transform, and any 8-bit YBR source pydicom
-        decodes, which it returns as RGB by default (#482). An instance
-        that carries a PhotometricInterpretation is relabelled `RGB` to
-        match, which advances its revision. This is the one write a read
-        makes, and it is made only when the decode converted.
+        fallback comes back converted to RGB, as `ingest()` stores it. So
+        does a JPEG 2000 `YBR_RCT`/`YBR_ICT` file, whose codec undoes the
+        colour transform, and any 8-bit YBR source pydicom decodes, which it
+        returns as RGB by default. An instance that carries a
+        PhotometricInterpretation is relabelled `RGB` to match, which
+        advances its revision. This is the one write a read makes, and it is
+        made only when the decode converted.
 
         Raises:
             RuntimeError: If loading fails due to transfer syntax issues,
                 missing codecs, or a pixel element the reader could not
                 decode. Also, from a file, when an encapsulated pixel
                 element's offset table names a different number of frames
-                from NumberOfFrames -- "Lazy load failed for instance
+                from NumberOfFrames: "Lazy load failed for instance
                 <uid>: RuntimeError: <table> names N frames;
-                NumberOfFrames declares M" (#418). The message names the
+                NumberOfFrames declares M". The message names the
                 instance, never the source file. From a file ingest would
                 refuse, in ingest's words: a header pydicom's validation
                 rejects, whether or not pydicom has a plugin for its syntax
                 ("Missing required element: (0028,0006) 'Planar
-                Configuration'"), or a 16-bit YBR_FULL frame (#453, #461).
+                Configuration'"), or a 16-bit YBR_FULL frame.
                 From the sidecar, when a descriptor written since the
-                loader was built asks for a reading the stored bytes
+                frame was stored asks for a reading the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
-                smaller than the stored samples) -- "Pixel Loader failed
-                for <uid>: Integrity Error: ..." (#417). A reopened session
+                smaller than the stored samples): "Pixel Loader failed
+                for <uid>: Integrity Error: ...". A reopened session
                 gives the same refusal. From a file, the same refusal for
                 the same edit, as "Lazy load failed for instance <uid>:
                 RuntimeError: Integrity Error: frame for <uid> holds N
                 samples; geometry (R, C) needs M (one trailing pad byte is
-                tolerated, nothing else)" (#595).
+                tolerated, nothing else)".
             FileNotFoundError: If the file path does not exist.
         """
         if self.pixel_array is not None:
@@ -2466,14 +2407,9 @@ class Instance(DicomItem):
         Sets the pixel array and updates the descriptors that describe it.
 
         Which axis of the array means what is decided by the instance's own
-        attributes (`isocenter.pixel_geometry.resolve_pixel_geometry`), not
-        by the array's shape: `(frames, rows, cols)` and
-        `(rows, cols, samples)` are the same rank, so the old
-        `if shape[-1] in [3, 4]` test was a guess that relabelled every
-        multi-frame 3- or 4-column image and every non-RGB colour space
-        (#186, #205). How *large* each axis is still comes from the array --
-        replacing the pixels with a differently-sized array is what a setter
-        is for.
+        attributes, not by the array's shape: `(frames, rows, cols)` and
+        `(rows, cols, samples)` are the same rank. How *large* each axis is
+        comes from the array.
 
         Updates tags, each only when the value actually changes:
             - Rows (0028,0010)
@@ -2490,12 +2426,17 @@ class Instance(DicomItem):
               beside a float pixel element and the export deletes it
               there.
 
-        A genuinely ambiguous shape is **accepted** with a WARNING rather
-        than refused, because a hand-built graph has to be able to take
-        pixels before its attributes -- that is what
-        `DicomExporter.write_tree()` exists to serve. The export worker
-        refuses the same geometry, because that is where a guess would
-        become a file on disk. The asymmetry is deliberate.
+        A genuinely ambiguous shape is **accepted** with a WARNING, so a
+        hand-built graph can take pixels before its attributes (for
+        `DicomExporter.write_tree()`). The export worker refuses the same
+        geometry.
+
+        The prior value, or absence, of each descriptor it can write is
+        recorded once, at the first replacement since the array was last
+        written; a later set keeps that first record. It is kept until the
+        array is written (by a save or by redaction), or discarded, when
+        `discard_pixel_data()` puts it back. Until the array is written,
+        `unload_pixel_data()` refuses to drop it.
 
         Args:
             array (np.ndarray): The pixel data to set. Can be 1D, 2D, 3D, or 4D.
@@ -2512,27 +2453,7 @@ class Instance(DicomItem):
                 caught `ValueError` leaves the instance exactly as it was.
             ValueError: If the instance declares a SamplesPerPixel that no
                 axis of `array` can carry, or if the rank is unsupported.
-                The two statements cannot both be right and neither
-                trusting the attributes (descriptors that do not describe
-                the bytes) nor trusting the array (this is how #186
-                happened) is honest. **This one raises after
-                `self.pixel_array` has been assigned** -- pre-existing,
-                and not what the dtype guard above is about.
-
-        It records the prior value, or absence, of each descriptor it can
-        write (`_SET_PIXEL_DATA_TAGS`), once, at the first replacement
-        since the array was last written; a later set keeps that first
-        record. It is kept until the array is written -- by a save or the
-        redaction swap -- or discarded, when `discard_pixel_data()` puts
-        it back (#434).
-
-        Note that this does **not** clear `_pixel_loader`. #293 weighed
-        clearing it as a cheaper fix and rejected it: the loader is what
-        lets a partially-redacted array be dropped and the original
-        reloaded, which is the design
-        `tests/test_redaction_failure_is_reported.py` states outright.
-        Instead the divergence is recorded, and `unload_pixel_data()`
-        refuses until it is written.
+                **This one raises after `pixel_array` has been assigned.**
         """
         # **Before any mutation, and that is the whole of it.** The
         # assignment below is this method's first side effect and the
@@ -2819,7 +2740,7 @@ class Study(TrackedEntity):
         series (List[Series]): List of series belonging to this study.
         date_shifted (bool): Whether dates in this study have been shifted.
             Whether *this* study date is one the shift produced is
-            `date_shift_vouches_for` (#518).
+            `date_shift_vouches_for`.
         study_time (Optional[str]): The time of the study.
     """
     study_instance_uid: str
@@ -2985,7 +2906,7 @@ NO_PATIENT_ID_PREFIX = "\\no-patient-id\\"
 
 
 def is_synthetic_patient_id(value) -> bool:
-    """Whether `value` is the key ingest gave a subject with no Patient ID (#584)."""
+    """Whether `value` is the key ingest gave a subject with no Patient ID."""
     return isinstance(value, str) and value.startswith(NO_PATIENT_ID_PREFIX)
 
 
