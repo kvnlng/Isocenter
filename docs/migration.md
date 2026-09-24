@@ -143,6 +143,14 @@ Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same da
 
 A configuration that gave a UI attribute `REPLACE` with no value failed to load before 1.0 (#560) and now means UID replacement. `REPLACE` with a `value:` on a UI attribute writes that value, as before.
 
+### Identity tokens locked before 1.0 (#790)
+
+Every release before 1.0 wrote the reversible-anonymization token into `(0400,0510)` and the transfer syntax UID into `(0400,0520)`. DICOM defines those two elements the other way round: `(0400,0510)` is the Encrypted Content Transfer Syntax UID and `(0400,0520)` is the Encrypted Content. From 1.0 the token goes into `(0400,0520)`, and 1.x reads only that layout.
+
+A token in the earlier layout is recognised but not read. Whether it comes from an old store or from an old export ingested into a new one, `recover_patient_identity()` raises `RuntimeError` naming the layout and restores nothing, for the whole patient. `lock_identities()` refuses rather than replacing it. Recover such identities with Isocenter 0.9.x and the key they were locked with.
+
+Exporting such a patient from 1.x writes the item as it is, and 0.9.x can still recover it. The export also writes a `WARNING` audit row counting those instances, so the compliance report grades `REVIEW_REQUIRED`.
+
 ### A project secret stays in its store
 
 Until 1.0, `store_backend.write_project_secret(path)` and `load_project_secret(path)` copied a store's project secret into a fresh store. Both are gone and raise `AttributeError`: a secret belongs to the store it was generated in (see [What to keep](configuration.md#what-to-keep); [#716](https://github.com/kvnlng/Isocenter/issues/716)). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.
