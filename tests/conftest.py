@@ -3,7 +3,6 @@ import faulthandler
 import itertools
 import multiprocessing
 import os
-import signal
 import sys
 import threading
 import time
@@ -82,32 +81,6 @@ from support import shards
 # order in the run's output. Nothing private to `_pytest` is touched. The
 # rule this encodes: **a background diagnostic channel must own an fd
 # duplicated while capture is not in place, or it is not a channel.**
-#
-# **Two hooks for the hang probe (`.github/workflows/hang-probe.yml`),
-# installed in `pytest_configure` beside the watchdog.** First, SIGUSR1 is
-# registered with `faulthandler` on the same fd: pytest's own faulthandler
-# registers the fatal signals (SEGV, FPE, ABRT, BUS, ILL) and nothing else,
-# so a TERM from an outer timeout produces no dump at all -- the issue's
-# retraction measured exactly that -- and the probe needs a signal it can
-# send at its deadline that leaves every thread's stack in the log.
-# Unconditional: it is diagnostics, costs nothing, and settles the "a TERM
-# produced no dump" confusion for anyone else who reaches for one. Second,
-# when `ISOCENTER_HANG_PROBE_START_METHOD` is exactly `fork`,
-# `multiprocessing.get_context` is rebound so a request for `"spawn"`
-# returns the fork context. All four pool pins (`parallel.py`'s two pools,
-# `Session._executor` and its OOM restart) are the literal
-# `multiprocessing.get_context("spawn")` read through the module attribute
-# at construction time, so the rebinding reaches `ProcessPoolExecutor(
-# mp_context=...)`, `ctx.Pool(...)` and the session executor alike, and
-# the probe's fork arm re-creates the population #260 removed. Any other
-# value, or none, is inert. **This variable is test-only and must stay
-# so**: `tests/test_documented_env_vars.py` sweeps `isocenter/` for reads
-# and demands a `docs/environment.md` row for each, and none is written
-# here because the registry documents levers the package reads -- a
-# package-level way to pick fork would bring that population back for
-# users, which is the thing #260 removed. If the read ever moves into
-# `isocenter/`, that sweep goes red and the row and its registry test
-# move with it. `tests/test_hang_probe_hooks.py` holds both hooks.
 
 #: How long nothing may happen before the watchdog says so.
 #:
@@ -196,35 +169,6 @@ def _watch():
             next_report = idle + _STALL_S
         elif idle < _STALL_S:
             next_report = _STALL_S
-
-
-#: The hang probe's only lever (`.github/workflows/hang-probe.yml`). Read
-#: here and nowhere in `isocenter/` -- see the comment block above for why
-#: that boundary is the point.
-_PROBE_START_METHOD_VAR = "ISOCENTER_HANG_PROBE_START_METHOD"
-
-
-def _install_fork_override():
-    """Make every request for a spawn context return the fork context.
-
-    The wrapper delegates every other method unchanged, so only the four
-    literal `get_context("spawn")` pins are affected and a caller asking
-    for `"forkserver"` or the platform default still gets what it asked
-    for. Announced on the watchdog's fd, once, so a probe log says which
-    population it measured.
-    """
-    real_get_context = multiprocessing.get_context
-
-    def forking_get_context(method=None):
-        if method == "spawn":
-            return real_get_context("fork")
-        return real_get_context(method)
-
-    multiprocessing.get_context = forking_get_context
-    os.write(_stderr_fd,
-             (f"ISOCENTER HANG PROBE: {_PROBE_START_METHOD_VAR}=fork, "
-              "multiprocessing.get_context('spawn') now returns the fork "
-              "context for every pool in this run (#250)\n").encode())
 
 
 # Spawned workers inherit the environment but resolve a relative coverage
@@ -378,15 +322,14 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_configure(config):
-    """Take the fd, start the watchdog, and arm the probe's two hooks.
+    """Take the fd and start the watchdog.
 
     Here rather than at import: global capture is suspended while this
     hook runs, so fd 2 is the real stderr. See the measurement above.
 
-    Everything sits behind the one-configure guard, the fork override
-    included: a nested in-process pytest (pytester's `runpytest`) calls
-    this hook again, and a second wrapper over the first would still
-    answer correctly but would be a stack nobody meant to build.
+    Everything sits behind the one-configure guard: a nested in-process
+    pytest (pytester's `runpytest`) calls this hook again, and a second
+    watchdog thread would report every stall twice.
     """
     global _stderr_fd, _stderr_file, _timing_recorder
     if _stderr_fd is not None:  # pragma: no cover - one configure per run
@@ -412,15 +355,6 @@ def pytest_configure(config):
     # finalization begins, which is after `atexit`.
     threading.Thread(target=_watch, name="IsocenterStallWatchdog",
                      daemon=True).start()
-    # SIGUSR1 -> every thread's stack, on the fd that reaches the log.
-    # `chain=False`: there is no prior handler worth calling, and the
-    # default disposition would be to die. Guarded because Windows has no
-    # SIGUSR1; the probe never runs there.
-    if hasattr(signal, "SIGUSR1"):
-        faulthandler.register(signal.SIGUSR1, file=_stderr_file,
-                              all_threads=True, chain=False)
-    if os.environ.get(_PROBE_START_METHOD_VAR) == "fork":
-        _install_fork_override()
 
 
 def pytest_collection(session):

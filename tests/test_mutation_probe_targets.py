@@ -92,8 +92,8 @@ def _importers(module_path: str, tests_dir: pathlib.Path = ROOT / "tests") -> se
 
     Neither half alone is enough: the import half loses the `patch()`
     strings, and the text half loses the `from ... import` form. An import
-    written inside a string literal (a `pytester.makepyfile` source, as in
-    `test_hang_probe_hooks.py`) is seen by neither -- deliberately, since
+    written inside a string literal (a `pytester.makepyfile` source) is
+    seen by neither -- deliberately, since
     it imports nothing in the process the probe runs.
     """
     dotted = _dotted(module_path)
@@ -116,8 +116,7 @@ def test_importers_sees_every_import_form(tmp_path):
     use -- and names a subpackage module by its stem alone (#419).
     Each fixture below is one form; the decoys pin the two boundaries: a
     longer name that merely starts with the module's, and an import that
-    exists only inside a string a test hands to `pytester` (the
-    `test_hang_probe_hooks.py` case), which runs no import in this process.
+    exists only inside a string a test hands to `pytester`, which runs no import in this process.
     """
     demanded = {
         "test_import_dotted.py": "import isocenter.codec\n",

@@ -139,8 +139,6 @@
  "tests/test_flush_orphan_recovery.py": 0.59,
  "tests/test_frozen_surface.py": 0.48,
  "tests/test_full_logging.py": 0.67,
- "tests/test_hang_probe_hooks.py": 1.42,
- "tests/test_hang_probe_loop.py": 45.67,
  "tests/test_hashing_consistency.py": 0.0,
  "tests/test_high_bit_is_a_header_warning.py": 5.14,
  "tests/test_htj2k_decode.py": 8.03,
