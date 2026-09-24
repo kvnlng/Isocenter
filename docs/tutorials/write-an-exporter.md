@@ -165,7 +165,7 @@ export, because only the built-in formats record an `EXPORT` row.
 
 ## 5. Save before you close
 
-The built-in formats save the session before they write. A plugin's
+The DICOM format saves the session before it writes. A plugin's
 export does not, so `anonymize()`'s changes are still only in memory.
 Save them, then close:
 

@@ -46,8 +46,9 @@ never reaches it.
 
 ## 2. Write the zone
 
-The image is 64 by 64 pixels. Suppose this machine prints its text
-across the top ten rows. A zone is `[row_start, row_end, col_start,
+The image is 64 by 64 pixels. Suppose this machine prints its text in
+the top-left corner: the first ten rows, the left half of the width. A
+zone is `[row_start, row_end, col_start,
 col_end]`, counted from 0, with each end one past the last row or column
 it covers:
 
@@ -57,7 +58,7 @@ privacy_profile: "basic@2026c"
 machines:
   - serial_number: "-0000200"
     redaction_zones:
-      - [0, 10, 0, 64]
+      - [0, 10, 0, 32]
 ```
 
 Quote the serial number. Unquoted, YAML reads `-0000200` as the octal
@@ -114,19 +115,23 @@ pixels = exported.pixel_array
 original = source.pixel_array
 ```
 
-The ten rows inside the zone are zero. Before redaction, no pixel in
+Rows 0 to 9, columns 0 to 31, are zero. Before redaction, no pixel in
 them was:
 
 ```python
->>> int(original[:10].min())
-206
->>> int(pixels[:10].max())
+>>> int(original[:10, :32].min())
+239
+>>> int(pixels[:10, :32].max())
 0
 ```
 
-Every pixel outside the zone is exactly what the source held:
+The zone's bounds are rows first, then columns. In the same ten rows,
+the columns past the zone are exactly what the source held, and so is
+every row below it:
 
 ```python
+>>> bool((pixels[:10, 32:] == original[:10, 32:]).all())
+True
 >>> bool((pixels[10:] == original[10:]).all())
 True
 ```
