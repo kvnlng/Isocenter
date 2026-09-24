@@ -4,8 +4,8 @@ Each exporter turns a `DicomSession`'s in-memory object graph into files
 on disk in one output format. Formats register themselves here and are
 selected via `DicomSession.export(folder, format=...)`.
 
-**Provisional until 1.1** (#527). `Exporter`, `register`, `get_exporter`
-and `available_formats` are documented but internal (tier 2): 1.1 may
+**Provisional until 1.1.** `Exporter`, `register`, `get_exporter` and
+`available_formats` are documented but internal (tier 2): 1.1 may
 replace them rather than extend them, with a CHANGELOG entry naming both
 spellings. A third-party exporter runs behind none of the export gates,
 which all live inside the two built-in formats, and each of its runs
@@ -20,11 +20,10 @@ _REGISTRY: Dict[str, Any] = {}
 class Exporter:
     """Interface every export format implements.
 
-    Provisional until 1.1 (#527): this interface may be replaced, not
-    extended, in 1.1. A plugin written against 1.0 pins
-    `isocenter>=1.0,<1.1`.
+    Provisional until 1.1: this interface may be replaced, not extended, in
+    1.1. A plugin written against 1.0 pins `isocenter>=1.0,<1.1`.
 
-    Implementations must not mutate the session's object graph -- export is
+    Implementations must not mutate the session's object graph: export is
     a read operation over already-de-identified data. For a class other
     than the two built-ins, that is the whole of the boundary: `export()`
     applies none of the built-ins' gates (burned-in re-audit, the
@@ -60,12 +59,12 @@ class Exporter:
 def register(name: str, exporter_cls) -> None:
     """Register an export format under `name`.
 
-    Provisional until 1.1 (#527): this function may be replaced, not
-    extended, in 1.1. It checks only that `exporter_cls` has an `export`
-    attribute; 1.1 may check more. Registering any class other than the
-    two built-ins -- a subclass of one included -- makes each export in
-    that format write one `WARNING` audit row, because Isocenter cannot
-    attest what the class writes.
+    Provisional until 1.1: this function may be replaced, not extended, in
+    1.1. It checks only that `exporter_cls` has an `export` attribute; 1.1
+    may check more. Registering any class other than the two built-ins (a
+    subclass of one included) makes each export in that format write one
+    `WARNING` audit row, because Isocenter cannot attest what the class
+    writes.
 
     Args:
         name (str): The format name `export(format=...)` selects by.
