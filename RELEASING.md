@@ -349,9 +349,12 @@ a re-tag.
    squash (step 3), so on `release/X.Y` the fix and its changelog entry
    are one commit: cherry-pick that commit with `-x`, so the line names a
    commit the release branch keeps, then take `main`'s `CHANGELOG.md`
-   back (`git checkout HEAD~ -- CHANGELOG.md`, or `git checkout --ours
-   CHANGELOG.md` if the pick conflicts there) and amend or continue. Resolve any conflict as the code
-   on `main` requires, and have the PR reviewed like any other. If the
+   back. A clean pick merges the entry in silently: run `git checkout
+   HEAD~ -- CHANGELOG.md` and `git commit --amend --no-edit`. A pick
+   that conflicts there: run `git checkout --ours CHANGELOG.md`, then
+   `git add CHANGELOG.md` (without it the conflict stays unresolved),
+   then `git cherry-pick --continue`. Resolve any other conflict as the
+   code on `main` requires, and have the PR reviewed like any other. If the
    fix does not apply to `main` (the code is gone there), say so in the
    release-branch PR instead. The changelog entry reaches `main` with the
    released section in step 8, once the patch ships.
