@@ -374,7 +374,9 @@ otherwise.
   without creating one; `ValueError` when no patient holds the ID;
   `RuntimeError` when the patient has no instances or no identity token,
   the key does not decrypt it, or it holds no identity record this
-  library writes. It prints nothing, and no message names a Patient ID.
+  library writes, or the token is in the layout releases before 1.0
+  wrote (#790), in which case nothing on the patient is restored. It
+  prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
   file, creating none. The first `lock_identities()` creates the key,
