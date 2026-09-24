@@ -469,3 +469,43 @@ def test_a_source_files_own_encrypted_attributes_item_is_exported(tmp_path, sour
     assert (syntax.VR, str(syntax.value)) == ("UI", "1.2.840.10008.1.2.1")
     assert content.VR == "OB"
     assert bytes(content.value) == b"0\x82\x01\x00CMS-envelope-bytes"
+
+
+def test_a_patient_with_one_study_in_each_layout_is_refused_whole(tmp_path):
+    """Owner ruling on #792: a patient carrying a 1.0 token on one study
+    and a 0.9.x token on another is refused whole -- recovery raises the
+    layout refusal and restores nothing, not even the study it could
+    read. Half a restore would hand back a patient whose studies disagree
+    about who it is."""
+    for suffix in ("7905", "7906"):
+        write_ct(tmp_path / "src" / suffix / "x.dcm", PID, suffix, name=NAME)
+    key = str(tmp_path / "k.key")
+    with DicomSession(str(tmp_path / "a.db")) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "src"))
+        session.lock_identities(PID)
+        tokens = {session.reversibility_service.token_of_ours(i)
+                  for st in session.store.patients[0].studies
+                  for se in st.series for i in se.instances}
+        session.anonymize(session.audit())
+        session.save(sync=True)
+        pseudonym = session.store.patients[0].patient_id
+        session.export(str(tmp_path / "exp"), use_compression=False,
+                       show_progress=False)
+    [token] = tokens
+    files = sorted((tmp_path / "exp").rglob("*.dcm"))
+    assert len(files) == 2, "setup: one file per study"
+    _as_0_9_x(files[1], token)
+    with _ingested(tmp_path, tmp_path / "exp", key) as session:
+        [patient] = session.store.patients
+        instances = [i for st in patient.studies for se in st.series
+                     for i in se.instances]
+        before = [(dict(i.attributes)) for i in instances]
+        assert {session.reversibility_service.holds_an_earlier_layout_token(i)
+                for i in instances} == {True, False}, "setup: one of each"
+        with pytest.raises(RuntimeError) as raised:
+            session.recover_patient_identity(pseudonym, restore=True)
+        assert str(raised.value) == EARLIER
+        assert patient.patient_id == pseudonym
+        assert patient.patient_name != NAME
+        assert [dict(i.attributes) for i in instances] == before
