@@ -95,7 +95,9 @@ them, so no import scan demands the rows; they are there for
 those modules that breaks a tutorial is selected only through its
 `TARGETS` row. The cost is one page run (T1: about 8 s) per mutant, or per
 `--changed` selection, of those modules. A module a tutorial reaches but
-that has no row here is covered once the map is rebuilt.
+that has no row here is covered once the map is rebuilt. It is also
+listed under `exporters/__init__.py`, which it does import (convention
+6's registry restore), so the import scan demands that row.
 """
 import doctest
 import pathlib
