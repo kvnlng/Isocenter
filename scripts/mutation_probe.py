@@ -176,8 +176,7 @@ TARGETS = {
     # 5 sites, exhaustive: all 5 killed. Thirteen files; 20.3s/pass at seven.
     "isocenter/exporters/__init__.py": (["tests/test_a_third_party_export_is_not_attested.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
                                          "tests/test_murmur_annotations.py",
-                                         "tests/test_study_date_roundtrip.py",
-                                         "tests/test_tutorials_run.py",
+                                         "tests/test_study_date_roundtrip.py", "tests/test_tutorials_run.py",
                                          "tests/test_wfdb_option_strictness.py",
                                          "tests/test_wfdb_partial_export_is_audited.py",
                                          "tests/test_wfdb_start_date_honesty.py",
