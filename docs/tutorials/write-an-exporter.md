@@ -21,13 +21,31 @@ it.
 !!! tip "Run it yourself"
 
     Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked. To follow
-    along, make a folder called `input` holding pydicom's bundled test
-    file `CT_small.dcm` (`pydicom.data.get_testdata_file("CT_small.dcm")`
-    returns where it is), then paste the blocks into a Python prompt or a
-    notebook. In a `.py` script, put them under
-    `if __name__ == "__main__":`
-    ([why](../quickstart.md#1-initialize-a-session)).
+    Isocenter's test suite, and every output shown is checked.
+
+    - **Start in a new, empty folder.** Each tutorial creates its own
+      `tutorial.db` and export folders, and running one in another
+      tutorial's folder changes what it prints. The first block below
+      copies the input file from pydicom into `input/`.
+    - Paste the blocks into a Python prompt or a notebook. In a `.py`
+      script, put them under `if __name__ == "__main__":`
+      ([why](../quickstart.md#1-initialize-a-session)).
+    - In a block with `>>>`, type what follows each `>>>`; the lines
+      under it are what Python prints. A `...` in that output stands for
+      a value that differs on every run, such as a pseudonym or a UID.
+    - The session also prints progress bars, status lines and `WARNING`
+      lines as it works. They are not shown here.
+      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+shutil.copy(pydicom.data.get_testdata_file("CT_small.dcm"), "input")
+```
 
 ## 1. Write the exporter
 
@@ -84,7 +102,9 @@ exporters.register("patient-ids", PatientIdCsv)
 ['dicom', 'patient-ids', 'wfdb']
 ```
 
-Registering under a name that is already taken replaces what was there.
+Registering under a name that is already taken replaces what was there,
+the built-in `dicom` and `wfdb` included: `format="dicom"` would then run
+your class, without any of the built-in format's gates.
 
 ## 3. De-identify, export, and read the CSV
 
@@ -161,7 +181,10 @@ In 1.0, no third-party export grades `PASS`.
 lists every gate it runs without.
 
 The report also carries the note that it was generated before any
-export, because only the built-in formats record an `EXPORT` row.
+export, because only the built-in formats record an `EXPORT` row. Ignore
+its advice to regenerate the report after exporting: with an exporter of
+your own and no built-in export, every report of this store carries this
+note.
 
 ## 5. Save before you close
 

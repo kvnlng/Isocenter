@@ -1,4 +1,4 @@
-# Black out a region of every image from one machine
+# Redact burned-in text for one machine
 
 <!-- tutorial: inputs=MR_small.dcm -->
 
@@ -13,13 +13,31 @@ exported pixels back to show which ones changed.
 !!! tip "Run it yourself"
 
     Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked. To follow
-    along, make a folder called `input` holding pydicom's bundled test
-    file `MR_small.dcm` (`pydicom.data.get_testdata_file("MR_small.dcm")`
-    returns where it is), then paste the blocks into a Python prompt or a
-    notebook. In a `.py` script, put them under
-    `if __name__ == "__main__":`
-    ([why](../quickstart.md#1-initialize-a-session)).
+    Isocenter's test suite, and every output shown is checked.
+
+    - **Start in a new, empty folder.** Each tutorial creates its own
+      `tutorial.db` and export folders, and running one in another
+      tutorial's folder changes what it prints. The first block below
+      copies the input file from pydicom into `input/`.
+    - Paste the blocks into a Python prompt or a notebook. In a `.py`
+      script, put them under `if __name__ == "__main__":`
+      ([why](../quickstart.md#1-initialize-a-session)).
+    - In a block with `>>>`, type what follows each `>>>`; the lines
+      under it are what Python prints. A `...` in that output stands for
+      a value that differs on every run, such as a pseudonym or a UID.
+    - The session also prints progress bars, status lines and `WARNING`
+      lines as it works. They are not shown here.
+      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+shutil.copy(pydicom.data.get_testdata_file("MR_small.dcm"), "input")
+```
 
 ## 1. Find the machine
 
@@ -42,7 +60,7 @@ cohort = session.get_cohort_report()
 ```
 
 A series with no Device Serial Number matches no machine rule, so a zone
-never reaches it.
+never reaches it. Section 5 says what that means for the grade.
 
 ## 2. Write the zone
 
@@ -72,8 +90,7 @@ session.load_config("config.yaml")
 ## 3. De-identify, then redact
 
 `anonymize()` handles the attributes under the Basic Profile, and
-`redact()` handles the pixels. They are separate passes, and an export
-needs both:
+`redact()` handles the pixels. They are separate passes:
 
 ```python
 session.anonymize()
@@ -163,10 +180,20 @@ def grade_line(path):
 session.close()
 ```
 
+`PASS` says the zones you wrote were applied. It does not say the rest
+of each image is free of text: nothing on this page read the pixels for
+text. `scan_pixel_content()` does, with OCR, over the images of every
+machine your configuration names by serial with zones, and reports text
+no zone covers ([Intelligent Verification](../ocr.md#intelligent-verification)).
+A series with no Device Serial Number is reached by neither a zone nor
+that scan, so check such a series yourself.
+
 A zone is applied whether or not you call `redact()`: `export()` looks up
 every matching rule and zeroes a copy of each frame it writes. Calling
 `redact()` first is what puts the redacted pixels in the store, so the
-store and the export agree.
+store and the export agree. Only `redact()` writes Burned In Annotation
+`NO`: an export that applies a zone by itself zeroes the same pixels and
+leaves that attribute as the source had it.
 
 !!! note "Finding the zones for a new machine"
 

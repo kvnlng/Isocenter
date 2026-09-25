@@ -6,19 +6,39 @@ You rarely hand out everything you ingested. One recipient gets the
 images, another gets one patient. Two questions come with that: **how do
 you export only the patients or series you chose**, and **how do you
 find out when you asked for something the session does not hold**? This
-tutorial answers both over the three files
-[the first tutorial](deidentify-and-read-the-grade.md) used.
+tutorial answers both over the same three files as
+[the first tutorial](deidentify-and-read-the-grade.md), in a folder of
+their own.
 
 !!! tip "Run it yourself"
 
     Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked. To follow
-    along, make a folder called `input` holding pydicom's bundled test
-    files `CT_small.dcm`, `MR_small.dcm` and `rtdose.dcm`
-    (`pydicom.data.get_testdata_file("CT_small.dcm")` returns where each
-    one is), then paste the blocks into a Python prompt or a notebook.
-    In a `.py` script, put them under `if __name__ == "__main__":`
-    ([why](../quickstart.md#1-initialize-a-session)).
+    Isocenter's test suite, and every output shown is checked.
+
+    - **Start in a new, empty folder.** Each tutorial creates its own
+      `tutorial.db` and export folders, and running one in another
+      tutorial's folder changes what it prints. The first block below
+      copies the input files from pydicom into `input/`.
+    - Paste the blocks into a Python prompt or a notebook. In a `.py`
+      script, put them under `if __name__ == "__main__":`
+      ([why](../quickstart.md#1-initialize-a-session)).
+    - In a block with `>>>`, type what follows each `>>>`; the lines
+      under it are what Python prints. A `...` in that output stands for
+      a value that differs on every run, such as a pseudonym or a UID.
+    - The session also prints progress bars, status lines and `WARNING`
+      lines as it works. They are not shown here.
+      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+for name in ["CT_small.dcm", "MR_small.dcm", "rtdose.dcm"]:
+    shutil.copy(pydicom.data.get_testdata_file(name), "input")
+```
 
 ## 1. Look at the cohort
 
@@ -84,7 +104,7 @@ session.anonymize()
 Now pass the rows you chose as `subset=`. `rtdose.dcm` stores 32-bit
 dose values, which Isocenter's JPEG 2000 encoder cannot write exactly,
 so every export on this page uses `use_compression=False`
-([#771](https://github.com/kvnlng/Isocenter/issues/771) plans to write
+([#771](https://github.com/kvnlng/Isocenter/issues/771) tracks writing
 such an instance uncompressed on its own).
 
 ```python
