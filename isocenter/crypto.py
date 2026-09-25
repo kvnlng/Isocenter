@@ -29,37 +29,14 @@ class KeyManager:
         """
         Loads the key at `key_path`; never creates one.
 
-        Recovery's read (#539). A recovery that generated a key under a
-        mistyped path wrote a new key file beside the real one, then
-        failed to decrypt with it and said only that no token was found:
-        a caller could not tell a wrong path from a patient never locked.
+        The key is cached on `self.key` once it has been validated; a call
+        that raises caches nothing, so a later call reads the file again.
+        A valid key file readable beyond its owner (any group or other mode
+        bit) logs one WARNING naming the mode, and its mode is left
+        unchanged.
 
         Returns:
             bytes: The URL-safe base64-encoded key.
-
-        **A key is cached only once it is usable (#618).** The file is
-        read, checked non-empty, and handed to `Fernet` *before* it is
-        assigned to `self.key`: an empty read cached as `b''` made every
-        later call in the session raise `Key not loaded` whatever the
-        file had since been filled with, and a malformed read repeated
-        its own `ValueError` the same way. A crash between the key
-        file's creation and its write is what leaves an empty file;
-        `load_or_generate_key` now creates the file already written, so
-        a reader of this release's key never meets one, but a file left
-        by an earlier release, or emptied by hand, still can.
-
-        **A key file readable beyond its owner logs one WARNING and is
-        left as it is.** Since P2 the lock creates the key at 0600, but
-        every key 0.9.7 and earlier wrote has the umask's mode (0644
-        typically), and a key that decrypts every locked identity should
-        not be group- or world-readable. The library does not chmod a
-        file it did not create -- its mode may be deliberate (a group
-        that shares the key), and a silent permission change on the
-        caller's file is worse than a said one. The warning names the
-        mode and not the path: a path can carry whatever the caller
-        named a directory after, and the caller already holds it. It is
-        logged after validation, so a file that is refused is not also
-        warned about.
 
         Raises:
             FileNotFoundError: No file at `key_path`. The message names the
@@ -100,30 +77,20 @@ class KeyManager:
         """
         Loads the key at `key_path`, creating one there if none exists.
 
-        The lock's read (#539): locking is the one operation that may mint
-        a key. **Created already written, mode 0600, and never seen
-        empty (#618).** The key is written to a temporary file in the
-        key's own directory (`tempfile.mkstemp`, which creates at 0600
-        whatever the umask) and hard-linked into place; `os.link` refuses
-        to replace an existing path, so of two sessions creating the key
-        at once exactly one wins and the other loads the winner's file.
-        Until now the file was created with `O_EXCL` and written
-        afterwards, and a reader between the two -- another session's
-        lock, or every later session after a crash there -- found an
-        empty key file. A filesystem without hard links (`os.link` raises
-        an `OSError` other than `FileExistsError`) falls back to that
-        exclusive create, so the worst case is the previous behaviour.
-
-        An existing file's mode is left as it is. An existing file that
-        is empty or malformed raises as `load_key` does, and is never
-        overwritten.
+        A new key file is created at mode 0600 and already written. Of two
+        sessions creating the key at once, exactly one key is written and
+        both load it. On a filesystem without hard links a concurrent
+        reader can briefly find the new file empty. An existing file is
+        never overwritten and its mode is left as it is.
 
         Returns:
             bytes: The URL-safe base64-encoded key.
 
         Raises:
-            FileNotFoundError: The key path's directory does not exist;
-                the temporary file cannot be created there either.
+            OSError: The temporary key file cannot be created in the key
+                path's directory (for example `FileNotFoundError` when the
+                directory does not exist); re-raised with its own type and
+                errno against `key_path`.
             ValueError: An existing file at the path is empty or malformed.
         """
         if self.key is None:
@@ -132,6 +99,11 @@ class KeyManager:
             except FileNotFoundError:
                 pass
             key = Fernet.generate_key()
+            # Written to a temporary file in the key's own directory
+            # (`mkstemp` creates at 0600 whatever the umask) and hard-linked
+            # into place, so the key file is never seen empty. `os.link`
+            # refuses to replace an existing path, so of two sessions
+            # creating the key at once exactly one wins.
             directory = os.path.dirname(self.key_path) or "."
             try:
                 fd, temp_path = tempfile.mkstemp(
@@ -139,7 +111,7 @@ class KeyManager:
             except OSError as exc:
                 # A missing or read-only directory is reported against
                 # the path the caller gave, not the temporary name nobody
-                # asked for (review of #633, P-6). Same type, same errno.
+                # asked for. Same type, same errno.
                 raise type(exc)(exc.errno, exc.strerror, self.key_path) from None
             try:
                 with os.fdopen(fd, "wb") as f:
@@ -151,9 +123,9 @@ class KeyManager:
                     # it too was linked into place already written.
                     return self.load_key()
                 except OSError:
-                    # No hard links here. The exclusive create, as before
-                    # this release: a reader between it and the write can
-                    # still find an empty file on such a filesystem.
+                    # No hard links here: fall back to an exclusive create.
+                    # A reader between it and the write can find an empty
+                    # file on such a filesystem.
                     try:
                         exclusive = os.open(
                             self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -174,7 +146,8 @@ class KeyManager:
             bytes: The key.
 
         Raises:
-            RuntimeError: If key has not clearly been loaded.
+            RuntimeError: No key has been loaded by `load_key()` or
+                `load_or_generate_key()`.
         """
         if not self.key:
             raise RuntimeError(
@@ -195,9 +168,27 @@ class CryptoEngine:
         self.fernet = Fernet(key)
 
     def encrypt(self, data: bytes) -> bytes:
-        """Encrypts the byte payload."""
+        """Encrypts the byte payload.
+
+        Args:
+            data (bytes): The plaintext.
+
+        Returns:
+            bytes: The Fernet token.
+        """
         return self.fernet.encrypt(data)
 
     def decrypt(self, token: bytes) -> bytes:
-        """Decrypts the token payload."""
+        """Decrypts the token payload.
+
+        Args:
+            token (bytes): A Fernet token.
+
+        Returns:
+            bytes: The plaintext.
+
+        Raises:
+            cryptography.fernet.InvalidToken: The key does not open the
+                token, or it is not a well-formed token.
+        """
         return self.fernet.decrypt(token)
