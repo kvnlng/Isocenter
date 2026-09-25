@@ -1,11 +1,10 @@
 """One answer to "which axis of this pixel array means what".
 
-Four places in this codebase used to decide what an image looked like by
-reading a numpy array's ``.shape`` and breaking the ``(frames, rows, cols)``
-vs. ``(rows, cols, samples)`` tie with ``if shape[-1] in [3, 4]``. Both
-readings are rank 3, so that test is a guess -- and the information that
-settles it was sitting unread in ``Instance.attributes`` at every one of the
-four sites (#186, #205).
+A rank-3 array is either ``(frames, rows, cols)`` or ``(rows, cols,
+samples)``, and its shape alone cannot say which; a test such as
+``if shape[-1] in [3, 4]`` is a guess. The descriptors in
+``Instance.attributes`` settle it, and every caller that needs a layout
+asks this module rather than reading ``.shape`` itself.
 
 The rule this module implements:
 
@@ -17,24 +16,22 @@ stays legitimate; guessing which axis is which is the defect. When the two
 genuinely contradict each other -- an instance declaring *n* samples per
 pixel beside an array with no axis that can hold them -- neither statement
 can be trusted, so this raises rather than picking a winner.
-
-Import constraints, deliberate and load-bearing:
-
-- **No numpy.** The input is a shape tuple, not an array.
-- **No `entities`, no `io_handlers`.** Both import *this*; going the other
-  way would be a cycle.
-- **No third-party import at all**, so `tests/test_packaging_contract.py`
-  needs no new `install_requires` entry.
-- `_export_instance_worker` runs in a **separate process under
-  `session.export()` on every interpreter; by default `write_tree()`
-  spawns it on a GIL build and runs it in the caller's own threads on a
-  free-threaded one** (#521; the `ExportOutcome.corrections` note in
-  `io_handlers.py`). So this has to be importable at module scope in a
-  bare child, and a dependency-free module is all that child needs.
-
-`PixelGeometry` is a `NamedTuple` so it stays picklable, though nothing in
-this design sends one across a process boundary.
 """
+# Import constraints, deliberate and load-bearing:
+#
+# - No numpy. The input is a shape tuple, not an array.
+# - No `entities`, no `io_handlers`. Both import this; going the other
+#   way would be a cycle.
+# - No third-party import at all, so it adds no `install_requires` entry.
+# - `_export_instance_worker` runs in a separate process under
+#   `session.export()` on every interpreter; by default `write_tree()`
+#   spawns it on a GIL build and runs it in the caller's own threads on a
+#   free-threaded one (the `ExportOutcome.corrections` note in
+#   `io_handlers.py`). So this has to be importable at module scope in a
+#   bare child, and a dependency-free module is all that child needs.
+#
+# `PixelGeometry` is a `NamedTuple` so it stays picklable, though nothing
+# sends one across a process boundary.
 from enum import Enum
 from typing import Any, NamedTuple, Optional, Sequence
 
@@ -50,7 +47,7 @@ TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
 
 #: Where an instance records the numpy dtype of the pixel frame it is
 #: holding, when no DICOM descriptor can name that dtype -- the three
-#: floating-point widths (#183) and `bool` (#386). See
+#: floating-point widths and `bool`. See
 #: `SIDECAR_DTYPE_NAMES` for why the integer dtypes are deliberately not
 #: here.
 #:
@@ -65,19 +62,18 @@ TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
 #: "bool" either. `SidecarPixelLoader` derives its dtype from
 #: BitsAllocated and PixelRepresentation, and a 32-bit float frame and a
 #: 32-bit integer frame declare the same 32 -- so without this the
-#: sidecar hands back integers where floats went in, silently. `bool` is
-#: the same failure at 8 bits: numpy `bool_` and `uint8` both declare
-#: BitsAllocated 8 with PixelRepresentation 0, so a mask set in memory
-#: came back as `uint8` and only the *values* survived (#386). Set at
+#: sidecar would hand back integers where floats went in. `bool` is the
+#: same case at 8 bits: numpy `bool_` and `uint8` both declare
+#: BitsAllocated 8 with PixelRepresentation 0, so a mask would come back
+#: as `uint8`. Set at
 #: ingest from the element the bytes came out of, and kept true by
 #: `set_pixel_data()` from the dtype of the array it is handed.
 #:
 #: **The dtype, not the element**, and the difference is float16: it has
 #: no DICOM element at any width, so an element-shaped carrier could not
-#: name it and a `float16` array round-tripped through the sidecar as
-#: `uint16`. The export's float16 arm then never ran, and the
-#: `DATA_LOSS` row that says the pixels could not be written was never
-#: filed. The sidecar is ours and can hold what DICOM has no element
+#: name it and a `float16` array would round-trip through the sidecar as
+#: `uint16`, and the export's float16 arm and its `DATA_LOSS` row would
+#: never run. The sidecar is ours and can hold what DICOM has no element
 #: for; what it must never do is hand back a different type from the one
 #: it was given.
 PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
@@ -87,17 +83,17 @@ PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
 #: should do.
 #:
 #: The three float widths are every floating-point width numpy and DICOM
-#: between them produce here. `bool` joined them in #386 and is the only
-#: integer-kind dtype that will ever be here: once `set_pixel_data()`
-#: records `PixelRepresentation` as well as `BitsAllocated`, that pair
+#: between them produce here. `bool` is the only integer-kind dtype that
+#: belongs here: `set_pixel_data()` records `PixelRepresentation` as well
+#: as `BitsAllocated`, and that pair
 #: names every integer dtype the sidecar can hold *exactly*, and a
 #: carrier recorded as well would be a second answer to a question the
 #: descriptors already answer -- and the authoritative one, so a graph
 #: whose descriptors were later corrected would decode against a stale
 #: carrier. `bool` is the exception because no DICOM descriptor can name
 #: it: numpy `bool_` and `uint8` both declare BitsAllocated 8 with
-#: PixelRepresentation 0, which is the same argument #183 makes for
-#: float16 and the reason this carrier exists at all.
+#: PixelRepresentation 0, the same argument as for float16 and the
+#: reason this carrier exists at all.
 SIDECAR_DTYPE_NAMES = frozenset({"float16", "float32", "float64", "bool"})
 
 #: Numpy dtype name for each float pixel element. PS3.3 C.7.6.24 fixes
@@ -122,20 +118,18 @@ _IMPLICIT_SAMPLE_COUNTS = (3, 4)
 
 
 class GeometryEvidence(Enum):
-    """What settled the layout question -- not how confident we are.
+    """What settled the layout question -- not a confidence level.
 
-    The distinction matters because the callers apply different policies to
-    ``GUESSED``: `Instance.set_pixel_data` accepts it with a warning, so a
-    hand-built graph can still be given pixels before its attributes, while
-    `_export_instance_worker` refuses it, because that is the boundary at
-    which a guess would become a file on disk a recipient cannot tell apart
-    from a correct one.
+    Callers apply different policies to ``GUESSED``: `Instance.set_pixel_data`
+    accepts it with a warning, so a hand-built graph can be given pixels
+    before its attributes, while `_export_instance_worker` refuses it, so a
+    guess never becomes a file on disk.
     """
 
     DECLARED = "declared"      # SamplesPerPixel / NumberOfFrames chose the arm
     STRUCTURAL = "structural"  # only one arm was admissible for this rank
     MATCHED = "matched"        # Rows/Columns broke the tie
-    GUESSED = "guessed"        # nothing resolved it; legacy last-axis heuristic
+    GUESSED = "guessed"        # nothing resolved it; last-axis heuristic
 
 
 class PixelGeometry(NamedTuple):
@@ -143,9 +137,8 @@ class PixelGeometry(NamedTuple):
 
     ``frames`` is **never** the declared NumberOfFrames. It is the array's
     first axis on the frames-major arms and ``1`` on the others, so
-    ``frames <= shape[0]`` holds for every rank and every arm. Callers that
-    iterate ``range(geometry.frames)`` over the array's first axis are in
-    bounds because of that, not by coincidence.
+    ``frames <= shape[0]`` holds for every rank and every arm, and
+    ``range(geometry.frames)`` over the array's first axis is in bounds.
     """
 
     frames: int
@@ -158,19 +151,8 @@ class PixelGeometry(NamedTuple):
 def declared_int(attributes: Any, tag: str) -> Optional[int]:
     """Read one declared descriptor as an int, or ``None`` for "not declared".
 
-    Absent, empty, unparseable and non-scalar all read as ``None``. **Never
-    as a default** -- a hand-built instance that has declared nothing is
-    precisely the case that needs deriving, and collapsing "absent" into "1"
-    would silently choose the frames arm for every fixture-generator RGB
-    image.
-
-    The `str` coercion is load-bearing rather than defensive. `set_pixel_data`
-    used to write `str(frames)` for (0028,0008) while `ingest_worker` stores
-    an `int`, so a graph that has been through the buggy path once holds
-    ``"3"`` where ingest had ``3``; comparing raw values would fail the frames
-    check on exactly the instances the bug already touched. It also keeps the
-    `MagicMock` instances in `tests/test_pixel_analysis.py` working, since
-    ``int(str(MagicMock()))`` raises and so reads as "not declared".
+    Absent, empty, unparseable and non-scalar all read as ``None``, never
+    as a default. ``"3"`` and ``3`` both read as 3.
 
     Args:
         attributes: The instance's attributes mapping, or anything with a
@@ -180,6 +162,12 @@ def declared_int(attributes: Any, tag: str) -> Optional[int]:
     Returns:
         Optional[int]: The declared value, or None.
     """
+    # Never a default: a hand-built instance that has declared nothing is
+    # precisely the case that needs deriving, and collapsing "absent" into
+    # "1" would silently choose the frames arm for every fixture-generator
+    # RGB image. The `str` coercion below is load-bearing: a graph can hold
+    # "3" where ingest stores 3, and an object with no integer spelling
+    # (a `MagicMock`) must read as "not declared".
     try:
         raw = attributes.get(tag)
     except Exception:  # pylint: disable=broad-except
@@ -210,11 +198,21 @@ def _declared_str(attributes: Any, tag: str) -> Optional[str]:
 def _contradiction(shape, s_d, f_d, r_d, c_d) -> ValueError:
     """Build the error for "the array and the attributes cannot both be right".
 
-    Raising is the only outcome that neither corrupts nor lies. Trusting the
-    attributes writes descriptors that do not describe the bytes. Trusting the
-    array is the behaviour that produced #186. Logging a DATA_LOSS row
-    misnames it: nothing was dropped, two statements disagree.
+    Args:
+        shape (tuple): The array's shape.
+        s_d (Optional[int]): Declared SamplesPerPixel.
+        f_d (Optional[int]): Declared NumberOfFrames.
+        r_d (Optional[int]): Declared Rows.
+        c_d (Optional[int]): Declared Columns.
+
+    Returns:
+        ValueError: The error for the caller to raise, naming the shape and
+            the four declared values.
     """
+    # Raising is the only outcome that neither corrupts nor lies. Trusting
+    # the attributes writes descriptors that do not describe the bytes;
+    # trusting the array is guessing the layout. A DATA_LOSS row would
+    # misname it: nothing was dropped, two statements disagree.
     return ValueError(
         f"Pixel array shape {tuple(shape)} cannot be reconciled with the "
         f"instance's declared geometry (SamplesPerPixel={s_d}, "
@@ -226,11 +224,21 @@ def _contradiction(shape, s_d, f_d, r_d, c_d) -> ValueError:
 def _resolve_rank1(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
     """Rank 1 -- a flat buffer, reshaped from the declared descriptors.
 
-    The sidecar loader returns a 1-D array only when the stored metadata is
-    too small for the buffer, in which case this is consulting the same
-    metadata that just failed. Nothing is gained or lost by trying; the
-    fall-through below is the existing behaviour and stays.
+    Args:
+        shape (tuple): The array's shape, ``(n,)``.
+        s_d (Optional[int]): Declared SamplesPerPixel.
+        f_d (Optional[int]): Declared NumberOfFrames.
+        r_d (Optional[int]): Declared Rows.
+        c_d (Optional[int]): Declared Columns.
+
+    Returns:
+        PixelGeometry: DECLARED when the declared size fits in the buffer
+            (the caller truncates any padding); otherwise a single
+            STRUCTURAL row of ``shape[0]`` columns.
     """
+    # The sidecar loader returns a 1-D array only when the stored metadata
+    # is too small for the buffer, so this consults the same metadata that
+    # just failed.
     rows = r_d or 0
     cols = c_d or 0
     samples = s_d if s_d is not None else 1
@@ -253,11 +261,40 @@ def _resolve_rank3(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
 
     Arm A is ``(frames, rows, cols)`` with one sample per pixel; arm B is
     ``(rows, cols, samples)`` with one frame.
+
+    Args:
+        shape (tuple): The array's shape.
+        s_d (Optional[int]): Declared SamplesPerPixel.
+        f_d (Optional[int]): Declared NumberOfFrames.
+        r_d (Optional[int]): Declared Rows.
+        c_d (Optional[int]): Declared Columns.
+
+    Returns:
+        PixelGeometry: The chosen arm, with the evidence that chose it.
+
+    Raises:
+        ValueError: If neither arm can carry the declared SamplesPerPixel.
     """
     def arm_a(evidence):
+        """Arm A, ``(frames, rows, cols)``.
+
+        Args:
+            evidence (GeometryEvidence): What chose this arm.
+
+        Returns:
+            PixelGeometry: The layout.
+        """
         return PixelGeometry(shape[0], shape[1], shape[2], 1, evidence)
 
     def arm_b(evidence):
+        """Arm B, ``(rows, cols, samples)``.
+
+        Args:
+            evidence (GeometryEvidence): What chose this arm.
+
+        Returns:
+            PixelGeometry: The layout.
+        """
         return PixelGeometry(1, shape[0], shape[1], shape[2], evidence)
 
     # Step 1 -- admissibility. Layout evidence only; magnitudes are ignored
@@ -300,8 +337,8 @@ def _resolve_rank3(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
         return arm_a(GeometryEvidence.MATCHED) if a_ok \
             else arm_b(GeometryEvidence.MATCHED)
 
-    # Step 4 -- the guess. This is the pre-#186 heuristic, unchanged, and it
-    # is reported as a guess so each caller can apply its own policy.
+    # Step 4 -- the guess: the last-axis heuristic, reported as a guess so
+    # each caller can apply its own policy.
     if shape[2] in _IMPLICIT_SAMPLE_COUNTS:
         return arm_b(GeometryEvidence.GUESSED)
     return arm_a(GeometryEvidence.GUESSED)
@@ -361,9 +398,8 @@ def resolve_photometric_interpretation(attributes: Any,
     """Decide what to write for PhotometricInterpretation (0028,0004).
 
     Photometric Interpretation is **not derivable from an array**: a 3-sample
-    array is equally RGB, YBR_FULL, YBR_FULL_422 or YBR_RCT. The old
-    ``if samples >= 3: "RGB"`` is what relabelled every ``YBR_FULL`` instance
-    on the way through ``get_pixel_data()``.
+    array is equally RGB, YBR_FULL, YBR_FULL_422 or YBR_RCT, so
+    ``if samples >= 3: "RGB"`` would relabel every ``YBR_FULL`` instance.
 
     So: correct only an outright contradiction, and only to the neutral
     default for the sample count.
@@ -393,29 +429,16 @@ def resolve_photometric_interpretation(attributes: Any,
 def planar_configuration_default(attributes: Any, samples: int) -> bool:
     """Whether to write PlanarConfiguration (0028,0006) = 0.
 
-    Only when the instance is colour **and has not declared one**. Forcing it
-    to 0 whenever ``samples >= 3`` -- the old behaviour -- overwrote a
-    declared planar-1 value with a claim about a layout nothing had
-    converted (#217).
+    Only when the instance is colour **and has not declared one**. A
+    declared value, planar 1 included, is kept: forcing 0 would claim a
+    layout nothing had converted. Ingest is not the only way a declared 1
+    reaches the graph; a hand-built instance and a reloaded one both carry
+    whatever was set.
 
-    **One caller: `Instance.set_pixel_data()`.** That is the question this
-    answers -- what descriptor should the graph carry when the caller
-    supplied none -- and it writes no file, so a value the caller declared
-    is theirs to keep.
-
-    It is deliberately **not** the question the exporter asks.
-    `_write_pixel_geometry` describes the pixel element it has just
-    written, and that element is interleaved whatever `attributes` says,
-    so it writes 0 for every colour instance and spells the `samples >= 3`
-    gate out itself. Leaving that site on this predicate is what let
-    `write_tree` emit interleaved bytes under a `PlanarConfiguration` of 1
-    (#210).
-
-    An earlier version of this docstring said `ingest_worker`'s
-    normalisation means "on every live path there is nothing here to
-    correct". That was incomplete: ingest is not the only way a declared 1
-    reaches the graph -- a hand-built instance and a reloaded one both
-    carry whatever was set -- and #217's own narrowing is what preserves it.
+    For `Instance.set_pixel_data()`: what descriptor the graph should carry
+    when the caller supplied none. Not for an exporter, which describes the
+    interleaved element it writes and so writes 0 for every colour
+    instance.
 
     Args:
         attributes: The instance's attributes mapping.
@@ -424,6 +447,9 @@ def planar_configuration_default(attributes: Any, samples: int) -> bool:
     Returns:
         bool: True if the caller should write 0.
     """
+    # Do not move the exporter's `_write_pixel_geometry` onto this
+    # predicate: it would write interleaved bytes under a
+    # `PlanarConfiguration` of 1.
     if samples < 3:
         return False
     try:

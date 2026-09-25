@@ -1,3 +1,4 @@
+"""Convert a CTP DicomPixelAnonymizer.script into Isocenter redaction rules."""
 import os
 import re
 import sys
@@ -11,27 +12,30 @@ class CTPParser:
 
     @staticmethod
     def parse_script(content: str):
+        """Parse a script's text into machine redaction rules.
+
+        Each `{ condition }` block followed by `(x,y,w,h)` coordinates gives
+        one rule when its condition names a Manufacturer or a
+        ManufacturerModelName (`containsIgnoreCase`); other blocks are
+        skipped. Coordinates are converted to zone space `[y, y+h, x, x+w]`.
+
+        Args:
+            content (str): The script's text.
+
+        Returns:
+            list: Rule dicts with `manufacturer`, `model_name`, `comment`
+                and `redaction_zones` keys, in script order.
+        """
         rules = []
 
-        # Simple finite state machine or regex approach
         # The format is roughly:
-        # Title/Comment (Lines)
-        # { condition }
-        # (x,y,w,h) ...
+        #   Title/Comment (Lines)
+        #   { condition }
+        #   (x,y,w,h) ...
+        # A condition block and its coordinates may each span several lines.
 
-        # Regex to find blocks of { condition } followed by coordinates
-        # Conditions might span multiple lines.
-        # Coordinates might span multiple lines
-
-        # Normalize whitespace
         content = content.replace('\r\n', '\n')
 
-        # Split by blocks?
-        # Let's try to match the pattern:
-        # { ... }
-        # ( ... )
-
-        # Regex for condition block
         pattern = re.compile(r'\{\s*(.*?)\s*\}\s*([\(\)\d\s,]+)', re.DOTALL)
 
         matches = pattern.findall(content)
@@ -64,12 +68,9 @@ class CTPParser:
         if m_mod:
             criteria['model_name'] = m_mod.group(1)
 
-        # Extract Serial Number (if available? CTP scripts usually target Modality/Model, rarely serial)
-        # But we can look for it.
+        # No serial number is read: CTP scripts target Modality/Model.
 
-        # If no manufacturer/model, it might be generic.
         if not criteria:
-            # Maybe extract others for comment?
             pass
 
         # 2. Parse Coordinates
@@ -90,9 +91,7 @@ class CTPParser:
         if not isocenter_zones:
             return None
 
-        # Build Rule Object
-        # If we have extracted specific info, use it.
-        # Ideally we want key info for matching.
+        # A block with neither a manufacturer nor a model gives no rule.
 
         if 'manufacturer' in criteria or 'model_name' in criteria:
             return {

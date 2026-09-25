@@ -7,26 +7,30 @@ provide a baseline set of PHI actions (e.g. REMOVE, EMPTY) which can be
 overridden by the user's specific "phi_tags" configuration.
 
 `BASIC_PROFILE` is the Basic Prof. column of DICOM PS3.15 Annex E, Table
-E.1-1, edition 2026c: one rule per row, apart from the departures
-`tests/support/annex_e.py` names with their reasons. Its `U` rows replace
-each UID with one derived from the project secret (#544). It is not the
-whole of Annex E -- the attributes that record de-identification are not
-written (#554). See docs/configuration.md.
+E.1-1, edition 2026c: one rule per row, apart from a few documented
+departures. Its `U` rows replace each UID with one derived from the
+project secret. It is not the whole of Annex E: the attributes that
+record de-identification are not rules here; the export writes them. See
+docs/configuration.md.
 
-A profile's name is pinned to the PS3.15 edition its table was taken from
-(#714): `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
-`basic` means `basic@2026c` in every 1.x (`PROFILE_ALIASES`). A later
-edition arrives as a second literal under a new name (`basic@2027a`),
-never as an edit to this one. How a name resolves is `config_manager`'s:
-this module is data, with zero mutation sites.
+A profile's name is pinned to the PS3.15 edition its table was taken
+from: `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
+`basic` means `basic@2026c` in every 1.x (`PROFILE_ALIASES`).
 """
 
-# DICOM PS3.15 2026c, Table E.1-1, Basic Prof. column (#547). Each entry's
+# The departures from the table, each with its reason, are listed in
+# `tests/support/annex_e.py`. A later edition arrives as a second literal
+# under a new name (`basic@2027a`), never as an edit to this one. How a
+# name resolves is `config_manager`'s: this module is data, with zero
+# mutation sites.
+
+# DICOM PS3.15 2026c, Table E.1-1, Basic Prof. column. Each entry's
 # trailing comment is the table's code for the row. `PRIVACY_PROFILES`
-# names this table `basic@2026c`, and from the v1.0.0 tag what that name
-# holds is frozen (#714, tests/test_profile_editions.py): regenerating it
-# after 1.0 changes what an unchanged config removes. A later edition is a
-# new literal beside this one (`BASIC_2027A`), under a new name.
+# names this table `basic@2026c`, and what that name holds is frozen for
+# 1.x (its digest is pinned in tests/test_profile_editions.py):
+# regenerating it changes what an unchanged config removes. A later
+# edition is a new literal beside this one (`BASIC_2027A`), under a new
+# name.
 #
 # DO NOT EDIT ENTRIES BY HAND. This is a pasted literal, not a loop over
 # the table, because the mutation probe registers this module as data
@@ -35,23 +39,22 @@ this module is data, with zero mutation sites.
 # (`tests/fixtures/ps3.15-2026c-table-e1-1.json`). To change a rule,
 # change the mapping, a named departure or `LITERAL_COMMENTS` there, and
 # paste `render_literal(load_table())` over this literal; a comment
-# written here by hand fails the same test. Until 0.9.8 this was a hand-picked
-# 35 rows, and nothing said which of the other 621 were left out.
+# written here by hand fails the same test.
 #
 # How a code becomes an action: `X` removes; `Z` and `X/Z` empty,
 # because zero length is valid wherever the table's X or Z is and removal
 # drops Type 2 attributes; `D` and every code with a D arm (`X/D`, `Z/D`,
 # `X/Z/D`) REPLACE with no value, which writes the dummy of the tag's VR
-# (`config_manager.VR_DUMMY`, #557). A dummy is what D asks for and a
+# (`config_manager.VR_DUMMY`). A dummy is what D asks for and a
 # value PS3.15 E.1-1a's Z permits; where the code resolves to X (Type 3
 # in the IOD) the table removes the attribute and this writes the dummy
 # instead, a named departure (docs/configuration.md). The four D-arm
 # sequences keep EMPTY or REMOVE: no dummy item is valid in every IOD.
-# `U` REPLACEs with no value, which on a UI is the keyed UID (#544); the
+# `U` REPLACEs with no value, which on a UI is the keyed UID; the
 # two `X/Z/U*` sequences get no rule, so they are kept and the UIDs inside
 # them are replaced as `U` rows of their own.
 #
-# `50xx,xxxx` and `60xx,xxxx` are repeating-group keys (#556): every
+# `50xx,xxxx` and `60xx,xxxx` are repeating-group keys: every
 # element of every even group 5000-501E or 6000-601E. The overlay group
 # rule is not a table row; the table's Overlay Data and Overlay Comments
 # rows are folded into it.
@@ -61,12 +64,10 @@ this module is data, with zero mutation sites.
 #
 # NOTE: keys must be lowercase 'gggg,eeee'. Ingested attribute keys on the
 # object graph are always lowercased (isocenter/io_handlers.py's populate_attrs),
-# and PhiInspector.__init__ (isocenter/privacy.py) now normalizes any phi_tags
+# and PhiInspector.__init__ (isocenter/privacy.py) normalizes any phi_tags
 # dict to lowercase keys as a defensive backstop -- but do not rely on that
 # backstop when adding new entries here; write them lowercase directly so
-# a mismatch never has a chance to silently disable a tag. (0008,103E,
-# Series Description, shipped uppercase for a while and was never
-# remediated on any documented path as a result.)
+# a mismatch never has a chance to silently disable a tag.
 BASIC_PROFILE = {
     "0000,1000": {"action": "REMOVE", "name": "Affected SOP Instance UID"},  # X
     "0000,1001": {"action": "REPLACE", "name": "Requested SOP Instance UID"},  # U
@@ -757,7 +758,7 @@ BASIC_PROFILE = {
 # writes exactly these beneath `privacy_profile: basic@2026c` -- it diffs
 # the floor against `PRIVACY_PROFILES[FLOOR_BASE]`, so the scaffold cannot
 # drift from this table -- and they are half of what a bare session
-# applies. Frozen with the floor at 1.0 (#714). Keys lowercase, for the
+# applies. Frozen with the floor for 1.x. Keys lowercase, for the
 # reason the header comment above gives.
 RESEARCH_DEFAULTS = {
     "0008,0020": {"action": "JITTER", "name": "Study Date"},
@@ -769,7 +770,7 @@ RESEARCH_DEFAULTS = {
 #: `<profile>@<edition>`, the edition being the PS3.15 release its table was
 #: taken from, spelled as the standard spells it (`2026c`) and looked up
 #: exactly -- no case-folding, no stripping. A 1.x adds names; it never
-#: removes one or changes the rules of one (#714). Adding one also bumps
+#: removes one or changes the rules of one. Adding one also bumps
 #: the configuration schema's minor (`config_manager.CONFIG_VERSION`).
 PRIVACY_PROFILES = {
     "basic@2026c": BASIC_PROFILE,
@@ -795,16 +796,14 @@ FLOOR_BASE = "basic@2026c"
 FLOOR = object()
 
 # What a session applies when it has loaded no configuration, and what a
-# config file with no `privacy_profile` line extends (#495). Until then a
-# bare session scanned against `{}`: it remediated patient name, ID and
-# study date through the hardcoded entity checks and left Study ID,
-# Institution Name, Station Name and every series/acquisition/content
-# date in the exported file, graded PASS.
+# config file with no `privacy_profile` line extends. Without it a bare
+# session would scan against `{}` and leave most identifiers in the
+# export.
 #
 # Not a named profile. `PRIVACY_PROFILES` is what a config can spell; the
 # floor is what spelling nothing means, so it has no name to collide with
 # a user's. It is `FLOOR_BASE`'s table with the research defaults, in
-# every 1.x (#714). Callers that hand it out copy it (`copy.deepcopy`) -- a
+# every 1.x. Callers that hand it out copy it (`copy.deepcopy`) -- a
 # session's `set_phi_tag` writes into its own `phi_tags`, and a shared
 # dict would carry that edit into every later session. The dict is built
 # from copies of each entry for the same reason: `BASIC_PROFILE` is what

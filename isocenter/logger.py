@@ -26,7 +26,6 @@ def configure_logger(log_file=None):
 
     logger = logging.getLogger("isocenter")
 
-    # helper for default level
     log_level_map = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -39,18 +38,16 @@ def configure_logger(log_file=None):
     logger.setLevel(default_level)
 
     # Reset handlers to prevent duplicates on reload. Close them first:
-    # assigning `[]` over the list dropped each `FileHandler` with its
-    # file still open, so N sessions in one process held N descriptors
-    # on the log, a `ResourceWarning` at GC on 3.14t (#611). `close()`
-    # on the console `StreamHandler` flushes and leaves `sys.stdout`
-    # open -- only a `FileHandler` owns its stream.
+    # dropping a `FileHandler` without closing it leaves its file open, so
+    # N sessions in one process would hold N descriptors on the log.
+    # `close()` on the console `StreamHandler` flushes and leaves
+    # `sys.stdout` open -- only a `FileHandler` owns its stream.
     #
     # One `try` per handler, not one around the loop: `close()` flushes,
-    # and a flush that fails (a full disk) raises from it. Unguarded,
-    # that raised out of `Session()` before the reset, leaving every old
-    # handler attached and the rest unclosed -- where before #611 nothing
-    # here could raise at all. The failure is logged once the new
-    # handlers are in place, so it reaches the log it is about.
+    # and a flush that fails (a full disk) raises from it. Unguarded, it
+    # would raise out of `Session()` before the reset, leaving every old
+    # handler attached and the rest unclosed. The failure is logged once
+    # the new handlers are in place, so it reaches the log it is about.
     close_failures = []
     for handler in list(logger.handlers):
         try:
@@ -60,7 +57,7 @@ def configure_logger(log_file=None):
     logger.handlers = []
 
     # 1. File Handler
-    fh = logging.FileHandler(log_file, mode='w')  # Overwrite mode for now per session
+    fh = logging.FileHandler(log_file, mode='w')  # Overwritten per session
     fh.setLevel(default_level)
     file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     fh.setFormatter(file_formatter)
@@ -98,29 +95,26 @@ def describe_exception(exc: BaseException) -> str:
     or cannot be rendered at all (its `__str__` raises), and the direct
     cause (`raise ... from`) in the same spelling:
     `RuntimeError: Pixel Loader failed ... (caused by OSError: EIO)`.
+    `__context__` (an exception raised while handling another, without
+    `from`) is not followed.
 
-    **Why the type leads.** `str()` is `''` for `KeyError()`,
-    `StopIteration()`, `OSError()`, `AssertionError()` and most bare
-    raises, so a reason built as `f"...: {e}"` ended in a colon and said
-    a step failed without saying how, and one built as `str(e)` was
-    empty -- which ingest tested with `if err:` and dropped, so the file
-    was counted nowhere (#435). A message alone also cannot tell
-    `KeyError('x')` from the string `'x'`.
+    Every site that turns an exception into audit text, a summary reason
+    or a report failure calls this. Never raises.
 
-    **Why the cause, and only the direct one.** `get_pixel_data()` wraps
-    a loader's error in `RuntimeError("Pixel Loader failed ...") from e`,
-    so without the cause a sidecar `OSError` reaches `PhiReport.failures`
-    named only as a `RuntimeError` (#423). `__context__` -- an exception
-    raised while handling another, without `from` -- is not followed: the
-    raiser did not say the two were one failure.
+    Args:
+        exc (BaseException): The exception to describe.
 
-    **One spelling.** Bunch E (#423) wrote this as
-    `pixel_analysis._describe_failure`, with a trailing `: ` for an empty
-    message; this replaced it, and every site that turns an exception
-    into audit text, a summary reason or a report failure calls this.
-    Here because `logger` is a leaf every one of those modules already
-    imports, so no caller imports another caller for it.
+    Returns:
+        str: The one-line description.
     """
+    # Why the type leads: `str()` is `''` for `KeyError()`, `OSError()` and
+    # most bare raises, so a reason built from the message alone can be
+    # empty, and a caller testing it for truth would drop the failure; a
+    # message alone also cannot tell `KeyError('x')` from the string 'x'.
+    # Why the direct cause: `get_pixel_data()` wraps a loader's error in
+    # `RuntimeError(...) from e`, and without the cause a sidecar `OSError`
+    # would reach `PhiReport.failures` named only as a `RuntimeError`. It
+    # lives here because `logger` is a leaf every caller already imports.
     text = _type_and_message(exc)
     cause = exc.__cause__
     if cause is not None:
@@ -135,27 +129,20 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     its `strerror` alone (`NotADirectoryError: Not a directory`), because
     its `str()` appends `filename` and `filename2`, and an export path is
     built from the graph: `Subject_<Patient ID>/...` for a DICOM file,
-    `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB
-    exporter's `ERROR` rows interpolated the exception whole (#588), the
-    DICOM export worker printed the output path and then the exception
-    to stderr (P8, bunch E), and the DICOM `ERROR` row
-    (`DicomExporter._report_export_failures`) recorded both the same
-    way. An `OSError` with no `strerror` -- `OSError("cannot open
-    <path>")` -- is its type alone: its message is whatever the raiser
-    wrote, and the one exception this exists for is the one whose
-    message is built around a path.
+    `<Patient ID>_<series>_<instance>` for a WFDB record. An `OSError`
+    with no `strerror` -- `OSError("cannot open <path>")` -- is its type
+    alone.
 
-    **The limit.** Every other exception keeps its message, exactly as
-    `describe_exception` spells it: those messages are the reasons a
-    report exists to show, and there is no general way to tell a path in
-    one from prose. An exception type that writes a path into its own
-    message is not caught by this, so the fix belongs at the raise:
-    name the instance there. Found and fixed that way (review of #589):
-    the export worker's `Refusing to write <output path>` refusals
-    (`io_handlers._export_instance_worker`), `get_pixel_data()`'s
-    `Lazy load failed for <source path>` and `Failed to decompress pixel
-    data for <file name>`, and `_verify_readback`'s inner exception.
-    Name any further one here.
+    Every other exception keeps its message, exactly as
+    `describe_exception` spells it, so an exception type that writes a
+    path into its own message is not covered: name the instance at the
+    raise instead.
+
+    Args:
+        exc (BaseException): The exception to describe.
+
+    Returns:
+        str: The one-line description, with no `OSError` path in it.
     """
     text = _type_and_reason(exc)
     cause = exc.__cause__
@@ -181,7 +168,7 @@ def _type_and_message(exc: BaseException) -> str:
     # is called while a failure is being recorded, and raising here would
     # replace that failure with this one; the type is still a reason. A
     # whitespace-only message is no more a reason than an empty one, so
-    # it gets the bare type too (review of #466).
+    # it gets the bare type too.
     try:
         message = str(exc)
     except Exception:  # pylint: disable=broad-exception-caught
