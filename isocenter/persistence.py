@@ -1657,22 +1657,11 @@ class SqliteStore:
     def flush_audit_queue(self):
         """Settle the audit log.
 
-        Returns only when every row enqueued before this call is
-        readable from `audit_log`. This is a barrier, not a poll.
-
-        Before #218 it drained the queue and returned, which said
-        nothing about rows the worker had already taken out of the
-        queue and not yet written. A compliance report reading through
-        it graded `PASS` a run that dropped a private tag, because the
-        `DATA_LOSS`/`PRIVATE` row was in the worker's local batch when
-        `get_audit_losses()` looked.
-
-        There is deliberately no timeout. A bounded barrier would
-        reintroduce `stop()`'s failure mode -- a compliance read that
-        quietly gives up cannot be told apart from one that found
-        nothing. The worst case is one `log_audit_batch`; producers
-        never hold the lock, so no volume of logging can extend a
-        single acquisition.
+        Returns only when every row enqueued before this call is readable from
+        `audit_log`. This is a barrier, not a poll, and it has no timeout: a
+        compliance read that gave up could not be told from one that found
+        nothing. The worst case is one `log_audit_batch`; producers never hold
+        the lock, so no volume of logging can extend a single acquisition.
         """
         self._drain_and_write()
 
@@ -1687,15 +1676,12 @@ class SqliteStore:
             details (str): Prose for the human reading the report.
             loss_scope (str, optional): For `DATA_LOSS` only:
                 `io_handlers.LOSS_SCOPE_PRIVATE`, `LOSS_SCOPE_STANDARD`
-                or `LOSS_SCOPE_SIGNAL`. This is what `generate_report`
-                grades on, and it is passed in rather than derived from
-                `details` because only the caller still holds the tag
-                (#146).
+                or `LOSS_SCOPE_SIGNAL`. `generate_report` grades on it; the
+                caller passes it because only the caller still holds the tag.
             element_tag (str, optional): For `SCAN_GAP` only: the
                 `gggg,eeee` the parse gate refused. `generate_report`
                 resolves it against the object graph to say whether the
-                element is still held for export (#167). Passed in for
-                the same reason `loss_scope` is.
+                element is still held for export.
         """
         # Push to queue instead of writing directly. Producers take
         # neither lock and are never blocked by a database write.
@@ -1704,16 +1690,10 @@ class SqliteStore:
         self._audit_wakeup.set()
 
     def get_audit_summary(self) -> Dict[str, int]:
-        """
-        Returns an aggregated summary of actions from the audit log.
+        """Returns an aggregated summary of actions from the audit log.
 
-        It used to `stop()` the worker and restart it in a `finally`,
-        which was not a barrier but a race with a two-second head start
-        (#218). When the join timed out the caller got `{}` for a store
-        with rows recorded, silently, and the restart started a second
-        worker while the first was still alive -- one leaked thread per
-        timed-out read. Both are gone: this reads through the barrier
-        and starts nothing.
+        Reads through the `flush_audit_queue` barrier, so every row enqueued
+        before the call is counted.
 
         Returns:
             Dict[str, int]: e.g., {'ANONYMIZE': 500, 'EXPORT': 500}
@@ -1755,21 +1735,17 @@ class SqliteStore:
             return []
 
     def get_audit_losses(self) -> List[tuple]:
-        """
-        Retrieves every `DATA_LOSS` entry, with the scope it was
+        """Retrieves every `DATA_LOSS` entry, with the scope it was
         recorded under.
 
-        Still separate from `get_audit_errors`, and the reason is no
-        longer that the grade is untouched -- it is not. A loss scoped
-        `PRIVATE` or `SIGNAL` takes `validation_status` to
-        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`
-        (CHANGELOG.md, #146 and #150).
-        Folding these rows into `get_audit_errors` would grade all of
-        them alike *and* file a routine drop under "Exceptions &
-        Errors", where nothing failed.
+        Separate from `get_audit_errors` because the scopes grade differently:
+        a loss scoped `PRIVATE` or `SIGNAL` takes `validation_status` to
+        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`. Every
+        loss is reported under "3.1 Data Loss", never under "Exceptions &
+        Errors".
 
-        A row whose `loss_scope` is NULL predates the column and cannot
-        be graded; it is reported and left at `PASS`.
+        A row whose `loss_scope` is NULL predates the column and cannot be
+        graded; it is reported and left at `PASS`.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details, loss_scope)
@@ -1791,23 +1767,18 @@ class SqliteStore:
     def get_audit_scan_gaps(self) -> List[tuple]:
         """Every `SCAN_GAP` entry: an element the PHI scan could not open.
 
-        Separate from `get_audit_losses` because it is a different
-        claim. A loss says an element was dropped at ingest and cannot
-        reach the output; this says an element was kept whole and the
-        scan could not read what is inside it (#167). Folding them
-        together would file one under a section header that denies it.
+        Separate from `get_audit_losses` because it is a different claim. A loss
+        says an element was dropped at ingest and cannot reach the output; this
+        says an element was kept whole and the scan could not read what is
+        inside it.
 
-        The row states ingest-time knowledge only. Whether the element
-        reaches the exported file is decided later, by
-        `remove_private_tags`, and `generate_report` resolves that
-        against the object graph -- the row itself must not claim it
-        (#167).
+        The row states ingest-time knowledge only. Whether the element reaches
+        the exported file is decided later, by `remove_private_tags`, and
+        `generate_report` resolves that against the object graph.
 
-        No `loss_scope` column: these are private by construction --
-        only an odd-group tag reaches the parse gate -- so the column
-        would hold one value and grade nothing. `element_tag` is
-        selected instead, and is NULL for a row written before that
-        column existed.
+        No `loss_scope` column: only an odd-group tag reaches the parse gate,
+        so these are private by construction. `element_tag` is selected
+        instead, and is NULL for a row written before that column existed.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details, element_tag)
@@ -1829,21 +1800,13 @@ class SqliteStore:
     def get_audit_declines(self) -> List[tuple]:
         """Every `REMEDIATION_DECLINED` entry: a value the sweep left behind.
 
-        Its own reader beside `get_audit_scan_gaps` and for the same
-        reason: it is a different claim. A scan gap says an element could
-        not be *read*; this says an element was read, a remediation was
-        proposed for it, and the remediation did not run -- so the value
-        is still in the graph and will reach the exported file (#301).
+        A scan gap says an element could not be *read*; this says an element was
+        read, a remediation was proposed for it, and the remediation did not
+        run, so the value is still in the graph and will reach the exported
+        file. The reason is in `details`.
 
-        No `loss_scope` and no `element_tag`. The reason lives in
-        `details` prose: a `decline_reason` column would have no reader
-        (the grade turns on the row existing and the report lists the
-        rows), and `element_tag` is documented "for `SCAN_GAP` only" in
-        three places, so borrowing it would falsify all three.
-
-        Flushes first, like every other audit reader: a row still in the
-        queue has not reached the table, so reading before the barrier
-        would report a clean run over a session that had just declined.
+        Flushes first, like every other audit reader, so a row still in the
+        queue is counted.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details)
@@ -1865,16 +1828,13 @@ class SqliteStore:
     def get_audit_drops(self) -> int:
         """How many audit rows were dropped by a failed batch write.
 
-        The rows themselves are unrecoverable -- see `log_audit_batch`
-        for why they are counted rather than retried (#219). A non-zero
-        count means the audit table under-states what happened, which
-        is why `generate_report` grades it like an exception rather
-        than mentioning it: an audit trail with holes cannot support a
-        PASS.
+        The rows themselves are unrecoverable (see `log_audit_batch`). A
+        non-zero count means the audit table under-states what happened, and
+        `generate_report` grades it like an exception: an audit trail with
+        holes cannot support a PASS.
 
-        Flushes first, like every other audit reader: a row still in
-        the queue has not met the failing write yet, so counting before
-        the barrier would miss it.
+        Flushes first, like every other audit reader, so a row still in the
+        queue is counted if its write fails.
         """
         self.flush_audit_queue()
         with self._audit_drop_lock:
@@ -1909,35 +1869,25 @@ class SqliteStore:
     def check_pixel_geometry(self) -> List[tuple]:
         """Instances whose stored descriptors cannot describe their frame.
 
-        The detector for stores #186 already damaged before its fix
-        landed: the defect persisted a guessed geometry (RGB, 3 samples,
-        swapped axes) for multi-frame grayscale instances, and a store
-        carrying it exports garbage while grading PASS -- every step
-        downstream behaves correctly on descriptors that are already
-        wrong (#214). Repair is deliberately not attempted: the
-        sidecar's bytes are shape-free, so a migration would be
-        best-effort, and a best-effort repair that silently half-works
-        is worse than a detector. The remedy is the caller's -- re-ingest
-        from source, or `export(verify_readback=True)` (#209) -- and
-        rides the warning `DicomSession.__init__` logs from this result.
+        Detects stores holding a guessed geometry for a multi-frame grayscale
+        instance (RGB, 3 samples, swapped axes), which exports garbage while
+        every later step behaves correctly on the wrong descriptors. Nothing is
+        repaired: the sidecar's bytes are shape-free. Re-ingest from source, or
+        export with `verify_readback=True`; `DicomSession.__init__` logs a
+        warning from this result.
 
-        The check is arithmetic and exact: Rows x Columns x
-        SamplesPerPixel x NumberOfFrames x bytes-per-sample must equal
-        the stored frame length. Bytes-per-sample mirrors
-        `SidecarPixelLoader`'s dtype bucketing (`uint16 if bits > 8 else
-        uint8`) rather than BitsAllocated/8, because the sidecar holds
-        `pixel_array.tobytes()` -- a 1-bit Segmentation is stored
-        expanded to uint8, and dividing its declared width by 8 would
-        flag every healthy one.
+        The check is arithmetic and exact: Rows x Columns x SamplesPerPixel x
+        NumberOfFrames x bytes-per-sample must equal the stored frame length.
+        Bytes-per-sample follows `SidecarPixelLoader`'s dtype bucketing
+        (`uint16 if bits > 8 else uint8`) rather than BitsAllocated/8, because
+        the sidecar holds `pixel_array.tobytes()`: a 1-bit Segmentation is
+        stored expanded to uint8.
 
-        **Scope: frames stored uncompressed only.** A zlib frame's
-        stored length is post-compression, so the equality holds for no
-        store, damaged or healthy, and deciding it by decompressing
-        every frame would read the whole sidecar on every open -- the
-        memory-scaling promise says no. A frame whose `compress_alg` is
-        NULL is skipped too: its encoding is unrecorded and nothing here
-        guesses. Damage hiding behind a compressed frame is caught where
-        the bytes are actually decoded, by `verify_readback` at export.
+        **Scope: frames stored uncompressed only.** A zlib frame's stored length
+        is post-compression, and decompressing every frame would read the whole
+        sidecar on every open. A frame whose `compress_alg` is NULL is skipped
+        too: its encoding is unrecorded. Damage behind a compressed frame is
+        caught where the bytes are decoded, by `verify_readback` at export.
 
         Returns:
             List[tuple]: (sop_instance_uid, file_path, details), the
@@ -2003,28 +1953,20 @@ class SqliteStore:
         return flagged
 
     def log_audit_batch(self, entries: List[tuple]):
-        """
-        Batch inserts audit logs.
+        """Batch inserts audit logs.
 
         entries: List of
         (action_type, entity_uid, details, loss_scope, element_tag).
-        `loss_scope` is None for everything that is not a `DATA_LOSS`
-        row and `element_tag` for everything that is not a `SCAN_GAP`
-        one; a caller with neither to describe still writes both slots,
-        because one record with several accepted shapes is a fork the
-        reader has to hold in their head.
+        `loss_scope` is None for everything that is not a `DATA_LOSS` row and
+        `element_tag` for everything that is not a `SCAN_GAP` one; every entry
+        has both slots.
 
-        A batch that fails to insert -- for any reason, sqlite or not --
-        is *dropped and counted*, never retried and never raised (#219).
-        Retrying would mean holding the rows somewhere: a local survives
-        no reader's barrier (that was #218's defect), and re-enqueueing
-        under the lock loops forever on a permanently failing write and
-        reorders the log besides. Raising is no better -- this used to
-        swallow `sqlite3.Error` into a log line while the worker's
-        `except` swallowed the rest, and both were the same silent
-        under-report. The count is the one trace that reaches a reader:
-        `generate_report` files a non-zero `get_audit_drops()` as an
-        exception, which costs the run its PASS.
+        A batch that fails to insert, for any reason, sqlite or not, is
+        *dropped and counted*, never retried and never raised. Retrying would
+        mean holding the rows somewhere no reader's barrier sees, or looping on
+        a write that always fails. The count is what reaches a reader:
+        `generate_report` files a non-zero `get_audit_drops()` as an exception,
+        which costs the run its PASS.
         """
         if not entries:
             return
@@ -3126,45 +3068,32 @@ class SqliteStore:
             self, instance_uid: str, attributes: Dict[Tuple[str, str], Any],
             conn: sqlite3.Connection = None,
             vrs: Dict[Tuple[str, str], str] = None):
-        """
-        Persists extended attributes to the vertical `instance_attributes` table.
+        """Persists extended attributes to the vertical `instance_attributes` table.
 
         This handles private tags and attributes that don't fit in the core JSON.
 
-        The write **replaces the instance's whole vertical set**: every row
-        for `instance_uid` is deleted first, then the given attributes are
-        inserted. An empty mapping therefore clears the instance, and is not
-        a no-op. That is not tidiness -- it is the only shape that mirrors
-        the read side. Deleting only the keys about to be re-inserted leaves
-        a tag that was *removed* from the graph sitting in the table, and
-        skipping the call when there is nothing to insert leaves the entire
-        stripped block there. Both were invisible while nothing read the
-        rows back; once `load_all` does (#158), either one puts a vendor
-        block that `remove_private_tags=True` deleted back into a
-        de-identified graph on the next reload.
+        The write **replaces the instance's whole vertical set**: every row for
+        `instance_uid` is deleted first, then the given attributes are inserted.
+        An empty mapping therefore clears the instance, and is not a no-op. That
+        mirrors the read side: a tag removed from the graph must not stay in the
+        table, or the next reload puts it back.
 
-        `value_text` is NULL for exactly one thing: an atom whose value
-        was `None` (#339). Every other rendering goes through `str()`,
-        which never returns `None`, so no row written by any released
-        version can hold a NULL there and the meaning needs no
-        migration to claim.
+        `value_text` is NULL for exactly one thing: an atom whose value was
+        `None`. Every other rendering goes through `str()`.
 
         `value_count` carries the container's length on every row of an
-        element (#328), denormalized per atom exactly as `value_rep` is,
-        and `NULL` for a value that was not a container at all. An empty
-        container has no atom to hang it on, so it writes one
-        **placeholder row** -- atom 0, `value_text` NULL, `value_count`
-        0 -- whose atom the read side discards unread.
+        element, denormalized per atom as `value_rep` is, and `NULL` for a value
+        that was not a container at all. An empty container has no atom to hang
+        it on, so it writes one **placeholder row** (atom 0, `value_text` NULL,
+        `value_count` 0), whose atom the read side discards unread.
 
         Args:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
             conn (sqlite3.Connection, optional): An existing database connection to use for the transaction.
             vrs (Dict[Tuple[str, str], str], optional): The source VR for
-                each tag, keyed the same way. `value_rep` was reserved for
-                this and hardcoded to `"UN"` until #154; a tag with no
-                entry still stores `"UN"`, which is the honest answer for
-                a value whose VR was never known.
+                each tag, keyed the same way. A tag with no entry stores
+                `"UN"`: its VR was never known.
         """
         data_rows = []
         for (grp, elem), val in attributes.items():
@@ -3257,30 +3186,22 @@ class SqliteStore:
     def reconcile_private_tags(self) -> Tuple[int, Dict[str, List[str]]]:
         """Drop `instance_attributes` rows absent from the core attributes.
 
-        The database half of `DicomSession.reconcile_private_tags()`
-        (#172), which carries the public contract and the warnings; use
-        that. This method decides nothing -- it applies the one rule the
-        caller opted into: the core `attributes_json` is read as the
-        complete answer to "which tags does this instance have", and
-        every tier row whose tag is not there is deleted.
+        The database half of `DicomSession.reconcile_private_tags()`, which
+        carries the public contract and the warnings; use that. This method
+        applies one rule: the core `attributes_json` is read as the complete
+        answer to "which tags does this instance have", and every
+        `instance_attributes` row whose tag is not there is deleted. For a store
+        that keeps its private tags, those rows are the private data, which is
+        why nothing calls this automatically.
 
-        Why the core can be the answer for the store this exists for: a
-        store written before #158 was read core-only -- nothing consulted
-        the tier -- so the core IS what every pre-upgrade session saw,
-        scanned and exported. For any other store the tier holds the
-        instance's private text values *by design* and this deletes
-        them, which is why nothing calls this automatically.
-
-        A tier row whose instance is not in `instances` at all is
-        dropped too: it can reach no graph from this store, and keeping
-        it preserves exactly the kind of unreadable residue this call
-        exists to clear.
+        A row whose instance is not in `instances` at all is dropped too: it
+        can reach no graph from this store.
 
         Returns:
             Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not
-                tags -- a VM=3 value is three rows), and per-instance
-                `{sop_instance_uid: [tags]}` so the caller can heal the live
-                graph and write the audit trail.
+                tags: a value with multiplicity 3 is three rows), and
+                per-instance `{sop_instance_uid: [tags]}` so the caller can heal
+                the live graph and write the audit trail.
         """
         dropped: Dict[str, List[str]] = {}
         rows_deleted = 0
@@ -3322,44 +3243,28 @@ class SqliteStore:
     ) -> Dict[str, Dict[Tuple[str, str], Any]]:
         """Loads the vertical table for many instances in one pass.
 
-        Hydration needs this tier for every instance it builds, and the
-        whole point of the standard/private split is that loading 10k
-        instances does not mean 10k queries. `load_vertical_attributes`
-        takes a single UID, so calling it per instance would put exactly
-        that shape on the default session-open path. This is the same move
-        as the `wave_refs` pre-fetch in `load_all`: one query, stitched in
-        memory.
+        One query, stitched in memory, so loading many instances does not mean
+        one query per instance.
 
-        Values come back as they are stored -- `str`, or a `list` of `str`
-        for VM > 1 -- **except** where `value_rep` names a VR whose values
-        are not text on the wire. `US`, `UL`, `FL` and their siblings come
-        back as numbers, because pydicom refuses a `str` for them at write
-        time and would fail the whole export rather than the element
-        (`_VERTICAL_VR_PARSERS`). Nothing is inferred from the text: the
-        VR the source file gave decides, and a tag stored under `"UN"` --
-        which is every private element of an Implicit VR source -- still
-        reloads as text (#154).
+        Values come back as they are stored (`str`, or a `list` of `str` for
+        VM > 1) **except** where `value_rep` names a VR whose values are not text
+        on the wire: `US`, `UL`, `FL` and their siblings come back as numbers,
+        because pydicom refuses a `str` for them at write time
+        (`_VERTICAL_VR_PARSERS`). Nothing is inferred from the text: the VR the
+        source file gave decides, and a tag stored under `"UN"` (every private
+        element of an Implicit VR source) reloads as text.
 
-        Arity comes back too, since #328. `value_count` is read off the
-        first row of an element exactly as `value_rep` is: `0` over the
-        placeholder row is an empty container, `n >= 1` is a list even
-        at `n == 1`, and NULL
-        is either a scalar or a row written before the column existed --
-        both of which take the old rule, "more than one atom is a list".
-        The column is never used to truncate or pad, in either
-        direction: the rows decide the values, and a stored count that
-        disagrees with them is a corrupt row, not a licence to drop
-        values that are sitting in the table. That holds at `0` too --
-        the empty container is recognised by the placeholder row's shape
-        (one atom, NULL text) and not by the count alone, so a `0`
-        written over real atoms hands them back rather than swallowing
-        them.
+        `value_count` is read off the first row of an element, as `value_rep`
+        is: `0` over the placeholder row is an empty container, `n >= 1` is a
+        list even at `n == 1`, and NULL is a scalar or a row written before the
+        column existed, both read as "more than one atom is a list". The count
+        never truncates or pads: the rows decide the values, and a count that
+        disagrees with them is a corrupt row. At `0` too, the empty container is
+        recognised by the placeholder row's shape (one atom, NULL text), so a
+        `0` written over real atoms hands them back.
 
-        An atom stored as a NULL `value_text` comes back as `None`, not
-        as the text `None` (#339). The export then reports it as data
-        loss exactly as the in-memory path does, rather than writing a
-        conformant-looking `LO` element carrying a word the source never
-        said.
+        An atom stored as a NULL `value_text` comes back as `None`, not as the
+        text `None`, and the export reports it as data loss.
 
         Args:
             instance_uids (Optional[List[str]]): SOP Instance UIDs to fetch.
@@ -3368,20 +3273,13 @@ class SqliteStore:
                 SQLite's bound-parameter limit.
             conn (sqlite3.Connection, optional): An existing connection to
                 read on. Callers already inside a `_get_connection` block
-                MUST pass theirs -- on a `:memory:` store `_memory_lock` is
+                MUST pass theirs: on a `:memory:` store `_memory_lock` is
                 a plain, non-reentrant lock, so opening a nested connection
-                deadlocks outright. Same convention as
-                `save_vertical_attributes` and `record_blob_ref`.
+                deadlocks. Same convention as `save_vertical_attributes` and
+                `record_blob_ref`.
             vrs (Optional[Dict]): An accumulator, filled with SOP Instance
-                UID -> {(group, element): value_rep} when given. An
-                out-parameter rather than a second return value, matching
-                `populate_attrs`' `dropped`/`unscanned` and `_merge`'s
-                `losses`: every existing caller reads the return
-                positionally, and widening it to a `(value, vr)` pair
-                would rewrite all of them for one caller's benefit.
-                `"UN"` entries are included -- "no VR was recorded" is an
-                answer, and dropping it would be indistinguishable from
-                "this method was not asked".
+                UID -> {(group, element): value_rep} when given. `"UN"`
+                entries are included: "no VR was recorded" is an answer.
 
         Returns:
             Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID ->
@@ -3520,17 +3418,15 @@ class SqliteStore:
 
         Args:
             instance (Instance): Owning instance.
-            kind (str): A blob kind -- `'pixels'`, `'waveform'`, or either
+            kind (str): A blob kind: `'pixels'`, `'waveform'`, or either
                 followed by a sequence path. See `parse_blob_kind`.
             data (bytes | np.ndarray): Payload. Arrays are passed to the
                 sidecar directly to avoid a full copy.
 
         Raises:
-            ValueError: If `kind` does not match the blob-kind grammar. This
-                was a two-literal tuple until #183; the message now carries
-                the grammar, because the failure it most often means is a
-                caller who took the spelling from #183's `pixels:seq:...`
-                sketch rather than from `serialize_blob_kind`.
+            ValueError: If `kind` does not match the blob-kind grammar. The
+                message carries the grammar; `serialize_blob_kind` spells a
+                valid kind.
         """
         import hashlib
 
@@ -3690,19 +3586,14 @@ class SqliteStore:
         return {r["instance_uid"]: (r["offset"], r["length"]) for r in rows}
 
     def get_nested_pixel_refs(self) -> Dict[Tuple[str, str], Tuple[int, int]]:
-        """Every nested pixel reference, keyed `(instance_uid, kind)` (#183).
+        """Every nested pixel reference, keyed `(instance_uid, kind)`.
 
-        A separate method rather than a prefix flag on `get_blob_refs`,
-        because it answers a different question and returns a different
-        shape. `get_blob_refs` is keyed by UID alone, which is exactly what
-        a nested payload cannot be: one instance carries a bare `pixels`
-        blob *and* one row per icon, and collapsing them onto a UID is how
-        `compact_sidecar`'s uid_map would hand a pixel loader a thumbnail.
+        Separate from `get_blob_refs`, which is keyed by UID alone: one instance
+        can carry a bare `pixels` blob *and* one row per nested icon, so these
+        need the kind in the key.
 
-        Read for the same reason the waveform refs are: `compact_sidecar`'s
-        uid_map is pixels-only by design, so a nested loader left on a
-        pre-compaction offset reads the wrong bytes or runs off the end of
-        the file.
+        `compact_sidecar` reads these, as it reads the waveform refs, so a
+        nested loader is rewired to the compacted offsets.
 
         Returns:
             Dict[Tuple[str, str], Tuple[int, int]]: `(uid, kind)` ->
@@ -4778,76 +4669,46 @@ class SqliteStore:
                                 patient_ids: List[str] = None,
                                 instance_uids: List[str] = None,
                                 page_size: int = _FLATTENED_PAGE_SIZE):
-        """
-        Yields a flat dictionary for every instance in the DB.
+        """Yields a flat dictionary for every instance in the DB.
 
         Useful for streaming exports or analysis without loading the entire graph into RAM.
 
-        The rows come back one page at a time, and **no database handle is
-        held between pages** (#164). That is not an optimisation; it is
-        the only shape that lets this method do what it advertises. It
-        used to `yield` from inside `with self._get_connection()`, which
-        on a `:memory:` store holds `_memory_lock` -- a plain,
-        non-reentrant lock -- across its own yield. A generator parked
-        between rows therefore held the store's only lock and every other
-        call on it blocked forever. Streaming *is* partial consumption,
-        so the advertised usage was the one that hung; the two callers
-        that worked did `list(...)` first, which defeats the purpose. On
-        a file store nothing deadlocked, but the parked generator kept a
-        connection and a live read snapshot open, which stops WAL
-        checkpointing and lets the `-wal` file grow unbounded.
+        The rows come back one page at a time, and **no database handle is held
+        between pages**, so a generator left part-consumed holds no lock and no
+        read snapshot. Two consequences:
 
-        Two consequences worth knowing before you rely on this:
-
-        - **Iteration is not one snapshot.** Each page is its own query,
-          so writes that land between pages are visible and rows deleted
-          between pages are not returned. The previous single-cursor
-          version was a single snapshot; that guarantee is gone, and it
-          could not be kept without holding a read open across the yield,
-          which is the defect.
-        - **Order is by `instances.id`.** The walk is a keyset on that
-          column, so the sequence is now defined rather than whatever the
-          join happened to produce.
+        - **Iteration is not one snapshot.** Each page is its own query, so
+          writes that land between pages are visible and rows deleted between
+          pages are not returned.
+        - **Order is by `instances.id`.** The walk is a keyset on that column.
 
         Args:
             patient_ids (Iterable[str], optional): Restrict the rows to
                 these Patient IDs, read as every `patient_ids` in the
-                package is read (`io_handlers.normalize_id_filter`,
-                #696). ``None`` means every patient in the store. An
-                empty iterable matches nobody -- it is a filter that
-                selected nothing, not an absent filter. An iterator is
-                read once, at the call. An ID no patient holds is **not
-                counted** here, unlike the `Session` doors: this is a
-                paged query whose pages are separate reads (above), so
-                there is no single moment at which an ID is or is not
-                held, and rows that match nothing are the query's answer.
+                package is read. ``None`` means every patient in the store. An
+                empty iterable matches nobody: it is a filter that selected
+                nothing, not an absent filter. An iterator is read once, at the
+                call. An ID no patient holds is **not counted** here, unlike the
+                `Session` methods: the pages are separate reads, so there is no
+                single moment at which an ID is or is not held.
             instance_uids (Iterable[str], optional): Restrict the rows to
                 these SOP Instance UIDs. Same rules: ``None`` is no
                 filter, an empty iterable matches nobody. Both filters
                 together intersect.
             page_size (int, optional): Rows per page, defaulting to 500.
                 Trades resident memory against the number of queries.
-                Must be an `int` >= 1 -- `LIMIT 0` returns an empty page,
-                and an empty page is how the walk decides it has
-                finished, so a zero would silently report an empty store.
+                Must be an `int` >= 1.
 
         Yields:
             dict: Flattend dictionary representing row data (patient, study, series, instance paths).
 
         Raises:
-            ValueError: If `page_size` is not a whole number >= 1. This
-                is a plain method wrapping a generator precisely so the
-                check fires at the call, not on the first `next()` --
-                which is what a `2.5` used to do, reaching `LIMIT ?` and
-                raising `sqlite3.IntegrityError: datatype mismatch` a
-                page later, out of a public method, for a caller's typo.
+            ValueError: If `page_size` is not a whole number >= 1, at the call,
+                not on the first `next()`.
             TypeError: If either filter is a bare `str`, bytes-like, not
                 iterable, or holds an element that is not a `str` (named
-                by position and type, never by value), at the call (#696).
-                Until #696 a `str` was split into its characters, `bytes`
-                matched nothing, and a generator raised
-                `sqlite3.ProgrammingError` a page later. `page_size` is
-                checked first.
+                by position and type, never by value), at the call.
+                `page_size` is checked first.
         """
         # `bool` before `int`, and the ordering is the mechanism:
         # `isinstance(True, int)` is True and `True < 1` is False, so
@@ -4970,16 +4831,15 @@ class SqliteStore:
                 return
 
     def update_attributes(self, instances: List[Patient]):
-        """
-        Efficiently updates the attributes_json for a list of instances.
+        """Efficiently updates the attributes_json for a list of instances.
 
         Used when only attributes have changed (e.g., after locking identities)
         to avoid full graph traversal.
 
         One call is one transaction: a failure writes none of `instances`.
-        Nothing marks them persisted either way (#398), so an instance
-        whose write failed still reads as holding unsaved changes and a
-        later `save()` writes it.
+        Nothing marks them persisted either way, so an instance whose write
+        failed still reads as holding unsaved changes and a later `save()`
+        writes it.
 
         Args:
             instances (List[Instance]): The list of instances to update.
@@ -4988,22 +4848,18 @@ class SqliteStore:
             sqlite3.Error: The write failed. Logged, recorded as one
                 `ERROR` audit row (best-effort: a row that cannot be
                 recorded does not replace this exception), and re-raised
-                as sqlite raised it (#599). Until 0.9.8 it was logged and
-                swallowed, so `lock_identities(persist=True)` reported
-                instances secured whose tokens only memory held.
+                as sqlite raised it.
             RuntimeError: The write matched fewer rows than `instances`
                 holds: some instance's current SOP Instance UID has no row
-                in the store (#641) -- a graph built by hand and never
-                saved, or a UID `regenerate_uid()` moved since the last
-                save. The write is rolled back, so it stores none of
-                `instances`, then logged and recorded as one `ERROR` row
-                (best-effort, as above), counts only. Through 0.9.8 such
-                an instance was skipped in silence. Two limits: two
-                instances sharing one SOP Instance UID, which only a
-                hand-built graph can hold, both match its one row, so no
-                shortfall is seen and the row holds whichever was written
-                last; and the check counts the rows the write matched, it
-                does not read them back.
+                in the store (a graph built by hand and never saved, or a UID
+                `regenerate_uid()` moved since the last save). The write is
+                rolled back, so it stores none of `instances`, then logged and
+                recorded as one `ERROR` row (best-effort, as above), counts
+                only. Two limits: two instances sharing one SOP Instance UID,
+                which only a hand-built graph can hold, both match its one row,
+                so no shortfall is seen and the row holds whichever was written
+                last; and the check counts the rows the write matched, it does
+                not read them back.
         """
         if not instances:
             return
@@ -5483,15 +5339,12 @@ def _tag_number_strings(obj):
 class IsocenterJSONEncoder(json.JSONEncoder):
     """How a graph value becomes `attributes_json`, and the one place that decides.
 
-    **The trap (#662): `default()` is never called for a `float` or `int`
-    subclass.** `json` encodes those natively, as the number, so a
-    `DSfloat` arm in `default()` reads right and does nothing -- and that
-    is how `'5.000000'` came back from the store as `5.0`, `'0005'` as
-    `5`, and a 16-character DS as an 18-character one. So `iterencode`,
-    which `encode` calls (overriding both would walk twice), first
-    replaces every DS and IS atom, at every depth and inside every
-    `MultiValue`, with `{"__type__": "DS"|"IS", "data": <its text>}` --
-    the same tagged-value spelling `bytes` uses, one scheme in the store.
+    `json` encodes a `float` or `int` subclass natively, as the number, and
+    never calls `default()` for it, which would lose a DS or IS value's
+    text (`'5.000000'` would come back as `5.0`). So `iterencode`, which
+    `encode` calls, first replaces every DS and IS atom, at every depth and
+    inside every `MultiValue`, with `{"__type__": "DS"|"IS", "data": <its
+    text>}`, the same tagged-value spelling `bytes` uses.
     `isocenter_json_object_hook` turns it back into the pydicom value.
     """
 
@@ -5509,18 +5362,17 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
 
 def isocenter_json_object_hook(d):
-    """A tagged value back into what the graph held (#662).
+    """A tagged value back into what the graph held.
 
     **Any reader of `attributes_json` that needs a value must pass this
-    hook.** The two that pass none (the Rows/Columns read in the blob
-    index, and the key scan) read no DS, IS or bytes value; one that did
-    would get the tag dictionary.
+    hook.** The two that pass none (the Rows/Columns read in the blob index,
+    and the key scan) read no DS, IS or bytes value; one that did would get
+    the tag dictionary.
 
     DS and IS are built under `IGNORE`: the text is what ingest already
-    accepted, perhaps with a warning under pydicom's default `WARN`, and a
-    reload must neither refuse it nor warn about it a second time. A
-    `DSdecimal` comes back a `DSfloat` with the same text; nothing here
-    turns pydicom's `use_DS_decimal` on.
+    accepted, and a reload must neither refuse it nor warn about it a second
+    time. A `DSdecimal` comes back a `DSfloat` with the same text; nothing
+    here turns pydicom's `use_DS_decimal` on.
     """
     kind = d.get("__type__")
     if kind == "bytes":

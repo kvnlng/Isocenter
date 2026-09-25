@@ -74,13 +74,12 @@ class RedactionVerifier:
         return intersection_area / text_area
 
     def is_covered(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int], threshold=0.50) -> bool:
-        """
-        Checks if the text_box is significantly covered by the zone_box.
+        """Checks if the text_box is significantly covered by the zone_box.
 
         Args:
             text_box: OCR box space (x, y, w, h).
             zone_box: zone space (y1, y2, x1, x2), as `redaction_zones`
-                entries are stored and as redaction applies them (#264).
+                entries are stored and as redaction applies them.
             threshold (float): Fraction of text area that must be covered
                 (0.0 - 1.0).
 
@@ -90,15 +89,14 @@ class RedactionVerifier:
         return self._coverage(text_box, zone_box) >= threshold
 
     def verify_instance(self, instance: Instance, equipment: Any = None) -> List[PhiFinding]:
-        """
-        Runs OCR on the instance.
+        """Runs OCR on the instance.
         - If text is fully matched (>= 80% coverage): considered Safe (Ignored).
         - If text is partially matched (> 0% but < 80%): Reported as PARTIAL_LEAK.
         - If text is not matched (0%): Reported as NEW_LEAK.
 
         Also returns `[]` when OCR is unavailable, which is not "nothing
         leaks": `Session.scan_pixel_content()` checks first and refuses
-        instead (#422).
+        instead.
         """
         return self._findings_for(instance, analyze_pixels(instance), equipment)
 

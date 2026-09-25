@@ -1,11 +1,12 @@
 # Session API
 
-Every method on this page is **frozen at 1.0** — see
-[API stability](stability.md), whose table is the list this page
-renders, in the pipeline order the README teaches: lifecycle first, then
-ingest → examine → config → audit → anonymize → redact → verify → export
-→ report. `tests/test_frozen_surface.py` asserts the `members:` block
-below renders every frozen method; it rendered 16 of the 28 until 0.9.4.
+Every method on this page is **frozen at 1.0**
+([API stability](stability.md)). They are listed in pipeline order:
+lifecycle first, then ingest → examine → config → audit → anonymize →
+redact → verify → export → report.
+
+<!-- tests/test_frozen_surface.py asserts the `members:` block below
+     renders every method stability.md freezes. -->
 
 ::: isocenter.session.DicomSession
     handler: python
