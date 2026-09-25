@@ -122,10 +122,10 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
     """
     # Sanitized with the same `_sanitize_description` the `.hea` signal
     # line gets: `wfdb_description()` returns a coded Channel Source value
-    # verbatim (the lead-name allowlist guards only the free-text Channel
-    # Label fallback), so a non-conformant source can still carry an
-    # embedded newline, and annotations.json must not carry a rawer value
-    # than the `.hea` file.
+    # outside its CID 3001 table verbatim (the lead-name allowlist guards
+    # only the free-text Channel Label fallback), so a non-conformant
+    # source can still carry an embedded newline, and annotations.json
+    # must not carry a rawer value than the `.hea` file.
     state, channel_number = _referenced_channel(referenced_channels)
     if state != _REF_KEPT:
         return None

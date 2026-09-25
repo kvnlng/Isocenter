@@ -855,3 +855,30 @@ def test_dropping_an_annotation_does_not_change_the_hea(tmp_path):
             return f.read()
 
     assert _export("kept", 1) == _export("dropped", 2)
+
+
+# --- Coded lead names and SCP-ECG concepts (#828) -----------------------
+
+
+@pytest.mark.parametrize("scheme,code", [("SCPECG", "5.6.3-9-2"), ("MDC", "2:2")])
+def test_a_coded_lead_is_written_by_its_name(scheme, code):
+    """`lead` is the name the `.hea` signal line carries, not the Code
+    Value: Lead II, in either scheme CID 3001 has used."""
+    ds = build_ecg_dataset(num_samples=500)
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[1]
+    chdef.ChannelSourceSequence[0].CodingSchemeDesignator = scheme
+    chdef.ChannelSourceSequence[0].CodeValue = code
+    add_annotation(ds, channel=2)
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test")["findings"][0]
+    assert finding["lead"] == "II"
+
+
+def test_an_scpecg_concept_keeps_its_label_and_category():
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, code_value="5.13.5-11", code_meaning="QT Interval",
+                   scheme="SCPECG")
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test")["findings"][0]
+    assert finding["category"] == "SCPECG:5.13.5-11"
+    assert finding["label"] == "QT Interval"

@@ -162,7 +162,9 @@ def test_header_date_reflects_the_real_shifted_study_date(tmp_path):
     finally:
         session.close()
 
-    assert lines[1] == f"# de-identified start date: {expected_date_token}"
+    # After the signal lines, where `wfdb.wrheader` puts comments (#828).
+    n_sig = int(record_line[1])
+    assert lines[1 + n_sig:] == [f"# de-identified start date: {expected_date_token}"]
     assert expected_date_token != source_date_token
     assert source_date_token not in header
 

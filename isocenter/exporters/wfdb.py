@@ -183,8 +183,9 @@ def format_header(record_name: str,
                   start_date_note: Optional[str] = None) -> str:
     """Render a WFDB `.hea` file.
 
-    Emits no `#` comment lines except `start_date_note`. A channel
-    description is sanitized so it cannot manufacture a comment line.
+    Emits no `#` comment lines except `start_date_note`, which follows the
+    signal lines. A channel description is sanitized so it cannot
+    manufacture a comment line.
 
     Args:
         record_name (str): Record name (must match the .hea basename).
@@ -232,15 +233,6 @@ def format_header(record_name: str,
 
     lines = [" ".join(record_fields)]
 
-    if start_date_note:
-        # Same sanitizer the signal-line description gets -- not a new,
-        # separately-maintained comment-writing path. `start_date_note`
-        # is a caller-computed string around a DD/MM/YYYY date, not
-        # attacker input, but a second unsanitized comment path would be
-        # an injection route.
-        comment_text = _sanitize_description(start_date_note)
-        lines.append(f"# {comment_text}")
-
     for idx in range(n_channels):
         if waveform.channels:
             channel = (waveform.channels[idx]
@@ -277,6 +269,18 @@ def format_header(record_name: str,
             "0",
             _sanitize_description(channel.wfdb_description(idx)),
         ]))
+
+    if start_date_note:
+        # After the signal lines, never between them and the record line:
+        # the Moody Challenge's helper code reads lines 1..n_sig as the
+        # signal lines, and `wfdb.wrheader` writes comments here too.
+        # Same sanitizer the signal-line description gets -- not a new,
+        # separately-maintained comment-writing path. `start_date_note`
+        # is a caller-computed string around a DD/MM/YYYY date, not
+        # attacker input, but a second unsanitized comment path would be
+        # an injection route.
+        comment_text = _sanitize_description(start_date_note)
+        lines.append(f"# {comment_text}")
 
     return "\n".join(lines) + "\n"
 

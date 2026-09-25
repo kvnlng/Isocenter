@@ -870,3 +870,26 @@ def test_an_empty_sample_array_is_reported_as_the_other_cause(tmp_path):
             f"the two arms must carry one scope; got {scope!r}")
     finally:
         session.close()
+
+
+# --- The start-date comment follows the signal lines (#828) -------------
+
+
+def test_the_start_date_comment_follows_the_signal_lines():
+    """Lines 1..n_sig are the signal lines, then the comment.
+
+    The Moody Challenge's `helper_code.get_signal_names()` and
+    `get_signal_files()` read header lines 1..n_sig as signal lines, so a
+    comment between the record line and the first signal line was read as
+    a signal (a file named `#`) and pushed the last signal line out of
+    range. `wfdb`'s own `wrheader` writes comments after the signal lines.
+    """
+    wf = _waveform(n_channels=3)
+    samples = np.zeros((100, 3), dtype=np.int16)
+    lines = format_header("REC", wf, samples, "REC.dat",
+                          start_date_note="start date: 17/04/2023").splitlines()
+
+    assert len(lines) == 1 + 3 + 1, lines
+    for line in lines[1:4]:
+        assert line.split(" ")[0] == "REC.dat", lines
+    assert lines[4] == "# start date: 17/04/2023"
