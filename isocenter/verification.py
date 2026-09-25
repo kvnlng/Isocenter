@@ -29,15 +29,11 @@ class RedactionVerifier:
         if not target_serial:
             return None
 
-        # 1. Exact Serial Match
         for rule in self.rules:
             if rule.get("serial_number") == target_serial:
                 return rule
 
-        # 2. Check Model/Manufacturer (if serial not found or not required by rule?)
-        # For verification, we stick to strict serial matching as per current architecture
-        # unless there's a fallback mechanism.
-        # For now, strict match.
+        # Strict serial matching only: no model/manufacturer fallback.
         return None
 
     def _coverage(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int]) -> float:
@@ -126,8 +122,8 @@ class RedactionVerifier:
 
             # Check against all zones to find BEST coverage. The zone
             # convention ((y1, y2, x1, x2), unlike region.box's
-            # (x, y, w, h)) lives in _coverage; this loop used to inline
-            # the math with its own -- wrong -- unpacking (#264).
+            # (x, y, w, h)) lives in _coverage; do not inline the math
+            # here with an unpacking of its own.
             for zone in zones:
                 if len(zone) >= 4:
                     cov = self._coverage(region.box, tuple(zone[:4]))
@@ -135,8 +131,7 @@ class RedactionVerifier:
                         best_coverage = cov
                         best_zone = zone
 
-            # Decision Logic
-            threshold_safe = 0.80  # Configurable?
+            threshold_safe = 0.80
 
             clean_text = region.text.replace('\n', ' ').strip()
             if len(clean_text) <= 2:

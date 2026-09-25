@@ -26,7 +26,6 @@ def configure_logger(log_file=None):
 
     logger = logging.getLogger("isocenter")
 
-    # helper for default level
     log_level_map = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -39,18 +38,16 @@ def configure_logger(log_file=None):
     logger.setLevel(default_level)
 
     # Reset handlers to prevent duplicates on reload. Close them first:
-    # assigning `[]` over the list dropped each `FileHandler` with its
-    # file still open, so N sessions in one process held N descriptors
-    # on the log, a `ResourceWarning` at GC on 3.14t (#611). `close()`
-    # on the console `StreamHandler` flushes and leaves `sys.stdout`
-    # open -- only a `FileHandler` owns its stream.
+    # dropping a `FileHandler` without closing it leaves its file open, so
+    # N sessions in one process would hold N descriptors on the log.
+    # `close()` on the console `StreamHandler` flushes and leaves
+    # `sys.stdout` open -- only a `FileHandler` owns its stream.
     #
     # One `try` per handler, not one around the loop: `close()` flushes,
-    # and a flush that fails (a full disk) raises from it. Unguarded,
-    # that raised out of `Session()` before the reset, leaving every old
-    # handler attached and the rest unclosed -- where before #611 nothing
-    # here could raise at all. The failure is logged once the new
-    # handlers are in place, so it reaches the log it is about.
+    # and a flush that fails (a full disk) raises from it. Unguarded, it
+    # would raise out of `Session()` before the reset, leaving every old
+    # handler attached and the rest unclosed. The failure is logged once
+    # the new handlers are in place, so it reaches the log it is about.
     close_failures = []
     for handler in list(logger.handlers):
         try:
@@ -60,7 +57,7 @@ def configure_logger(log_file=None):
     logger.handlers = []
 
     # 1. File Handler
-    fh = logging.FileHandler(log_file, mode='w')  # Overwrite mode for now per session
+    fh = logging.FileHandler(log_file, mode='w')  # Overwritten per session
     fh.setLevel(default_level)
     file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     fh.setFormatter(file_formatter)
@@ -172,7 +169,7 @@ def _type_and_message(exc: BaseException) -> str:
     # is called while a failure is being recorded, and raising here would
     # replace that failure with this one; the type is still a reason. A
     # whitespace-only message is no more a reason than an empty one, so
-    # it gets the bare type too (review of #466).
+    # it gets the bare type too.
     try:
         message = str(exc)
     except Exception:  # pylint: disable=broad-exception-caught

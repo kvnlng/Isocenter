@@ -8,9 +8,7 @@ from typing import List, Tuple, Any, Dict, Union, Callable
 
 from .logger import describe_exception
 
-# Lazy imports for optional dependencies
-# import pandas as pd
-# import spacy
+# Optional dependencies (pandas, spacy) are imported lazily, where used.
 
 logger = logging.getLogger(__name__)
 

@@ -24,20 +24,14 @@ class IODValidator:
         'Common': {
             '0008,0016': '1', '0008,0018': '1',
             # Study Date is Type 2 in General Study (PS3.3 C.7.2.1), as
-            # Study Time below is. It read '1' until #537, which nothing
-            # noticed while `anonymize()` always wrote a shifted date: a
-            # CT whose source had no or an empty Study Date failed export
-            # ('[Type 1 Error] Missing 0008,0020', 0 files), and once the
-            # rule governs the study's date the basic profile's own EMPTY
-            # would have failed every CT file the same way.
+            # Study Time below is. Under '1', a CT whose source has no or
+            # an empty Study Date, or one the basic profile emptied, would
+            # fail export.
             '0008,0020': '2',
             # Study Time is Type 2 in General Study (PS3.3 C.7.2.1):
-            # present and empty is conformant. It read '1' until #495,
-            # which nothing noticed while no policy touched the tag; the
-            # basic profile empties it, and under '1' the Type-1 arm
-            # below rejected the empty value, so the documented
-            # create_config -> load_config -> anonymize -> export path
-            # raised on every CT file and wrote nothing.
+            # present and empty is conformant. The basic profile empties
+            # it, and under '1' the Type-1 arm below would reject every
+            # CT file on the documented anonymize -> export path.
             '0008,0030': '2', '0008,0060': '1', '0020,000e': '1',
         },
         'CTImage': {

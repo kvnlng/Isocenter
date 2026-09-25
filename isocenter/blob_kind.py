@@ -15,7 +15,7 @@ would need an import cycle. Stdlib only, so it adds nothing to
 import re
 from typing import Optional, Tuple
 
-# --- The grammar for `instance_blobs.kind` (#183) ---
+# --- The grammar for `instance_blobs.kind` ---
 #
 #   kind   := root | root ":" path
 #   root   := "pixels" | "waveform"
@@ -37,9 +37,8 @@ from typing import Optional, Tuple
 # answer to the same question.
 #
 # The terminal tag is not decoration -- it is what tells the export writeback
-# which element to create. Inferring it from the root would work only until
-# it did not: #277 wants (5400,1010) under a path and Q5's shape is
-# (7fe0,0008) under one.
+# which element to create. Do not infer it from the root: a root can carry
+# more than one element, such as (5400,1010) or (7fe0,0008) under a path.
 #
 # **There is no escaping and none may be added.** The token alphabets are
 # closed and disjoint from the delimiters: a tag is drawn from `[0-9a-f,]`

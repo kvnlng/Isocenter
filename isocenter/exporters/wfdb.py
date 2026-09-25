@@ -31,15 +31,7 @@ WFDB_ADC_ZERO = 0
 #
 # This constant is the **only** place in this module the two names are
 # spelled as a pair: spelling the allow-list inline in the check would
-# leave two lists to keep in step and pin only one of them.
-#
-# `tests/test_wfdb_option_strictness.py` pins it against that page, and
-# it needs its own pin because the AST pin in `tests/test_wfdb_privacy.py`
-# structurally cannot see this. That one collects the literal keys the
-# body *touches* by five syntactic forms -- `.get`, `.pop`,
-# `.setdefault`, subscript and `in` -- and a name sitting in a frozenset
-# is none of them: measured, adding a third name here leaves it green.
-# One pin on what is read, one on what is admitted (#410).
+# leave two lists to keep in step.
 _WFDB_OPTIONS = frozenset({"patient_ids", "include_annotation_text"})
 
 
@@ -96,7 +88,7 @@ def record_name_for(patient, study, series, instance) -> str:
     """
     return "_".join([
         # Never `patient_id` itself: a subject with no Patient ID is keyed
-        # on its source Study UID (#584), which must not name a record.
+        # on its source Study UID, which must not name a record.
         _sanitize(exported_patient_id(patient)),
         _sanitize(series.series_number if series.series_number is not None else 0),
         _sanitize(instance.instance_number if instance.instance_number is not None else 0),
@@ -219,8 +211,8 @@ def format_header(record_name: str,
         # Same sanitizer the signal-line description gets -- not a new,
         # separately-maintained comment-writing path. `start_date_note`
         # is a caller-computed string around a DD/MM/YYYY date, not
-        # attacker input, but a second unsanitized comment path is
-        # exactly how injection bugs reappear.
+        # attacker input, but a second unsanitized comment path would be
+        # an injection route.
         comment_text = _sanitize_description(start_date_note)
         lines.append(f"# {comment_text}")
 
@@ -380,16 +372,13 @@ class WfdbExporter(Exporter):
         """
         logger = get_logger()
         # First thing, before `patient_ids` is read and before any file
-        # is written. Placement is the whole fix: a refusal raised after
-        # the walk arrives with the cohort already on disk, which is the
-        # silence #410 is about wearing an exception's clothes.
+        # is written: a refusal raised after the walk arrives with the
+        # cohort already on disk.
         #
         # `TypeError`, not `ValueError`: it is what Python raises for an
-        # unexpected keyword, and it is what the `dicom` path already
-        # raises for this exact mistake, because `_export_dicom` has a
-        # real signature. Until #410 a one-character typo on
-        # `patient_ids` was a loud error on one format and a full-cohort
-        # export on the other, and closing that gap is the issue.
+        # unexpected keyword, and it is what the `dicom` path raises for
+        # this exact mistake, because `_export_dicom` has a real
+        # signature. The two formats must agree on a mistyped option.
         #
         # `sorted`, so the message is deterministic and a test can assert
         # on it.
@@ -404,8 +393,8 @@ class WfdbExporter(Exporter):
         # file is written, for the same reason: a refusal raised later
         # arrives with records already on disk. `select_patient_ids` is the
         # one reading of this option, shared with
-        # `DicomSession._export_dicom` and `get_cohort_report` (#678, #696)
-        # -- see `io_handlers.normalize_id_filter` for what it refuses.
+        # `DicomSession._export_dicom` and `get_cohort_report` -- see
+        # `io_handlers.normalize_id_filter` for what it refuses.
         #
         # `store_backend` is read first so the count below can write its
         # row, and is passed down to `_write_instance` explicitly rather
@@ -421,7 +410,7 @@ class WfdbExporter(Exporter):
         # Straight after the selection: nothing can refuse between here and
         # the walk, so the export this row describes is certain to run.
         # Counted and never named, one row per export; `WARNING`, so a
-        # short export grades `REVIEW_REQUIRED` rather than PASS (#686).
+        # short export grades `REVIEW_REQUIRED` rather than PASS.
         if selection.unmatched:
             sentence = unmatched_patient_ids_sentence(selection)
             logger.warning(sentence)
@@ -435,8 +424,9 @@ class WfdbExporter(Exporter):
         # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
 
-        # The #555 notice, over the instances this export will attempt: the
-        # ones in the selected patients that hold a waveform. A CT slice
+        # The notice for statuses recorded under another policy, over the
+        # instances this export will attempt: the ones in the selected
+        # patients that hold a waveform. A CT slice
         # sharing a series with an ECG is written nowhere, so its status is
         # not this export's to report (`_write_instance`'s first arm).
         # After the option checks above, so a refused call says nothing;
@@ -458,23 +448,19 @@ class WfdbExporter(Exporter):
         written = []
         failed = 0
         # `(uid, detail)` per failed record, the shape `ExportError`
-        # carries (#541). `failed` alone could say that nothing was
+        # carries. `failed` alone could say that nothing was
         # delivered but not which records, which is all a caller who
         # catches the exception can act on.
         failures = []
         used_names = {}  # out_dir -> set of record names already claimed
 
         for patient in session.store.patients:
-            # `is not None`, never a truthiness test. This read
-            # `if patient_ids and ...` until #678, so an empty container
-            # was falsy and taken for a missing filter: `[]`, `()`,
-            # `set()` and `frozenset()` each wrote the whole cohort to a
-            # caller who had selected nobody -- a cohort query that came
-            # back empty delivered everybody's waveforms. The three
-            # siblings that answer the same question were always spelled
-            # this way: `_export_dicom`, `Session.get_cohort_report`, and
-            # `SqliteStore._iter_flattened_instances`, which was this
-            # same defect and was fixed as Breaking in #142.
+            # `is not None`, never a truthiness test: an empty container
+            # is a filter that selected nobody, and a truthiness test
+            # would read it as no filter and write the whole cohort. The
+            # siblings that answer the same question are spelled the same
+            # way: `_export_dicom`, `Session.get_cohort_report`, and
+            # `SqliteStore._iter_flattened_instances`.
             if patient_ids is not None and patient.patient_id not in patient_ids:
                 continue
 
@@ -490,16 +476,13 @@ class WfdbExporter(Exporter):
                         # unexported with no indication on disk that the
                         # run was partial.
                         #
-                        # Containment is only half the pattern, and the
-                        # other half was missing until #332: the DICOM
-                        # path records an `ERROR` audit row per failure
-                        # (`DicomExporter._report_export_failures`), and
-                        # this one recorded none -- so `get_audit_errors()`
-                        # found nothing, the report's "Exceptions &
-                        # Errors" section was empty, and a run that lost
-                        # records graded PASS. A returned list one entry
-                        # short is not a channel: nothing compares its
-                        # length against the graph.
+                        # Containment is only half the pattern: like the
+                        # DICOM path (`DicomExporter._report_export_failures`),
+                        # each failure also records an `ERROR` audit row,
+                        # so `get_audit_errors()` and the report see it and
+                        # the run does not grade PASS. A returned list one
+                        # entry short is not a channel: nothing compares
+                        # its length against the graph.
                         try:
                             path = self._write_instance(
                                 folder, patient, study, series, instance, logger,
@@ -516,8 +499,8 @@ class WfdbExporter(Exporter):
                             # Never `{e}`: an OSError's text ends in the
                             # path it failed on, and a record path carries
                             # the Patient ID into a persisted row and the
-                            # report (#588). The type leads, as every
-                            # other recorded reason does (#435).
+                            # report. The type leads, as every other
+                            # recorded reason does.
                             detail = (f"WFDB export failed for instance "
                                       f"{uid}: "
                                       f"{describe_exception_without_paths(e)}")
@@ -553,12 +536,12 @@ class WfdbExporter(Exporter):
                             written.append(path)
 
         logger.info(f"WFDB export complete. {len(written)} records written.")
-        # Every export run writes one EXPORT row (#166), whatever the
+        # Every export run writes one EXPORT row, whatever the
         # format: `generate_report` keys its export boundary on the
-        # row's absence (#153), so a format that skipped it would tell
+        # row's absence, so a format that skipped it would tell
         # its users their finished export never happened.
         #
-        # It names the failure count as well as the written one (#332).
+        # It names the failure count as well as the written one.
         # "wrote 8 records" cannot be read as "8 of 10" or as "8 of 8",
         # and the whole-run question is the one a reader asks first --
         # the per-instance rows above answer *which*, this answers
@@ -574,15 +557,13 @@ class WfdbExporter(Exporter):
                          f"{'instance' if failed == 1 else 'instances'} "
                          f"failed."))
         # Last, after every ERROR row and the EXPORT row, for the reason
-        # `_export_dicom` raises there (#191): a caller who catches this
-        # still holds a complete audit trail and a report grading
-        # REVIEW_REQUIRED (#541). Until #541 this returned `[]`, the same
-        # value as a store with no waveforms, so a caller testing the
-        # return saw an empty success.
+        # `_export_dicom` raises there: a caller who catches this still
+        # holds a complete audit trail and a report grading
+        # REVIEW_REQUIRED.
         #
         # `failed and not written`, never `not written` alone: a store
         # with no waveform instances, or waveforms with no samples (a
-        # #338 skip with its own STANDARD row), attempted nothing and
+        # skip with its own STANDARD row), attempted nothing and
         # `[]` is the truth about it. Never `failed` alone either: a
         # partial export is a real result, and raising would discard the
         # list naming what did reach disk. And not guarded on
@@ -633,24 +614,21 @@ class WfdbExporter(Exporter):
             # so it is not loss and files nothing. Deliberately NOT
             # merged with the arm below: both return `None` and the loop
             # cannot tell them apart, so an emitter placed here would
-            # write one `DATA_LOSS` row per slice and bury the real ones
-            # (#338).
+            # write one `DATA_LOSS` row per slice and bury the real ones.
             return None
 
         samples = instance.get_waveform_data()
         if samples is None or samples.size == 0:
-            # This one *is* loss, and it was invisible in every channel
-            # but a log line (#338). The instance declared a waveform and
+            # This one *is* loss. The instance declared a waveform and
             # produced no record: `written` does not hold it, `failed`
             # does not count it (nothing raised), and the `EXPORT` row's
             # "0 instances failed" is therefore true while a record the
-            # run was asked for is missing.
+            # run was asked for is missing. This row is how it is found.
             #
             # **`STANDARD` and not `SIGNAL`.** `LOSS_SCOPE_SIGNAL` is in
             # `GRADED_LOSS_SCOPES` and takes `validation_status` to
-            # `REVIEW_REQUIRED`, which would reclassify a skip that
-            # `tests/test_wfdb_writer.py` pins as deliberate and flip
-            # previously-clean runs. Reported, not graded.
+            # `REVIEW_REQUIRED`; this skip is deliberate. Reported, not
+            # graded.
             #
             # **The detail is about this export, not about the source.**
             # `get_waveform_data()` returns `None` when nothing was ever
@@ -663,8 +641,7 @@ class WfdbExporter(Exporter):
             # that.
             #
             # This row makes the loss findable; it does not make the
-            # `EXPORT` line sum. That would need a third counter, which
-            # #338 rules out.
+            # `EXPORT` line sum, which would need a third counter.
             # `entity_uid` is the locating column of the compliance
             # report's section 3.1 table, so it chains the way
             # `_report_export_losses` chains its own `DATA_LOSS` rows
@@ -745,22 +722,22 @@ class WfdbExporter(Exporter):
             build_annotations(instance, waveform, source, include_annotation_text,
                               dropped_groups=dropped_groups))
 
-        # Warn-plus-audit, the shape #36 established for the multiplex
-        # discard itself. A dropped annotation that says nothing is a
-        # different bug from a mislabelled one, not a fix for it (#159).
+        # Warn-plus-audit, the shape of the multiplex discard itself: an
+        # annotation dropped without a word is as wrong as a mislabelled
+        # one.
         #
         # ONE row per instance, naming the count and the groups -- not
-        # one per annotation. #36's emitter, which this descends from,
-        # reports "carried N groups; kept group 0 and discarded N-1"
-        # once; a cart that marks forty beats on a discarded group would
+        # one per annotation, as the multiplex discard reports "carried N
+        # groups; kept group 0 and discarded N-1" once. A cart that marks
+        # forty beats on a discarded group would
         # otherwise put forty near-identical rows into section 3 of the
         # compliance report, and a section nobody can read reports
         # nothing. Group ordinals are deduplicated but the annotation
         # count is not, because they answer different questions: which
         # signal was referenced, and how much was dropped.
         #
-        # Scoped STANDARD, even now that #150 grades the group discard
-        # itself as SIGNAL. An annotation is a mark *about* the signal,
+        # Scoped STANDARD, though the group discard itself is graded
+        # SIGNAL. An annotation is a mark *about* the signal,
         # not the signal: the acquired-samples loss these annotations
         # described already costs the run its PASS via the ingest-side
         # multiplex row, and grading the bookkeeping that follows from
@@ -844,20 +821,18 @@ class WfdbExporter(Exporter):
         except ValueError:
             return None, None
 
-        # Parsed on its own, not concatenated onto the date. The combined
-        # stamp was only ever tried as `%Y%m%d%H%M%S`, so a four-digit
-        # Study Time failed and took the date down with it -- real
-        # recorded timing discarded, while an instance with no time at
-        # all kept its date.
+        # Parsed on its own, not concatenated onto the date: a combined
+        # stamp tried only as `%Y%m%d%H%M%S` would fail on a four-digit
+        # Study Time and take the date down with it.
         time_of_day = _parse_dicom_tm(
             str(instance.attributes.get("0008,0030", "") or ""))
         if time_of_day is not None:
             return datetime.combine(only_date, time_of_day), None
 
-        # A date, and no time of day we can read. `000000` used to be
-        # appended here, so the record line carried `00:00:00` -- timing
-        # this tool invented, indistinguishable to a reader from an
-        # acquisition that really happened at midnight (#59).
+        # A date, and no time of day we can read. Never append `000000`:
+        # a record line carrying `00:00:00` is timing this tool invented,
+        # indistinguishable to a reader from an acquisition that really
+        # happened at midnight.
         return None, f"start date: {only_date.strftime('%d/%m/%Y')}"
 
     @staticmethod
@@ -924,12 +899,9 @@ class WfdbExporter(Exporter):
                     # the caller to preserve as a comment rather than
                     # dropping it outright.
                     #
-                    # Labelled by whether a shift actually happened. This
-                    # said "de-identified" unconditionally, so exporting
-                    # without ever calling anonymize() wrote the
-                    # patient's real study date under a comment asserting
-                    # it had been de-identified -- a false provenance
-                    # claim in the one place a consumer would check.
+                    # Labelled by whether a shift actually happened: a real
+                    # study date exported without `anonymize()` must not be
+                    # labelled de-identified.
                     token = shifted_date.strftime("%d/%m/%Y")
                     if getattr(study, "date_shifted", False):
                         return None, f"de-identified start date: {token}"

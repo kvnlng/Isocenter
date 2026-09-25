@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Optional
 from .config_manager import _vr_dummy
 from .exporters.wfdb import _sanitize_description
 # The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
-# iteration -- lives in waveform.py since #177, because the graph-side
+# iteration -- lives in waveform.py, because the graph-side
 # dangling-reference filter must read the pairs exactly as this bridge
 # does. Import, never copy: a second parser is a second answer to
-# "which group does this mark name", which is how #159 happened.
+# "which group does this mark name".
 from .waveform import (TAG_ANNOTATION_SEQ, TAG_REFERENCED_CHANNELS,
                        _as_list, _channel_pairs, _is_known_coding_scheme,
                        _item_index)
@@ -42,8 +42,8 @@ _RANGE_TYPES = {"SEGMENT", "MULTISEGMENT"}
 # name and the grouping are given up.
 UNCODED_CATEGORY = "uncoded"
 
-# Ingest keeps Waveform Sequence (5400,0100) item 0 and discards the rest
-# (#36), so item 0 is the only multiplex group whose samples reach an
+# Ingest keeps Waveform Sequence (5400,0100) item 0 and discards the rest,
+# so item 0 is the only multiplex group whose samples reach an
 # export. Every position in this file is therefore expressed on item 0's
 # sample axis, at item 0's rate.
 KEPT_WAVEFORM_ITEM_INDEX = 0
@@ -261,7 +261,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
         referenced = item.attributes.get(TAG_REFERENCED_CHANNELS)
         state, referenced_groups = _referenced_channel(referenced)
         if state == _REF_OTHER:
-            # #159. Every position on this annotation is expressed on a
+            # Every position on this annotation is expressed on a
             # sample axis that is not in this record: a different rate,
             # a different length, different channels. Resolving it
             # against the surviving group produces a well-formed finding
@@ -275,11 +275,9 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             # mark would still land at the wrong place in the exported
             # signal.
             #
-            # This drop is correct whichever way #150 goes. If multi-rate
-            # support lands and groups 1..n stop being discarded, the
-            # test becomes "resolve against the right group" and this
-            # branch stops firing on its own; nothing here presumes the
-            # discard is permanent.
+            # Nothing here presumes the multiplex discard is permanent: if
+            # groups 1..n stop being discarded, this branch stops firing
+            # on its own.
             if dropped_groups is not None:
                 dropped_groups.append(list(referenced_groups))
             continue

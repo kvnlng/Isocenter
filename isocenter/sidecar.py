@@ -1,12 +1,9 @@
 # Module scope, deliberately. `fcntl` is POSIX-only and `setup.py`
-# says `Operating System :: POSIX` because of it (#376). At module
-# scope a Windows install fails at `import isocenter` -- `sidecar` is
-# imported by `persistence`, which is imported by `session` -- where the
-# packaging claim is checked; inside `write_frame`, where this used to
-# be, the same install succeeded and failed at the first sidecar write.
-# `tests/test_packaging_contract.py` walks the AST for this import at
-# module scope, and a `try:` guard would make the classifier true and
-# that walk's answer false.
+# says `Operating System :: POSIX` because of it. At module scope a
+# Windows install fails at `import isocenter` -- `sidecar` is imported
+# by `persistence`, which is imported by `session` -- rather than at the
+# first sidecar write. `tests/test_packaging_contract.py` checks for
+# this import unguarded at module scope; do not wrap it in `try:`.
 import fcntl
 import os
 import zlib
@@ -60,11 +57,11 @@ class SidecarManager:
         # appends into the unlinked one. That is the gate's job
         # (`SqliteStore._hold_sidecar_gate`, on a stable path beside
         # the sidecar), which is held by every caller of this method
-        # and never taken inside it (#368).
+        # and never taken inside it.
         #
-        # We assume strict append mode
-        # Use r+b and explicit seek to ensure tell() is accurate and writes are
-        # contiguous, avoiding 'ab' mode ambiguity in some environments.
+        # Strict append: r+b and an explicit seek to the end keep tell()
+        # accurate and writes contiguous, avoiding 'ab' mode ambiguity in
+        # some environments.
         with open(self.filepath, 'r+b') as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             try:
@@ -96,9 +93,7 @@ class SidecarManager:
         """
 
         with open(self.filepath, 'rb') as f:
-            # print(f"  -> Sidecar: Seek {offset}", flush=True)
             f.seek(offset)
-            # print(f"  -> Sidecar: Read {length}", flush=True)
             blob = f.read(length)
 
         if len(blob) != length:
@@ -113,7 +108,6 @@ class SidecarManager:
                 total_in = len(blob)
 
                 for i in range(0, total_in, chunk_size):
-                    # print(f"    dchunk {i}/{total_in}", flush=True)
                     chunk_data = blob[i:i + chunk_size]
                     chunks.append(dobj.decompress(chunk_data))
 
@@ -122,7 +116,6 @@ class SidecarManager:
 
                 return res
             except Exception as e:
-                # print(f"[Worker {os.getpid()}] Sidecar: DECOMPRESS ERROR: {e}", flush=True)
                 raise e
         elif compression == 'raw':
             return blob
@@ -131,12 +124,10 @@ class SidecarManager:
 
     size = property(lambda self: os.path.getsize(self.filepath))
 
-    # No `__getstate__`/`__setstate__`. They existed to drop and rebuild a
-    # `threading.Lock` that nothing ever acquired (#366); with it gone the
-    # only attribute is `filepath`, a string, and default pickling carries
-    # it. This class deliberately holds **no mutable state**, which is why
-    # `compact_sidecar` could rebind `self.sidecar` for years without
-    # consequence -- a fresh manager is indistinguishable from the one it
-    # replaced. Keep it that way: adding mutable state here would make
-    # every pickled copy in a spawned worker a separate answer, and would
-    # resurrect the rebind as a real bug.
+    # No `__getstate__`/`__setstate__`: the only attribute is `filepath`,
+    # a string, and default pickling carries it. This class deliberately
+    # holds **no mutable state**, so a fresh manager is indistinguishable
+    # from the one it replaces and `compact_sidecar` can rebind
+    # `self.sidecar` safely. Keep it that way: mutable state here would
+    # make every pickled copy in a spawned worker a separate answer, and
+    # would make that rebind a real bug.

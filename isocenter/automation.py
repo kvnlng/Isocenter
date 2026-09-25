@@ -42,11 +42,10 @@ class ConfigAutomator:
             if serial:
                 findings_by_serial[serial].append(finding)
             else:
-                # Todo: Handle findings with no matching rule (Unknown Serial or No config entry)
+                # A finding with no matching rule gets no suggestion.
                 pass
 
         for serial, findings in findings_by_serial.items():
-            # In a real system we might merge zones here.
             for f in findings:
                 meta = f.metadata
                 l_type = meta.get("leak_type")
@@ -62,7 +61,7 @@ class ConfigAutomator:
                         # text_box is box space; best_zone is a config
                         # zone verbatim (verification.py stores the rule's
                         # own entry), so the union is taken in zone space
-                        # and best_zone is NOT converted (#258).
+                        # and best_zone is NOT converted.
                         tx, ty, tw, th = text_box
                         zy1, zy2, zx1, zx2 = best_zone
 
@@ -122,7 +121,6 @@ class ConfigAutomator:
 
             if action == "ADD_ZONE":
                 zone = sug["zone"]
-                # Check duplicates?
                 if zone not in target_rule["redaction_zones"]:
                     target_rule["redaction_zones"].append(zone)
                     count += 1
@@ -134,7 +132,7 @@ class ConfigAutomator:
                 # Find index of old_zone
                 zones = target_rule["redaction_zones"]
                 try:
-                    # Convert to list for comparison just in case
+                    # Compared as lists: a zone may be a tuple.
                     idx = -1
                     for i, z in enumerate(zones):
                         if list(z) == list(old_zone):

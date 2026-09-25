@@ -52,10 +52,8 @@ class ManifestItem:
     # Processing details
     #
     # False by default: an item nobody described has not been shown to be
-    # anonymized. This defaulted to True and `generate_manifest` never
-    # passed it, so every manifest said `"anonymized": true` for every
-    # instance -- beside the untouched PatientID of a session that never
-    # called `anonymize()` (#486).
+    # anonymized. A True default would claim `"anonymized": true` for every
+    # instance a caller did not describe.
     anonymized: bool = False
 
 

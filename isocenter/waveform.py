@@ -34,7 +34,7 @@ TAG_CODE_MEANING = "0008,0104"
 # `<` is a contract with ingest, not an assumption about the source: the
 # sidecar holds samples little-endian, because `ingest_worker` converts a
 # big-endian source's Waveform Data by Waveform Bits Allocated before it
-# writes them (#657). Do not thread a byte order through here -- there is
+# writes them. Do not thread a byte order through here -- there is
 # none left to thread, and the exporters write these same bytes back
 # verbatim under a little-endian syntax.
 _DTYPES = {
@@ -149,7 +149,7 @@ def _as_int(value, default=0):
 # way: the Murmur bridge resolves annotations against the kept group,
 # and the graph-side filter below drops references to discarded ones. A
 # second parser of (0040,A0B0) is a second answer to "which group does
-# this mark name", which is how #159 happened.
+# this mark name".
 TAG_ANNOTATION_SEQ = "0040,b020"
 TAG_REFERENCED_CHANNELS = "0040,a0b0"
 

@@ -49,7 +49,7 @@ TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
 
 #: Where an instance records the numpy dtype of the pixel frame it is
 #: holding, when no DICOM descriptor can name that dtype -- the three
-#: floating-point widths (#183) and `bool` (#386). See
+#: floating-point widths and `bool`. See
 #: `SIDECAR_DTYPE_NAMES` for why the integer dtypes are deliberately not
 #: here.
 #:
@@ -64,19 +64,18 @@ TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
 #: "bool" either. `SidecarPixelLoader` derives its dtype from
 #: BitsAllocated and PixelRepresentation, and a 32-bit float frame and a
 #: 32-bit integer frame declare the same 32 -- so without this the
-#: sidecar hands back integers where floats went in, silently. `bool` is
-#: the same failure at 8 bits: numpy `bool_` and `uint8` both declare
-#: BitsAllocated 8 with PixelRepresentation 0, so a mask set in memory
-#: came back as `uint8` and only the *values* survived (#386). Set at
+#: sidecar would hand back integers where floats went in. `bool` is the
+#: same case at 8 bits: numpy `bool_` and `uint8` both declare
+#: BitsAllocated 8 with PixelRepresentation 0, so a mask would come back
+#: as `uint8`. Set at
 #: ingest from the element the bytes came out of, and kept true by
 #: `set_pixel_data()` from the dtype of the array it is handed.
 #:
 #: **The dtype, not the element**, and the difference is float16: it has
 #: no DICOM element at any width, so an element-shaped carrier could not
-#: name it and a `float16` array round-tripped through the sidecar as
-#: `uint16`. The export's float16 arm then never ran, and the
-#: `DATA_LOSS` row that says the pixels could not be written was never
-#: filed. The sidecar is ours and can hold what DICOM has no element
+#: name it and a `float16` array would round-trip through the sidecar as
+#: `uint16`, and the export's float16 arm and its `DATA_LOSS` row would
+#: never run. The sidecar is ours and can hold what DICOM has no element
 #: for; what it must never do is hand back a different type from the one
 #: it was given.
 PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
@@ -86,17 +85,17 @@ PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
 #: should do.
 #:
 #: The three float widths are every floating-point width numpy and DICOM
-#: between them produce here. `bool` joined them in #386 and is the only
-#: integer-kind dtype that will ever be here: once `set_pixel_data()`
-#: records `PixelRepresentation` as well as `BitsAllocated`, that pair
+#: between them produce here. `bool` is the only integer-kind dtype that
+#: belongs here: `set_pixel_data()` records `PixelRepresentation` as well
+#: as `BitsAllocated`, and that pair
 #: names every integer dtype the sidecar can hold *exactly*, and a
 #: carrier recorded as well would be a second answer to a question the
 #: descriptors already answer -- and the authoritative one, so a graph
 #: whose descriptors were later corrected would decode against a stale
 #: carrier. `bool` is the exception because no DICOM descriptor can name
 #: it: numpy `bool_` and `uint8` both declare BitsAllocated 8 with
-#: PixelRepresentation 0, which is the same argument #183 makes for
-#: float16 and the reason this carrier exists at all.
+#: PixelRepresentation 0, the same argument as for float16 and the
+#: reason this carrier exists at all.
 SIDECAR_DTYPE_NAMES = frozenset({"float16", "float32", "float64", "bool"})
 
 #: Numpy dtype name for each float pixel element. PS3.3 C.7.6.24 fixes
@@ -134,7 +133,7 @@ class GeometryEvidence(Enum):
     DECLARED = "declared"      # SamplesPerPixel / NumberOfFrames chose the arm
     STRUCTURAL = "structural"  # only one arm was admissible for this rank
     MATCHED = "matched"        # Rows/Columns broke the tie
-    GUESSED = "guessed"        # nothing resolved it; legacy last-axis heuristic
+    GUESSED = "guessed"        # nothing resolved it; last-axis heuristic
 
 
 class PixelGeometry(NamedTuple):
@@ -297,8 +296,8 @@ def _resolve_rank3(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
         return arm_a(GeometryEvidence.MATCHED) if a_ok \
             else arm_b(GeometryEvidence.MATCHED)
 
-    # Step 4 -- the guess. This is the pre-#186 heuristic, unchanged, and it
-    # is reported as a guess so each caller can apply its own policy.
+    # Step 4 -- the guess: the last-axis heuristic, reported as a guess so
+    # each caller can apply its own policy.
     if shape[2] in _IMPLICIT_SAMPLE_COUNTS:
         return arm_b(GeometryEvidence.GUESSED)
     return arm_a(GeometryEvidence.GUESSED)

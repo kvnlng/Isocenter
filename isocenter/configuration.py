@@ -19,8 +19,8 @@ from .entities import ScanPolicy
 from .profiles import FLOOR_POLICY
 
 #: `save()` with nowhere to write, and any change under `auto_save` with
-#: nowhere to write (#715). A silent return here was the #234 shape: a
-#: tier-1 method reporting success after doing nothing.
+#: nowhere to write. Raised, never a silent return: a method must not
+#: report success after doing nothing.
 _NO_FILE = ("configuration.save() has no file to write: load_config(path) "
             "sets one, or set session.configuration.config_path (#715)")
 
@@ -42,7 +42,7 @@ def _flow_list_representer(dumper, data):
 yaml.add_representer(FlowList, _flow_list_representer)
 
 
-# --- The policy a PHI status is recorded under (#555) ----------------------
+# --- The policy a PHI status is recorded under -----------------------------
 #
 # **A store format.** Every status a 1.x store holds carries a `"v1:"`
 # fingerprint made here, and a 1.0 store opens in every 1.x, so the v1
@@ -50,40 +50,37 @@ yaml.add_representer(FlowList, _flow_list_representer)
 # with a `"v2:"` prefix beside it, and compares a stored v1 record against
 # the in-force policy's *v1* fingerprint. A stored fingerprint is never
 # rewritten -- the input it hashed is gone, and deriving it again would be
-# the back-fill the migration refuses. `test_the_v1_fingerprint_is_pinned`
-# holds the bytes, under a fixed `CONFIG_VERSION`: a minor bump moves
-# every fingerprint by design and is not a change of the form.
+# the back-fill the migration refuses. The bytes are pinned under a fixed
+# `CONFIG_VERSION`: a minor bump moves every fingerprint by design and is
+# not a change of the form.
 #
 # **The rule it keeps: it may tell apart two policies that scan alike, and
 # must never equate two that scan differently.** Telling them apart costs a
-# re-audit; equating them is #555 again. So nothing is normalized. The
-# inspector does not read a rule one way: `_owned_rule` reads
+# re-audit; equating them lets a stale status pass for current. So nothing
+# is normalized. The inspector does not read a rule one way: `_owned_rule` reads
 # `rule.get("action") or "REPLACE"` and the configured-tag scan
 # `rule.get("action", "REPLACE")`, so `action: ""` is two different things
 # at two sites and hashes as itself.
 #
 # In: every rule key except `name`, the rule's form,
-# `remove_private_tags` (on CT_small the difference between 183 findings
-# and 4), and `config_manager.CONFIG_VERSION` (#762). Out: `name` and a
+# `remove_private_tags`, and `config_manager.CONFIG_VERSION`. Out: `name` and a
 # bare-string rule's text, which only label a finding; `date_jitter`,
 # which moves a shift and not what is flagged; the pixel rules; the
 # project secret; the library version; and the base, which is a label.
 #
-# **What `CONFIG_VERSION` is doing here (#762, owner's ruling).** The dict
-# is not the whole of what a scan does with it: across #760 a value-less
-# REPLACE on a UN tag began writing the VR dummy (#556) and a repeating-
-# group mask key began resolving (#557), and two identical dicts scanned
-# differently under one fingerprint -- the rule above, broken by the
-# library rather than the config. A release that changes what an
+# **What `CONFIG_VERSION` is doing here.** The dict is not the whole of
+# what a scan does with it: a library change (a value-less REPLACE writing
+# a VR dummy, a repeating-group mask key resolving) can make two identical
+# dicts scan differently under one fingerprint -- the rule above, broken
+# by the library rather than the config. A release that changes what an
 # unchanged configuration does bumps `CONFIG_VERSION`'s minor, so the
 # version names the behaviour the dict was read with, and a store's
 # statuses from before the bump read as another policy at export. Not the
 # library version: every release would then cost every store a re-audit,
 # for releases that change nothing a scan reads. The cost of the version
 # is the same in kind and rarer: a minor bumped for a key added, with no
-# behaviour changed, tells apart two policies that scan alike. Added
-# before any release carried a v1 record, so nothing was migrated, and
-# the prefix stayed `v1:`: no store holds a v1 hash of the older form.
+# behaviour changed, tells apart two policies that scan alike. Every v1
+# hash includes `CONFIG_VERSION`.
 
 
 def _tagged(value):
@@ -119,7 +116,7 @@ def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
         else:
             rules[_key(tag)] = {"__form__": _tagged(rule)}
     # Read through the module at call time, never bound by a `from`
-    # import (CLAUDE.md): the bump is what moves every fingerprint (#762).
+    # import: the bump is what moves every fingerprint.
     doc = {"config_version": config_manager.CONFIG_VERSION,
            "phi_tags": rules, "remove_private_tags": bool(remove_private_tags)}
     return json.dumps(doc, sort_keys=True, separators=(",", ":"),
@@ -148,8 +145,8 @@ def _policy_base_label(base) -> str:
 
 
 #: What `(0012,0063)` calls a policy whose base is an external profile's
-#: path (#554): the path is the operator's directory layout, and exported
-#: data is de-identification scope (#655).
+#: path: the path is the operator's directory layout, and it must not
+#: reach exported data.
 EXTERNAL_PROFILE_LABEL = "external profile"
 
 
@@ -222,8 +219,8 @@ class IsocenterConfiguration:
     remove_private_tags: bool = True
     config_path: Optional[str] = None
     privacy_profile: Optional[str] = None
-    #: Off by default since 1.0 (#715): a loaded file is the user's, and
-    #: one `add_rule()` rewrote a 7-line commented file as 1,872 lines.
+    #: Off by default: a loaded file is the user's, and a save rewrites it
+    #: whole, dropping its comments and layout.
     #: Survives `load_config()`, which never assigns it: it is the
     #: session's choice, not the file's, and a later load is written to.
     auto_save: bool = False
@@ -231,15 +228,14 @@ class IsocenterConfiguration:
     # or a loaded file with no `privacy_profile` line. `Session.load_config`
     # sets it on every load. The floor and `privacy_profile: none` both
     # leave `privacy_profile` at None, and nothing else here tells them
-    # apart -- the report called both "session defaults" until #714.
-    # Private and not a constructor parameter, so the frozen field list is
-    # unchanged.
+    # apart. Private and not a constructor parameter, so the frozen field
+    # list is unchanged.
     _floor: bool = field(default=True, init=False, repr=False, compare=False)
     # Whether `config_path` holds what memory holds, as far as this object
     # knows: cleared by the first change that stays in memory, set by a
     # save that succeeded and by `Session.load_config`. It exists for the
-    # one-line notice (owner ruling Q4), so a 0.9.x script that relied on
-    # auto-save is told once that its file stopped following its edits.
+    # one-line notice, so a script that expects its file to follow its
+    # edits is told once that it does not.
     _file_in_sync: bool = field(default=True, init=False, repr=False, compare=False)
 
     @property
@@ -300,8 +296,8 @@ class IsocenterConfiguration:
         base = config_manager._policy_base_rules(self.privacy_profile, self._floor)
         # Keys as the loader reads them, lowercase: `phi_tags` assigned in
         # code can hold `0008,103E`, which the base spells `0008,103e`.
-        # Compared raw, that rule read as missing and the save refused a
-        # policy that has it (review of #742, finding 5).
+        # Compared raw, that rule would read as missing and the save would
+        # refuse a policy that has it.
         tags = config_manager._lowercase_tag_keys(self.phi_tags)
 
         missing = [tag for tag in base if tag not in tags]
@@ -324,13 +320,11 @@ class IsocenterConfiguration:
 
         data = {
             # The loader's constant, read at call time: one home for the
-            # number both writers stamp (#711).
+            # number both writers stamp.
             "version": config_manager.CONFIG_VERSION,
         }
         # No line for the floor: an absent line means the floor in every
-        # 1.x (#495, #714). 0.9.8 wrote `none` plus the 620 floor rules,
-        # a file that said "exactly these rules" where the session had
-        # said "the floor".
+        # 1.x. `none` would mean "exactly these rules", not the floor.
         if self.privacy_profile:
             data["privacy_profile"] = self.privacy_profile
         elif not self._floor:
@@ -452,8 +446,8 @@ class IsocenterConfiguration:
             "redaction_zones": redaction_zones or []
         }
         # Before the delete, not merely before the append: a refusal after
-        # it would have lost the serial's existing rule (#712). The
-        # loader's own check, so this cannot store a rule the session's
+        # it would lose the serial's existing rule. The loader's own
+        # check, so this cannot store a rule the session's
         # next `load_config` of the saved file refuses. Ahead of `_apply`,
         # so a refused rule never reaches the write.
         config_manager.ConfigLoader._validate_rule(new_rule, len(self.rules))
@@ -492,9 +486,9 @@ class IsocenterConfiguration:
         if "serial_number" in updates and updates["serial_number"] != serial_number:
             raise ValueError("Values for 'serial_number' cannot be changed via update_rule.")
 
-        # The rule as it would be, judged before the in-place update: the
-        # typo `{"redaction_zone": ...}` was stored and auto-saved, writing
-        # a file this session's own loader then refused (#712). Updated in
+        # The rule as it would be, judged before the in-place update, so a
+        # typo such as `{"redaction_zone": ...}` is refused rather than
+        # stored and saved into a file the loader refuses. Updated in
         # place afterwards, not replaced, because `get_rule` hands out the
         # dict itself -- which is why the change looks the rule up in the
         # configuration it is given rather than closing over `rule`.
@@ -552,23 +546,16 @@ class IsocenterConfiguration:
                 is then as it was.
         """
         # Lowercase, as every other key in the policy is (profiles.py's
-        # header comment gives the reason). This was `tag.upper()`, so
-        # `set_phi_tag("0008,103e", ...)` stored `0008,103E` beside the
-        # floor's own `0008,103e`: two rules for one tag, one of which
-        # `PhiInspector._normalize_tag_keys` silently dropped at scan time
-        # by dict order, and a report counting both (#495).
+        # header comment gives the reason). Any other case would store a
+        # second rule for a tag the floor already holds, one of which
+        # `PhiInspector._normalize_tag_keys` drops at scan time by dict
+        # order.
         tag = tag.lower()
         # `config_manager` accepts a tag value in either of two shapes --
         # a bare name string, or the structured
         # `{"name": ..., "action": ...}` form -- and this method always
         # writes the structured one, because it is the only shape that
         # can carry the action and the replacement.
-        #
-        # The line number that used to be cited here for that fact
-        # pointed past the end of `config_manager.py` and what it
-        # originally referred to is unrecoverable, so it is deleted
-        # rather than renumbered to a guess (#310). The claim itself is
-        # carried by the structured-tag tests, not by prose.
         val = {
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action
@@ -576,10 +563,10 @@ class IsocenterConfiguration:
         if value:
             val["value"] = value
 
-        # Before the assignment and any write (#456): a refused rule leaves
-        # the policy and its file as they were. This refuses an unknown
-        # action too, with the loader's words; until 0.9.8 `OBLITERATE`
-        # was stored and scanned as REPLACE.
+        # Before the assignment and any write: a refused rule leaves the
+        # policy and its file as they were. This refuses an unknown action
+        # too (`OBLITERATE`), with the loader's words, rather than storing
+        # it to be scanned as REPLACE.
         config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
 
         def change(configuration):
