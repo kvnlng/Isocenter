@@ -269,6 +269,16 @@ fixes, never features.
      section; the file describes the code on the branch. A patch's first
      fix adds one back (see "Patch releases").
 
+     **The section is the release's notes** (step 7 copies it to the
+     GitHub Release), and it says what changed since the previous release.
+     Its entries do that for a candidate, a patch, or a final that had no
+     candidates. A final that followed candidates, whose entries sit in
+     the candidates' sections, opens with a summary of the changes since
+     the previous final release, candidates included. A major release
+     (`X.0.0`) opens instead with highlights of all its changes and
+     capabilities, written for a reader upgrading from the previous major.
+     A final's section is never empty (#826).
+
    Run the full suite on both interpreters at this commit
    (`tests/test_version_contract.py` checks that the three files agree).
    For a patch release this run is the integration test, **and the two
@@ -503,7 +513,7 @@ cut this way (#818, #821, #822).
      <sha>`.
 3. **Cut the release** by following "Cutting a release" from step 3,
    with version `X.Y.Zrc<N+1>` for a candidate or `X.Y.Z` for final.
-   Three things differ.
+   These things differ.
    - **Step 1's integration run is made at the release commit, not at
      `main`:**
      - the full suite on 3.12 and 3.14t;
@@ -531,6 +541,11 @@ cut this way (#818, #821, #822).
      release's range leaves out. A fix `main` does not need at all
      ("Patch releases" step 3), or one forward-ported adapted, goes on the
      line's branch-only fixes.
+   - **Final's section opens with the summary that step 3's
+     `CHANGELOG.md` item requires,** above any picked entries. When step
+     2 had nothing to pick, the branch has no `[Unreleased]` to rename, so
+     the release commit adds the `## [X.Y.Z] - YYYY-MM-DD` heading with
+     the summary under it.
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
