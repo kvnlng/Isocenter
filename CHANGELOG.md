@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`RELEASING.md` says how to cut another candidate on a line that already exists.** It adds a section, "Another candidate on an existing line", with these rules:
+  - Before X.Y.Z final, a candidate carries everything on `main` at the chosen commit.
+  - `main`'s commits since the line was cut, or since the last pick, reach `release/X.Y` by `git cherry-pick -x` in one reviewed PR. Record-backs and forward-ports are left out.
+  - The PR's tree must equal `main`'s at the chosen commit. A file that still differs is a missing pick, never a copy.
+  - Each pick is checked by `patch-id` with the changelog excluded.
+  - "Cutting a release" then continues from step 3. Step 1's full-suite and fingerprint runs are made at the release commit.
+  - A failure before the release-commit PR merges is fixed on `main` and picked. That overrides step 3's fix-on-the-branch, which still applies after that PR merges.
+  - The branch is never moved, because it is locked and holds a published tag's commit.
+
+  The procedure is written from the v1.0.0rc2 cut (#818, #821, #822), which had none to follow. No package code and no output change.
+
 ## [1.0.0rc2] - 2026-09-25
 
 ### Changed
