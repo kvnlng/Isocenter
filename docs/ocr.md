@@ -8,7 +8,7 @@ Isocenter uses **Tesseract** optical character recognition to help you write and
 2. **Check** that the zones you configured cover the text actually present: `scan_pixel_content()`.
 3. **Fix** the zones from what the check found: `auto_remediate_config()`.
 
-OCR runs only when you call one of these. `redact()`, `export()` and the compliance grade never read the pixels: a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` checks tags, not pixels.
+OCR runs only when you call one of these. None of `redact()`, `export()` or the compliance grade runs OCR: a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` re-runs the tag scan (`audit()`); it does not look for text in the pixels.
 
 ## Prerequisites
 
