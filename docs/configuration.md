@@ -91,7 +91,7 @@ type is listed below; **an unknown key, a value of the wrong type, or a
 `version` this library does not read makes `load_config()` and
 `audit(config_path=...)` raise `ValueError`**, naming the key, before
 anything is assigned. A file written for 0.9.x may need small changes:
-see [Configs from 0.9.x](migration.md#configuration-files).
+see [Configuration files](migration.md#configuration-files) on the upgrade page.
 
 | Level | Key | Type | Default when absent |
 | :--- | :--- | :--- | :--- |
