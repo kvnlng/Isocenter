@@ -32,6 +32,16 @@ entry carries no `(type)`, stripping the stars from `**options` to look
 it up, and warns when the signature has none. An entry naming a
 parameter the def does not have warns too.
 
+**Rule 4 -- no raw HTML tag outside a code span.** Markdown passes
+`<name>` through to the page as a tag: a browser drops one it does not
+know (`<uid>`) with the text inside it, and one it does know (`<table>`)
+opens a real element. `Instance.get_pixel_data`'s Raises section spelled
+its message templates that way and the entities page read "Lazy load
+failed for instance : RuntimeError: names N frames". Put a placeholder in
+backticks. A `<...>` inside a backtick span or a fenced block is code and
+is not graded, and neither is an autolink (`<https://...>`) nor a
+comparison (`a < b`).
+
 The scope is the `:::` lines of `docs/api/*.md`, read at test time, so
 a page added to the reference is graded without anyone editing this
 file. Private members (`_name`) are what mkdocstrings' default filter
@@ -109,7 +119,9 @@ def _resolve(target, package=PACKAGE):
     """`(module path, class name or None)` for one `:::` target.
 
     The longest dotted prefix that names a `.py` file under the package
-    is the module; one further segment, if any, is a class in it, and a
+    is the module; one further segment, if any, is a class in it (or a
+    module-level function or constant, which `_documented_nodes`
+    resolves when no class has the name), and a
     second is one member of that class, returned as `"Class.member"`
     (#27: `docs/api/session.md` renders `_export_dicom` alone). A
     prefix naming a subpackage is its `__init__.py`: the exporter
@@ -160,6 +172,24 @@ def _documented_nodes(tree, class_name=None):
         roots = [node for node in tree.body
                  if isinstance(node, ast.ClassDef) and node.name == class_name]
         if not roots:
+            # A module-level function or constant named by the page
+            # (`docs/api/entities.md` renders each tier-2 helper on its
+            # own): the function is graded, and a constant has no
+            # docstring to grade.
+            functions = [node for node in tree.body
+                         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                         and node.name == class_name]
+            if functions:
+                return [node for node in functions
+                        if ast.get_docstring(node, clean=False)]
+            if any(isinstance(node, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == class_name
+                           for t in node.targets)
+                   or isinstance(node, ast.AnnAssign)
+                   and isinstance(node.target, ast.Name)
+                   and node.target.id == class_name
+                   for node in tree.body):
+                return []
             raise ValueError(f"class {class_name} not found")
     found = []
 
@@ -230,7 +260,19 @@ def _blocks(doc, title):
 
 
 def _parameters(node):
-    """`{name: annotated?}` over every parameter of a def."""
+    """`{name: annotated?}` over every parameter of a def.
+
+    A class's `Args:` documents its `__init__`, as griffe reads it (and
+    as `merge_init_into_class` renders it), so a class answers with its
+    `__init__`'s parameters, `self` left out.
+    """
+    if isinstance(node, ast.ClassDef):
+        init = next((child for child in node.body
+                     if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and child.name == "__init__"), None)
+        params = _parameters(init) if init is not None else {}
+        params.pop("self", None)
+        return params
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return {}
     args = node.args
@@ -241,6 +283,32 @@ def _parameters(node):
         if arg is not None:
             params[arg.arg] = arg.annotation is not None
     return params
+
+
+# Rule 4. A tag as Markdown passes it through: `<` then a letter, an
+# optional `/`, and on to the next `>` on the same line. An autolink
+# (`<https://...>`, `<user@host>`) is Markdown's own syntax and renders as
+# a link, so a `:` or `@` before the `>` makes it one. Fenced blocks and
+# code spans are blanked first, keeping their newlines so a tag after
+# them is reported on its own line. A code span may wrap across lines
+# within a paragraph, as Python-Markdown reads it, but not across a blank
+# line.
+_RAW_TAG = re.compile(r"</?[A-Za-z][^<>\n]*>")
+_FENCE = re.compile(r"^[ \t]*```.*?^[ \t]*```[^\n]*$", re.MULTILINE | re.DOTALL)
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\1)(?!\n[ \t]*\n).)+?\1", re.DOTALL)
+
+
+def _blank_keeping_lines(match):
+    return "\n" * match.group().count("\n")
+
+
+def _raw_html_tags(doc):
+    """`(line index, tag)` for each raw HTML tag outside code, cleandoc'd."""
+    text = _FENCE.sub(_blank_keeping_lines, inspect.cleandoc(doc))
+    text = _CODE_SPAN.sub(_blank_keeping_lines, text)
+    return [(text.count("\n", 0, match.start()), match.group())
+            for match in _RAW_TAG.finditer(text)
+            if not re.search(r"[:@]", match.group())]
 
 
 def _node_offenders(node, where):
@@ -290,6 +358,12 @@ def _node_offenders(node, where):
             offenders.append(
                 f"{where}:{line}: {name}: {first.split(':', 1)[0]!r} is "
                 "read as the returned type and is not one (rule 2)")
+
+    for line_offset, tag in _raw_html_tags(doc):
+        offenders.append(
+            f"{where}:{origin + line_offset}: {name}: raw HTML tag {tag!r} "
+            "outside a code span; the page drops or renders it as markup "
+            "-- put it in backticks (rule 4)")
 
     params = _parameters(node)
     for header, base, items in _blocks(doc, _ARGS):
@@ -475,6 +549,41 @@ def test_a_near_miss_union_is_rejected_in_linear_time():
             f"{len(text)} characters took {elapsed * 1e3:.0f} ms to reject")
 
 
+def test_a_raw_html_tag_outside_a_code_span_is_flagged():
+    """Rule 4, positive: the `get_pixel_data` shape, `<uid>` and `<table>`."""
+    offenders = _one("def f():\n"
+                     '    """Summary.\n\n'
+                     "    Raises:\n"
+                     "        RuntimeError: Lazy load failed for instance <uid>,\n"
+                     "            or the <table> names N frames.\n"
+                     '    """\n')
+    assert len(offenders) == 2, offenders
+    assert "raw HTML tag '<uid>'" in offenders[0], offenders
+    assert "fixture.py:5:" in offenders[0], offenders
+    assert "raw HTML tag '<table>'" in offenders[1], offenders
+    assert "fixture.py:6:" in offenders[1], offenders
+    # A backtick left open does not swallow the next paragraph's tags.
+    offenders = _one("def f():\n"
+                     '    """Summary with a stray ` here.\n\n'
+                     "    Then <uid> and a closing ` there.\n"
+                     '    """\n')
+    assert len(offenders) == 1 and "fixture.py:4:" in offenders[0], offenders
+
+
+def test_code_spans_fences_autolinks_and_comparisons_are_not_tags():
+    """Rule 4, negative: what renders as code, a link, or plain text."""
+    assert _one("def f():\n"
+                '    """Summary with `<uid>` and ``a <b> c`` in code, and a\n'
+                "    span that wraps: `Lazy load failed for\n"
+                "    <uid>: <table> names N frames`.\n\n"
+                "    See <https://example.org/x> and write to <a@b.org>.\n"
+                "    When a < b and c > d, or x -> y, or Dict[str, Any].\n\n"
+                "    ```python\n"
+                "    html = '<table>'\n"
+                "    ```\n"
+                '    """\n') == []
+
+
 def test_an_untyped_args_entry_needs_a_parameter_annotation():
     """Rule 3, both arms, and the star-stripped `**options` lookup."""
     doc = ('    """Summary.\n\n'
@@ -504,6 +613,54 @@ def test_an_args_entry_naming_no_parameter_is_flagged():
                      '    """\n')
     assert len(offenders) == 1, offenders
     assert "names 'fodler', which the def does not take" in offenders[0]
+
+
+def test_a_module_level_function_or_constant_target_is_resolved(tmp_path):
+    """`::: pkg.mod.f` grades `f`; `::: pkg.mod.CONST` grades nothing."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "mod.py").write_text(
+        "CONST = 1\n"
+        "def f():\n"
+        '    """Returns:\n        two.\n        items.\n    """\n'
+        "def g():\n"
+        '    """Returns:\n        two.\n        items.\n    """\n',
+        encoding="utf-8")
+    pages = tmp_path / "api"
+    pages.mkdir()
+    (pages / "m.md").write_text("::: pkg.mod.f\n\n::: pkg.mod.CONST\n",
+                                encoding="utf-8")
+
+    offenders, graded, _ = check_rendered_scope(pages, pkg)
+
+    assert graded == 1, graded
+    assert len(offenders) == 1 and " f: " in offenders[0], offenders
+
+    (pages / "m.md").write_text("::: pkg.mod.absent\n", encoding="utf-8")
+    try:
+        check_rendered_scope(pages, pkg)
+    except ValueError as error:
+        assert "absent" in str(error)
+    else:
+        raise AssertionError("a target naming nothing resolved")
+
+
+def test_a_class_args_section_documents_its_init():
+    """Rule 3 on a class: griffe matches its `Args:` to `__init__`."""
+    source = ("class E(RuntimeError):\n"
+              '    """Summary.\n\n'
+              "    Args:\n"
+              "        failures (list): what failed.\n"
+              "        attempted (int): how many.\n"
+              "        folder (str): not a parameter.\n"
+              '    """\n'
+              "    def __init__(self, failures, attempted):\n"
+              "        pass\n")
+    offenders, graded = check_source(source, "fixture.py")
+    assert graded == 1, graded
+    assert len(offenders) == 1, offenders
+    assert "names 'folder', which the def does not take" in offenders[0]
 
 
 def test_private_members_are_not_graded_and_dunders_are():
