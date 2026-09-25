@@ -1,19 +1,31 @@
 # Configuration Guide
 
-Isocenter uses a **Unified YAML Configuration** (schema version 2) to control all aspects of de-identification, including PHI tag rules, date shifting, and pixel redaction.
+A configuration file is a YAML file that sets the de-identification policy: which tags are kept, removed, emptied, replaced or date-shifted, how far dates move, whether private tags go, and which pixel regions are blacked out on each machine. Keep it under version control: it is the record of the policy you applied.
 
-This file allows you to define a reproducible privacy policy that can be shared across your team or version controlled.
+Load it with `session.load_config("isocenter_config.yaml")`. The policy in force is then `session.configuration`, an `IsocenterConfiguration` whose fields hold the file's content:
+
+| Field | Holds |
+| :--- | :--- |
+| `phi_tags` | a dict from `"gggg,eeee"` tag to rule, the profile's rules and the file's merged, for example `{"action": "EMPTY", "name": "Study Date"}` |
+| `rules` | the `machines:` list: dicts with `serial_number`, `redaction_zones` (each `[y1, y2, x1, x2]`) and the optional metadata keys |
+| `date_jitter` | `{"min_days": int, "max_days": int}` |
+| `remove_private_tags` | `True` or `False` |
+| `privacy_profile` | `"basic@2026c"`, an external profile's path, or `None` for the floor and for `none` |
+| `config_path` | the file `save()` writes: the one `load_config()` read, or `None` |
+| `auto_save` | whether each change is written to `config_path` as it is made; `False` by default |
+
+A session that loads no file has the defaults in the table below, and applies the [floor policy](#the-floor-policy).
 
 ## Quick Reference
 
-| Section | Description |
-| :--- | :--- |
-| **[version](#schema-version-2)** | The schema version, `"2.0"`. Optional; a file without it is version 2.0. |
-| **[privacy_profile](#privacy-profile)** | Base set of rules: "basic@2026c" (or its short form "basic"), "none", or a path to a YAML profile. |
-| **[date_jitter](#date-jitter)** | Randomly shifts dates to preserve intervals while hiding exact dates. |
-| **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). |
-| **[phi_tags](#phi-tags)** | Overrides or adds specific tag rules, keyed by quoted `"gggg,eeee"` hex (e.g., `"0010,0010"` for Patient's Name). |
-| **[machines](#pixel-redaction-machines)** | Defines burn-in redaction zones for specific equipment. |
+| Section | Description | Default when absent |
+| :--- | :--- | :--- |
+| **[version](#schema-version-2)** | The schema version, `"2.0"`. | `"2.0"` |
+| **[privacy_profile](#privacy-profile)** | Base set of rules: `"basic@2026c"` (or its short form `"basic"`), `"none"`, or a path to a YAML profile. | the [floor policy](#the-floor-policy) |
+| **[date_jitter](#date-jitter)** | The range of the per-patient date shift, applied to tags whose rule is `SHIFT` or `JITTER`. | `{min_days: -365, max_days: -1}` |
+| **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). | `true` |
+| **[phi_tags](#phi-tags)** | Overrides or adds tag rules, keyed by quoted `"gggg,eeee"` hex (e.g., `"0010,0010"` for Patient's Name). | none: the profile's rules only |
+| **[machines](#pixel-redaction-machines)** | Burned-in text redaction zones for specific equipment. | none: no pixels are redacted |
 
 ---
 
@@ -27,23 +39,26 @@ version: "2.0"
 
 # 1. Privacy Profile (Base Rules)
 # Options: "basic@2026c" ("basic" is its short form), "none", or path to
-# external YAML
+# external YAML. Leave the line out for the floor policy.
 privacy_profile: "basic@2026c"
 
 # 2. Date Jitter
-# Range for the per-patient date shift, applied to every tag whose rule
-# is SHIFT or JITTER (consistent across studies), and to Study Date under
-# no rule or REPLACE with no value.
+# Range for the per-patient date shift. It moves only the tags whose rule
+# is SHIFT or JITTER (see "0008,0020" below).
 date_jitter:
   min_days: -30
   max_days: -10
 
 # 3. Private Tags
-# Remove all odd-group tags (vendor specific) unless whitelisted?
+# Remove all odd-group tags (vendor specific)
 remove_private_tags: true
 
 # 4. Custom PHI Tags (Overrides Profile)
 phi_tags:
+  "0008,0020":
+    action: "JITTER" # basic@2026c empties Study Date; shift it instead
+    name: "StudyDate"
+
   "0008,1030":
     action: "EMPTY"
     name: "StudyDescription"
@@ -65,6 +80,8 @@ machines:
       - [900, 1024, 0, 400] # Bottom Left Details
 ```
 
+`basic@2026c` has no `SHIFT` or `JITTER` rule of its own: without the `"0008,0020"` line, this file would shift no date, and every exported study would have an empty Study Date.
+
 ---
 
 ## Schema (version 2)
@@ -73,57 +90,52 @@ A configuration is read as exactly what it says. Every key and every value
 type is listed below; **an unknown key, a value of the wrong type, or a
 `version` this library does not read makes `load_config()` and
 `audit(config_path=...)` raise `ValueError`**, naming the key, before
-anything is assigned
-([#711](https://github.com/kvnlng/Isocenter/issues/711),
-[#712](https://github.com/kvnlng/Isocenter/issues/712),
-[#713](https://github.com/kvnlng/Isocenter/issues/713)). Until 1.0 an
-unknown key was ignored, so a misspelling loaded and meant something the
-file did not say.
+anything is assigned. A file written for 0.9.x may need small changes:
+see [Configs from 0.9.x](migration.md#configs-from-09x).
 
-| Level | Key | Type |
-| :--- | :--- | :--- |
-| top level | `version` | a quoted `"MAJOR.MINOR"` string with no leading zero: `"2.0"` |
-| top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file; `null` (a bare `privacy_profile:`) is absent, and means the floor |
-| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, or [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), to rule |
-| top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` |
-| top level | `remove_private_tags` | `true` or `false` (unquoted) |
-| top level | `machines` | a list of machine rules |
-| machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits (required) |
-| machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) |
-| machine rule | `redaction_zones` | a list of zones |
-| zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) |
-| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default) |
+| Level | Key | Type | Default when absent |
+| :--- | :--- | :--- | :--- |
+| top level | `version` | a quoted `"MAJOR.MINOR"` string with no leading zero: `"2.0"` | `"2.0"` |
+| top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file; `null` (a bare `privacy_profile:`) is absent | the floor |
+| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, or [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), to rule | no overrides |
+| top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` | `{min_days: -365, max_days: -1}` |
+| top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
+| top level | `machines` | a list of machine rules | no rules |
+| machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits | required |
+| machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
+| machine rule | `redaction_zones` | a list of zones | no zones |
+| zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) | |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the [actions](#phi-tags); `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default) | |
 
 Three of these are traps YAML sets, and are refused rather than read:
 
 * **An unquoted serial number is a number.** `serial_number: 12345` is the
   integer 12345, and `serial_number: 0123` is the octal integer 83; neither
-  ever equals a Device Serial Number, so the rule matched nothing. Quote it:
+  ever equals a Device Serial Number, so the rule would match nothing. Quote it:
   `serial_number: "0123"`.
 * **A quoted boolean is a string.** `remove_private_tags: "false"` is a
-  non-empty string, which read as true. A bare `remove_private_tags:` is
-  null, which read as false. Write `true` or `false` unquoted
+  non-empty string, which would read as true. A bare `remove_private_tags:` is
+  null, which would read as false. Write `true` or `false` unquoted
   (`yes`/`no` also work).
 * **An unquoted version is a number.** `version: 2.10` is the number 2.1.
   Quote it.
 
 **`version`.** A file with no `version` line is version 2.0, and always
 will be. A present `version` must be a quoted string whose major is `2`;
-any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused
-rather than read as 2.0 ([#730](https://github.com/kvnlng/Isocenter/issues/730)). A 1.x release raises the `2.x` minor for either of two reasons: it adds
+any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused.
+A 1.x release raises the `2.x` minor for either of two reasons: it adds
 a key or a value, or it applies an unchanged file differently (for
-example, a value-less `REPLACE` writing a dummy its VR can hold)
-([#762](https://github.com/kvnlng/Isocenter/issues/762)). Either way, a
-`2.x` file still loads unchanged. A file that uses a key or a value this
-release does not have is refused, and the refusal says the file's version
-is newer than this isocenter's. When the way a file is applied changes, a
-store scanned under the older minor is not silently treated as scanned
-under the new one. The minor is part of the policy fingerprint each PHI
-status records, so `export()` writes a notice and the report grades
-`REVIEW_REQUIRED` until `audit()` runs again
-([#555](https://github.com/kvnlng/Isocenter/issues/555)). `"1.0"` is refused: it
-labelled the machines-only rules file before version 2 (December 2025),
-and such a file loads unchanged as `"2.0"`.
+example, a value-less `REPLACE` writing a dummy its VR can hold).
+Either way, a `2.x` file still loads unchanged. A file that uses a key or
+a value this release does not have is refused, and the refusal says the
+file's version is newer than this isocenter's.
+
+When the way a file is applied changes, a store scanned under the older
+minor is not treated as scanned under the new one. The minor is part of
+the policy each PHI status records, so after such an upgrade, run
+`audit()` and `anonymize()` before you export. An export made first writes
+a `WARNING` row that stays in the store's audit log, and every later
+report of that store grades `REVIEW_REQUIRED` (see [What to keep](#what-to-keep)).
 
 ---
 
@@ -131,126 +143,164 @@ and such a file loads unchanged as `"2.0"`.
 
 ### Privacy Profile
 
-Sets the baseline rules that `phi_tags` then extends or overrides.
+Sets the baseline rules that `phi_tags` then extends or overrides. **Default:** with no `privacy_profile` line, the [floor policy](#the-floor-policy).
 
 ```yaml
 privacy_profile: "basic@2026c"
 ```
 
-**A built-in profile's name is pinned to the PS3.15 edition its table was taken from** ([#714](https://github.com/kvnlng/Isocenter/issues/714)). `basic@2026c` is the name, and a bare `basic` means `basic@2026c` in every 1.x: both load the same rules, and `session.configuration.privacy_profile` holds `"basic@2026c"` after either, so `save()` writes the pinned name back. `create_config()` writes it. A later PS3.15 edition arrives in a minor release as a new name, under a new configuration schema minor, never as a new meaning for this one. A name is looked up exactly: `basic@2026C` is refused, and so is `Basic` unless a file of that name exists, in which case it loads as an external profile, and a value containing `@` that this version does not ship raises `ValueError` saying which names it ships; such a value is never read as a file path.
+| Value | Base rules |
+| :--- | :--- |
+| absent, or a bare `privacy_profile:` | the [floor policy](#the-floor-policy) |
+| `"basic@2026c"`, or `"basic"` | the [Basic Profile table](#what-basic2026c-contains) |
+| `"none"` | [no base](#none): the file's `phi_tags` are the whole policy |
+| a path, such as `"./profiles/my_hospital_standard.yaml"` | an [external profile](#external-profile-file) |
 
-* **`basic@2026c`** (short form **`basic`**): The Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c** (`BASIC_PROFILE` in `isocenter/profiles.py`, 646 tag rules). Each row maps to a rule: `X` removes the attribute; `Z` and `X/Z` empty it, so a Type 2 attribute stays present; `D`, and every code with a D arm (`X/D`, `Z/D`, `X/Z/D`), is `REPLACE` with no value, which writes a dummy value consistent with the attribute's VR ([#557](https://github.com/kvnlng/Isocenter/issues/557)). PS3.15 Table E.1-1a defines D as "replace with a non-zero length value that may be a dummy value and consistent with the VR", and Z as "a zero length value, or a non-zero length value that may be a dummy value and consistent with the VR", so the dummy is what the code asks for where it resolves to D (an attribute Type 1 in its IOD, such as Verifying Observer Name in a Structured Report) and a value it permits where it resolves to Z. Until 1.0 `D` emptied the attribute and `X/D` removed it, and a Type 1 attribute was written zero-length or dropped. The dummies are the same constant for every instance and carry nothing of the original:
+Any other value is refused: `load_config()` raises `ValueError` naming it.
 
-    | VR | Dummy written |
-    | :--- | :--- |
-    | AE, CS, LO, LT, PN, SH, ST, UC, UR, UT | `ANONYMIZED` |
-    | DA, DT | `19000101` (a DT at date precision: no time of day) |
-    | TM | `000000` |
-    | AS | `000D` |
-    | OB, OW, UN | two zero bytes |
-    | OF, OL | four zero bytes |
-    | OD, OV | eight zero bytes |
+**A built-in profile's name is pinned to the PS3.15 edition its table was taken from.** `basic@2026c` is the name, and a bare `basic` means `basic@2026c` in every 1.x: both load the same rules, and `session.configuration.privacy_profile` holds `"basic@2026c"` after either, so `save()` writes the pinned name back. `create_config()` writes it. A later PS3.15 edition arrives in a minor release as a new name, under a new configuration schema minor, never as a new meaning for this one. A name is looked up exactly: `basic@2026C` is refused, and so is `Basic` unless a file of that name exists, in which case it loads as an external profile. A value containing `@` that this version does not ship raises `ValueError` saying which names it ships; such a value is never read as a file path.
 
-    The table's `50xx,xxxx` row is a rule, and the whole overlay group is one: see [Repeating groups](#repeating-groups) ([#556](https://github.com/kvnlng/Isocenter/issues/556)). A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit. It is **not** the whole of Annex E:
-    * **UIDs are replaced by UIDs derived from the project secret** ([#544](https://github.com/kvnlng/Isocenter/issues/544)). Each `U` row, and Annotation Group UID's `D`, is `REPLACE` with no value, which on a UI attribute is UID replacement: the value becomes `2.25.` followed by a UUID derived from the value and the store's [project secret](#what-to-keep). One source UID gets one replacement wherever it appears in the store -- the Study Instance UID on every file of the study, a Referenced SOP Instance UID nested in a sequence and the SOP Instance UID it names -- so references between exported files still resolve, and the next pass recognises a replacement and leaves it alone. The replacement names the entity from then on: `export(subset=...)` accepts the UID a study, series or instance had before the pass as well as its replacement, and a later `ingest()` of another file of a replaced study or series joins it. Three limits: a UID in a private tag is not replaced ([#765](https://github.com/kvnlng/Isocenter/issues/765)); a UID written into free text, such as a description, is not found; and a redacted instance's new SOP Instance UID is derived from its source UID and its zones, so a reference to it from another file names the replacement of the source UID, which no exported file carries. The table's two `X/Z/U*` sequences (Referenced Image Sequence and Source Image Sequence) have no rule: they are kept, and the UIDs inside them are replaced. `REPLACE` with a `value:` on a UI attribute writes that value, as 0.9.8 did, and on Study, Series or SOP Instance UID does not move what the export is organised by: the file keeps the source Study and Series Instance UIDs, and a file whose SOP Instance UID is given a value is still named by its source UID. Use `REPLACE` with no value there.
-    * No code from CID 7050 is written to De-identification Method Code Sequence `(0012,0064)`, not even `113100` (Basic Application Confidentiality Profile): the departures listed here are why `basic@2026c` does not claim that profile. What the export writes instead is under [What an exported file says about itself](#what-an-exported-file-says-about-itself) ([#554](https://github.com/kvnlng/Isocenter/issues/554)).
-    * Patient's Name is `REPLACE` rather than the table's `Z`: it becomes `ANONYMIZED`, a dummy `Z` permits. Patient ID follows its `Z/D` code: `REPLACE` with no value on Patient ID is the keyed `ANON_` pseudonym, which is its dummy, and a Patient ID rule may not empty or remove it ([#537](https://github.com/kvnlng/Isocenter/issues/537)). Study Date follows the table and is exported zero-length; the floor shifts it instead.
-    * **Where an `X/D` or `X/Z/D` attribute is Type 3 in its IOD, the table's code removes it, and Isocenter writes the dummy instead.** This departs from the code's X arm. PS3.15 E.1.1 permits it as protection ("either be removed from the Data Set, or have its value replaced by a different 'replacement value' that does not allow identification of the patient"); Isocenter does not know each attribute's type in each IOD, so it cannot tell which arm applies to an instance ([#558](https://github.com/kvnlng/Isocenter/issues/558)), and writes the value that is valid under every arm. Series Date and Time, Instance Creation Date and Protocol Name are the ones most image files carry; each is present in the export holding its dummy.
-    * The four sequences whose code has a D arm keep `EMPTY` or `REMOVE`: Institution Code Sequence and Referenced Performed Procedure Step Sequence (`X/Z/D`) and Person Identification Code Sequence (`D`) are emptied to zero items, and Operator Identification Sequence (`X/D`) is removed. D on a sequence asks for items that are themselves valid, and what makes an item valid depends on the IOD, so no dummy item is written ([#557](https://github.com/kvnlng/Isocenter/issues/557)). Where one of these is Type 1 in its IOD, the export departs from the table there.
-    * Deliberate departures from the table: Study and Series Description are emptied rather than removed, because the export directory names read them. Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned, and an icon is dropped when its pixels may show what redaction removed, in two tiers ([#542](https://github.com/kvnlng/Isocenter/issues/542)): an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export. Retired Curve groups `(50xx)` are removed, by the table's own `50xx,xxxx` row. Overlay groups `(60xx)` are removed whole by `60xx,xxxx`, a rule the table does not have: the table removes Overlay Data `(60xx,3000)` and Overlay Comments `(60xx,4000)`, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them" ([#556](https://github.com/kvnlng/Isocenter/issues/556)). The two table rows are folded into the group rule, so `"60xx,xxxx": {action: KEEP}` keeps a whole, valid overlay. Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed. Private attributes are the `remove_private_tags` sweep, not a rule.
+#### The floor policy
 
-    **Keeping UIDs.** PS3.15's Retain UIDs Option is `KEEP` on the `U` rows. Keep all of them or none: keeping Study Instance UID while SOP Instance UID is replaced, or a Referenced SOP Instance UID while the SOP Instance UID it names is replaced, leaves references in the export that name nothing in it. A kept UID links the export to its source for anyone who can see the source UIDs, and a UID that embeds a date carries it.
+A session that has loaded no configuration applies the **floor policy**: `basic@2026c` with three of its 646 rules changed to the research defaults `create_config()` writes. Study Date is jittered rather than emptied, and Patient's Sex and Patient's Age are kept. Private tags are removed, as `remove_private_tags` defaults to `true`. The floor is built on `basic@2026c` in every 1.x. The compliance report names it (`None (session defaults: the floor policy over basic@2026c)`), and says `None (no base profile)` for a session under `privacy_profile: none`, or under an external profile that contributed no rules.
 
-    ```yaml
-    phi_tags:
-      "0000,1001": {action: KEEP}  # Requested SOP Instance UID
-      "0002,0003": {action: KEEP}  # Media Storage SOP Instance UID
-      "0004,1511": {action: KEEP}  # Referenced SOP Instance UID in File
-      "0008,0014": {action: KEEP}  # Instance Creator UID
-      "0008,0017": {action: KEEP}  # Acquisition UID
-      "0008,0018": {action: KEEP}  # SOP Instance UID
-      "0008,0019": {action: KEEP}  # Pyramid UID
-      "0008,0058": {action: KEEP}  # Failed SOP Instance UID List
-      "0008,1155": {action: KEEP}  # Referenced SOP Instance UID
-      "0008,1195": {action: KEEP}  # Transaction UID
-      "0008,3010": {action: KEEP}  # Irradiation Event UID
-      "0018,1002": {action: KEEP}  # Device UID
-      "0018,100b": {action: KEEP}  # Manufacturer's Device Class UID
-      "0018,2042": {action: KEEP}  # Target UID
-      "0020,000d": {action: KEEP}  # Study Instance UID
-      "0020,000e": {action: KEEP}  # Series Instance UID
-      "0020,0052": {action: KEEP}  # Frame of Reference UID
-      "0020,0200": {action: KEEP}  # Synchronization Frame of Reference UID
-      "0020,9161": {action: KEEP}  # Concatenation UID
-      "0020,9164": {action: KEEP}  # Dimension Organization UID
-      "0028,1199": {action: KEEP}  # Palette Color Lookup Table UID
-      "0028,1214": {action: KEEP}  # Large Palette Color Lookup Table UID
-      "003a,0310": {action: KEEP}  # Multiplex Group UID
-      "0040,0554": {action: KEEP}  # Specimen UID
-      "0040,4023": {action: KEEP}  # Referenced General Purpose Scheduled Procedure Step Transaction UID
-      "0040,a124": {action: KEEP}  # UID
-      "0040,a171": {action: KEEP}  # Observation UID
-      "0040,a172": {action: KEEP}  # Referenced Observation UID (Trial)
-      "0040,a402": {action: KEEP}  # Observation Subject UID (Trial)
-      "0040,db0c": {action: KEEP}  # Template Extension Organization UID
-      "0040,db0d": {action: KEEP}  # Template Extension Creator UID
-      "0062,0021": {action: KEEP}  # Tracking UID
-      "0064,0003": {action: KEEP}  # Source Frame of Reference UID
-      "006a,0003": {action: KEEP}  # Annotation Group UID
-      "0070,031a": {action: KEEP}  # Fiducial UID
-      "0070,1101": {action: KEEP}  # Presentation Display Collection UID
-      "0070,1102": {action: KEEP}  # Presentation Sequence Collection UID
-      "0088,0140": {action: KEEP}  # Storage Media File-set UID
-      "0400,0100": {action: KEEP}  # Digital Signature UID
-      "3006,0024": {action: KEEP}  # Referenced Frame of Reference UID
-      "3006,00c2": {action: KEEP}  # Related Frame of Reference UID
-      "300a,0013": {action: KEEP}  # Dose Reference UID
-      "300a,0054": {action: KEEP}  # Table Top Position Alignment UID
-      "300a,0083": {action: KEEP}  # Referenced Dose Reference UID
-      "300a,0609": {action: KEEP}  # Treatment Position Group UID
-      "300a,0650": {action: KEEP}  # Patient Setup UID
-      "300a,0700": {action: KEEP}  # Treatment Session UID
-      "300a,0785": {action: KEEP}  # Referenced Treatment Position Group UID
-      "3010,0006": {action: KEEP}  # Conceptual Volume UID
-      "3010,000b": {action: KEEP}  # Referenced Conceptual Volume UID
-      "3010,0013": {action: KEEP}  # Constituent Conceptual Volume UID
-      "3010,0015": {action: KEEP}  # Source Conceptual Volume UID
-      "3010,0031": {action: KEEP}  # Referenced Fiducials UID
-      "3010,003b": {action: KEEP}  # RT Treatment Phase UID
-      "3010,006e": {action: KEEP}  # Dosimetric Objective UID
-      "3010,006f": {action: KEEP}  # Referenced Dosimetric Objective UID
-    ```
+**Omitting `privacy_profile` means the floor beneath your `phi_tags`.** A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. A bare `privacy_profile:` line (YAML null) is the same as leaving the line out. To opt a single tag out, give it `action: "KEEP"`; to opt out of the floor entirely, write `privacy_profile: "none"`.
 
-    The table removes, empties or replaces attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. What `basic@2026c` contains is frozen for every 1.x: the rules 1.0 ships under it, which are the table, this mapping and these departures. The one exception is a row the published 2026c standard shows was transcribed wrongly, which a 1.x may correct as a **Breaking** changelog entry quoting the standard's row; anything else is a new name. A PHI status records the policy it was recorded under, and an `export()` that writes instances whose statuses were recorded under another policy, or before 1.0, writes one `WARNING` row naming the policies, so its report grades `REVIEW_REQUIRED` ([#555](https://github.com/kvnlng/Isocenter/issues/555)). A store anonymized under 0.9.7's 35-rule profile therefore no longer exports as though the policy in force had been applied: run `audit()` and then `anonymize()` on it before exporting again, and after reopening any store, load the configuration it was anonymized under. That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
-* **`none`**: No base. The file's `phi_tags` are the whole policy. A bare `privacy_profile:` line (YAML null) is **not** `none`: it is absent, and means the floor ([#730](https://github.com/kvnlng/Isocenter/issues/730); until 1.0 it meant `none`, so a template's blank left unfilled switched the floor off).
-* **External File**: You can provide a path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) to inherit its rules. That file carries its rules under a `phi_tags:` mapping and nothing else, beside an optional `version`; any other key raises `ValueError` naming it ([#712](https://github.com/kvnlng/Isocenter/issues/712)). A profile file contributes only its `phi_tags`, so a `privacy_profile: basic` or `remove_private_tags:` line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises `ValueError` too, because the root used to be read as the tags and a profile written like a config then loaded `privacy_profile` itself as a "tag".
+#### none
 
-Any other value is refused: `load_config()` raises `ValueError` naming it. (These docs once offered a `comprehensive` profile, which never existed; loading it warned and applied no base.)
+No base. The file's `phi_tags` are the whole policy. Patient's Name, Patient ID and Study Date are still replaced unless a rule says otherwise (see [below](#patients-name-patient-id-and-study-date)); any other tag the file does not name is exported as ingested.
 
-A session that has loaded no configuration applies the **floor policy**, `FLOOR_POLICY` in `isocenter/profiles.py`: `basic@2026c` with three of its rules changed by the research defaults `create_config()` writes (Study Date jittered, Patient's Sex and Age kept): 646 rules. The floor is built on `basic@2026c` in every 1.x. The compliance report says so (`None (session defaults: the floor policy over basic@2026c)`), and says `None (no base profile)` for a session under `privacy_profile: none`, or under an external profile that contributed no rules.
+#### External profile file
 
-**Omitting `privacy_profile` means the floor beneath your `phi_tags`.** A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. To opt a single tag out, give it `action: "KEEP"`; to opt out of the floor entirely, write `privacy_profile: "none"`.
+A path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) inherits its rules. That file carries its rules under a `phi_tags:` mapping and nothing else, beside an optional `version`; any other key raises `ValueError` naming it. A profile file contributes only its `phi_tags`, so a `privacy_profile: basic` or `remove_private_tags:` line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises `ValueError` too.
 
-!!! note "Patient's Name, Patient ID and Study Date"
+#### What basic@2026c contains
 
-    These three belong to the patient and the study, and the exporter writes the patient's and study's value on every file. Their rule governs that value ([#537](https://github.com/kvnlng/Isocenter/issues/537); until 0.9.8 `anonymize()` replaced all three whatever the rule said):
+`basic@2026c` (short form `basic`) is the Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c**: 646 tag rules. Each row maps to a rule:
 
-    | Rule | Patient's Name | Patient ID | Study Date |
-    | :--- | :--- | :--- | :--- |
-    | none, or `REPLACE` with no `value:` | `ANONYMIZED` | the keyed `ANON_` pseudonym | the per-patient shift |
-    | `REPLACE` with `value:` | the value | refused | the value (a valid DA) |
-    | `KEEP` | kept | kept | kept |
-    | `EMPTY` | zero-length | refused | zero-length |
-    | `REMOVE` | zero-length in the file; removed from the instance's own copy | refused | zero-length in the file; removed from the instance's own copy |
-    | `SHIFT` / `JITTER` | refused | refused | the per-patient shift |
+* `X` removes the attribute.
+* `Z` and `X/Z` empty it, so a Type 2 attribute stays present.
+* `D`, and every code with a D arm (`X/D`, `Z/D`, `X/Z/D`), is `REPLACE` with no value, which writes a dummy value consistent with the attribute's VR.
 
-    `REMOVE` still writes the element, at zero length: both are Type 2 in their modules, so a file without them would not conform. A Patient ID rule other than `KEEP` or `REPLACE` with no value raises `ValueError`, because the ID is what keeps two patients apart and `anonymize()` merges patients that share one. On Study Date, the string form (`"0008,0020": "Study Date"`) is `REPLACE` with no value, and means the shift.
+PS3.15 Table E.1-1a defines D as "replace with a non-zero length value that may be a dummy value and consistent with the VR", and Z as "a zero length value, or a non-zero length value that may be a dummy value and consistent with the VR", so the dummy is what the code asks for where it resolves to D (an attribute Type 1 in its IOD, such as Verifying Observer Name in a Structured Report) and a value it permits where it resolves to Z. The dummies are the same constant for every instance and carry nothing of the original:
+
+| VR | Dummy written |
+| :--- | :--- |
+| AE, CS, LO, LT, PN, SH, ST, UC, UR, UT | `ANONYMIZED` |
+| DA, DT | `19000101` (a DT at date precision: no time of day) |
+| TM | `000000` |
+| AS | `000D` |
+| OB, OW, UN | two zero bytes |
+| OF, OL | four zero bytes |
+| OD, OV | eight zero bytes |
+
+The table's `50xx,xxxx` row is a rule, and the whole overlay group is one: see [Repeating groups](#repeating-groups). A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit.
+
+It is **not** the whole of Annex E. Where it departs from the table:
+
+* **UIDs are replaced by UIDs derived from the project secret.** Each `U` row, and Annotation Group UID's `D`, is `REPLACE` with no value, which on a UI attribute is UID replacement: the value becomes `2.25.` followed by a UUID derived from the value and the store's [project secret](#what-to-keep). One source UID gets one replacement wherever it appears in the store -- the Study Instance UID on every file of the study, a Referenced SOP Instance UID nested in a sequence and the SOP Instance UID it names -- so references between exported files still resolve, and the next pass recognises a replacement and leaves it alone. The replacement names the entity from then on: `export(subset=...)` accepts the UID a study, series or instance had before the pass as well as its replacement, and a later `ingest()` of another file of a replaced study or series joins it. Three limits: a UID in a private tag is not replaced ([#765](https://github.com/kvnlng/Isocenter/issues/765)); a UID written into free text, such as a description, is not found; and a redacted instance's new SOP Instance UID is derived from its source UID and its zones, so a reference to it from another file names the replacement of the source UID, which no exported file carries. The table's two `X/Z/U*` sequences (Referenced Image Sequence and Source Image Sequence) have no rule: they are kept, and the UIDs inside them are replaced. `REPLACE` with a `value:` on a UI attribute writes that value, and on Study, Series or SOP Instance UID does not move what the export is organised by: the file keeps the source Study and Series Instance UIDs, and a file whose SOP Instance UID is given a value is still named by its source UID. Use `REPLACE` with no value there.
+* No code from CID 7050 is written to De-identification Method Code Sequence `(0012,0064)`, not even `113100` (Basic Application Confidentiality Profile): the departures listed here are why `basic@2026c` does not claim that profile. What the export writes instead is under [What an exported file says about itself](#what-an-exported-file-says-about-itself).
+* Patient's Name is `REPLACE` rather than the table's `Z`: it becomes `ANONYMIZED`, a dummy `Z` permits. Patient ID follows its `Z/D` code: `REPLACE` with no value on Patient ID is the keyed `ANON_` pseudonym, which is its dummy, and a Patient ID rule may not empty or remove it. Study Date follows the table and is exported zero-length; the floor shifts it instead.
+* **Where an `X/D` or `X/Z/D` attribute is Type 3 in its IOD, the table's code removes it, and Isocenter writes the dummy instead.** This departs from the code's X arm. PS3.15 E.1.1 permits it as protection ("either be removed from the Data Set, or have its value replaced by a different 'replacement value' that does not allow identification of the patient"); Isocenter does not know each attribute's type in each IOD, so it cannot tell which arm applies to an instance ([#558](https://github.com/kvnlng/Isocenter/issues/558)), and writes the value that is valid under every arm. Series Date and Time, Instance Creation Date and Protocol Name are the ones most image files carry; each is present in the export holding its dummy.
+* The four sequences whose code has a D arm keep `EMPTY` or `REMOVE`: Institution Code Sequence and Referenced Performed Procedure Step Sequence (`X/Z/D`) and Person Identification Code Sequence (`D`) are emptied to zero items, and Operator Identification Sequence (`X/D`) is removed. D on a sequence asks for items that are themselves valid, and what makes an item valid depends on the IOD, so no dummy item is written. Where one of these is Type 1 in its IOD, the export departs from the table there.
+* Study and Series Description are emptied rather than removed, because the export directory names read them.
+* Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned. An icon is dropped when its pixels may show what redaction removed, in two tiers: an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export.
+* Retired Curve groups `(50xx)` are removed, by the table's own `50xx,xxxx` row. Overlay groups `(60xx)` are removed whole by `60xx,xxxx`, a rule the table does not have. The table removes Overlay Data `(60xx,3000)` and Overlay Comments `(60xx,4000)`, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them". The two table rows are folded into the group rule, so `"60xx,xxxx": {action: KEEP}` keeps a whole, valid overlay.
+* Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed.
+* Private attributes are the `remove_private_tags` sweep, not a rule.
+
+The table removes, empties or replaces attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it.
+
+What `basic@2026c` contains is frozen for every 1.x: the rules 1.0 ships under it, which are the table, this mapping and these departures. The one exception is a row the published 2026c standard shows was transcribed wrongly, which a 1.x may correct as a **Breaking** changelog entry quoting the standard's row; anything else is a new name.
+
+A PHI status records the policy it was recorded under. An `export()` that writes instances whose statuses were recorded under another policy writes one `WARNING` row naming the policies, and the row stays: every later report of the store grades `REVIEW_REQUIRED`. After reopening a store, load the configuration it was anonymized under before anything else. A store anonymized by a 0.9.x release has statuses of this kind; see [Upgrading from 0.9.x](migration.md).
+
+#### Keeping UIDs
+
+PS3.15's Retain UIDs Option is `KEEP` on the `U` rows. Keep all of them or none: keeping Study Instance UID while SOP Instance UID is replaced, or a Referenced SOP Instance UID while the SOP Instance UID it names is replaced, leaves references in the export that name nothing in it. A kept UID links the export to its source for anyone who can see the source UIDs, and a UID that embeds a date carries it.
+
+```yaml
+phi_tags:
+  "0000,1001": {action: KEEP}  # Requested SOP Instance UID
+  "0002,0003": {action: KEEP}  # Media Storage SOP Instance UID
+  "0004,1511": {action: KEEP}  # Referenced SOP Instance UID in File
+  "0008,0014": {action: KEEP}  # Instance Creator UID
+  "0008,0017": {action: KEEP}  # Acquisition UID
+  "0008,0018": {action: KEEP}  # SOP Instance UID
+  "0008,0019": {action: KEEP}  # Pyramid UID
+  "0008,0058": {action: KEEP}  # Failed SOP Instance UID List
+  "0008,1155": {action: KEEP}  # Referenced SOP Instance UID
+  "0008,1195": {action: KEEP}  # Transaction UID
+  "0008,3010": {action: KEEP}  # Irradiation Event UID
+  "0018,1002": {action: KEEP}  # Device UID
+  "0018,100b": {action: KEEP}  # Manufacturer's Device Class UID
+  "0018,2042": {action: KEEP}  # Target UID
+  "0020,000d": {action: KEEP}  # Study Instance UID
+  "0020,000e": {action: KEEP}  # Series Instance UID
+  "0020,0052": {action: KEEP}  # Frame of Reference UID
+  "0020,0200": {action: KEEP}  # Synchronization Frame of Reference UID
+  "0020,9161": {action: KEEP}  # Concatenation UID
+  "0020,9164": {action: KEEP}  # Dimension Organization UID
+  "0028,1199": {action: KEEP}  # Palette Color Lookup Table UID
+  "0028,1214": {action: KEEP}  # Large Palette Color Lookup Table UID
+  "003a,0310": {action: KEEP}  # Multiplex Group UID
+  "0040,0554": {action: KEEP}  # Specimen UID
+  "0040,4023": {action: KEEP}  # Referenced General Purpose Scheduled Procedure Step Transaction UID
+  "0040,a124": {action: KEEP}  # UID
+  "0040,a171": {action: KEEP}  # Observation UID
+  "0040,a172": {action: KEEP}  # Referenced Observation UID (Trial)
+  "0040,a402": {action: KEEP}  # Observation Subject UID (Trial)
+  "0040,db0c": {action: KEEP}  # Template Extension Organization UID
+  "0040,db0d": {action: KEEP}  # Template Extension Creator UID
+  "0062,0021": {action: KEEP}  # Tracking UID
+  "0064,0003": {action: KEEP}  # Source Frame of Reference UID
+  "006a,0003": {action: KEEP}  # Annotation Group UID
+  "0070,031a": {action: KEEP}  # Fiducial UID
+  "0070,1101": {action: KEEP}  # Presentation Display Collection UID
+  "0070,1102": {action: KEEP}  # Presentation Sequence Collection UID
+  "0088,0140": {action: KEEP}  # Storage Media File-set UID
+  "0400,0100": {action: KEEP}  # Digital Signature UID
+  "3006,0024": {action: KEEP}  # Referenced Frame of Reference UID
+  "3006,00c2": {action: KEEP}  # Related Frame of Reference UID
+  "300a,0013": {action: KEEP}  # Dose Reference UID
+  "300a,0054": {action: KEEP}  # Table Top Position Alignment UID
+  "300a,0083": {action: KEEP}  # Referenced Dose Reference UID
+  "300a,0609": {action: KEEP}  # Treatment Position Group UID
+  "300a,0650": {action: KEEP}  # Patient Setup UID
+  "300a,0700": {action: KEEP}  # Treatment Session UID
+  "300a,0785": {action: KEEP}  # Referenced Treatment Position Group UID
+  "3010,0006": {action: KEEP}  # Conceptual Volume UID
+  "3010,000b": {action: KEEP}  # Referenced Conceptual Volume UID
+  "3010,0013": {action: KEEP}  # Constituent Conceptual Volume UID
+  "3010,0015": {action: KEEP}  # Source Conceptual Volume UID
+  "3010,0031": {action: KEEP}  # Referenced Fiducials UID
+  "3010,003b": {action: KEEP}  # RT Treatment Phase UID
+  "3010,006e": {action: KEEP}  # Dosimetric Objective UID
+  "3010,006f": {action: KEEP}  # Referenced Dosimetric Objective UID
+```
+
+#### Patient's Name, Patient ID and Study Date
+
+These three belong to the patient and the study, and the exporter writes the patient's and study's value on every file. Their rule governs that value:
+
+| Rule | Patient's Name | Patient ID | Study Date |
+| :--- | :--- | :--- | :--- |
+| no rule, or `REPLACE` with no `value:` | `ANONYMIZED` | the keyed `ANON_` pseudonym | the per-patient shift |
+| `REPLACE` with `value:` | the value | refused | the value (a valid DA) |
+| `KEEP` | kept | kept | kept |
+| `EMPTY` | zero-length | refused | zero-length |
+| `REMOVE` | zero-length in the file; removed from the instance's own copy | refused | zero-length in the file; removed from the instance's own copy |
+| `SHIFT` / `JITTER` | refused | refused | the per-patient shift |
+
+`REMOVE` still writes the element, at zero length: both are Type 2 in their modules, so a file without them would not conform. A Patient ID rule other than `KEEP` or `REPLACE` with no value raises `ValueError`, because the ID is what keeps two patients apart and `anonymize()` merges patients that share one. On Study Date, the string form (`"0008,0020": "Study Date"`) is `REPLACE` with no value, and means the shift.
 
 ### Date Jitter
 
-Sets the range of the per-patient date shift. It is applied to every tag whose rule is `SHIFT` or `JITTER`, and to Study Date when it has no rule or `REPLACE` with no value; other date tags follow their own rule, and the `basic` profile *removes or empties* the dates Table E.1-1 names (Series, Acquisition, Content, Instance Creation and the rest) rather than shifting them. A date tag no rule names is exported as ingested: under `basic` or the floor that is a date the table does not name, and under `privacy_profile: none` it is every date your `phi_tags` leave out, so add a rule for any such date that must not leave the site.
+Sets the range of the per-patient date shift. **Default:** `{min_days: -365, max_days: -1}`.
 
-* **Logic**: Isocenter derives each patient's offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, a UID the configuration keeps carries any date it embeds ([#544](https://github.com/kvnlng/Isocenter/issues/544)), and a whole-day shift keeps the weekday. A patient a store de-identified before 0.9.7 keeps that store's unkeyed, computable offset (see the second Migration Guide link below). The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. From 0.9.7 the log file (`isocenter.log`) records neither original Patient IDs nor offsets. Offsets and pseudonyms belong to the store, and a secret cannot be carried to another one; see [What to keep](#what-to-keep). Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient's studies when `anonymize()` gives it the same pseudonym, and its dates land on the same offset ([#548](https://github.com/kvnlng/Isocenter/issues/548)). Releases before 0.9.7 derived the offset without a secret, so it could be computed from an exported file ([Migration Guide](migration.md#stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7)).
+The shift applies only to tags whose rule is `SHIFT` or `JITTER`, and to Study Date when it has no rule or `REPLACE` with no value. `basic@2026c` has no `SHIFT` or `JITTER` rule: it *removes or empties* the dates Table E.1-1 names (Study, Series, Acquisition, Content, Instance Creation and the rest), so under `basic@2026c` alone `date_jitter` moves nothing. The floor and the file `create_config()` writes give Study Date `JITTER`. To shift another date, give it `action: "JITTER"`. A date tag no rule names is exported as ingested: under `basic` or the floor that is a date the table does not name, and under `privacy_profile: none` it is every date your `phi_tags` leave out, so add a rule for any such date that must not leave the site.
+
+* **Logic**: Isocenter derives each patient's offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, a UID the configuration keeps carries any date it embeds, and a whole-day shift keeps the weekday. The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. The log file (`isocenter.log`) records neither original Patient IDs nor offsets. Offsets and pseudonyms belong to the store, and a secret cannot be carried to another one; see [What to keep](#what-to-keep). Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient's studies when `anonymize()` gives it the same pseudonym, and its dates land on the same offset. A store de-identified by a release before 0.9.7 used an offset that can be computed from an exported file; see [Upgrading from 0.9.x](migration.md).
 * **Config**:
 
     ```yaml
@@ -259,31 +309,24 @@ Sets the range of the per-patient date shift. It is applied to every tag whose r
       max_days: 10
     ```
 
-    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong ([#713](https://github.com/kvnlng/Isocenter/issues/713)).
+    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong.
 
 ### Private Tags
 
-DICOM Private Tags (Odd Group Numbers, e.g., `0009,xxxx`) often contain hidden PHI strings dumped by the machine.
+DICOM Private Tags (Odd Group Numbers, e.g., `0009,xxxx`) often contain hidden PHI strings dumped by the machine. **Default:** `true`.
 
 ```yaml
 remove_private_tags: true
 ```
 
-* `true`: Removes **ALL** private tags. (Recommended for safety).
+* `true`: Removes **ALL** private tags, including private sequences at every depth. (Recommended for safety.)
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
 
-"All" includes private *sequences*, at every depth, and that is newer
-than it sounds: until
-[#167](https://github.com/kvnlng/Isocenter/issues/167) the sweep read an
-instance's attributes only, so a private `SQ` was never a candidate and
-survived into the exported file with its private creator stripped off
-it. A private sequence nested inside another sequence is swept on the
-same rule.
+#### The 65534-byte limit
 
 The flag governs the private tags Isocenter *holds*, which is not every
 private tag in your source files. Whether a private value is held is
-decided by its **size**, not its VR
-([#151](https://github.com/kvnlng/Isocenter/issues/151)):
+decided by its **size**, not its VR:
 
 | Private tag | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
@@ -291,11 +334,16 @@ decided by its **size**, not its VR
 | Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
 | Binary value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
 
+65534 bytes is the largest value an explicit-VR 16-bit length field can
+carry. Because the limit weighs the value rather than the VR it was read
+with, explicit-VR and implicit-VR copies of one study give the same
+answer: under implicit VR pydicom reads every private tag as `UN`, and a
+`UN` blob takes exactly the same size rule.
+
 A kept binary value whose bytes are not a whole number of its VR's words
 -- an `OL` of six bytes, say -- is written `UN` instead, and the
 instance's export draws one `WARNING` row naming the tag, the VR it was
-read with and the one it was written under
-([#676](https://github.com/kvnlng/Isocenter/issues/676)). The VR is
+read with and the one it was written under. The VR is
 visible only in an explicit-VR export -- the compressed export of an
 instance with pixels; an uncompressed export, and any export of an
 instance without pixels, is Implicit VR and carries no VR on the wire.
@@ -303,22 +351,12 @@ A binary value read from an Implicit VR source is written `UN` even when
 pydicom's private dictionary names a VR for its creator (a Siemens CSA
 header reads back as `OB`): the file itself stated none.
 
-The limit is `BINARY_RETENTION_MAX_BYTES` in `isocenter/io_handlers.py`,
-the largest value an explicit-VR 16-bit length field can carry. Because it
-weighs the value rather than the VR it was read with, explicit-VR and
-implicit-VR copies of one study give the same answer: under implicit VR
-pydicom reads every private tag as `UN`, and a `UN` blob takes exactly the
-same size rule. Before 0.9.1 the rule keyed on VR, so the two syntaxes
-disagreed; if you read an older description of a binary-VR private tag
-being "always dropped", it is out of date.
-
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
 same graph the explicit-VR reading of the same file produces -- so the
 PHI scan walks inside it, remediation reaches the values there, and
-`remove_private_tags: true` removes it
-([#167](https://github.com/kvnlng/Isocenter/issues/167)). A recovered
+`remove_private_tags: true` removes it. A recovered
 sequence is exempt from the size rule, and its items then follow the
 ordinary rules, so a large binary child inside it is dropped and reported
 like any other. A candidate that does *not* re-encode exactly keeps its
@@ -330,7 +368,7 @@ private attribute and the entry reads `removed before export` (grading
 `PASS`); under `false` they are retained byte-for-byte, the entry reads
 `retained for export`, and the session grades `REVIEW_REQUIRED`.
 
-!!! warning "Private binary values over 64 KiB cannot be retained"
+!!! warning "Private binary values over 65534 bytes cannot be retained"
 
     A binary value larger than 65534 bytes never enters the object graph,
     so `remove_private_tags: false` has nothing left to keep. Setting
@@ -338,33 +376,16 @@ private attribute and the entry reads `removed before export` (grading
 
     **The loss is announced, not silent.** Each dropped element is logged
     as a warning and written to the audit log as a `DATA_LOSS` entry
-    naming the tag *and its VR*. It reaches you in three places: the
-    session log, section 3.1 (*Data Loss*, under *Data Loss & Unscanned
+    naming the tag *and its VR*. It reaches you in two places: the
+    session log, and section 3.1 (*Data Loss*, under *Data Loss & Unscanned
     Content*) of the compliance report written by
-    `session.generate_report(path)`, and
-    `session.store_backend.get_audit_losses()` if you want the rows
-    directly. A dropped *private* element grades the run
+    `session.generate_report(path)`. A dropped *private* element grades the run
     `REVIEW_REQUIRED`. Read that section before concluding a vendor block
     came through a run intact.
 
-    **This is settled rather than pending**
-    ([#125](https://github.com/kvnlng/Isocenter/issues/125)). If you need
+    This is how 1.x works, not a gap to be closed. If you need
     those bytes, keep your source files -- Isocenter never modifies them,
     so the vendor block is still there to go back to.
-
-**Why large values are not stored.** Holding a megabyte vendor blob in
-`attributes` makes it permanently resident, and memory scaling on 100GB+
-datasets depends on heavy arrays never being resident by default; the
-64 KiB cap bounds what retention can cost per element. Routing large values
-to the sidecar instead means giving private tags an offset/length
-representation the EAV table does not have, plus a lazy loader and an
-export re-merge path. `session.compact()` rewrites the sidecar and rewires
-every offset it knows about, so a class of offset it does not know about is
-silent corruption after the first compaction. (It also holds the sidecar
-gate for the whole rewrite, so any writer of such an offset would have to
-take that gate too, and it refuses outright while a `redact()` or
-`ingest()` pass is open -- see `compact()`'s API entry.) That is design
-work, not a flag.
 
 !!! note "Standard binary elements follow the same size rule"
 
@@ -372,11 +393,10 @@ work, not a flag.
     are `OW`. At or below 65534 bytes they are carried into the export --
     a 256-entry palette LUT is 512 bytes -- and above it they are dropped
     and reported. `PixelData` and `WaveformData` are the only binary
-    elements routed to the sidecar.
+    elements stored in the pixel sidecar, and the size rule does not apply to them.
 
-    Under `basic@2026c` and the floor the whole overlay group is removed
-    ([#556](https://github.com/kvnlng/Isocenter/issues/556)), so the
-    size rule matters only where a policy keeps it (`"60xx,xxxx":
+    Under `basic@2026c` and the floor the whole overlay group is removed,
+    so the size rule matters only where a policy keeps it (`"60xx,xxxx":
     {action: KEEP}`, or `privacy_profile: none`). There, an overlay's
     *descriptors* (`OverlayRows`, `OverlayColumns`, `OverlayBitPosition`
     and friends) are `US`, so they survive, and an export from which a
@@ -386,35 +406,34 @@ work, not a flag.
     by `OverlayBitPosition`), and since Isocenter preserves `PixelData`
     intact, those overlays survive and their descriptors are the only
     pointer to them. When the group rule removes the descriptors, such
-    high-bit overlay bits stay in `PixelData`, as they always did, with
+    high-bit overlay bits stay in `PixelData`, with
     nothing left that points to them.
 
     A dropped *standard* element is listed in the report's Data Loss
-    section but does not change the grade
-    ([#137](https://github.com/kvnlng/Isocenter/issues/137)).
+    section but does not change the grade.
 
 ### PHI Tags
 
-Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`); case is normalised on load, so either case works.
+Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`); case is normalised on load, so either case works. **Default:** no overrides; the profile's rules apply.
 
 **Supported Actions:**
 
 | Action | Logic | Example Config |
 | :--- | :--- | :--- |
-| **`REPLACE`** | Replaces the value with its `value:`. With no `value:` (or `null`), it writes the dummy for the standard tag's VR from the [table above](#privacy-profile): `ANONYMIZED` on a text VR, `19000101` on a DA or DT, `000000` on a TM, `000D` on an AS, zero bytes on a binary VR ([#538](https://github.com/kvnlng/Isocenter/issues/538), [#557](https://github.com/kvnlng/Isocenter/issues/557), [#730](https://github.com/kvnlng/Isocenter/issues/730)); `ANONYMIZED` on a private or unknown tag. Patient ID's is the keyed pseudonym, and Study Date's is the shift. It replaces a value that is there: a zero-length value is left zero-length. A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
-| **`REMOVE`** | Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see the note above). | `action: "REMOVE"` |
+| **`REPLACE`** | Replaces the value with its `value:`. With no `value:` (or `null`), it writes the dummy for the standard tag's VR from the [dummy table](#what-basic2026c-contains): `ANONYMIZED` on a text VR, `19000101` on a DA or DT, `000000` on a TM, `000D` on an AS, zero bytes on a binary VR; on a UI attribute it is [UID replacement](#what-basic2026c-contains); `ANONYMIZED` on a private or unknown tag. Patient ID's is the keyed pseudonym, and Study Date's is the shift. It replaces a value that is there: a zero-length value is left zero-length. A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
+| **`REMOVE`** | Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see [Patient's Name, Patient ID and Study Date](#patients-name-patient-id-and-study-date)). | `action: "REMOVE"` |
 | **`EMPTY`** | Sets the tag value to an empty string (zero-length bytes for a binary VR). | `action: "EMPTY"` |
-| **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined ([#559](https://github.com/kvnlng/Isocenter/issues/559)). | `action: "SHIFT"` |
+| **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined. | `action: "SHIFT"` |
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
 
-A rule mapping's keys are `action`, `name` and `value`; any other key raises `ValueError` naming it (a misspelt `actoin: KEEP` used to leave the action at `REPLACE`). Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
+A rule mapping's keys are `action`, `name` and `value`; any other key raises `ValueError` naming it. Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
 
-* a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (the name `set_phi_tag` saved in 0.9.7; rename it `value:`);
+* a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (a 0.9.x spelling; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
-* `SHIFT` or `JITTER` on a standard tag that is not DA or DT ([#559](https://github.com/kvnlng/Isocenter/issues/559));
-* `REPLACE` on a standard tag whose VR cannot hold what it writes ([#560](https://github.com/kvnlng/Isocenter/issues/560)). With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`); 0.9.8 also refused DA, DT, TM, AS and the binary VRs here, which write a dummy since [#557](https://github.com/kvnlng/Isocenter/issues/557), and UI, where `REPLACE` with no value is UID replacement since [#544](https://github.com/kvnlng/Isocenter/issues/544). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
-* a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form ([#556](https://github.com/kvnlng/Isocenter/issues/556)).
+* `SHIFT` or `JITTER` on a standard tag that is not DA or DT;
+* `REPLACE` on a standard tag whose VR cannot hold what it writes. With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
+* a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form;
 * a `REPLACE` `value:` holding a range: a `-` in a DA or TM, or in a DT anywhere but its UTC offset at the end (`20230515104822-0500` is one DateTime; `20230101-20230201` is a range);
 * a `REPLACE` `value:` whose count of `\`-separated values the standard tag's value multiplicity does not allow: a `\` on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.
 
@@ -422,7 +441,7 @@ Private tags are not checked against a VR: the exporter writes a private value i
 
 #### Repeating groups
 
-PS3.15 Table E.1-1 spells the retired Curve module and the Overlay Plane module as repeating groups, and `phi_tags` accepts those spellings as keys ([#556](https://github.com/kvnlng/Isocenter/issues/556)):
+PS3.15 Table E.1-1 spells the retired Curve module and the Overlay Plane module as repeating groups, and `phi_tags` accepts those spellings as keys:
 
 * `"50xx,xxxx"` and `"60xx,xxxx"`: every element of every group;
 * `"50xx,eeee"` and `"60xx,eeee"` (for example `"60xx,0022"`, Overlay Description): that element, in every group.
@@ -436,7 +455,7 @@ phi_tags:
   "60xx,4000": { action: "REMOVE" }   #    as the table's own two rows do
 ```
 
-An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its `DATA_LOSS` row from ingest (see [Private Tags](#private-tags)). Every element removed has its own `REMEDIATION_REMOVE` row.
+An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its `DATA_LOSS` row from ingest (see [The 65534-byte limit](#the-65534-byte-limit)). Every element removed has its own `REMEDIATION_REMOVE` row.
 
 **Example:**
 
@@ -449,7 +468,7 @@ phi_tags:
 
 ### What an exported file says about itself
 
-`export(format="dicom")` writes up to three elements that say how the file was de-identified ([#554](https://github.com/kvnlng/Isocenter/issues/554)). They state which software ran and which policy it applied. They do not say whether that policy is enough: that is your configuration's call.
+`export(format="dicom")` writes up to three elements that say how the file was de-identified. They state which software ran and which policy it applied. They do not say whether that policy is enough: that is your configuration's call.
 
 **When.** Only on an instance whose patient, study and own PHI status all read `REMEDIATED` or `CLEARED`, recorded under one policy, and that policy is the one in force or one this session ran `audit()` under. That is the condition under which the export writes no "recorded under a policy other than the one in force" notice. The markers are not written on:
 
@@ -460,7 +479,7 @@ phi_tags:
 * a store reopened under another policy and not audited again;
 * a store written before 1.0.
 
-The markers rest on the same status the report's grade reads, so any edit after the pass withholds them until a scan reads it ([#767](https://github.com/kvnlng/Isocenter/issues/767)). That covers an instance's own attributes, and also an owner field assigned directly, such as `patient.patient_name = ...`, a Series field, such as `series.series_instance_uid = ...`, and a value set inside a nested sequence item.
+The markers rest on the same status the report's grade reads, so any edit after the pass withholds them until a scan reads it. That covers an instance's own attributes, and also an owner field assigned directly, such as `patient.patient_name = ...`, a Series field, such as `series.series_instance_uid = ...`, and a value set inside a nested sequence item.
 
 **Attributes, not pixels.** `YES` records that the attribute policy was applied in full and that the file declares no burned-in text. Isocenter does not read the pixels to decide it. PS3.3 defines `YES` as identity removed from the Pixel Data as well, so a file whose Burned In Annotation `(0028,0301)` says `YES` does not get it: the source's own `(0012,0062)`, if any, stays, and the De-identification Method value and the temporal marker are still written. Text drawn into the pixels is `redact()`'s to clear (see [Pixel Redaction](#pixel-redaction-machines)); it writes Burned In Annotation `NO` on the pixels it clears, and that file then says `YES`. A `(0012,0062)` already in the source is kept as the source wrote it, `YES` included, beside a Burned In Annotation `YES`: it is the source's claim, not Isocenter's, and the hold-back governs only the `YES` Isocenter writes. The file is read as it is written, so a rule of yours that removes Burned In Annotation removes the declaration too, and the file then says `YES`: that is your policy's call.
 
@@ -485,7 +504,9 @@ The markers rest on the same status the report's grade reads, so any edit after 
 
 ### Pixel Redaction (Machines)
 
-Automatically scrubs burned-in text (pixels) for specific devices. Isocenter identifies the machine using the `DeviceSerialNumber` (0018,1000) tag.
+Blacks out burned-in text (pixels) on specific devices. Isocenter identifies the machine by the Device Serial Number `(0018,1000)` of each series. **Default:** no rules, so no pixels are redacted.
+
+Worked example: [Redact burned-in text for one machine](tutorials/redact-burned-in-pixels.md).
 
 ```yaml
 machines:
@@ -496,16 +517,18 @@ machines:
 ```
 
 * **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
-* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones ([#580](https://github.com/kvnlng/Isocenter/issues/580)). The export applies them whether or not `redact()` has run.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
   * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
   * End must be strictly greater than start on both axes. `load_config()` accepts a zone whose start equals its end, but it selects no pixels, and `redact()` fails every instance it applies to with `RedactionError`.
 
+To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-new-machines-zone-discovery).
+
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` based on your current session inventory. This is useful for bootstrapping a new configuration file that includes all detected machines.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. It names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file
@@ -534,7 +557,7 @@ print(config.phi_tags) # the full tag policy in force, floor included
 
 ### Methods
 
-These methods change the configuration **in memory**. Since 1.0 they do not write the file `load_config()` read ([#715](https://github.com/kvnlng/Isocenter/issues/715)); the first change after a load or a save prints one line saying the file is unchanged. Call `session.configuration.save()` to write it, or turn on auto-save for the session with `session.configuration.auto_save = True`, after which every change is written as it is made, to whichever file the session loaded last. `save()` raises `ValueError` when there is no file to write (a session that loaded none: set `session.configuration.config_path` first), and it raises the error of a write that fails. With auto-save on, a change whose write fails or is refused is undone, and with no file to write each method raises that `ValueError` before changing anything.
+These methods change the configuration **in memory**. They do not write the file `load_config()` read; the first change after a load or a save prints one line saying the file is unchanged. Call `session.configuration.save()` to write it, or turn on auto-save for the session with `session.configuration.auto_save = True`, after which every change is written as it is made, to whichever file the session loaded last. `save()` raises `ValueError` when there is no file to write (a session that loaded none: set `session.configuration.config_path` first), and it raises the error of a write that fails. With auto-save on, a change whose write fails or is refused is undone, and with no file to write each method raises that `ValueError` before changing anything.
 
 `save()` writes a new file. It names the profile rather than copying it: `privacy_profile: basic@2026c` (or the external file's path, `none`, or no line for the floor), and under `phi_tags` only the rules that differ from the profile's. Then it writes `date_jitter`, `remove_private_tags` and every machine rule. It always writes a `version` line, `"2.0"`. **Comments and layout in the loaded file are not kept.** Keep a hand-edited file under version control, and if its comments matter, edit it by hand rather than through these methods. `save()` refuses a policy that has lost a rule its profile supplies (by deleting from `phi_tags` directly), because the file would restore that rule; give the tag `action: KEEP` instead. An external profile is read again when `save()` runs, so the saved file reloads to what the session holds; if the profile file has gained a rule since the load, `save()` refuses and asks you to load it again. `auto_remediate_config()` changes the rules in memory; call `save()` afterwards to keep them.
 
@@ -559,24 +582,31 @@ session.configuration.save()  # write it to the loaded file
 
 `delete_rule(serial_number)`
 
-Remove a rule by serial number.
+Remove a rule by serial number. Returns `True` if a rule was removed, `False` if none had that serial.
 
 ```python
-session.configuration.delete_rule("US-5555")
+removed = session.configuration.delete_rule("US-5555")
 ```
 
 #### update_rule()
 `update_rule(serial_number, updates)`
 
-Update a rule by serial number.
+Update a rule by serial number. `updates` is a dict of the rule's keys and their new values; the serial number itself cannot be changed. A rule with no such serial raises `ValueError`.
 
-`add_rule()` and `update_rule()` refuse, with `ValueError`, a rule `load_config()` would refuse -- an unknown key such as `redaction_zone`, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file `save()` writes always loads again ([#712](https://github.com/kvnlng/Isocenter/issues/712)).
+```python
+session.configuration.update_rule(
+    "US-5555",
+    {"redaction_zones": [[0, 60, 0, 800]], "comment": "banner is taller on v2 firmware"},
+)
+```
+
+`add_rule()` and `update_rule()` refuse, with `ValueError`, a rule `load_config()` would refuse -- an unknown key such as `redaction_zone`, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file `save()` writes always loads again.
 
 #### set_phi_tag()
 
 `set_phi_tag(tag, action, value=None)`
 
-Update the policy for a specific DICOM tag. `value` is stored as the rule's `value:`, which `REPLACE` writes ([#538](https://github.com/kvnlng/Isocenter/issues/538)); the keyword was `replacement=` until 1.0, and that spelling now raises `TypeError`. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
+Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
 # Force removal of PatientWeight
@@ -588,25 +618,25 @@ session.configuration.set_phi_tag("0008,1030", "EMPTY")
 
 ## What to keep
 
-A de-identification run depends on three things, and the configuration file is only one of them ([#716](https://github.com/kvnlng/Isocenter/issues/716)).
+A de-identification run depends on three things, and the configuration file is only one of them.
 
 | | What it decides | Where it is | If you lose it |
 | :--- | :--- | :--- | :--- |
-| **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads unchanged in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. A release that applies an unchanged file differently raises the schema minor (see [Schema (version 2)](#schema-version-2)). But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ), `remove_private_tags`, and the configuration schema version this isocenter applies the file under ([#762](https://github.com/kvnlng/Isocenter/issues/762)) -- or every export from a reopened store warns, and its report grades `REVIEW_REQUIRED`, until the next `audit()` ([#555](https://github.com/kvnlng/Isocenter/issues/555)). The same happens after an upgrade that raises the minor. |
+| **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads unchanged in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. A release that applies an unchanged file differently raises the schema minor (see [Schema (version 2)](#schema-version-2)). But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ), `remove_private_tags`, and the configuration schema version this isocenter applies the file under -- or an export from the reopened store writes a `WARNING` row. The row stays in the store's audit log, so every later report of the store grades `REVIEW_REQUIRED`; running `audit()` and `anonymize()` under the right configuration stops further warnings but does not remove it. The same happens after an upgrade that raises the minor. After reopening a store, load its configuration before anything else. |
 | **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
 | **`isocenter.key`** (only with [reversible anonymization](quickstart.md#4-backup-identity-optional)) | Whether original identities written into exported files can be recovered. | The file `enable_reversible_anonymization()` names. | Recovery. Identities in files exported under that key cannot be recovered by anyone. |
 
-**The configuration does not reproduce pseudonyms or date shifts.** They belong to the store they were made in. A later batch for the same patients goes into the same store: `ingest()` adds to it, and a patient ingested under the same original Patient ID gets the same pseudonym and the same offset ([#548](https://github.com/kvnlng/Isocenter/issues/548)).
+**The configuration does not reproduce pseudonyms or date shifts.** They belong to the store they were made in. A later batch for the same patients goes into the same store: `ingest()` adds to it, and a patient ingested under the same original Patient ID gets the same pseudonym and the same offset.
 
-**A project secret cannot be moved to another store.** Isocenter has no way to export one or to load one, and 1.0 offers none. Every session that opens a store uses that store's secret; a session on a different store uses a different one.
+**A project secret cannot be moved to another store.** Isocenter has no way to export one or to load one. Every session that opens a store uses that store's secret; a session on a different store uses a different one.
 
 **A copy of the store is the same store, secret included.** The store is both files: copy `my_project.db` and `my_project_pixels.bin` together, and keep them under the same basename, because the session finds its sidecar by the `.db` file's name. A copy of the `.db` alone keeps the pseudonyms and offsets; for the instances ingested before the copy, their pixels are not in the copy, and export fails for them. Isocenter does not detect copies or refuse them. Treat every copy as the project itself: back it up as you back up `isocenter.key`, and never send it, or any copy of it, with an export. Whoever holds the store can recover every shifted date, and its audit log records each offset.
 
-**Replacement UIDs belong to the store as well** ([#544](https://github.com/kvnlng/Isocenter/issues/544)). A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()` and `redact()`, because a new secret would not recognise them and would replace them a second time.
+**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()` and `redact()`, because a new secret would not recognise them and would replace them a second time.
 
 ## Auto-Discovery of Redaction Zones
 
-To help identify pixel redaction zones (e.g., for burned-in PHI), Isocenter provides a discovery tool that analyzes a sample of images from a specific machine to find common text "hotspots".
+To find where a machine draws its burned-in text, `discover_redaction_zones()` runs OCR over a sample of that machine's images and reports where text was found. It needs the `ocr` extra and the Tesseract binary; see [Burned-in text (OCR)](ocr.md#prerequisites).
 
 `discover_redaction_zones()` returns a `DiscoveryResult` holding the raw text
 candidates, not zones. `to_zones()` groups them, and each group's `zone` entry
