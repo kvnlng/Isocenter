@@ -19,7 +19,7 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 - `isocenter.log` in the current directory.
 
 !!! warning "The session store holds PHI"
-    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
+    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report, a manifest or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
 
 !!! tip "Context manager"
     `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.

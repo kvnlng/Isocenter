@@ -103,7 +103,8 @@ that was found, pass `min_occurrence=0` or read `to_dataframe()`. Each zone's
 `zone` is `[y1, y2, x1, x2]`, the form a rule stores, and its `type` is
 `LIKELY_NAME` if any member matched the name pattern (text with a `^`),
 `PROPER_NOUN` if any was a named person or organisation (with the `nlp` extra)
-or holds a capitalised word of two or more letters, and `TEXT` otherwise.
+or holds a word of two or more characters (punctuation removed) that starts
+with a capital letter, such as `T1` or `L5`, and `TEXT` otherwise.
 
 `filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
 `get_density_matrix()`, `visualize_heatmap()`, `analyze_temporal_stability()`
