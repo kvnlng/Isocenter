@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/api/persistence/">
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/tutorials/write-an-exporter/">
       
       
-        <link rel="prev" href="../ocr/">
+        <link rel="prev" href="../redact-burned-in-pixels/">
       
       
-        <link rel="next" href="../../for-institutions/">
+        <link rel="next" href="../../configuration/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Audit trail - Isocenter</title>
+        <title>Write your own export format - Isocenter</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#audit-trail" class="md-skip">
+        <a href="#write-your-own-export-format" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Audit trail
+              Write your own export format
             
           </span>
         </div>
@@ -232,11 +232,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../deidentify-and-read-the-grade/" class="md-tabs__link">
           
   
   
@@ -291,13 +293,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../stability/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../api/stability/" class="md-tabs__link">
           
   
   
@@ -528,28 +528,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -567,7 +570,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -585,7 +588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+      <a href="../deidentify-and-read-the-grade/" class="md-nav__link">
         
   
   
@@ -613,7 +616,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+      <a href="../select-part-of-a-cohort/" class="md-nav__link">
         
   
   
@@ -641,7 +644,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/reversible-anonymization/" class="md-nav__link">
+      <a href="../reversible-anonymization/" class="md-nav__link">
         
   
   
@@ -669,7 +672,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/redact-burned-in-pixels/" class="md-nav__link">
+      <a href="../redact-burned-in-pixels/" class="md-nav__link">
         
   
   
@@ -694,10 +697,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../tutorials/write-an-exporter/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write your own export format
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -713,6 +743,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-write-the-exporter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Write the exporter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-register-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Register it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-de-identify-export-and-read-the-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. De-identify, export, and read the CSV
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-read-the-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Read the report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-save-before-you-close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Save before you close
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1041,31 +1146,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1083,7 +1185,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1101,7 +1203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../stability/" class="md-nav__link">
+      <a href="../../api/stability/" class="md-nav__link">
         
   
   
@@ -1129,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../session/" class="md-nav__link">
+      <a href="../../api/session/" class="md-nav__link">
         
   
   
@@ -1157,7 +1259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../results/" class="md-nav__link">
+      <a href="../../api/results/" class="md-nav__link">
         
   
   
@@ -1185,7 +1287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../api/configuration/" class="md-nav__link">
         
   
   
@@ -1213,7 +1315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../entities/" class="md-nav__link">
+      <a href="../../api/entities/" class="md-nav__link">
         
   
   
@@ -1241,7 +1343,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exporters/" class="md-nav__link">
+      <a href="../../api/exporters/" class="md-nav__link">
         
   
   
@@ -1269,7 +1371,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ocr/" class="md-nav__link">
+      <a href="../../api/ocr/" class="md-nav__link">
         
   
   
@@ -1294,37 +1396,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Audit trail
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/persistence/" class="md-nav__link">
         
   
   
@@ -1340,120 +1415,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SqliteStore
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SqliteStore">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_summary
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_errors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_errors
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_losses" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_losses
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_declines" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_declines
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_scan_gaps
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_drops" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_drops
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_flattened_instances" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_flattened_instances
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1694,96 +1655,57 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore" class="md-nav__link">
+  <a href="#1-write-the-exporter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SqliteStore
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SqliteStore">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_summary
+        1. Write the exporter
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_errors" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#2-register-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_errors
+        2. Register it
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_losses" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#3-de-identify-export-and-read-the-csv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_losses
+        3. De-identify, export, and read the CSV
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_declines" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#4-read-the-report" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_declines
+        4. Read the report
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#5-save-before-you-close" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_scan_gaps
+        5. Save before you close
       
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_drops" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_drops
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_flattened_instances" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_flattened_instances
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1830,10 +1752,10 @@
     
     
       <li class="md-path__item">
-        <a href="../stability/" class="md-path__link">
+        <a href="../deidentify-and-read-the-grade/" class="md-path__link">
           
   <span class="md-ellipsis">
-    API Reference
+    Tutorials
   </span>
 
         </a>
@@ -1855,512 +1777,171 @@
   
 
 
-<h1 id="audit-trail">Audit trail</h1>
-<p><code>session.store_backend</code> is the session's SQLite store. The methods below
-read its audit rows and its flattened instance table. They are
-<em>documented but internal</em> (see <a href="../stability/">API stability</a>): the words
-in the rows are frozen, and these methods that return them may change in
-a 1.x release. What each <code>action_type</code> means is on
-<a href="../../analytics/">Analytics &amp; Reporting</a>.</p>
+<h1 id="write-your-own-export-format">Write your own export format</h1>
+<!-- tutorial: inputs=CT_small.dcm -->
 
-
-<div class="doc doc-object doc-class">
-
-
-
-<h2 id="isocenter.persistence.SqliteStore" class="doc doc-heading">
-            <code>SqliteStore</code>
-
-
-</h2>
-
-
-    <div class="doc doc-contents first">
-
-
-
-        <p>The session's SQLite store and pixel sidecar: <code>session.store_backend</code>.</p>
-<p>It holds the Patient -&gt; Study -&gt; Series -&gt; Instance hierarchy, the
-append-only <code>&lt;name&gt;_pixels.bin</code> sidecar, and the audit log, which a
-background thread writes.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_summary" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_summary</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Returns an aggregated summary of actions from the audit log.</p>
-<p>Reads through the <code>flush_audit_queue</code> barrier, so every row enqueued
-before the call is counted.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="int">int</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>e.g., {'REMEDIATION_REPLACE': 1200, 'EXPORT': 1}</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
+<p>Isocenter writes DICOM and WFDB. If a recipient needs something else, you
+can register an <strong>exporter</strong> of your own and select it with
+<code>session.export(folder, format=...)</code>. This tutorial writes the smallest
+useful one, a CSV listing each exported Patient ID, runs it over
+pydicom's bundled <code>CT_small.dcm</code>, and reads what the report says about
+it.</p>
+<div class="admonition warning">
+<p class="admonition-title">Provisional until 1.1</p>
+<p>The exporter registry (<code>Exporter</code>, <code>register()</code>, <code>get_exporter()</code>,
+<code>available_formats()</code>) is documented but internal, and 1.1 may
+replace it rather than extend it. Pin <code>isocenter&gt;=1.0,&lt;1.1</code> in a
+plugin written against 1.0. The terms are on
+<a href="../../api/exporters/">Exporter registry</a> and
+<a href="../../api/stability/#the-exporter-registry-provisional-until-11">API stability</a>.</p>
 </div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_errors" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_errors</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>ERROR</code> and <code>WARNING</code> audit row, oldest first.</p>
-<p>Flushes the audit queue first, so every row enqueued before the
-call is included.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>(timestamp, action_type, details)</code> per row; empty
-if the query fails.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_losses" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_losses</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Retrieves every <code>DATA_LOSS</code> entry, with the scope it was
-recorded under.</p>
-<p>Separate from <code>get_audit_errors</code> because the scopes grade differently:
-a loss scoped <code>PRIVATE</code> or <code>SIGNAL</code> takes <code>validation_status</code> to
-<code>REVIEW_REQUIRED</code>; one scoped <code>STANDARD</code> leaves it at <code>PASS</code>. Every
-loss is reported under "3.1 Data Loss", never under "Exceptions &amp;
-Errors".</p>
-<p>A row whose <code>loss_scope</code> is NULL predates the column and cannot be
-graded; it is reported and left at <code>PASS</code>.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details, loss_scope)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_declines" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_declines</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>REMEDIATION_DECLINED</code> entry: a value the sweep left behind.</p>
-<p>A scan gap says an element could not be <em>read</em>; this says an element was
-read, a remediation was proposed for it, and the remediation did not
-run, so the value is still in the graph and will reach the exported
-file. The reason is in <code>details</code>.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_scan_gaps</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>SCAN_GAP</code> entry: an element the PHI scan could not open.</p>
-<p>Separate from <code>get_audit_losses</code> because it is a different claim. A loss
-says an element was dropped at ingest and cannot reach the output; this
-says an element was kept whole and the scan could not read what is
-inside it.</p>
-<p>The row states ingest-time knowledge only. Whether the element reaches
-the exported file is decided later, by <code>remove_private_tags</code>, and
-<code>generate_report</code> resolves that against the object graph.</p>
-<p>No <code>loss_scope</code> column: only an odd-group tag reaches the parse gate,
-so these are private by construction. <code>element_tag</code> is selected
-instead, and is NULL for a row written before that column existed.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details, element_tag)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_drops" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_drops</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>How many audit rows were dropped by a failed batch write.</p>
-<p>The rows themselves are unrecoverable: a failed batch write loses them. A
-non-zero count means the audit table under-states what happened, and
-<code>generate_report</code> grades it like an exception.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted if its write fails.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Rows dropped over this store object's lifetime.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_flattened_instances" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_flattened_instances</span><span class="p">(</span><span class="n">patient_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">instance_uids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">page_size</span><span class="o">=</span><span class="n">_FLATTENED_PAGE_SIZE</span><span class="p">)</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>An iterator of one flat dictionary per stored instance.</p>
-<p>For streaming exports or analysis without loading the entire graph
-into RAM. The rows come back one page at a time, and <strong>no database
-handle is held between pages</strong>, so an iterator left part-consumed
-holds no lock and no read snapshot. Two consequences:</p>
+<div class="admonition tip">
+<p class="admonition-title">Run it yourself</p>
+<p>Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.</p>
 <ul>
-<li><strong>Iteration is not one snapshot.</strong> Each page is its own query, so
-  writes that land between pages are visible and rows deleted between
-  pages are not returned.</li>
-<li><strong>Order is by <code>instances.id</code>.</strong></li>
+<li><strong>Start in a new, empty folder.</strong> Each tutorial creates its own
+  <code>tutorial.db</code> and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input file from pydicom into <code>input/</code>.</li>
+<li>Paste the blocks into a Python prompt or a notebook. In a <code>.py</code>
+  script, put them under <code>if __name__ == "__main__":</code>
+  (<a href="../../quickstart/#1-initialize-a-session">why</a>).</li>
+<li>In a block with <code>&gt;&gt;&gt;</code>, type what follows each <code>&gt;&gt;&gt;</code>; the lines
+  under it are what Python prints. A <code>...</code> inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.</li>
+<li>The session also prints progress bars, status lines and <code>WARNING</code>
+  lines as it works. They are not shown here.
+  <code>ISOCENTER_SHOW_PROGRESS=0</code> turns the bars off.</li>
 </ul>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>patient_ids</code>
-            </td>
-            <td>
-                  <code><span title="Iterable">Iterable</span>[<span title="str">str</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Restrict the rows to
-these Patient IDs, read as every <code>patient_ids</code> in the
-package is read. <code>None</code> means every patient in the store. An
-empty iterable matches nobody: it is a filter that selected
-nothing, not an absent filter. An iterator is read once, at the
-call. An ID no patient holds is <strong>not counted</strong> here, unlike the
-<code>Session</code> methods: the pages are separate reads, so there is no
-single moment at which an ID is or is not held.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>instance_uids</code>
-            </td>
-            <td>
-                  <code><span title="Iterable">Iterable</span>[<span title="str">str</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Restrict the rows to
-these SOP Instance UIDs. Same rules: <code>None</code> is no
-filter, an empty iterable matches nobody. Both filters
-together intersect.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>page_size</code>
-            </td>
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Rows per page, defaulting to 500.
-Trades resident memory against the number of queries.
-Must be an <code>int</code> &gt;= 1.</p>
-              </div>
-            </td>
-            <td>
-                  <code><span title="isocenter.persistence.SqliteStore._FLATTENED_PAGE_SIZE">_FLATTENED_PAGE_SIZE</span></code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="Iterator">Iterator</span>[<span title="dict">dict</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>One dict per instance, keyed <code>patient_id</code>,
-<code>patient_name</code>, <code>study_instance_uid</code>, <code>study_date</code>,
-<code>series_instance_uid</code>, <code>modality</code>, <code>series_number</code>,
-<code>manufacturer</code>, <code>model_name</code>, <code>device_serial_number</code>,
-<code>sop_instance_uid</code>, <code>sop_class_uid</code>, <code>instance_number</code>,
-<code>file_path</code>, <code>pixel_offset</code>, <code>pixel_length</code>, <code>compress_alg</code> and
-<code>attributes_json</code>, with the values as stored.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="ValueError">ValueError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>If <code>page_size</code> is not a whole number &gt;= 1, at the call,
-not on the first <code>next()</code>.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="TypeError">TypeError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>If either filter is a bare <code>str</code>, bytes-like, not
-iterable, or holds an element that is not a <code>str</code> (named
-by position and type, never by value), at the call.
-<code>page_size</code> is checked first.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
 </div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pydicom.data</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">Path</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">shutil</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">pydicom</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">get_testdata_file</span><span class="p">(</span><span class="s2">"CT_small.dcm"</span><span class="p">),</span> <span class="s2">"input"</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="1-write-the-exporter">1. Write the exporter</h2>
+<p>An exporter is a class with an <code>export(self, session, folder, **options)</code>
+method. It reads the session's graph, writes files under <code>folder</code>, and
+returns what it wrote:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">exporters</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter.entities</span><span class="w"> </span><span class="kn">import</span> <span class="n">exported_patient_id</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">PatientIdCsv</span><span class="p">(</span><span class="n">exporters</span><span class="o">.</span><span class="n">Exporter</span><span class="p">):</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="sd">"""Write one CSV row per patient: the Patient ID the export carries."""</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">export</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session</span><span class="p">,</span> <span class="n">folder</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">folder</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">folder</span><span class="p">,</span> <span class="s2">"patients.csv"</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">out</span><span class="p">:</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">writer</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">([</span><span class="s2">"PatientID"</span><span class="p">])</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>            <span class="k">for</span> <span class="n">patient</span> <span class="ow">in</span> <span class="n">session</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">:</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>                <span class="n">writer</span><span class="o">.</span><span class="n">writerow</span><span class="p">([</span><span class="n">exported_patient_id</span><span class="p">(</span><span class="n">patient</span><span class="p">)])</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>        <span class="k">return</span> <span class="p">[</span><span class="n">path</span><span class="p">]</span>
+</code></pre></div>
+<p>Three choices in it follow the
+<a href="../../api/exporters/#rules-for-an-exporter-author">rules for an exporter author</a>:</p>
+<ul>
+<li><strong>It reads and never writes the graph.</strong> Export is a read.</li>
+<li><strong>It writes <code>exported_patient_id(patient)</code>, not <code>patient.patient_id</code>.</strong>
+  A patient whose files carry no Patient ID is held under a key that must
+  never reach an output, and <code>exported_patient_id()</code> returns the value
+  the patient's files should carry: its ID, or <code>''</code> for that key.</li>
+<li><strong>It returns the paths it wrote.</strong> A caller can then tell an export
+  that wrote nothing from one that worked.</li>
+</ul>
+<p><code>export()</code> does not create <code>folder</code> before calling an exporter, so the
+exporter does.</p>
+<h2 id="2-register-it">2. Register it</h2>
+<p><code>register(name, cls)</code> makes the class selectable by name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">exporters</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="s2">"patient-ids"</span><span class="p">,</span> <span class="n">PatientIdCsv</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">exporters</span><span class="o">.</span><span class="n">available_formats</span><span class="p">()</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="p">[</span><span class="s1">'dicom'</span><span class="p">,</span> <span class="s1">'patient-ids'</span><span class="p">,</span> <span class="s1">'wfdb'</span><span class="p">]</span>
+</code></pre></div>
+<p>Registering under a name that is already taken replaces what was there,
+the built-in <code>dicom</code> and <code>wfdb</code> included: <code>format="dicom"</code> would then run
+your class, without any of the built-in format's gates.</p>
+<h2 id="3-de-identify-export-and-read-the-csv">3. De-identify, export, and read the CSV</h2>
+<p>A plugin runs on the graph as it stands, so de-identify first. No
+configuration is loaded here, so <code>anonymize()</code> applies the session's
+default policy:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"tutorial.db"</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">written</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"patient-ids"</span><span class="p">)</span>
+</code></pre></div>
+<p><code>export()</code> returns what the exporter returned:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">written</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="p">[</span><span class="s1">'export/patients.csv'</span><span class="p">]</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">"export/patients.csv"</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">rows</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="o">...</span>     <span class="n">rows</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">[</span><span class="s1">'PatientID'</span><span class="p">,</span> <span class="s1">'ANON_...'</span><span class="p">]</span>
+</code></pre></div>
+<p>The CSV holds the patient's pseudonym, not the source ID <code>1CT1</code>.</p>
+<h2 id="4-read-the-report">4. Read the report</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">)</span>
+</code></pre></div>
+<p>The helpers below print the grade line and the rows of section 4,
+<strong>Exceptions &amp; Errors</strong>, as the
+<a href="../select-part-of-a-cohort/">cohort-selection tutorial</a> does:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">grade_line</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">report_file</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">report_file</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>                    <span class="k">if</span> <span class="s2">"Validation Status"</span> <span class="ow">in</span> <span class="n">line</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">exceptions</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">report_file</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="n">text</span> <span class="o">=</span> <span class="n">report_file</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">section</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"## 4. Exceptions &amp; Errors"</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">## "</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">rows</span> <span class="o">=</span> <span class="p">[</span><span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">" | "</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s2">" |"</span><span class="p">)</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>            <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span> <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"| 20"</span><span class="p">)]</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="nb">print</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">),</span> <span class="s2">"row(s)"</span><span class="p">)</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">print</span><span class="p">(</span><span class="n">grade_line</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">))</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="o">|</span> <span class="o">**</span><span class="n">Validation</span> <span class="n">Status</span><span class="o">**</span> <span class="o">|</span> <span class="o">**</span><span class="n">REVIEW_REQUIRED</span><span class="o">**</span> <span class="o">|</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">exceptions</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="mi">1</span> <span class="n">row</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">Export</span> <span class="n">to</span> <span class="n">export</span> <span class="ow">in</span> <span class="nb">format</span> <span class="s1">'patient-ids'</span> <span class="n">ran</span> <span class="o">...</span><span class="n">PatientIdCsv</span><span class="p">,</span> <span class="n">an</span> <span class="n">exporter</span> <span class="n">Isocenter</span> <span class="n">does</span> <span class="ow">not</span> <span class="n">ship</span><span class="p">:</span> <span class="n">its</span> <span class="n">output</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">attested</span> <span class="n">by</span> <span class="n">Isocenter</span><span class="o">.</span> <span class="kc">None</span> <span class="n">of</span> <span class="n">the</span> <span class="n">export</span> <span class="n">gates</span> <span class="n">ran</span> <span class="k">for</span> <span class="n">it</span> <span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">so</span> <span class="n">this</span> <span class="n">report</span> <span class="n">does</span> <span class="ow">not</span> <span class="n">know</span> <span class="n">what</span> <span class="n">it</span> <span class="n">wrote</span> <span class="p">(</span><span class="c1">#527).</span>
+</code></pre></div>
+<p>This is by design, and it is the same for every exporter Isocenter does
+not ship, however well it behaves. The export gates (the burned-in
+re-audit, the redaction zones, the de-identification markers and the
+rest) live inside the two built-in formats, so none of them ran for
+<code>PatientIdCsv</code>. Before calling it, <code>export()</code> wrote one <code>WARNING</code> row
+saying so, and a <code>WARNING</code> row grades the report <code>REVIEW_REQUIRED</code>
+(condition 2 of
+<a href="../../analytics/#how-the-grade-is-decided">How the grade is decided</a>).
+In 1.0, no third-party export grades <code>PASS</code>.
+<a href="../../api/exporters/#what-a-third-party-exporter-receives">What a third-party exporter receives</a>
+lists every gate it runs without.</p>
+<p>The report also carries the note that it was generated before any
+export, because only the built-in formats record an <code>EXPORT</code> row. Ignore
+its advice to regenerate the report after exporting: with an exporter of
+your own and no built-in export, every report of this store carries this
+note.</p>
+<h2 id="5-save-before-you-close">5. Save before you close</h2>
+<p>The DICOM format saves the session before it writes. A plugin's
+export does not, so <code>anonymize()</code>'s changes are still only in memory.
+Save them, then close:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">sync</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p>Without the <code>save()</code>, <code>close()</code> warns that instances hold unsaved
+changes, and the store keeps the source values.</p>
 
 
 
@@ -2398,7 +1979,7 @@ by position and type, never by value), at the call.
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../ocr/" class="md-footer__link md-footer__link--prev" aria-label="Previous: OCR API">
+          <a href="../redact-burned-in-pixels/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Redact burned-in text for one machine">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2408,20 +1989,20 @@ by position and type, never by value), at the call.
                 Previous
               </span>
               <div class="md-ellipsis">
-                OCR API
+                Redact burned-in text for one machine
               </div>
             </div>
           </a>
         
         
           
-          <a href="../../for-institutions/" class="md-footer__link md-footer__link--next" aria-label="Next: For institutions">
+          <a href="../../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuration">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                For institutions
+                Configuration
               </div>
             </div>
             <div class="md-footer__button md-icon">

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/api/persistence/">
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/tutorials/redact-burned-in-pixels/">
       
       
-        <link rel="prev" href="../ocr/">
+        <link rel="prev" href="../reversible-anonymization/">
       
       
-        <link rel="next" href="../../for-institutions/">
+        <link rel="next" href="../write-an-exporter/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Audit trail - Isocenter</title>
+        <title>Redact burned-in text for one machine - Isocenter</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#audit-trail" class="md-skip">
+        <a href="#redact-burned-in-text-for-one-machine" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Audit trail
+              Redact burned-in text for one machine
             
           </span>
         </div>
@@ -232,11 +232,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../deidentify-and-read-the-grade/" class="md-tabs__link">
           
   
   
@@ -291,13 +293,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../stability/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../api/stability/" class="md-tabs__link">
           
   
   
@@ -528,28 +528,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -567,7 +570,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -585,7 +588,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+      <a href="../deidentify-and-read-the-grade/" class="md-nav__link">
         
   
   
@@ -613,7 +616,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+      <a href="../select-part-of-a-cohort/" class="md-nav__link">
         
   
   
@@ -641,7 +644,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/reversible-anonymization/" class="md-nav__link">
+      <a href="../reversible-anonymization/" class="md-nav__link">
         
   
   
@@ -666,10 +669,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../tutorials/redact-burned-in-pixels/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redact burned-in text for one machine
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -685,6 +715,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-find-the-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Find the machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-write-the-zone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Write the zone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-de-identify-then-redact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. De-identify, then redact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-export-and-read-the-pixels-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Export and read the pixels back
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-read-the-grade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Read the grade
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-rule-matches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a rule matches
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -697,7 +813,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/write-an-exporter/" class="md-nav__link">
+      <a href="../write-an-exporter/" class="md-nav__link">
         
   
   
@@ -1041,31 +1157,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1083,7 +1196,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1101,7 +1214,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../stability/" class="md-nav__link">
+      <a href="../../api/stability/" class="md-nav__link">
         
   
   
@@ -1129,7 +1242,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../session/" class="md-nav__link">
+      <a href="../../api/session/" class="md-nav__link">
         
   
   
@@ -1157,7 +1270,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../results/" class="md-nav__link">
+      <a href="../../api/results/" class="md-nav__link">
         
   
   
@@ -1185,7 +1298,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../api/configuration/" class="md-nav__link">
         
   
   
@@ -1213,7 +1326,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../entities/" class="md-nav__link">
+      <a href="../../api/entities/" class="md-nav__link">
         
   
   
@@ -1241,7 +1354,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../exporters/" class="md-nav__link">
+      <a href="../../api/exporters/" class="md-nav__link">
         
   
   
@@ -1269,7 +1382,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ocr/" class="md-nav__link">
+      <a href="../../api/ocr/" class="md-nav__link">
         
   
   
@@ -1294,37 +1407,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Audit trail
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../api/persistence/" class="md-nav__link">
         
   
   
@@ -1340,120 +1426,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SqliteStore
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SqliteStore">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_summary
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_errors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_errors
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_losses" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_losses
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_declines" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_declines
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_scan_gaps
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_drops" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_drops
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_flattened_instances" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_flattened_instances
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1694,96 +1666,68 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore" class="md-nav__link">
+  <a href="#1-find-the-machine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SqliteStore
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SqliteStore">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_audit_summary
+        1. Find the machine
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_errors" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#2-write-the-zone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_errors
+        2. Write the zone
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_losses" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#3-de-identify-then-redact" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_losses
+        3. De-identify, then redact
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_declines" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#4-export-and-read-the-pixels-back" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_declines
+        4. Export and read the pixels back
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#5-read-the-grade" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_scan_gaps
+        5. Read the grade
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_audit_drops" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#what-a-rule-matches" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_audit_drops
+        What a rule matches
       
     </span>
   </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.persistence.SqliteStore.get_flattened_instances" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_flattened_instances
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1830,10 +1774,10 @@
     
     
       <li class="md-path__item">
-        <a href="../stability/" class="md-path__link">
+        <a href="../deidentify-and-read-the-grade/" class="md-path__link">
           
   <span class="md-ellipsis">
-    API Reference
+    Tutorials
   </span>
 
         </a>
@@ -1855,512 +1799,176 @@
   
 
 
-<h1 id="audit-trail">Audit trail</h1>
-<p><code>session.store_backend</code> is the session's SQLite store. The methods below
-read its audit rows and its flattened instance table. They are
-<em>documented but internal</em> (see <a href="../stability/">API stability</a>): the words
-in the rows are frozen, and these methods that return them may change in
-a 1.x release. What each <code>action_type</code> means is on
-<a href="../../analytics/">Analytics &amp; Reporting</a>.</p>
-
-
-<div class="doc doc-object doc-class">
-
-
-
-<h2 id="isocenter.persistence.SqliteStore" class="doc doc-heading">
-            <code>SqliteStore</code>
-
-
-</h2>
-
-
-    <div class="doc doc-contents first">
-
-
-
-        <p>The session's SQLite store and pixel sidecar: <code>session.store_backend</code>.</p>
-<p>It holds the Patient -&gt; Study -&gt; Series -&gt; Instance hierarchy, the
-append-only <code>&lt;name&gt;_pixels.bin</code> sidecar, and the audit log, which a
-background thread writes.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_summary" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_summary</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Returns an aggregated summary of actions from the audit log.</p>
-<p>Reads through the <code>flush_audit_queue</code> barrier, so every row enqueued
-before the call is counted.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="int">int</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>e.g., {'REMEDIATION_REPLACE': 1200, 'EXPORT': 1}</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_errors" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_errors</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>ERROR</code> and <code>WARNING</code> audit row, oldest first.</p>
-<p>Flushes the audit queue first, so every row enqueued before the
-call is included.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>(timestamp, action_type, details)</code> per row; empty
-if the query fails.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_losses" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_losses</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Retrieves every <code>DATA_LOSS</code> entry, with the scope it was
-recorded under.</p>
-<p>Separate from <code>get_audit_errors</code> because the scopes grade differently:
-a loss scoped <code>PRIVATE</code> or <code>SIGNAL</code> takes <code>validation_status</code> to
-<code>REVIEW_REQUIRED</code>; one scoped <code>STANDARD</code> leaves it at <code>PASS</code>. Every
-loss is reported under "3.1 Data Loss", never under "Exceptions &amp;
-Errors".</p>
-<p>A row whose <code>loss_scope</code> is NULL predates the column and cannot be
-graded; it is reported and left at <code>PASS</code>.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details, loss_scope)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_declines" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_declines</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>REMEDIATION_DECLINED</code> entry: a value the sweep left behind.</p>
-<p>A scan gap says an element could not be <em>read</em>; this says an element was
-read, a remediation was proposed for it, and the remediation did not
-run, so the value is still in the graph and will reach the exported
-file. The reason is in <code>details</code>.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_scan_gaps" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_scan_gaps</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Every <code>SCAN_GAP</code> entry: an element the PHI scan could not open.</p>
-<p>Separate from <code>get_audit_losses</code> because it is a different claim. A loss
-says an element was dropped at ingest and cannot reach the output; this
-says an element was kept whole and the scan could not read what is
-inside it.</p>
-<p>The row states ingest-time knowledge only. Whether the element reaches
-the exported file is decided later, by <code>remove_private_tags</code>, and
-<code>generate_report</code> resolves that against the object graph.</p>
-<p>No <code>loss_scope</code> column: only an odd-group tag reaches the parse gate,
-so these are private by construction. <code>element_tag</code> is selected
-instead, and is NULL for a row written before that column existed.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(timestamp, entity_uid, details, element_tag)</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_audit_drops" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_audit_drops</span><span class="p">()</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>How many audit rows were dropped by a failed batch write.</p>
-<p>The rows themselves are unrecoverable: a failed batch write loses them. A
-non-zero count means the audit table under-states what happened, and
-<code>generate_report</code> grades it like an exception.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted if its write fails.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Rows dropped over this store object's lifetime.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.persistence.SqliteStore.get_flattened_instances" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_flattened_instances</span><span class="p">(</span><span class="n">patient_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">instance_uids</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">page_size</span><span class="o">=</span><span class="n">_FLATTENED_PAGE_SIZE</span><span class="p">)</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>An iterator of one flat dictionary per stored instance.</p>
-<p>For streaming exports or analysis without loading the entire graph
-into RAM. The rows come back one page at a time, and <strong>no database
-handle is held between pages</strong>, so an iterator left part-consumed
-holds no lock and no read snapshot. Two consequences:</p>
+<h1 id="redact-burned-in-text-for-one-machine">Redact burned-in text for one machine</h1>
+<!-- tutorial: inputs=MR_small.dcm -->
+
+<p>Some scanners draw the patient's name, an accession number or a date
+into the image itself. That text is pixels, not an attribute, so no
+<code>phi_tags</code> rule reaches it. What reaches it is a <strong>redaction zone</strong>: a
+rectangle that <code>redact()</code> sets to zero in every image from a given
+machine. This tutorial writes one zone for the machine that made
+pydicom's bundled <code>MR_small.dcm</code>, redacts, exports, and reads the
+exported pixels back to show which ones changed.</p>
+<div class="admonition tip">
+<p class="admonition-title">Run it yourself</p>
+<p>Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.</p>
 <ul>
-<li><strong>Iteration is not one snapshot.</strong> Each page is its own query, so
-  writes that land between pages are visible and rows deleted between
-  pages are not returned.</li>
-<li><strong>Order is by <code>instances.id</code>.</strong></li>
+<li><strong>Start in a new, empty folder.</strong> Each tutorial creates its own
+  <code>tutorial.db</code> and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input file from pydicom into <code>input/</code>.</li>
+<li>Paste the blocks into a Python prompt or a notebook. In a <code>.py</code>
+  script, put them under <code>if __name__ == "__main__":</code>
+  (<a href="../../quickstart/#1-initialize-a-session">why</a>).</li>
+<li>In a block with <code>&gt;&gt;&gt;</code>, type what follows each <code>&gt;&gt;&gt;</code>; the lines
+  under it are what Python prints. A <code>...</code> inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.</li>
+<li>The session also prints progress bars, status lines and <code>WARNING</code>
+  lines as it works. They are not shown here.
+  <code>ISOCENTER_SHOW_PROGRESS=0</code> turns the bars off.</li>
 </ul>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>patient_ids</code>
-            </td>
-            <td>
-                  <code><span title="Iterable">Iterable</span>[<span title="str">str</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Restrict the rows to
-these Patient IDs, read as every <code>patient_ids</code> in the
-package is read. <code>None</code> means every patient in the store. An
-empty iterable matches nobody: it is a filter that selected
-nothing, not an absent filter. An iterator is read once, at the
-call. An ID no patient holds is <strong>not counted</strong> here, unlike the
-<code>Session</code> methods: the pages are separate reads, so there is no
-single moment at which an ID is or is not held.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>instance_uids</code>
-            </td>
-            <td>
-                  <code><span title="Iterable">Iterable</span>[<span title="str">str</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Restrict the rows to
-these SOP Instance UIDs. Same rules: <code>None</code> is no
-filter, an empty iterable matches nobody. Both filters
-together intersect.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>page_size</code>
-            </td>
-            <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Rows per page, defaulting to 500.
-Trades resident memory against the number of queries.
-Must be an <code>int</code> &gt;= 1.</p>
-              </div>
-            </td>
-            <td>
-                  <code><span title="isocenter.persistence.SqliteStore._FLATTENED_PAGE_SIZE">_FLATTENED_PAGE_SIZE</span></code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="Iterator">Iterator</span>[<span title="dict">dict</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>One dict per instance, keyed <code>patient_id</code>,
-<code>patient_name</code>, <code>study_instance_uid</code>, <code>study_date</code>,
-<code>series_instance_uid</code>, <code>modality</code>, <code>series_number</code>,
-<code>manufacturer</code>, <code>model_name</code>, <code>device_serial_number</code>,
-<code>sop_instance_uid</code>, <code>sop_class_uid</code>, <code>instance_number</code>,
-<code>file_path</code>, <code>pixel_offset</code>, <code>pixel_length</code>, <code>compress_alg</code> and
-<code>attributes_json</code>, with the values as stored.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="ValueError">ValueError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>If <code>page_size</code> is not a whole number &gt;= 1, at the call,
-not on the first <code>next()</code>.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="TypeError">TypeError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>If either filter is a bare <code>str</code>, bytes-like, not
-iterable, or holds an element that is not a <code>str</code> (named
-by position and type, never by value), at the call.
-<code>page_size</code> is checked first.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
 </div>
-
-
-
-  </div>
-
-    </div>
-
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pydicom.data</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">Path</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">shutil</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">pydicom</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">get_testdata_file</span><span class="p">(</span><span class="s2">"MR_small.dcm"</span><span class="p">),</span> <span class="s2">"input"</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="1-find-the-machine">1. Find the machine</h2>
+<p>A zone belongs to a machine, and Isocenter tells machines apart by their
+Device Serial Number <code>(0018,1000)</code>. Ingest the file and read the serial
+from the cohort report:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"tutorial.db"</span><span class="p">)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">cohort</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">()</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">cohort</span><span class="p">[[</span><span class="s2">"PatientID"</span><span class="p">,</span> <span class="s2">"Modality"</span><span class="p">,</span> <span class="s2">"DeviceSerial"</span><span class="p">]]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  <span class="n">PatientID</span> <span class="n">Modality</span> <span class="n">DeviceSerial</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="mi">0</span>      <span class="mi">4</span><span class="n">MR1</span>       <span class="n">MR</span>     <span class="o">-</span><span class="mi">0000200</span>
+</code></pre></div>
+<p>A series with no Device Serial Number matches no machine rule, so a zone
+never reaches it. Section 5 says what that means for the grade.</p>
+<h2 id="2-write-the-zone">2. Write the zone</h2>
+<p>The image is 64 by 64 pixels. Suppose this machine prints its text in
+the top-left corner: the first ten rows, the left half of the width. A
+zone is <code>[row_start, row_end, col_start,
+col_end]</code>, counted from 0, with each end one past the last row or column
+it covers:</p>
+<!-- tutorial: file=config.yaml -->
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">"basic@2026c"</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"-0000200"</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">32</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Quote the serial number. Unquoted, YAML reads <code>-0000200</code> as the octal
+number -128, and <code>load_config()</code> refuses it
+(<a href="../../configuration/#schema-version-2">Schema</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="3-de-identify-then-redact">3. De-identify, then redact</h2>
+<p><code>anonymize()</code> handles the attributes under the Basic Profile, and
+<code>redact()</code> handles the pixels. They are separate passes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">redacted</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">redact</span><span class="p">()</span>
+</code></pre></div>
+<p><code>redact()</code> returns how many images it changed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">redacted</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="mi">1</span>
+</code></pre></div>
+<p>It changes the pixels in the session's store, never the file in
+<code>input/</code>. The Basic Profile replaced the Device Serial Number in the
+attributes, and the rule still matched: a rule is matched on the serial
+the series was ingested with.</p>
+<h2 id="4-export-and-read-the-pixels-back">4. Export and read the pixels back</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export"</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">)</span>
+</code></pre></div>
+<p><code>use_compression=False</code> writes the pixels uncompressed, so this page
+does not depend on the JPEG 2000 codec to read them back. Open the
+exported file and the source file side by side:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pydicom</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">exported_path</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"export"</span><span class="p">)</span><span class="o">.</span><span class="n">rglob</span><span class="p">(</span><span class="s2">"*.dcm"</span><span class="p">))</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">exported</span> <span class="o">=</span> <span class="n">pydicom</span><span class="o">.</span><span class="n">dcmread</span><span class="p">(</span><span class="n">exported_path</span><span class="p">)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">source</span> <span class="o">=</span> <span class="n">pydicom</span><span class="o">.</span><span class="n">dcmread</span><span class="p">(</span><span class="s2">"input/MR_small.dcm"</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">pixels</span> <span class="o">=</span> <span class="n">exported</span><span class="o">.</span><span class="n">pixel_array</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">original</span> <span class="o">=</span> <span class="n">source</span><span class="o">.</span><span class="n">pixel_array</span>
+</code></pre></div>
+<p>Rows 0 to 9, columns 0 to 31, are zero. Before redaction, no pixel in
+them was:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">original</span><span class="p">[:</span><span class="mi">10</span><span class="p">,</span> <span class="p">:</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">())</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="mi">239</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">pixels</span><span class="p">[:</span><span class="mi">10</span><span class="p">,</span> <span class="p">:</span><span class="mi">32</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="mi">0</span>
+</code></pre></div>
+<p>The zone's bounds are rows first, then columns. In the same ten rows,
+the columns past the zone are exactly what the source held, and so is
+every row below it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">bool</span><span class="p">((</span><span class="n">pixels</span><span class="p">[:</span><span class="mi">10</span><span class="p">,</span> <span class="mi">32</span><span class="p">:]</span> <span class="o">==</span> <span class="n">original</span><span class="p">[:</span><span class="mi">10</span><span class="p">,</span> <span class="mi">32</span><span class="p">:])</span><span class="o">.</span><span class="n">all</span><span class="p">())</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kc">True</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">bool</span><span class="p">((</span><span class="n">pixels</span><span class="p">[</span><span class="mi">10</span><span class="p">:]</span> <span class="o">==</span> <span class="n">original</span><span class="p">[</span><span class="mi">10</span><span class="p">:])</span><span class="o">.</span><span class="n">all</span><span class="p">())</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kc">True</span>
+</code></pre></div>
+<p>The exported file also says what was done to it: Burned In Annotation
+<code>(0028,0301)</code> reads <code>NO</code>, because <code>redact()</code> cleared the region the rule
+names.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">exported</span><span class="o">.</span><span class="n">BurnedInAnnotation</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="s1">'NO'</span>
+</code></pre></div>
+<h2 id="5-read-the-grade">5. Read the grade</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">grade_line</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">report_file</span><span class="p">:</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>        <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">report_file</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>                    <span class="k">if</span> <span class="s2">"Validation Status"</span> <span class="ow">in</span> <span class="n">line</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">print</span><span class="p">(</span><span class="n">grade_line</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">))</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="o">|</span> <span class="o">**</span><span class="n">Validation</span> <span class="n">Status</span><span class="o">**</span> <span class="o">|</span> <span class="o">**</span><span class="n">PASS</span><span class="o">**</span> <span class="o">|</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p><code>PASS</code> says the zones you wrote were applied. It does not say the rest
+of each image is free of text: nothing on this page read the pixels for
+text. <code>scan_pixel_content()</code> does, with OCR, over the images of every
+machine your configuration names by serial with zones, and reports text
+no zone covers (<a href="../../ocr/#checking-zones-verification">Checking Zones</a>).
+A series with no Device Serial Number is reached by neither a zone nor
+that scan, so check such a series yourself.</p>
+<p>A zone is applied whether or not you call <code>redact()</code>: <code>export()</code> looks up
+every matching rule and zeroes a copy of each frame it writes. Calling
+<code>redact()</code> first is what puts the redacted pixels in the store, so the
+store and the export agree. Only <code>redact()</code> writes Burned In Annotation
+<code>NO</code>: an export that applies a zone by itself zeroes the same pixels and
+leaves that attribute as the source had it.</p>
+<div class="admonition note">
+<p class="admonition-title">Finding the zones for a new machine</p>
+<p>This page wrote its zone by hand. For a machine you have not seen,
+<code>session.discover_redaction_zones(serial_number)</code> reads a sample of
+that machine's images with OCR and returns the text it found, with
+<code>to_zones()</code> to group it into zones for a rule. It needs the <code>ocr</code>
+extra and the <code>tesseract</code> program, so this page does not run it.
+<a href="../../ocr/#setting-up-new-machines-zone-discovery">Zone Discovery</a>
+shows how.</p>
 </div>
+<h2 id="what-a-rule-matches">What a rule matches</h2>
+<ul>
+<li><strong><code>serial_number</code></strong> is compared exactly with Device Serial Number
+  <code>(0018,1000)</code>. <code>"*"</code> matches every series that has one.</li>
+<li><strong>Every matching rule applies.</strong> An exact rule and a <code>"*"</code> rule both
+  zero their zones.</li>
+<li><strong>A zone's end must be greater than its start</strong> on both axes. A zone
+  with no area is refused at <code>redact()</code> with <code>RedactionError</code>.</li>
+</ul>
+<p><a href="../../configuration/#pixel-redaction-machines">Pixel Redaction</a> is the
+full reference for the <code>machines:</code> section.</p>
 
 
 
@@ -2398,7 +2006,7 @@ by position and type, never by value), at the call.
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../ocr/" class="md-footer__link md-footer__link--prev" aria-label="Previous: OCR API">
+          <a href="../reversible-anonymization/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Reversible anonymization: keep a way back">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2408,20 +2016,20 @@ by position and type, never by value), at the call.
                 Previous
               </span>
               <div class="md-ellipsis">
-                OCR API
+                Reversible anonymization: keep a way back
               </div>
             </div>
           </a>
         
         
           
-          <a href="../../for-institutions/" class="md-footer__link md-footer__link--next" aria-label="Next: For institutions">
+          <a href="../write-an-exporter/" class="md-footer__link md-footer__link--next" aria-label="Next: Write your own export format">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                For institutions
+                Write your own export format
               </div>
             </div>
             <div class="md-footer__button md-icon">

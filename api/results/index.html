@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/api/configuration/">
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/api/results/">
       
       
-        <link rel="prev" href="../results/">
+        <link rel="prev" href="../session/">
       
       
-        <link rel="next" href="../entities/">
+        <link rel="next" href="../configuration/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Configuration - Isocenter</title>
+        <title>Results and errors - Isocenter</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#configuration-api" class="md-skip">
+        <a href="#results-and-errors" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Configuration
+              Results and errors
             
           </span>
         </div>
@@ -1154,34 +1154,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../results/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Results and errors
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -1201,7 +1173,7 @@
   <span class="md-ellipsis">
     
   
-    Configuration
+    Results and errors
   
 
     
@@ -1219,7 +1191,7 @@
   <span class="md-ellipsis">
     
   
-    Configuration
+    Results and errors
   
 
     
@@ -1245,22 +1217,61 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration" class="md-nav__link">
+  <a href="#summaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        IsocenterConfiguration
+        Summaries
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="IsocenterConfiguration">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.IngestSummary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IngestSummary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IngestSummary">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.save" class="md-nav__link">
+  <a href="#isocenter.io_handlers.IngestSummary.failed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        save
+        failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportSummary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExportSummary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExportSummary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportSummary.failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        failed
       
     </span>
   </a>
@@ -1268,54 +1279,165 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.add_rule" class="md-nav__link">
+  <a href="#isocenter.io_handlers.ExportSummary.written" class="md-nav__link">
     <span class="md-ellipsis">
       
-        add_rule
+        written
       
     </span>
   </a>
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.update_rule" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#findings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        update_rule
+        Findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiReport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PhiReport
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PhiReport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiReport.to_dataframe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_dataframe
       
     </span>
   </a>
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.delete_rule" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiFinding" class="md-nav__link">
     <span class="md-ellipsis">
       
-        delete_rule
+        PhiFinding
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.set_phi_tag" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiRemediation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        set_phi_tag
+        PhiRemediation
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.get_rule" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#identity-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_rule
+        Identity locks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.session.LockingResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LockingResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exceptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exceptions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.services.RedactionError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedactionError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExportError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-a-graph-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a graph by hand
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.builders.DicomBuilder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DicomBuilder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DicomBuilder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.builders.DicomBuilder.start_patient" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        start_patient
       
     </span>
   </a>
@@ -1331,6 +1453,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1683,22 +1833,61 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration" class="md-nav__link">
+  <a href="#summaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        IsocenterConfiguration
+        Summaries
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="IsocenterConfiguration">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.IngestSummary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IngestSummary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IngestSummary">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.save" class="md-nav__link">
+  <a href="#isocenter.io_handlers.IngestSummary.failed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        save
+        failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportSummary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExportSummary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ExportSummary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportSummary.failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        failed
       
     </span>
   </a>
@@ -1706,54 +1895,165 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.add_rule" class="md-nav__link">
+  <a href="#isocenter.io_handlers.ExportSummary.written" class="md-nav__link">
     <span class="md-ellipsis">
       
-        add_rule
+        written
       
     </span>
   </a>
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.update_rule" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#findings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        update_rule
+        Findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiReport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PhiReport
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PhiReport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiReport.to_dataframe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_dataframe
       
     </span>
   </a>
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.delete_rule" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiFinding" class="md-nav__link">
     <span class="md-ellipsis">
       
-        delete_rule
+        PhiFinding
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.set_phi_tag" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.privacy.PhiRemediation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        set_phi_tag
+        PhiRemediation
       
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#isocenter.configuration.IsocenterConfiguration.get_rule" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#identity-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        get_rule
+        Identity locks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.session.LockingResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LockingResult
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exceptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exceptions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.services.RedactionError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RedactionError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.io_handlers.ExportError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExportError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-a-graph-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a graph by hand
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isocenter.builders.DicomBuilder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DicomBuilder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DicomBuilder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.builders.DicomBuilder.start_patient" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        start_patient
       
     </span>
   </a>
@@ -1833,21 +2133,88 @@
   
 
 
-<h1 id="configuration-api">Configuration API</h1>
-<p>A session's configuration is <code>session.configuration</code>, an
-<code>IsocenterConfiguration</code>. <code>load_config()</code> fills it from a YAML file;
-the methods below change it in memory and write it back with <code>save()</code>.
-The file format is on <a href="../../configuration/">Configuration</a>. The class,
-its fields and these six methods are frozen at 1.0
-(<a href="../stability/#frozen-at-10">API stability</a>).</p>
+<h1 id="results-and-errors">Results and errors</h1>
+<p>What the frozen <code>Session</code> methods return, and the two exceptions a caller
+is expected to catch. The names and fields on this page are <strong>frozen at
+1.0</strong> (<a href="../stability/#frozen-at-10">API stability</a>) unless the stability
+page lists them as tier 2.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ingest()</code></td>
+<td><a class="autorefs autorefs-internal" title="IngestSummary
+
+
+  
+      dataclass
+  " href="#isocenter.io_handlers.IngestSummary"><code>IngestSummary</code></a></td>
+</tr>
+<tr>
+<td><code>audit()</code>, <code>scan_pixel_content()</code></td>
+<td><a class="autorefs autorefs-internal" title="PhiReport(findings, failures=None)" href="#isocenter.privacy.PhiReport"><code>PhiReport</code></a> of <a class="autorefs autorefs-internal" title="PhiFinding
+
+
+  
+      dataclass
+  " href="#isocenter.privacy.PhiFinding"><code>PhiFinding</code></a></td>
+</tr>
+<tr>
+<td><code>lock_identities()</code>, <code>lock_identities_batch()</code></td>
+<td><a class="autorefs autorefs-internal" href="#isocenter.session.LockingResult"><code>LockingResult</code></a>, a <code>list</code> of <code>Instance</code></td>
+</tr>
+<tr>
+<td><code>recover_patient_identity()</code></td>
+<td><code>Dict[str, Dict[str, Any]]</code>: SOP Instance UID to the values its token holds</td>
+</tr>
+<tr>
+<td><code>export(format="dicom")</code></td>
+<td><a class="autorefs autorefs-internal" title="ExportSummary
+
+
+  
+      dataclass
+  " href="#isocenter.io_handlers.ExportSummary"><code>ExportSummary</code></a></td>
+</tr>
+<tr>
+<td><code>export(format="wfdb")</code></td>
+<td><code>List[str]</code>, the paths written</td>
+</tr>
+<tr>
+<td><code>discover_redaction_zones()</code></td>
+<td><a class="autorefs autorefs-internal" href="../ocr/#isocenter.discovery.DiscoveryResult"><code>DiscoveryResult</code></a></td>
+</tr>
+<tr>
+<td><code>get_cohort_report()</code></td>
+<td><code>pandas.DataFrame</code></td>
+</tr>
+<tr>
+<td><code>phi_status_summary()</code></td>
+<td><code>Dict[str, Counter]</code> of <a class="autorefs autorefs-internal" href="../entities/#isocenter.entities.PhiStatus"><code>PhiStatus</code></a></td>
+</tr>
+<tr>
+<td><code>redact()</code>, <code>reconcile_private_tags()</code>, <code>auto_remediate_config()</code></td>
+<td><code>int</code></td>
+</tr>
+</tbody>
+</table>
+<p>Import the two exceptions from the package:
+<code>from isocenter import RedactionError, ExportError</code>. Both subclass
+<code>RuntimeError</code>.</p>
+<h2 id="summaries">Summaries</h2>
 
 
 <div class="doc doc-object doc-class">
 
 
 
-<h2 id="isocenter.configuration.IsocenterConfiguration" class="doc doc-heading">
-            <code>IsocenterConfiguration</code>
+<h2 id="isocenter.io_handlers.IngestSummary" class="doc doc-heading">
+            <code>IngestSummary</code>
 
 
   <span class="doc doc-labels">
@@ -1861,9 +2228,9 @@ its fields and these six methods are frozen at 1.0
 
 
 
-        <p>The configuration a session applies, reached as <code>session.configuration</code>.</p>
-<p><code>load_config()</code> fills it from a file; the methods below change it in
-memory, and <code>save()</code> writes it.</p>
+        <p>What <code>ingest()</code> did with each file it found.</p>
+<p>A file takes exactly one of four routes. A declined file is not
+recorded as imported, so offering it again declines it again.</p>
 
 
 <p><span class="doc-section-title">Attributes:</span></p>
@@ -1877,95 +2244,372 @@ memory, and <code>save()</code> writes it.</p>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.rules">rules</span></code></td>
+            <td><code><span title="isocenter.io_handlers.IngestSummary.ingested">ingested</span></code></td>
             <td>
-                  <code><span title="typing.List">List</span>[<span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]]</code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List of machine redaction rules.</p>
+                <p>Files read into the graph.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.phi_tags">phi_tags</span></code></td>
+            <td><code><span title="isocenter.io_handlers.IngestSummary.failures">failures</span></code></td>
             <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+                  <code><span title="typing.List">List</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>]]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>PHI tag policies, keyed by lowercase
-<code>"gggg,eeee"</code> tag. With none given, a copy of the floor policy
-(<code>profiles.FLOOR_POLICY</code>): the PS3.15 <code>basic@2026c</code> profile
-plus three research defaults, which a session applies before
-any config is loaded (see the Configuration guide). Each
-instance holds its own copy, so one session's <code>set_phi_tag</code>
-cannot reach another's policy or the module table.</p>
+                <p><code>(path, reason)</code> per rejected
+file, the same pair its <code>ERROR</code> audit row carries.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.date_jitter">date_jitter</span></code></td>
+            <td><code><span title="isocenter.io_handlers.IngestSummary.declined">declined</span></code></td>
             <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="int">int</span>]</code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The range the per-patient date
-offset is derived within, in days, both ends included:
-<code>{"min_days": -365, "max_days": -1}</code> by default.</p>
+                <p>Files refused because the session already holds
+their SOP Instance UID (as another instance's UID, or as a
+redacted instance's UID before redaction). Each has a
+<code>WARNING</code> audit row and is not read into the store.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.remove_private_tags">remove_private_tags</span></code></td>
+            <td><code><span title="isocenter.io_handlers.IngestSummary.skipped">skipped</span></code></td>
             <td>
-                  <code><span title="bool">bool</span></code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Global flag to strip private tags.</p>
+                <p>Files already in the store, not read again.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.config_path">config_path</span></code></td>
+            <td><code><a class="autorefs autorefs-internal" title="failed
+
+  
+      property
+   (isocenter.io_handlers.IngestSummary.failed)" href="#isocenter.io_handlers.IngestSummary.failed">failed</a></code></td>
             <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="str">str</span>]</code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The file <code>save()</code> writes. Set by
-<code>load_config()</code>, or by hand.</p>
+                <p><code>len(failures)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="isocenter.io_handlers.IngestSummary.failed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">failed</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>How many files were rejected.</p>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="isocenter.io_handlers.ExportSummary" class="doc doc-heading">
+            <code>ExportSummary</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>What <code>export(format="dicom")</code> wrote, and what it did not.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.io_handlers.ExportSummary.written_uids">written_uids</span></code></td>
+            <td>
+                  <code><span title="typing.List">List</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The SOP Instance UID of each instance
+that reached disk, and nothing else. An instance with no UID
+is not written and is in <code>failures</code>.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.auto_save">auto_save</span></code></td>
+            <td><code><span title="isocenter.io_handlers.ExportSummary.failures">failures</span></code></td>
             <td>
-                  <code><span title="bool">bool</span></code>
+                  <code><span title="typing.List">List</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>]]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Write <code>config_path</code> after every <code>add_rule</code>,
-<code>update_rule</code>, <code>delete_rule</code> and <code>set_phi_tag</code>. False by
-default.</p>
+                <p><code>(entity_uid, details)</code> per
+instance that did not reach disk, each with an audit row.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
-            <td><code><span title="isocenter.configuration.IsocenterConfiguration.privacy_profile">privacy_profile</span></code></td>
+            <td><code><a class="autorefs autorefs-internal" title="written
+
+  
+      property
+   (isocenter.io_handlers.ExportSummary.written)" href="#isocenter.io_handlers.ExportSummary.written">written</a></code></td>
             <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="str">str</span>]</code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The pinned name of the built-in
-profile whose rules were merged into <code>phi_tags</code> (<code>basic@2026c</code>,
-also when the file said <code>basic</code>), or an external profile's
-path, or None when no named profile was applied (the floor, or
-<code>privacy_profile: none</code>). Only ever set to a profile that
-resolved.</p>
+                <p>Files that reached disk, counted over distinct
+UIDs: two instances sharing a UID write one file.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><a class="autorefs autorefs-internal" title="failed
+
+  
+      property
+   (isocenter.io_handlers.ExportSummary.failed)" href="#isocenter.io_handlers.ExportSummary.failed">failed</a></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>len(failures)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="isocenter.io_handlers.ExportSummary.failed" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">failed</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>How many instances did not.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="isocenter.io_handlers.ExportSummary.written" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">written</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>How many files reached disk.</p>
+<p>Counted over the de-duplicated UIDs: two instances sharing a UID
+write one file, the second overwriting the first.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The number of distinct written UIDs.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><h2 id="findings">Findings</h2>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="isocenter.privacy.PhiReport" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">PhiReport</span><span class="p">(</span><span class="n">findings</span><span class="p">,</span> <span class="n">failures</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A container for PHI findings that supports analysis and export.</p>
+<p>Iterates, indexes and measures like the list of findings it wraps
+(<code>len(report)</code>, <code>report[0]</code>, <code>for finding in report</code>), and adds
+DataFrame export.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiReport.findings">findings</span></code></td>
+            <td>
+                  <code><span title="typing.List">List</span>[<a class="autorefs autorefs-internal" title="PhiFinding
+
+
+  
+      dataclass
+   (isocenter.privacy.PhiFinding)" href="#isocenter.privacy.PhiFinding">PhiFinding</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The findings, one per report line.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiReport.failures">failures</span></code></td>
+            <td>
+                  <code><span title="typing.List">List</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(entity_uid, reason)</code>, one per
+instance a pixel scan could not read in full: its pixels could
+not be loaded, or OCR raised on at least one of its frames.
+<code>scan_pixel_content()</code> fills it; an instance that failed on
+some frames keeps the findings of the frames that were read.
+It is always a list, never <code>None</code>. <code>audit()</code>'s is always
+empty: a failure in its workers raises instead.</p>
               </div>
             </td>
           </tr>
@@ -1996,28 +2640,18 @@ resolved.</p>
 <div class="doc doc-object doc-function">
 
 
-<h3 id="isocenter.configuration.IsocenterConfiguration.save" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">save</span><span class="p">()</span></code>
+<h3 id="isocenter.privacy.PhiReport.to_dataframe" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">to_dataframe</span><span class="p">()</span></code>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Write the configuration to <code>config_path</code> as YAML.</p>
-<p>The file names the profile rather than copying it:
-<code>privacy_profile</code> is the pinned name (<code>basic@2026c</code>), the external
-profile's path, <code>none</code>, or no line at all for the floor, and
-<code>phi_tags</code> holds only the rules that differ from that base's. Then
-<code>date_jitter</code>, <code>remove_private_tags</code> and every machine rule, each
-key kept (<code>comment:</code> as data). <code>version</code> is always written, as this
-library's configuration version. A file this writes loads to the
-configuration it was written from.</p>
-<p>Comments and layout in an existing file are not kept: this writes a
-new file.</p>
+        <p>Convert the findings to a pandas DataFrame, one row each.</p>
 
 
-<p><span class="doc-section-title">Raises:</span></p>
+    <p><span class="doc-section-title">Returns:</span></p>
     <table>
       <thead>
         <tr>
@@ -2028,129 +2662,12 @@ new file.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="ValueError">ValueError</span></code>
+                  <code><span title="pd">pd</span>.<span title="pd.DataFrame">DataFrame</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>With no <code>config_path</code>; and when <code>phi_tags</code> has no
-rule for a tag its base supplies, because a file naming
-that base would bring the rule back on reload. Nothing is
-written.</p>
+                <p>A dataframe containing flattened finding details.</p>
               </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="OSError">OSError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The write's own error, unchanged.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="isocenter.configuration.IsocenterConfiguration.add_rule" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">add_rule</span><span class="p">(</span><span class="n">serial_number</span><span class="p">,</span> <span class="n">manufacturer</span><span class="o">=</span><span class="s1">'Unknown'</span><span class="p">,</span> <span class="n">model_name</span><span class="o">=</span><span class="s1">'Unknown'</span><span class="p">,</span> <span class="n">redaction_zones</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-</h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Add a machine redaction rule.</p>
-<p>Replaces any existing rule for the same serial number. Changes
-memory; writes <code>config_path</code> only when <code>auto_save</code> is on. The
-keywords are spelled as the rule's keys in a <code>machines:</code> file.</p>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>serial_number</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The device serial number.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>manufacturer</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Metadata for reference.</p>
-              </div>
-            </td>
-            <td>
-                  <code>&#39;Unknown&#39;</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>model_name</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Metadata for reference.</p>
-              </div>
-            </td>
-            <td>
-                  <code>&#39;Unknown&#39;</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>redaction_zones</code>
-            </td>
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="typing.Any">Any</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The zones to set to zero,
-each <code>[y1, y2, x1, x2]</code> in pixels: rows <code>y1</code> up to <code>y2</code> and
-columns <code>x1</code> up to <code>x2</code>, the end excluded. A zone with no
-area (<code>y2 &lt;= y1</code> or <code>x2 &lt;= x1</code>) makes <code>redact()</code> fail that
-instance; one that starts past the image's edge is skipped.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
             </td>
           </tr>
       </tbody>
@@ -2168,26 +2685,11 @@ instance; one that starts past the image's edge is skipped.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="ValueError">ValueError</span></code>
+                  <code><span title="ImportError">ImportError</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>For a rule <code>load_config</code> would refuse (a serial
-that is not a non-empty, non-blank string, a metadata field
-that is not a string, a malformed zone), before any rule or
-the file changes. Under <code>auto_save</code>, with no <code>config_path</code>,
-or when <code>save()</code> refuses; the rules are then as they were.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="OSError">OSError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Under <code>auto_save</code>, when the write fails; the rules
-are then as they were.</p>
+                <p>If pandas is not installed.</p>
               </div>
             </td>
           </tr>
@@ -2199,101 +2701,294 @@ are then as they were.</p>
 
 </div>
 
-<div class="doc doc-object doc-function">
 
 
-<h3 id="isocenter.configuration.IsocenterConfiguration.update_rule" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">update_rule</span><span class="p">(</span><span class="n">serial_number</span><span class="p">,</span> <span class="n">updates</span><span class="p">)</span></code>
+  </div>
 
-</h3>
+    </div>
 
+</div>
 
-    <div class="doc doc-contents ">
-
-        <p>Update the rule for <code>serial_number</code>.</p>
-<p>Changes memory; writes <code>config_path</code> only when <code>auto_save</code> is on.</p>
+<div class="doc doc-object doc-class">
 
 
-<p><span class="doc-section-title">Parameters:</span></p>
+
+<h2 id="isocenter.privacy.PhiFinding" class="doc doc-heading">
+            <code>PhiFinding</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A potential PHI breach discovered during a scan: one report line.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
     <table>
       <thead>
         <tr>
           <th>Name</th>
           <th>Type</th>
           <th>Description</th>
-          <th>Default</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-            <td>
-                <code>serial_number</code>
-            </td>
+            <td><code><span title="isocenter.privacy.PhiFinding.entity_uid">entity_uid</span></code></td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The target rule's serial number.</p>
+                <p>Unique identifier of the entity (PatientID, SOPInstanceUID).</p>
               </div>
-            </td>
-            <td>
-                <em>required</em>
             </td>
           </tr>
           <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.entity_type">entity_type</span></code></td>
             <td>
-                <code>updates</code>
+                  <code><span title="str">str</span></code>
             </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>"Patient"</code>, <code>"Study"</code>, <code>"Series"</code> or
+<code>"Instance"</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.field_name">field_name</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The specific field or tag description.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.value">value</span></code></td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The PHI value found.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.reason">reason</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Why this was flagged (e.g. "Safe Harbor Rules").</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.tag">tag</span></code></td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The DICOM tag (e.g., "0010,0010").</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.patient_id">patient_id</span></code></td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Linkage for context.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.entity">entity</span></code></td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The live object in <code>session.store</code> the finding names,
+or None when it cannot be found.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.remediation_proposal">remediation_proposal</span></code></td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<a class="autorefs autorefs-internal" title="PhiRemediation
+
+
+  
+      dataclass
+   (isocenter.privacy.PhiRemediation)" href="#isocenter.privacy.PhiRemediation">PhiRemediation</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The suggested fix,
+which <code>anonymize()</code> applies.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.metadata">metadata</span></code></td>
             <td>
                   <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dictionary of fields to update.</p>
+                <p>Context carried with the finding.</p>
               </div>
             </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiFinding.entity_path">entity_path</span></code></td>
             <td>
-                <em>required</em>
+                  <code><span title="typing.Tuple">Tuple</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Route from the Instance to the item this was
+raised against, as <code>(sequence_tag, index)</code> steps. Empty means
+the Instance itself. The only way to rebind a finding to its
+sequence item after it crosses a process boundary.</p>
+              </div>
             </td>
           </tr>
       </tbody>
     </table>
 
 
-<p><span class="doc-section-title">Raises:</span></p>
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="isocenter.privacy.PhiRemediation" class="doc doc-heading">
+            <code>PhiRemediation</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Proposed action to fix a PHI finding.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
     <table>
       <thead>
         <tr>
+          <th>Name</th>
           <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiRemediation.action_type">action_type</span></code></td>
             <td>
-                  <code><span title="ValueError">ValueError</span></code>
+                  <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If no rule is found, if the update changes the
-serial number, or if the updated rule is one <code>load_config</code>
-would refuse (an unknown key such as <code>redaction_zone</code>, a
-value of the wrong type, a malformed zone). Raised before
-the rule or the file changes. Under <code>auto_save</code>, with no
-<code>config_path</code>, or when <code>save()</code> refuses; the rule is then
-as it was.</p>
+                <p><code>REMOVE_TAG</code>, <code>REPLACE_TAG</code> or <code>SHIFT_DATE</code>.</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiRemediation.target_attr">target_attr</span></code></td>
             <td>
-                  <code><span title="OSError">OSError</span></code>
+                  <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Under <code>auto_save</code>, when the write fails; the rule is
-then as it was.</p>
+                <p>The attribute or tag to modify.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiRemediation.new_value">new_value</span></code></td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The proposed new value (if known).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiRemediation.original_value">original_value</span></code></td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The original value for audit/reversion.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.privacy.PhiRemediation.metadata">metadata</span></code></td>
+            <td>
+                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Context metadata (e.g. patient linkage for date shifting).</p>
               </div>
             </td>
           </tr>
@@ -2301,24 +2996,111 @@ then as it was.</p>
     </table>
 
 
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
     </div>
 
-</div>
-
-<div class="doc doc-object doc-function">
+</div><h2 id="identity-locks">Identity locks</h2>
 
 
-<h3 id="isocenter.configuration.IsocenterConfiguration.delete_rule" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">delete_rule</span><span class="p">(</span><span class="n">serial_number</span><span class="p">)</span></code>
-
-</h3>
+<div class="doc doc-object doc-class">
 
 
-    <div class="doc doc-contents ">
 
-        <p>Remove the rule for a serial number.</p>
-<p>Changes memory; writes <code>config_path</code> only when <code>auto_save</code> is on
-and a rule was removed.</p>
+<h2 id="isocenter.session.LockingResult" class="doc doc-heading">
+            <code>LockingResult</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="list">list</span></code></p>
+
+
+
+        <p>What <code>lock_identities()</code> returns: a <code>list</code> of the <code>Instance</code> objects
+that received an identity token, whose repr is one line
+(<code>&lt;LockingResult: N instances secured&gt;</code>) rather than every instance.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><h2 id="exceptions">Exceptions</h2>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="isocenter.services.RedactionError" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">RedactionError</span><span class="p">(</span><span class="n">failures</span><span class="p">,</span> <span class="n">attempted</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="RuntimeError">RuntimeError</span></code></p>
+
+
+
+        <p>Redaction did not remove what it was asked to remove.</p>
+<p>Raised after the whole pass, not at the first failure: the instances
+that could be redacted are redacted, and the failures are already in
+the audit log, so a caller that catches this still gets a compliance
+report that grades REVIEW_REQUIRED.</p>
+<p>A <code>RuntimeError</code> subclass, so <code>except RuntimeError</code> catches it; its
+own class tells it from the export path's bare <code>RuntimeError</code>s, which
+mean nothing was written, where this means something unsafe is still
+in the graph.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2334,14 +3116,32 @@ and a rule was removed.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>serial_number</code>
+                <code>failures</code>
             </td>
             <td>
-                  <code><span title="str">str</span></code>
+                  <code><span title="list">list</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The serial number to remove.</p>
+                <p><code>(entity_uid, details)</code> pairs, kept as
+<code>self.failures</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>attempted</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>How many instances the pass targeted, kept as
+<code>self.attempted</code>.</p>
               </div>
             </td>
             <td>
@@ -2352,81 +3152,67 @@ and a rule was removed.</p>
     </table>
 
 
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>True if a rule was found and removed, False otherwise.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
 
 
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="ValueError">ValueError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Under <code>auto_save</code> with no <code>config_path</code> (even
-when no rule matches), and when <code>save()</code> refuses.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="OSError">OSError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Under <code>auto_save</code>, when the write fails; the rules
-are then as they were.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
 
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-function">
+<div class="doc doc-object doc-class">
 
 
-<h3 id="isocenter.configuration.IsocenterConfiguration.set_phi_tag" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">set_phi_tag</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">action</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
-</h3>
+<h2 id="isocenter.io_handlers.ExportError" class="doc doc-heading">
+              <code class="highlight language-python"><span class="n">ExportError</span><span class="p">(</span><span class="n">failures</span><span class="p">,</span> <span class="n">attempted</span><span class="p">,</span> <span class="n">folder</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h2>
 
 
-    <div class="doc doc-contents ">
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="RuntimeError">RuntimeError</span></code></p>
 
-        <p>Set or replace the PHI rule for one tag.</p>
-<p>Changes memory; writes <code>config_path</code> only when <code>auto_save</code> is on.</p>
+
+
+        <p>The export delivered nothing.</p>
+<p>Raised by <code>session.export()</code> when <strong>zero of N planned</strong> instances
+reached disk and at least one failed, in both formats: the DICOM path,
+and <code>WfdbExporter.export</code>, where N is the waveform records attempted.
+The message says "instances" in both: a WFDB record is written from
+one waveform instance, and its failure is named by that instance's
+UID, as the DICOM one is. Not raised on a partial export.</p>
+<p>Raised <strong>last</strong>, after every record the run produces, so a caller who
+catches this still holds a correct graph, a complete audit trail and
+a compliance report grading <code>REVIEW_REQUIRED</code>. The DICOM path raises
+after the collision report, the recoverable-identity disclosure, the
+delivery counters, the <code>EXPORT</code> audit row and <code>Done.</code>. The WFDB path
+has none of the first three; it raises after each record's <code>ERROR</code> or
+<code>DATA_LOSS</code> row and its own <code>EXPORT</code> row.</p>
+<p>A <code>RuntimeError</code> subclass, so <code>except RuntimeError</code> catches it.
+<code>write_tree</code> raises a bare <code>RuntimeError</code> instead, for "this
+serializer could not write".</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2442,15 +3228,15 @@ are then as they were.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>tag</code>
+                <code>failures</code>
             </td>
             <td>
-                  <code><span title="str">str</span></code>
+                  <code><span title="list">list</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The DICOM tag to target (e.g. "0010,0010"), stored
-lowercase.</p>
+                <p><code>(entity_uid, details)</code> per instance that failed;
+kept as <code>self.failures</code>.</p>
               </div>
             </td>
             <td>
@@ -2459,15 +3245,15 @@ lowercase.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>action</code>
+                <code>attempted</code>
             </td>
             <td>
-                  <code><span title="str">str</span></code>
+                  <code><span title="int">int</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One of <code>KEEP</code>, <code>REMOVE</code>, <code>EMPTY</code>, <code>REPLACE</code>,
-<code>SHIFT</code> and <code>JITTER</code> (<code>JITTER</code> is <code>SHIFT</code>).</p>
+                <p>How many instances were planned; kept as
+<code>self.attempted</code>.</p>
               </div>
             </td>
             <td>
@@ -2476,15 +3262,14 @@ lowercase.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>value</code>
+                <code>folder</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The value <code>REPLACE</code> writes, stored as
-the rule's <code>value</code>, the key a file spells it with.</p>
+                <p>The output folder, named in the message.</p>
               </div>
             </td>
             <td>
@@ -2495,66 +3280,97 @@ the rule's <code>value</code>, the key a file spells it with.</p>
     </table>
 
 
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="ValueError">ValueError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>For an unknown action, and for a rule the pipeline
-cannot honour: a Patient ID rule other than KEEP or REPLACE
-with no value, a <code>value</code> under an action other than
-REPLACE, SHIFT/JITTER on a standard tag that is not DA or
-DT, or REPLACE on a standard tag whose VR cannot hold the
-value. Raised before the policy or its file is changed.
-Under <code>auto_save</code>, also with no <code>config_path</code> and when
-<code>save()</code> refuses; the policy is then as it was.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="OSError">OSError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Under <code>auto_save</code>, when the write fails; the policy
-is then as it was.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
 
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
 
     </div>
 
-</div>
+</div><h2 id="building-a-graph-by-hand">Building a graph by hand</h2>
+<p><code>isocenter.Builder</code> is the frozen name of the class below; only
+<code>start_patient()</code> is frozen, and the chain it starts is tier 2.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="isocenter.builders.DicomBuilder" class="doc doc-heading">
+            Builder
+
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Build a <code>Patient</code> graph by hand, with no files behind it.</p>
+<p>Import it as <code>from isocenter import Builder</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">patient</span> <span class="o">=</span> <span class="p">(</span><span class="n">Builder</span><span class="o">.</span><span class="n">start_patient</span><span class="p">(</span><span class="s2">"P123"</span><span class="p">,</span> <span class="s2">"Doe^John"</span><span class="p">)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>           <span class="o">.</span><span class="n">add_study</span><span class="p">(</span><span class="s2">"1.2.3"</span><span class="p">,</span> <span class="s2">"20240101"</span><span class="p">)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>           <span class="o">.</span><span class="n">add_series</span><span class="p">(</span><span class="s2">"1.2.3.1"</span><span class="p">,</span> <span class="s2">"CT"</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>           <span class="o">.</span><span class="n">end_series</span><span class="p">()</span><span class="o">.</span><span class="n">end_study</span><span class="p">()</span><span class="o">.</span><span class="n">build</span><span class="p">())</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
 
 <div class="doc doc-object doc-function">
 
 
-<h3 id="isocenter.configuration.IsocenterConfiguration.get_rule" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_rule</span><span class="p">(</span><span class="n">serial_number</span><span class="p">)</span></code>
+<h3 id="isocenter.builders.DicomBuilder.start_patient" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">start_patient</span><span class="p">(</span><span class="n">patient_id</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
+  </span>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Return the rule for a serial number: the rule dictionary itself,
-not a copy.</p>
-<p>Exact spelling, first match. Redaction does not use this: <code>redact()</code>
-and the export apply every matching rule, <code>"*"</code> included.</p>
+        <p>Begin building a Patient.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2570,14 +3386,31 @@ and the export apply every matching rule, <code>"*"</code> included.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>serial_number</code>
+                <code>patient_id</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The serial number to find.</p>
+                <p>The Patient ID. There is no <code>id</code> keyword:
+<code>start_patient(id=...)</code> raises <code>TypeError</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The Patient's Name.</p>
               </div>
             </td>
             <td>
@@ -2599,11 +3432,11 @@ and the export apply every matching rule, <code>"*"</code> included.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]]</code>
+                  <code><span title="isocenter.builders.PatientBuilder">PatientBuilder</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The rule dictionary if found, else None.</p>
+                <p>A builder for the new patient.</p>
               </div>
             </td>
           </tr>
@@ -2659,7 +3492,7 @@ and the export apply every matching rule, <code>"*"</code> included.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../results/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Results and errors">
+          <a href="../session/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Session">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2669,20 +3502,20 @@ and the export apply every matching rule, <code>"*"</code> included.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Results and errors
+                Session
               </div>
             </div>
           </a>
         
         
           
-          <a href="../entities/" class="md-footer__link md-footer__link--next" aria-label="Next: Entities">
+          <a href="../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuration">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Entities
+                Configuration
               </div>
             </div>
             <div class="md-footer__button md-icon">
