@@ -521,7 +521,8 @@ consequences (a report generated before any export carries a boundary
 note; export-time `DATA_LOSS` rows are in a report generated after it);
 `audit()` and `redact()` drain the persistence manager on entry;
 until `export()`, the session writes only the store, `isocenter.log`
-and files you name (a configuration, a key); source files are never
+and files you ask for (a configuration, a key, a report or a cohort
+table); source files are never
 modified; `redact()` on a `:memory:` store runs in threads on every
 interpreter; and the two below.
 

@@ -1226,7 +1226,7 @@ class DicomSession:
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
         original identifiers and pixels** of everything ingested; keep it where
         you keep the source data. Until `export()`, the session writes only the
-        store, `isocenter.log` and files you name (a configuration, a key).
+        store, `isocenter.log` and files you ask for (a configuration, a key).
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`
@@ -5326,7 +5326,7 @@ class DicomSession:
         set to zero. This changes pixel data in memory (and the sidecar,
         for persistence); call `save()` afterwards to persist it. A
         redacted instance takes a new SOP Instance UID, derived from its
-        source SOP Instance UID and the zones applied.
+        source SOP Instance UID and the rule's zones.
 
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this

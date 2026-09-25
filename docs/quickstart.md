@@ -19,7 +19,7 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 - `isocenter.log` in the current directory.
 
 !!! warning "The session store holds PHI"
-    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you name (a configuration, a key). Keep the store where PHI may live, and do not hand it out with the export.
+    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
 
 !!! tip "Context manager"
     `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.
@@ -31,7 +31,7 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 
 ## 2. Ingest & Examine
 
-Ingest reads your folders recursively and indexes every DICOM file into the store. It never moves or modifies the source files. It tries every file it finds except hidden ones (names starting with `.`): a file that is not DICOM is rejected, not skipped (see below).
+Ingest reads your folders recursively and indexes every DICOM file into the store. It never moves or modifies the source files. It tries every file it finds except hidden ones (names starting with `.`; a hidden folder is still searched): a file that is not DICOM is rejected, not skipped (see below).
 
 ```python
 summary = session.ingest("/path/to/dicom/data")
@@ -79,7 +79,7 @@ print(locked)   # <LockingResult: N instances secured>
 session.save()
 ```
 
-The lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, unless that sequence holds an Isocenter identity token whose values the new one would change: then the lock refuses with `RuntimeError`. `lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token, unless the new token would lose a value the existing one holds: then it raises `RuntimeError` and writes nothing. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
+The lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, unless that sequence holds an Isocenter identity token the lock cannot read or would change: then the lock refuses with `RuntimeError`. `lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token, unless the new token would lose a value the existing one holds: then it raises `RuntimeError` and writes nothing. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
 
 Locking after `anonymize()` secures nothing. Given the report, `lock_identities()` finds none of its Patient IDs (they have been replaced), logs one `ERROR`, returns an empty result and still creates the key file. Given a patient's new ID, it raises `RuntimeError`. Check the count it returns.
 

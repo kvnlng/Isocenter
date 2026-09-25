@@ -3,7 +3,8 @@
 The code in a new release is fixed; the data an old release wrote is not.
 This page lists what changes when a configuration, a store or an export
 written by an earlier release meets 1.0, in the order you are likely to meet
-it: the configuration first (`load_config()`), then the store (opening it,
+it: the configuration first (`load_config()`), then what the profile and
+the API changed, then the store (opening it,
 `audit()`, `export()`), then identity tokens, the project secret and files
 with no Patient ID. Last come stores written by releases before 0.9.7,
 newest first.

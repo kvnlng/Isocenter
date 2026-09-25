@@ -51,7 +51,8 @@ none of the instances it tried, it raises `PixelScanError`, also a
 
 `scan_pixel_content()` runs in worker processes (threads on a free-threaded
 build). `discover_redaction_zones()` runs in threads, but in processes when
-`ISOCENTER_MAX_TASKS_PER_CHILD` is set.
+`ISOCENTER_MAX_TASKS_PER_CHILD` is set. [Environment Variables](environment.md)
+lists the variables that change either choice.
 Run either from a script whose top level is guarded by
 `if __name__ == "__main__":`, as the examples below are.
 
@@ -102,7 +103,7 @@ that was found, pass `min_occurrence=0` or read `to_dataframe()`. Each zone's
 `zone` is `[y1, y2, x1, x2]`, the form a rule stores, and its `type` is
 `LIKELY_NAME` if any member matched the name pattern (text with a `^`),
 `PROPER_NOUN` if any was a named person or organisation (with the `nlp` extra)
-or holds a word that starts with a capital letter, and `TEXT` otherwise.
+or holds a capitalised word of two or more letters, and `TEXT` otherwise.
 
 `filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
 `get_density_matrix()`, `visualize_heatmap()`, `analyze_temporal_stability()`
