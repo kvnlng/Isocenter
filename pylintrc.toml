@@ -35,7 +35,12 @@ limit-inference-results = 100
 
 # List of plugins (as comma separated values of python module names) to load,
 # usually to register additional checkers.
-load-plugins = []
+# docparams checks every public docstring (and every private one that exists)
+# for an entry per parameter, a Returns/Yields entry and a Raises entry per
+# exception raised. A docstring documents the code: summary, Args, Returns,
+# Raises and usage. History and maintainer reasoning go elsewhere (CHANGELOG,
+# `#` comments at the line they explain).
+load-plugins = ["pylint.extensions.docparams"]
 
 # Pickle collected data for later comparisons.
 persistent = "yes"
@@ -488,3 +493,13 @@ min-public-methods = 2
 # Exceptions that will emit a warning when being caught. Defaults to
 # "BaseException, Exception".
 overgeneral-exceptions = ["builtins.BaseException", "builtins.Exception"]
+
+[tool.pylint.parameter_documentation]
+# Google style, which mkdocstrings renders in the API reference.
+default-docstring-type = "google"
+# A docstring that documents none of its parameters, raises, returns or
+# yields is reported, not accepted.
+accept-no-param-doc = false
+accept-no-raise-doc = false
+accept-no-return-doc = false
+accept-no-yields-doc = false
