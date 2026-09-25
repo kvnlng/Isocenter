@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from .entities import Patient, Equipment, PhiStatus, SOURCE_SOP_UID_ATTR
 from .logger import get_logger
 
-#: How much a status assures, least first, for a merge (#548): a patient
+#: How much a status assures, least first, for a merge: a patient
 #: made of several can claim no more than its least-assured member. A
 #: member never scanned (or edited since) is below one whose identifiers
 #: are known to be gone, and above one whose identifiers are known to be
@@ -36,56 +36,33 @@ class DicomStore:
             self, drain: Optional[Callable[[], None]] = None) -> Tuple[int, int]:
         """Make every Patient ID name one `Patient` object again.
 
-        The store keeps one `patients` row per ID (`UNIQUE(patient_id)`),
-        so two objects with one ID are one patient whether or not memory
-        agrees. They arise when `anonymize()` gives a re-ingested study's
-        patient the pseudonym a stored patient already carries, or when
-        `recover_patient_identity(restore=True)` puts back an ID a raw
-        patient holds. Left in the graph, each object's scoped delete
-        would remove the other's studies at the next save.
+        Two objects holding one Patient ID are one patient to the store,
+        which keeps one row per ID; left in the graph, each object's scoped
+        delete would remove the other's studies at the next save. Call it
+        after remediation.
 
-        **Survivor.** The first object in `patients` order: hydrated
-        patients precede ingested ones and an earlier ingest precedes a
-        later one, so it is the one that came from the store whenever one
-        did. It keeps its identity and its `patient_name` (a differing
-        name draws one WARNING, counts only) and takes the others'
-        studies in order. Each other object is removed from `patients`
-        with its `studies` emptied, so a caller still holding one sees a
-        detached patient rather than a second parent of the same studies.
-
-        **Status.** The most conservative member's, ranked IDENTIFIED >
-        UNSCANNED > REMEDIATED > CLEARED, read from every member before
-        anything moves. Recorded on the survivor only when it differs, and
-        `record_phi_status` advancing the revision on a change is what
-        makes the save write it. The moved studies are not marked: the
-        save re-points their rows (`SqliteStore._reparent_studies`), and
-        marking them would claim an edit to the study that did not happen.
-
-        **Refusal.** A group whose members carry different jitter schemes
-        raises `RuntimeError` before `drain` is called or anything is
-        touched. A row holds one scheme, and either choice would give some
-        of that subject's dates a second offset or silently re-class a
-        legacy patient. Unreachable from `anonymize()` on a graph the
-        library built -- a keyed and an unkeyed pseudonym differ in length
-        -- and reachable through a restore. A graph built in user code can
-        reach it from `anonymize()` too, and there the refusal comes after
-        the remediations are applied; a restore asks first
-        (`_refuse_a_merge_across_schemes`).
-
-        **Offsets need nothing.** The caller runs this after remediation,
-        and a pseudonym and its original seed one offset
-        (`privacy.canonical_patient_key`).
+        The survivor is the first object in `patients` order, so a patient
+        hydrated from the store survives over one ingested since. It keeps
+        its identity and `patient_name` and takes the others' studies in
+        order; a differing name logs one WARNING with counts only. Each
+        other object is removed from `patients` with its `studies` emptied.
+        The survivor's status becomes the least assured of the group's
+        (IDENTIFIED > UNSCANNED > REMEDIATED > CLEARED) under that member's
+        policy, recorded only when it differs. Logs one INFO line with the
+        counts.
 
         Args:
             drain: Called once, only when there is something to merge,
                 after the refusal check and before the first mutation.
-                The session passes its persistence manager's `flush`: a
-                queued save snapshots the list, not the objects, and one
-                still holding a duplicate would walk it after its studies
-                moved and write its name and status over the survivor's.
+                The session passes its persistence manager's `flush`, so
+                no queued save walks a duplicate after its studies moved.
 
         Returns:
-            (patients merged away, studies moved).
+            Tuple[int, int]: (patients merged away, studies moved).
+
+        Raises:
+            RuntimeError: A group's members carry different jitter schemes.
+                Raised before `drain` is called or anything is touched.
         """
         groups = self._patients_sharing_an_id()
         if not groups:
@@ -100,13 +77,18 @@ class DicomStore:
         for members in groups.values():
             survivor, others = members[0], members[1:]
             # The member whose status is kept, not only the status: the
-            # status is recorded under that member's policy (#555), which
+            # status is recorded under that member's policy, which
             # the survivor's own would misstate. `max` returns the first
             # of equals, so a tie on the worst status under two policies
             # keeps the earliest member's, in `members` order.
             kept = max(members,
                        key=lambda m: _MERGE_STATUS_RANK[m.phi_status])
             status, policy = kept.phi_status, kept.phi_status_policy
+            # The moved studies are not marked modified: the save
+            # re-points their rows (`SqliteStore._reparent_studies`), and
+            # marking them would claim an edit to the study that did not
+            # happen. A changed status is written because
+            # `record_phi_status` advances the survivor's revision.
             for other in others:
                 if other.patient_name != survivor.patient_name:
                     renamed += 1
@@ -137,8 +119,14 @@ class DicomStore:
     ) -> Dict[str, List[Patient]]:
         """Patient ID -> members, for every ID more than one object holds.
 
-        `renamed` is `(patient, patient_id)`: group as though that patient
-        already held that ID, without assigning it.
+        Args:
+            renamed: `(patient, patient_id)`: group as though that patient
+                already held that ID, without assigning it. None groups
+                the graph as it stands.
+
+        Returns:
+            Dict[str, List[Patient]]: Each shared ID mapped to its members,
+            in `patients` order.
         """
         groups: Dict[str, List[Patient]] = {}
         for patient in self.patients:
@@ -151,13 +139,19 @@ class DicomStore:
 
     def _refuse_a_merge_across_schemes(
             self, renamed: Optional[Tuple[Patient, str]] = None) -> None:
-        """Raise `RuntimeError` if a merge would mix jitter schemes.
+        """Refuse a merge that would mix jitter schemes.
 
-        `recover_patient_identity` calls it with `renamed` *before* it
-        writes the original identifiers back: the merge's own check runs
-        after the restore, when a refusal would leave the graph holding
-        two patients with one ID under two schemes. The message names a
-        count, never an ID.
+        `recover_patient_identity` calls it with `renamed` before it writes
+        the original identifiers back, so a refusal leaves the graph
+        untouched.
+
+        Args:
+            renamed: `(patient, patient_id)`: check as though that patient
+                already held that ID. None checks the graph as it stands.
+
+        Raises:
+            RuntimeError: Patients sharing a Patient ID carry different
+                jitter schemes. The message names a count, never an ID.
         """
         mismatched = sum(
             len(members)
@@ -173,9 +167,8 @@ class DicomStore:
         """
         Returns all unique Equipment (Manufacturer/Model/Serial) in the store.
 
-        The result is sorted, so `session.create_config()` lists the same
-        machines in the same order on every run; set iteration order varies
-        between processes because string hashing is randomised.
+        The order is stable across runs, so `session.create_config()`
+        lists the same machines in the same order every time.
 
         Returns:
             List[Equipment]: Unique equipment, ordered by manufacturer,
@@ -187,6 +180,8 @@ class DicomStore:
                 for se in st.series:
                     if se.equipment:
                         unique.add(se.equipment)
+        # Sorted: set iteration order varies between processes because
+        # string hashing is randomised.
         return sorted(
             unique,
             key=lambda e: (e.manufacturer or "", e.model_name or "",
@@ -195,26 +190,23 @@ class DicomStore:
     def get_ingested_paths(self) -> Set[str]:
         """Every file path this store has imported, for ingest de-duplication.
 
-        Keyed on `Instance.source_path`, not `file_path`: `regenerate_uid()`
-        clears `file_path`, so keying on it would let the next `ingest()` of
-        the same folder re-add a redacted instance's un-redacted original as
-        a second instance.
+        Read from each instance's `source_path`, so a redacted instance,
+        whose `file_path` is cleared, still names the file it came from.
 
         **A path in this set does not mean the file matches the
         instance.** For a redacted instance it means the opposite: the
         file still holds the burned-in identifier. This set answers
-        "have I imported this file before" and nothing else -- do not
-        reuse it to decide what can be read back off disk. That is what
-        `file_path` is for, and it is absent precisely where it would be
-        wrong.
-
-        `file_path` is not consulted as a fallback: nothing assigns it a
-        path after construction, and `Instance.__post_init__` has already
-        mirrored it into `source_path`.
+        "have I imported this file before" and nothing else; use
+        `file_path` to decide what can be read back off disk.
 
         Returns:
             Set[str]: Absolute paths, one per instance that came from a file.
         """
+        # Keyed on `source_path`, not `file_path`: `regenerate_uid()` clears
+        # `file_path`, and keying on it would let the next `ingest()` of the
+        # same folder re-add a redacted instance's original. No fallback to
+        # `file_path` is needed: `Instance.__post_init__` mirrors it into
+        # `source_path`, and nothing assigns it a path afterwards.
         files = set()
         for p in self.patients:
             for st in p.studies:
@@ -228,18 +220,13 @@ class DicomStore:
         """The identities instances were ingested under, mapped to the
         instance that holds them now.
 
-        `Instance._take_sop_uid` records the SOP Instance UID an instance
-        carried before redaction (`regenerate_uid()`) or UID replacement
-        at `anonymize()` first gave it a new one. A file
-        offered to `ingest()` under one of these UIDs is the source of an
-        image this store already holds -- un-redacted, if it was
-        redacted -- reached by a path
-        de-duplication did not recognise -- a copy, a move, or a
-        symlinked mount. `DicomImporter.import_files` declines it.
-
-        Deliberately narrow. This is *not* "every UID in the store": a
-        map that answered that would make the ingest gate refuse every
-        re-offered file, including files this store has never seen.
+        Holds the SOP Instance UID an instance carried before redaction
+        (`regenerate_uid()`) or UID replacement at `anonymize()` first gave
+        it a new one. A file offered to `ingest()` under one of these UIDs
+        is the source of an image this store already holds, reached by a
+        path de-duplication did not recognise; `DicomImporter.import_files`
+        declines it. Only superseded UIDs are included, not every UID in
+        the store.
 
         Returns:
             Dict[str, str]: pre-redaction UID -> the current SOP Instance
@@ -256,6 +243,11 @@ class DicomStore:
         return superseded
 
     def save_state(self, filepath: str):
+        """Pickles this store to `filepath`, overwriting any file there.
+
+        Args:
+            filepath: The file to write.
+        """
         logger = get_logger()
         logger.info(f"Persisting session metadata to {filepath}...")
         with open(filepath, 'wb') as f:
@@ -264,6 +256,17 @@ class DicomStore:
 
     @staticmethod
     def load_state(filepath: str) -> 'DicomStore':
+        """Unpickles a store from `filepath`.
+
+        Only load a file you trust: unpickling can run arbitrary code.
+
+        Args:
+            filepath: The file `save_state` wrote.
+
+        Returns:
+            DicomStore: The loaded store, or a new empty one when no file
+            exists at `filepath`.
+        """
         if not os.path.exists(filepath):
             return DicomStore()
         with open(filepath, 'rb') as f:

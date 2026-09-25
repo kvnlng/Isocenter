@@ -29,17 +29,11 @@ class KeyManager:
         """
         Loads the key at `key_path`; never creates one.
 
-        Recovery reads through this, so a mistyped path raises rather than
-        minting a new key that cannot decrypt anything.
-
-        A key is cached on `self.key` only once it is usable: the file is
-        read, checked non-empty and handed to `Fernet` before it is
-        assigned, so a later call after the file is fixed reads it again.
-
-        A key file readable beyond its owner (any group or other mode bit)
-        logs one WARNING naming the mode, not the path, and its mode is
-        left unchanged. The warning is logged after validation, so a file
-        that is refused is not also warned about.
+        The key is cached on `self.key` once it has been validated; a call
+        that raises caches nothing, so a later call reads the file again.
+        A valid key file readable beyond its owner (any group or other mode
+        bit) logs one WARNING naming the mode, and its mode is left
+        unchanged.
 
         Returns:
             bytes: The URL-safe base64-encoded key.
@@ -83,31 +77,20 @@ class KeyManager:
         """
         Loads the key at `key_path`, creating one there if none exists.
 
-        The lock reads through this; locking is the one operation that may
-        mint a key. A new key file is created already written, at mode
-        0600, and is never seen empty: the key is written to a temporary
-        file in the key's own directory (`tempfile.mkstemp`, which creates
-        at 0600 whatever the umask) and hard-linked into place. `os.link`
-        refuses to replace an existing path, so of two sessions creating
-        the key at once exactly one wins and the other loads the winner's
-        file. On a filesystem without hard links (`os.link` raises an
-        `OSError` other than `FileExistsError`) the key is written after an
-        exclusive `O_EXCL` create at 0600, and a reader between the create
-        and the write can find an empty file. The temporary file is always
-        removed.
-
-        An existing file's mode is left as it is. An existing file that
-        is empty or malformed raises as `load_key` does, and is never
-        overwritten.
+        A new key file is created at mode 0600 and already written. Of two
+        sessions creating the key at once, exactly one key is written and
+        both load it. On a filesystem without hard links a concurrent
+        reader can briefly find the new file empty. An existing file is
+        never overwritten and its mode is left as it is.
 
         Returns:
             bytes: The URL-safe base64-encoded key.
 
         Raises:
-            FileNotFoundError: The key path's directory does not exist;
-                the temporary file cannot be created there either. Any
-                `OSError` from creating the temporary file is re-raised as
-                its own type and errno against `key_path`.
+            OSError: The temporary key file cannot be created in the key
+                path's directory (for example `FileNotFoundError` when the
+                directory does not exist); re-raised with its own type and
+                errno against `key_path`.
             ValueError: An existing file at the path is empty or malformed.
         """
         if self.key is None:
@@ -116,6 +99,11 @@ class KeyManager:
             except FileNotFoundError:
                 pass
             key = Fernet.generate_key()
+            # Written to a temporary file in the key's own directory
+            # (`mkstemp` creates at 0600 whatever the umask) and hard-linked
+            # into place, so the key file is never seen empty. `os.link`
+            # refuses to replace an existing path, so of two sessions
+            # creating the key at once exactly one wins.
             directory = os.path.dirname(self.key_path) or "."
             try:
                 fd, temp_path = tempfile.mkstemp(
@@ -123,7 +111,7 @@ class KeyManager:
             except OSError as exc:
                 # A missing or read-only directory is reported against
                 # the path the caller gave, not the temporary name nobody
-                # asked for (review of #633, P-6). Same type, same errno.
+                # asked for. Same type, same errno.
                 raise type(exc)(exc.errno, exc.strerror, self.key_path) from None
             try:
                 with os.fdopen(fd, "wb") as f:
@@ -135,9 +123,9 @@ class KeyManager:
                     # it too was linked into place already written.
                     return self.load_key()
                 except OSError:
-                    # No hard links here. The exclusive create, as before
-                    # this release: a reader between it and the write can
-                    # still find an empty file on such a filesystem.
+                    # No hard links here: fall back to an exclusive create.
+                    # A reader between it and the write can find an empty
+                    # file on such a filesystem.
                     try:
                         exclusive = os.open(
                             self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -158,7 +146,8 @@ class KeyManager:
             bytes: The key.
 
         Raises:
-            RuntimeError: If key has not clearly been loaded.
+            RuntimeError: No key has been loaded by `load_key()` or
+                `load_or_generate_key()`.
         """
         if not self.key:
             raise RuntimeError(
@@ -179,9 +168,27 @@ class CryptoEngine:
         self.fernet = Fernet(key)
 
     def encrypt(self, data: bytes) -> bytes:
-        """Encrypts the byte payload."""
+        """Encrypts the byte payload.
+
+        Args:
+            data (bytes): The plaintext.
+
+        Returns:
+            bytes: The Fernet token.
+        """
         return self.fernet.encrypt(data)
 
     def decrypt(self, token: bytes) -> bytes:
-        """Decrypts the token payload."""
+        """Decrypts the token payload.
+
+        Args:
+            token (bytes): A Fernet token.
+
+        Returns:
+            bytes: The plaintext.
+
+        Raises:
+            cryptography.fernet.InvalidToken: The key does not open the
+                token, or it is not a well-formed token.
+        """
         return self.fernet.decrypt(token)
