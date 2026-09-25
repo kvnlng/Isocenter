@@ -1,16 +1,8 @@
 """Export format registry.
 
-Each exporter turns a `DicomSession`'s in-memory object graph into files
-on disk in one output format. Formats register themselves here and are
-selected via `DicomSession.export(folder, format=...)`.
-
-**Provisional until 1.1** (#527). `Exporter`, `register`, `get_exporter`
-and `available_formats` are documented but internal (tier 2): 1.1 may
-replace them rather than extend them, with a CHANGELOG entry naming both
-spellings. A third-party exporter runs behind none of the export gates,
-which all live inside the two built-in formats, and each of its runs
-writes one `WARNING` audit row so the report grades `REVIEW_REQUIRED`.
-`docs/api/exporters.md` is the plugin author's page; #783 is the 1.1 work.
+Each exporter turns a session's in-memory object graph into files on
+disk in one output format. Formats register themselves here and are
+selected by `session.export(folder, format=...)`.
 """
 from typing import Any, Dict, List
 
@@ -20,31 +12,19 @@ _REGISTRY: Dict[str, Any] = {}
 class Exporter:
     """Interface every export format implements.
 
-    Provisional until 1.1 (#527): this interface may be replaced, not
-    extended, in 1.1. A plugin written against 1.0 pins
-    `isocenter>=1.0,<1.1`.
+    Provisional until 1.1: this interface may be replaced, not extended, in
+    1.1. A plugin written against 1.0 pins `isocenter>=1.0,<1.1`.
 
-    Implementations must not mutate the session's object graph -- export is
-    a read operation over already-de-identified data. For a class other
-    than the two built-ins, that is the whole of the boundary: `export()`
-    applies none of the built-ins' gates (burned-in re-audit, the
-    configured redaction zones, the drop of nested icons that may show
-    redacted pixels, the filter that writes only `gggg,eeee` attribute keys,
-    identity disclosure, de-identification markers, owner stamps, `EXPORT`
-    and `DATA_LOSS` rows) before or after calling it, and writes one
-    `WARNING` audit row saying the output is not attested by Isocenter.
-    Call `redact()` first, write no nested pixel payload such as an Icon
-    Image Sequence `(0088,0200)` item (nothing scans or redacts one), and
-    write no `_`-prefixed key from `attributes`: one holds the source SOP
-    Instance UID that UID replacement removed.
+    Implementations must not mutate the session's object graph: export is
+    a read. For a class other than the two built-ins, `export()` applies
+    none of the built-ins' gates before or after calling it (the list is
+    under "What a third-party exporter receives" on the Exporter registry
+    page), and writes one `WARNING` audit row saying the output is not
+    attested by Isocenter.
     """
 
     def export(self, session, folder: str, **options):
         """Write the session to `folder`.
-
-        The return type is annotated loosely on purpose: a single
-        `List[str]` here was a promise the registry cannot keep, since
-        each format answers "what did you write" in its own terms.
 
         Args:
             session (DicomSession): The active session.
@@ -53,13 +33,10 @@ class Exporter:
 
         Returns:
             Any: The format's own result object. `dicom` returns an
-                `io_handlers.ExportSummary`; `wfdb` returns a `List[str]`
+                `ExportSummary`; `wfdb` returns a `List[str]`
                 of paths. **Whatever the shape, it must let a caller
-                detect that nothing was written** -- an empty list, a zero
-                count, a raise. The DICOM exporter returned `None` until
-                #191, so an export that delivered none of its three files
-                was indistinguishable at the call site from one that
-                delivered all three.
+                detect that nothing was written**: an empty list, a zero
+                count, a raise.
         """
         raise NotImplementedError
 
@@ -67,12 +44,11 @@ class Exporter:
 def register(name: str, exporter_cls) -> None:
     """Register an export format under `name`.
 
-    Provisional until 1.1 (#527): this function may be replaced, not
-    extended, in 1.1. It checks only that `exporter_cls` has an `export`
-    attribute; 1.1 may check more. Registering any class other than the
-    two built-ins -- a subclass of one included -- makes each export in
-    that format write one `WARNING` audit row, because Isocenter cannot
-    attest what the class writes.
+    Provisional until 1.1. It checks only that `exporter_cls` has an
+    `export` attribute; 1.1 may check more. Registering any class other than the two built-ins (a
+    subclass of one included) makes each export in that format write one
+    `WARNING` audit row, because Isocenter cannot attest what the class
+    writes.
 
     Args:
         name (str): The format name `export(format=...)` selects by.
@@ -93,6 +69,12 @@ def register(name: str, exporter_cls) -> None:
 def get_exporter(name: str):
     """Instantiate the exporter registered under `name`.
 
+    Args:
+        name (str): The format name, e.g. `'dicom'` or `'wfdb'`.
+
+    Returns:
+        Exporter: A new instance of the registered class.
+
     Raises:
         ValueError: If no such format is registered.
     """
@@ -105,7 +87,11 @@ def get_exporter(name: str):
 
 
 def available_formats() -> List[str]:
-    """Return the registered format names, sorted."""
+    """Return the registered format names, sorted.
+
+    Returns:
+        List[str]: The names, sorted.
+    """
     return sorted(_REGISTRY)
 
 

@@ -1,3 +1,12 @@
+"""PHI detection: `PhiInspector` scans the object graph under a policy and
+returns `PhiFinding`s, each with a `PhiRemediation` proposal, in a
+`PhiReport`.
+
+Also the keyed derivations under the project secret that the scan
+proposes and remediation checks: the `ANON_` pseudonym, the date-jitter
+seed (`canonical_patient_key`), and the version-8 `2.25.` replacement
+UIDs.
+"""
 import copy
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Dict, Tuple
@@ -17,7 +26,7 @@ from .profiles import FLOOR_POLICY
 # places that ask "is this already the Patient's replacement?":
 # `scan_patient`, which raises nothing for a patient holding one, and
 # `_scan_instance`, which raises nothing for an instance's top-level copy
-# of it (#496). Two spellings of one test would drift, and a drift here
+# of it. Two spellings of one test would drift, and a drift here
 # either re-flags every anonymized instance on a re-audit or stops
 # flagging a real identifier that happens to start with the prefix.
 def _is_replacement_name(value) -> bool:
@@ -29,21 +38,26 @@ def _is_replacement_id(value) -> bool:
 
 
 def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
-    """`(action, value)` under which the owner of `tag` is remediated (#537).
+    """`(action, value)` under which the owner of `tag` is remediated.
 
-    Until 0.9.8 `scan_patient` and `_scan_study` read no rule: the name
-    was always `ANONYMIZED`, the ID always the keyed pseudonym, the date
-    always the per-patient shift. This is the one reading of the rule for
-    the three, so the owner scans and the instance scan cannot disagree.
+    No rule and the string form are `REPLACE` with no value: `ANONYMIZED`
+    for the name, the keyed pseudonym for the ID, the per-patient shift
+    for the date. On Study Date, `REPLACE` with no value and
+    `SHIFT`/`JITTER` all read `SHIFT`.
 
-    No rule and the string form are `REPLACE` with no value, which is the
-    replacement these tags always had: `ANONYMIZED`, the pseudonym, the
-    shift. On Study Date, `REPLACE` with no value and `SHIFT`/`JITTER` all
-    read `SHIFT`, because the string form (`"0008,0020": "Study Date"`) has
-    always meant the shift and a DA cannot hold `ANONYMIZED` (Q3 of #537).
-    A rule the validator refuses (an emptied Patient ID, say) never gets
-    here: `PhiInspector.__init__` raises first.
+    Args:
+        phi_tags (dict): The policy.
+        tag (str): Patient Name, Patient ID or Study Date.
+
+    Returns:
+        Tuple[str, Optional[str]]: The upper-cased action and the rule's
+        `value:`, or None.
     """
+    # The one reading of the rule for the three owned tags, so the owner
+    # scans and the instance scan cannot disagree. Study Date's string form
+    # (`"0008,0020": "Study Date"`) means the shift, and a DA cannot hold
+    # `ANONYMIZED`. A rule the validator refuses (an emptied Patient ID,
+    # say) never gets here: `PhiInspector.__init__` raises first.
     rule = (phi_tags or {}).get(tag)
     if isinstance(rule, dict):
         action = str(rule.get("action") or "REPLACE").upper()
@@ -59,24 +73,37 @@ def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
 def _rule_name(rule: Dict[str, Any]) -> str:
     """A rule mapping's display name, or `Unknown Tag`.
 
-    `name: null` is absent, as the loader reads it (#728): the finding
-    was named `None` while `get("name", "Unknown Tag")` saw the key
-    present (#730)."""
+    `name: null` is absent, as the loader reads it, so it also gives
+    `Unknown Tag` rather than `None`.
+
+    Args:
+        rule (Dict[str, Any]): The rule mapping.
+
+    Returns:
+        str: The name.
+    """
     name = rule.get("name")
     return "Unknown Tag" if name is None else name
 
 
 def _rule_for(phi_tags, tag):
-    """The rule for the concrete `tag`, or None: the most specific key wins
-    (#556).
+    """The rule for the concrete `tag`, or None: the most specific key wins.
 
     `tag` itself first; then, for an even group in 5000-501E or 6000-601E
     (PS3.5 7.6), the table's element mask (`60xx,0022`) and then its group
     mask (`60xx,xxxx`). So `6002,0022` beats `60xx,0022`, which beats
     `60xx,xxxx`. An odd group between them is private and never matches a
-    mask: it is the `remove_private_tags` sweep's. The finding a mask
-    raises names the concrete tag, so remediation, the audit rows and the
-    process boundary see an ordinary rule."""
+    mask: it is the `remove_private_tags` sweep's.
+
+    Args:
+        phi_tags (dict): The policy, lowercase-keyed.
+        tag (str): A concrete `gggg,eeee` key.
+
+    Returns:
+        The rule (a mapping or a display name), or None.
+    """
+    # The finding a mask raises names the concrete tag, so remediation, the
+    # audit rows and the process boundary see an ordinary rule.
     rule = phi_tags.get(tag)
     if rule:
         return rule
@@ -92,24 +119,33 @@ def _rule_for(phi_tags, tag):
 
 def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
     """Whether `value`, an owner's value for `tag`, is already what the rule
-    on `tag` resolves to (#537).
+    on `tag` resolves to.
 
     The scan's "already replaced?" test, action by action. Only the value
     the rule resolves to *now* counts: a name holding `ANONYMIZED` under
     `REPLACE value: v` is raised and rewritten, and so is a `v1` under
-    `value: v2`. `lock_identities` also refuses the constants on any
-    policy; that OR belongs to the lock and must not be shared with the
-    scan, which would then never write `v` over an old `ANONYMIZED`.
+    `value: v2`.
 
-    - `KEEP`, `REMOVE`, `EMPTY`: False. Nothing is a replacement: REMOVE
-      is judged by presence and EMPTY by blankness, which every caller
-      tests before it asks this (a blank EMPTY is not raised at all).
+    - `KEEP`, `REMOVE`, `EMPTY`: False. REMOVE is judged by presence and
+      EMPTY by blankness, which every caller tests before it asks this.
     - Name `REPLACE`: the rule's `value:`, or `ANONYMIZED`.
     - ID `REPLACE`: an `ANON_` pseudonym.
     - Date `SHIFT`: a date this pipeline's shift produced
       (`_study_date_is_this_pipelines`; needs `study`).
     - Date `REPLACE value: v`: the value renders as `v`.
+
+    Args:
+        phi_tags (dict): The policy.
+        tag (str): Patient Name, Patient ID or Study Date.
+        value: The owner's value.
+        study (Study, optional): The owning study, for a Study Date.
+
+    Returns:
+        bool: Whether the value is the rule's replacement.
     """
+    # `lock_identities` also refuses the constants on any policy; that OR
+    # belongs to the lock and must not be shared with the scan, which would
+    # then never write `v` over an old `ANONYMIZED`.
     action, rule_value = _owned_rule(phi_tags, tag)
     if tag == "0010,0010" and action == "REPLACE":
         return value == (rule_value or "ANONYMIZED")
@@ -119,7 +155,7 @@ def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
         return _study_date_is_this_pipelines(study)
     if tag == "0008,0020" and action == "REPLACE":
         # Lazy: io_handlers is the heavy module, and this is the one
-        # spelling of "a Study's date as a DA string" (#189).
+        # spelling of "a Study's date as a DA string".
         from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
         return value is not None and format_study_date(value) == rule_value
     return False
@@ -132,8 +168,8 @@ _UNKEYED_IS_HEX = re.compile(r"[0-9a-f]+")
 
 #: The unkeyed scheme's shape: how many hex characters of the PatientID
 #: digest its replacement carried, and how many its date jitter seeded
-#: on. Kept only for patients a store classed as de-identified before
-#: 0.9.7 (`JITTER_SCHEME_UNKEYED`); nothing keyed reads them.
+#: on. Read only for patients a store classed `JITTER_SCHEME_UNKEYED`;
+#: nothing keyed reads them.
 _UNKEYED_REPLACEMENT_DIGEST_CHARS = 12
 _UNKEYED_JITTER_DIGEST_CHARS = 8
 
@@ -147,8 +183,8 @@ _UNKEYED_JITTER_DIGEST_CHARS = 8
 #:
 #: Three labels, one per derivation, so no output of one is an output of
 #: another: the date offset in particular is **not** readable out of the
-#: pseudonym, as it was under the unkeyed scheme. Changing
-#: a label changes every pseudonym and offset a store has minted.
+#: pseudonym. Changing a label changes every pseudonym and offset a store
+#: has minted.
 _DIGEST_HEX = 16
 _CHECK_HEX = 8
 _LABEL_PATIENT_ID = b"isocenter/v1/patient-id\x00"
@@ -163,11 +199,19 @@ _UNKEYED_PSEUDONYM = re.compile(
 def _require_secret(secret) -> bytes:
     """The project secret, or `RuntimeError`.
 
-    There is deliberately no default. A keyed derivation handed no secret
-    that quietly used the unkeyed one instead would be a single-line road
-    back to offsets anyone can compute, and no end-to-end test would see
-    it, because the output still looks like a pseudonym.
+    Args:
+        secret: The secret, or a falsy value.
+
+    Returns:
+        bytes: The secret.
+
+    Raises:
+        RuntimeError: When `secret` is falsy.
     """
+    # There is deliberately no default. A keyed derivation handed no secret
+    # that quietly used the unkeyed one instead would be a single-line road
+    # back to offsets anyone can compute, and no end-to-end test would see
+    # it, because the output still looks like a pseudonym.
     if not secret:
         raise RuntimeError(
             "No project secret: the pseudonym, the date offset and the "
@@ -188,17 +232,26 @@ def _replacement_id_for(patient_id, secret) -> str:
     """The PatientID replacement `scan_patient` proposes for a keyed
     patient: `ANON_` + 16 hex of a keyed digest + 8 hex of its check.
 
-    Spelled once, because the date jitter canonicalizes an original id
-    to this value (`canonical_patient_key`) and `_pseudonym_verifies`
-    recomputes its check: two spellings would let the prefix, the
-    lengths or a label drift on one side only.
+    Args:
+        patient_id: The original id; read as `str`.
+        secret: The project secret.
+
+    Returns:
+        str: The pseudonym.
+
+    Raises:
+        RuntimeError: With no secret.
     """
+    # Spelled once, because the date jitter canonicalizes an original id
+    # to this value (`canonical_patient_key`) and `_pseudonym_verifies`
+    # recomputes its check: two spellings would let the prefix, the
+    # lengths or a label drift on one side only.
     digest = _hmac(secret, _LABEL_PATIENT_ID, patient_id).hex()[:_DIGEST_HEX]
     check = _hmac(secret, _LABEL_PSEUDONYM_CHECK, digest).hex()[:_CHECK_HEX]
     return f"ANON_{digest}{check}"
 
 
-#: UID replacement (#544). Three more labels, disjoint from the three
+#: UID replacement. Three more labels, disjoint from the three
 #: above, so a minted UID is not readable out of a pseudonym or an
 #: offset, nor a redacted instance's UID out of its unredacted one.
 #: Changing a label re-maps every UID a store has minted: every exported
@@ -226,12 +279,22 @@ def _mint_uid(secret, label: bytes, text: str) -> str:
     """`2.25.<n>`, `n` an RFC 9562 version-8 UUID: 82 bits of an HMAC of
     `text` under `label`, and 40 bits of a keyed check over them.
 
-    The version and variant are set on the 11 digest bytes *before* the
-    check is computed, so a verifier reading the UID back recomputes it
-    over exactly what it reads; `uid_from_bytes16` sets them again, which
-    changes nothing (both are in the first 11 bytes, and masking is
-    idempotent).
+    Args:
+        secret: The project secret.
+        label (bytes): The derivation's label.
+        text (str): What the UID is derived from.
+
+    Returns:
+        str: The UID.
+
+    Raises:
+        RuntimeError: With no secret.
     """
+    # The version and variant are set on the 11 digest bytes *before* the
+    # check is computed, so a verifier reading the UID back recomputes it
+    # over exactly what it reads; `uid_from_bytes16` sets them again, which
+    # changes nothing (both are in the first 11 bytes, and masking is
+    # idempotent).
     from .uids import uid_from_bytes16  # pylint: disable=import-outside-toplevel
     digest = bytearray(_hmac(secret, label, text)[:_UID_DIGEST_BYTES])
     digest[6] = (digest[6] & 0x0F) | 0x80
@@ -240,26 +303,47 @@ def _mint_uid(secret, label: bytes, text: str) -> str:
 
 
 def _replacement_uid_for(uid, secret) -> str:
-    """The UID that replaces `uid` in this project (#544).
+    """The UID that replaces `uid` in this project.
 
     A function of the value alone -- never the tag it sits under, the
     patient or the study -- so a SOP Instance UID, the Referenced SOP
     Instance UID in another file that names it, and the file meta's copy
     all map to one replacement. Deterministic per project secret, and
     recognisable by `_uid_is_minted` under that secret.
+
+    Args:
+        uid: The source UID; read as `str`.
+        secret: The project secret.
+
+    Returns:
+        str: The replacement UID.
+
+    Raises:
+        RuntimeError: With no secret.
     """
     return _mint_uid(secret, _LABEL_UID, str(uid))
 
 
 def _redaction_uid_for(source_uid, config_hash, secret) -> str:
-    """The SOP Instance UID a redaction gives an instance (#544).
+    """The SOP Instance UID a redaction gives an instance.
 
     Keyed on the instance's **source** SOP Instance UID and the redaction
     configuration's hash, so the same redaction in the same project gives
     the same UID whether it runs before or after `anonymize()`, a
-    different set of zones gives a different one (#237), and the label
+    different set of zones gives a different one, and the label
     keeps it from ever equalling `_replacement_uid_for(source_uid)`: the
     redacted pixels never share a UID with the unredacted image.
+
+    Args:
+        source_uid: The instance's source SOP Instance UID.
+        config_hash: The redaction configuration's hash.
+        secret: The project secret.
+
+    Returns:
+        str: The new SOP Instance UID.
+
+    Raises:
+        RuntimeError: With no secret.
     """
     return _mint_uid(secret, _LABEL_REDACTED_UID,
                      f"{source_uid}\x00{config_hash}")
@@ -268,14 +352,25 @@ def _redaction_uid_for(source_uid, config_hash, secret) -> str:
 def _uid_is_minted(value, secret) -> bool:
     """Whether `value` is a UID this project minted, of either kind.
 
-    What makes UID replacement idempotent without stored state: a scan
-    leaves a minted UID alone, so a second `anonymize()`, a reopened
-    store and a re-ingested export of this project do not replace it
-    again. A UID minted under another secret does not verify and is
-    replaced like any source UID. Exactly one spelling verifies (no
-    leading zero, no whitespace, below 2**128), and only a `str`: a
-    multi-valued element is judged value by value by the caller.
+    A UID minted under another secret does not verify. Exactly one
+    spelling verifies (no leading zero, no whitespace, below 2**128), and
+    only a `str`: a multi-valued element is judged value by value by the
+    caller.
+
+    Args:
+        value: The candidate UID.
+        secret: The project secret.
+
+    Returns:
+        bool: Whether it verifies under `secret`.
+
+    Raises:
+        RuntimeError: With no secret, whatever `value` is.
     """
+    # What makes UID replacement idempotent without stored state: a scan
+    # leaves a minted UID alone, so a second `anonymize()`, a reopened
+    # store and a re-ingested export of this project do not replace it
+    # again.
     secret = _require_secret(secret)
     raw = _minted_uid_bytes(value)
     if raw is None:
@@ -287,7 +382,14 @@ def _uid_is_minted(value, secret) -> bool:
 def _minted_uid_bytes(value) -> Optional[bytes]:
     """The 16 bytes of `value` if it has the shape this library mints --
     `2.25.`, the one spelling of an integer below 2**128, version 8,
-    variant `10` -- else None. No secret: the shape alone."""
+    variant `10` -- else None. No secret: the shape alone.
+
+    Args:
+        value: The candidate; anything but a `str` gives None.
+
+    Returns:
+        Optional[bytes]: The 16 bytes, or None.
+    """
     if not isinstance(value, str):
         return None
     match = _MINTED_UID.fullmatch(value)
@@ -303,45 +405,74 @@ def _minted_uid_bytes(value) -> Optional[bytes]:
 
 
 def _has_minted_uid_shape(value) -> bool:
-    """Whether `value` has a minted UID's shape, verifiable or not: the
-    evidence a store that lost its secret refuses on (#544, Q-B), where
-    there is no secret left to verify with."""
+    """Whether `value` has a minted UID's shape, verifiable or not.
+
+    The evidence a store that lost its secret refuses on, where there is
+    no secret left to verify with.
+
+    Args:
+        value: The candidate.
+
+    Returns:
+        bool: Whether `_minted_uid_bytes` reads it.
+    """
     return _minted_uid_bytes(value) is not None
 
 
-#: The proposal metadata key that marks a keyed UID replacement (#544).
+#: The proposal metadata key that marks a keyed UID replacement.
 #: What remediation reads to move an Instance's own SOP Instance UID with
 #: its top-level element (`Instance._take_sop_uid`), rather than write the
-#: element alone as a `REPLACE value:` does (0.9.8's behaviour, kept).
+#: element alone as a `REPLACE value:` does.
 UID_REPLACEMENT = "uid_replacement"
 
 
 def _owned_uid_is_open(phi_tags, tag, uid, secret) -> bool:
-    """Whether the owner holding `uid` under `tag` is raised (#544): the
+    """Whether the owner holding `uid` under `tag` is raised: the
     policy's rule on `tag` is the value-less REPLACE, and `uid` is a
     non-blank UID this project did not mint.
 
-    One spelling for `PhiInspector._scan_owned_uid`, which raises the
-    finding, and `RemediationService._settle_statuses`, which asks the
-    same question of every Series at a pass end (review of #544, round 2):
-    a Series has no stored status, so after a reopen a pass handed a plain
-    list has nothing else to say its UID is still open.
+    Shared by `PhiInspector._scan_owned_uid`, which raises the finding,
+    and `RemediationService._settle_statuses`, which asks it of every
+    Series at a pass end.
+
+    Args:
+        phi_tags (dict): The policy.
+        tag (str): `0020,000d` or `0020,000e`.
+        uid: The owner's UID.
+        secret: The project secret.
+
+    Returns:
+        bool: Whether the owner would be raised.
+
+    Raises:
+        RuntimeError: With no secret, when the rule is the UID replacement
+            and `uid` is not blank.
     """
+    # One spelling for both, so the two cannot disagree. A Series has no
+    # stored status, so after a reopen a pass handed a plain list has
+    # nothing else to say its UID is still open.
     return (_is_uid_replacement(_rule_for(phi_tags, tag), tag) and uid is not None
             and bool(str(uid).strip()) and not _uid_is_minted(str(uid), secret))
 
 
 def _is_uid_replacement(rule, tag) -> bool:
-    """Whether `rule` on `tag` is the keyed UID replacement (#544): REPLACE
+    """Whether `rule` on `tag` is the keyed UID replacement: REPLACE
     with no `value:` (or the string form, which is that), on a tag whose
     standard dictionary VR is UI.
 
-    One reading for the instance scan and the owners' scans, and the
-    loader admits exactly this spelling (`_refused_phi_rule`). A private
-    key has no dictionary VR, so it keeps writing `ANONYMIZED` (#765); a
-    rule with a `value:` writes the value, as in 0.9.8; and no rule is not
-    this rule, so `privacy_profile: none` with no tags keeps every UID.
+    A private key has no dictionary VR, so it keeps writing `ANONYMIZED`;
+    a rule with a `value:` writes the value; and no rule is not this rule,
+    so `privacy_profile: none` with no tags keeps every UID.
+
+    Args:
+        rule: The rule for `tag`, a mapping, a display name, or None.
+        tag (str): The concrete tag.
+
+    Returns:
+        bool: Whether it is the keyed UID replacement.
     """
+    # One reading for the instance scan and the owners' scans, and the
+    # loader admits exactly this spelling (`_refused_phi_rule`).
     if isinstance(rule, dict):
         if (str(rule.get("action") or "REPLACE").upper() != "REPLACE"
                 or rule.get("value")):
@@ -353,9 +484,16 @@ def _is_uid_replacement(rule, tag) -> bool:
 
 
 def _uid_text(value) -> str:
-    """One UI value as the text the derivation reads. A `bytes` value is
-    what a UI element arrives as when its VR was not on the wire and the
-    dictionary did not name it: decoded, with its padding stripped."""
+    """One UI value as the text the derivation reads.
+
+    Args:
+        value: A `str`, or `bytes` -- what a UI element arrives as when its
+            VR was not on the wire and the dictionary did not name it.
+
+    Returns:
+        str: The text; bytes are decoded as ASCII with trailing NUL and
+        space padding stripped.
+    """
     if isinstance(value, (bytes, bytearray)):
         return bytes(value).decode("ascii", "replace").rstrip("\x00 ")
     return str(value)
@@ -368,6 +506,17 @@ def _replaced_uids(value, secret):
     A multi-valued element (`0008,0058`, VM 1-n) is judged and replaced
     value by value and comes back as a list, which the exporter writes as
     a multi-value; a value this project minted keeps its place unchanged.
+
+    Args:
+        value: One UID, or a list, tuple or `MultiValue` of them.
+        secret: The project secret.
+
+    Returns:
+        The replacement (`str`, or `list` for a multi-valued input), or
+        None.
+
+    Raises:
+        RuntimeError: With no secret, when a value is not blank.
     """
     multi = isinstance(value, (list, tuple, MultiValue))
     texts = [_uid_text(v) for v in (value if multi else [value])]
@@ -383,9 +532,18 @@ def _pseudonym_verifies(patient_id, secret) -> bool:
     """Whether `patient_id` is a keyed pseudonym minted under `secret`.
 
     Diagnostics only -- the refusals and warnings about a missing or
-    foreign secret. Never used to
-    decide an offset: every `ANON_` id seeds from its own text, whether
-    or not it verifies, so a verdict here cannot move a date.
+    foreign secret. Never used to decide an offset: every `ANON_` id
+    seeds from its own text, whether or not it verifies.
+
+    Args:
+        patient_id: The id; read as `str`.
+        secret: The secret to verify under.
+
+    Returns:
+        bool: Whether it has the keyed shape and its check verifies.
+
+    Raises:
+        RuntimeError: With no secret, for an id of the keyed shape.
     """
     text = str(patient_id)
     if not _KEYED_PSEUDONYM.fullmatch(text):
@@ -407,24 +565,37 @@ def _unkeyed_replacement_id_for(patient_id) -> str:
     """The replacement the unkeyed scheme minted, for a legacy patient.
 
     Reachable only for a patient its store classed
-    `JITTER_SCHEME_UNKEYED` when opened. A legacy patient whose id is no
-    longer `ANON_` (restored, or never replaced) has to re-mint *this*
-    value, or the next pass reads a different id back and the patient
-    ends up with two offsets.
+    `JITTER_SCHEME_UNKEYED` when opened.
+
+    Args:
+        patient_id: The original id; read as `str`.
+
+    Returns:
+        str: `ANON_` + the first 12 hex of its unkeyed SHA-256.
     """
+    # A legacy patient whose id is no longer `ANON_` (restored, or never
+    # replaced) has to re-mint *this* value, or the next pass reads a
+    # different id back and the patient ends up with two offsets.
     digest = hashlib.sha256(str(patient_id).encode()).hexdigest()
     return f"ANON_{digest[:_UNKEYED_REPLACEMENT_DIGEST_CHARS]}"
 
 
 def _unkeyed_jitter_digest(patient_id) -> str:
-    """The unkeyed scheme's jitter seed, for a legacy patient (#517).
+    """The unkeyed scheme's jitter seed, for a legacy patient.
 
-    Exactly what 0.9.6 computed: an `ANON_` id whose first eight
-    characters after the prefix are lowercase hex seeds from those
-    characters, anything else from `sha256(text)[:8]`. Kept bit for bit
-    so a patient whose dates a store already shifted under it gets the
-    same offset for a date shifted now, and never a second one.
+    An `ANON_` id whose first eight characters after the prefix are
+    lowercase hex seeds from those characters, anything else from
+    `sha256(text)[:8]`.
+
+    Args:
+        patient_id: The id; read as `str`.
+
+    Returns:
+        str: Eight hex characters.
     """
+    # Must stay bit for bit as the unkeyed scheme computed it, so a patient
+    # whose dates a store already shifted under it gets the same offset for
+    # a date shifted now, and never a second one.
     text = str(patient_id)
     if _is_replacement_id(text):
         carried = text[5:5 + _UNKEYED_JITTER_DIGEST_CHARS]
@@ -437,29 +608,36 @@ def _unkeyed_jitter_digest(patient_id) -> str:
 
 def canonical_patient_key(patient_id, secret, scheme) -> int:
     """The integer that seeds a patient's date offset, from either
-    spelling of its identity (#517).
+    spelling of its identity.
 
-    `_get_date_shift` reads a scan's PatientID, and `anonymize()`
-    replaces that id in its first pass -- so a later pass reads the
-    pseudonym where the first read the original. Both spellings have to
-    give one offset, or a date first shifted in a later pass falls off
-    the offset its siblings got.
+    The original id and its pseudonym give the same seed, so a date first
+    shifted in a later pass (which reads the pseudonym) gets the offset
+    its siblings got.
 
-    **Keyed** (`JITTER_SCHEME_KEYED`): the canonical key is the
-    pseudonym. An original id is mapped to the pseudonym it would be
-    replaced by; an id already `ANON_` is taken as it stands. The seed
-    is then an HMAC of that key under its own label, so it is a function
-    of the secret, and nothing about it can be read out of the
-    pseudonym's characters.
+    **Keyed** (`JITTER_SCHEME_KEYED`): an original id is mapped to the
+    pseudonym it would be replaced by; an id already `ANON_` is taken as
+    it stands. The seed is an HMAC of that pseudonym under its own label,
+    so nothing about it can be read out of the pseudonym's characters.
 
     **Unkeyed** (`JITTER_SCHEME_UNKEYED`): `_unkeyed_jitter_digest`,
     for a patient its store classed legacy at open. No secret is read.
 
-    Returns an int the caller reduces mod the jitter span. Raises
-    `RuntimeError` for the keyed scheme with no secret, and `ValueError`
-    for a scheme it does not know -- never a default, since a wrong
-    guess is a second offset for a patient.
+    Args:
+        patient_id (str): The original id or its pseudonym; any value is
+            read as `str`.
+        secret (bytes): The project secret; read only by the keyed
+            scheme.
+        scheme (str): `JITTER_SCHEME_KEYED` or `JITTER_SCHEME_UNKEYED`.
+
+    Returns:
+        int: The seed, which the caller reduces mod the jitter span.
+
+    Raises:
+        RuntimeError: For the keyed scheme with no secret.
+        ValueError: For a scheme it does not know.
     """
+    # Never a default scheme: a wrong guess is a second offset for a
+    # patient.
     if scheme == JITTER_SCHEME_UNKEYED:
         return int(_unkeyed_jitter_digest(patient_id), 16)
     if scheme != JITTER_SCHEME_KEYED:
@@ -473,29 +651,27 @@ def canonical_patient_key(patient_id, secret, scheme) -> int:
 
 def _study_date_is_this_pipelines(study) -> bool:
     """Whether `study.study_date` is a value this pipeline's shift
-    produced -- as far as the store can tell (#518).
+    produced -- as far as the store can tell.
 
-    Spelled once because two places ask it: `_scan_study`, which raises
-    a study date the pipeline did not produce, and
-    `_holds_owners_replacement`, which skips an instance's top-level
-    copy of a study date only when the owner's value is one this
-    pipeline produced (#496). It was `bool(study.date_shifted)` in both,
-    and that flag records *that* a shift happened, never *what it
-    produced* -- so a fresh original assigned to `study_date` was never
-    raised again, and an instance's copy of that fresh original skipped
-    as "the owner's replacement". Leaving either on the flag keeps half
-    of #518 alive.
+    A study with `date_shifted` set and no record of the shifted value
+    (a store from before per-value records) counts as "this pipeline's";
+    the load says so once, as a WARNING audit row.
 
-    A study shifted before 0.9.6 reads `date_shifted` with no record,
-    and what its shift produced is unknowable. That counts as "this
-    pipeline's", which keeps the pre-0.9.6 behaviour for such a store
-    exactly as the instance half does -- the owner's ruling is that
-    nothing in an existing store changes under the user. The load says
-    so once, as a WARNING audit row.
+    Args:
+        study: The study, or None (False).
 
-    `getattr` throughout because the arm and the scan both fire for any
-    object carrying these names, test doubles included.
+    Returns:
+        bool: Whether the date is the shift's own output.
     """
+    # Spelled once because two places ask it: `_scan_study` and
+    # `_holds_owners_replacement`. Neither may test `study.date_shifted`
+    # alone: that flag records *that* a shift happened, never *what it
+    # produced*, so a fresh original assigned to `study_date` would never
+    # be raised again, and an instance's copy of it would be skipped as
+    # "the owner's replacement".
+    #
+    # `getattr` throughout because the arm and the scan both fire for any
+    # object carrying these names, test doubles included.
     if study is None:
         return False
     vouches = getattr(study, "date_shift_vouches_for", None)
@@ -507,17 +683,16 @@ def _study_date_is_this_pipelines(study) -> bool:
 
 @dataclass(slots=True)
 class PhiRemediation:
-    """
-    Proposed action to fix a PHI finding.
+    """Proposed action to fix a PHI finding.
 
     Attributes:
-        action_type (str): The remediation logic code (e.g., "REPLACE_TAG", "SHIFT_DATE").
+        action_type (str): `REMOVE_TAG`, `REPLACE_TAG` or `SHIFT_DATE`.
         target_attr (str): The attribute or tag to modify.
         new_value (Any): The proposed new value (if known).
         original_value (Any): The original value for audit/reversion.
         metadata (Dict[str, Any]): Context metadata (e.g. patient linkage for date shifting).
     """
-    action_type: str  # e.g., "REPLACE_TAG", "REDACT_REGION"
+    action_type: str  # "REMOVE_TAG", "REPLACE_TAG" or "SHIFT_DATE"
     target_attr: str  # e.g., "patient_name", "study_date"
     new_value: Any = None
     original_value: Any = None
@@ -526,38 +701,36 @@ class PhiRemediation:
 
 @dataclass(slots=True)
 class PhiFinding:  # pylint: disable=too-many-instance-attributes
-    """
-    Represents a potential PHI breach discovered during a scan.
-
-    The attribute count is the point of the record -- it is a report line,
-    and every field below is something a reader of that report needs. The
-    same reasoning that disables `too-few-public-methods` for DTOs in
-    `pylintrc.toml` applies here; splitting it would only move fields
-    behind another name.
+    """A potential PHI breach discovered during a scan: one report line.
 
     Attributes:
         entity_uid (str): Unique identifier of the entity (PatientID, SOPInstanceUID).
-        entity_type (str): Type of entity ("Patient", "Instance", etc).
+        entity_type (str): `"Patient"`, `"Study"`, `"Series"` or
+            `"Instance"`.
         field_name (str): The specific field or tag description.
         value (Any): The PHI value found.
         reason (str): Why this was flagged (e.g. "Safe Harbor Rules").
         tag (Optional[str]): The DICOM tag (e.g., "0010,0010").
         patient_id (Optional[str]): Linkage for context.
-        entity (Any): Reference to the Python object for direct remediation.
-        remediation_proposal (Optional[PhiRemediation]): The suggested fix.
+        entity (Any): The live object in `session.store` the finding names,
+            or None when it cannot be found.
+        remediation_proposal (Optional[PhiRemediation]): The suggested fix,
+            which `anonymize()` applies.
+        metadata (Dict[str, Any]): Context carried with the finding.
         entity_path (Tuple): Route from the Instance to the item this was
             raised against, as `(sequence_tag, index)` steps. Empty means
-            the Instance itself. Findings cross a process boundary, and a
-            sequence item has no UID to be found again by, so this is the
-            only way to rebind one to the item it actually came from.
+            the Instance itself. The only way to rebind a finding to its
+            sequence item after it crosses a process boundary.
     """
+    # Not split to satisfy the attribute count: it is a report line, and
+    # every field is something a reader of that report needs.
     entity_uid: str
     entity_type: str
     field_name: str
     value: Any
     reason: str
     tag: Optional[str] = None  # specific DICOM tag if applicable
-    patient_id: Optional[str] = None  # Added for linkage
+    patient_id: Optional[str] = None  # linkage
     entity: Any = None  # Reference to the actual object (Patient, Study, etc.)
     remediation_proposal: Optional[PhiRemediation] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -565,20 +738,21 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
 
 
 class PhiReport:
-    """
-    A container for PHI findings that supports analysis and export.
+    """A container for PHI findings that supports analysis and export.
 
-    Acts as a list wrapper for backward compatibility but enables
-    DataFrame export features.
+    Iterates, indexes and measures like the list of findings it wraps
+    (`len(report)`, `report[0]`, `for finding in report`), and adds
+    DataFrame export.
 
-    `failures` is a list of `(entity_uid, reason)`, one per instance a
-    pixel scan could not read in full: its pixels could not be loaded, or
-    OCR raised on at least one of its frames. `scan_pixel_content()` fills
-    it (#423); an instance that failed on some frames keeps the findings
-    of the frames that were read. It is always a list, never `None` -- an
-    attribute that is sometimes a list and sometimes `None` is a trap for
-    every caller that iterates it. `audit()`'s is always empty: a failure
-    in its workers raises instead.
+    Attributes:
+        findings (List[PhiFinding]): The findings, one per report line.
+        failures (List[Tuple[str, str]]): `(entity_uid, reason)`, one per
+            instance a pixel scan could not read in full: its pixels could
+            not be loaded, or OCR raised on at least one of its frames.
+            `scan_pixel_content()` fills it; an instance that failed on
+            some frames keeps the findings of the frames that were read.
+            It is always a list, never `None`. `audit()`'s is always
+            empty: a failure in its workers raises instead.
     """
 
     def __init__(self, findings: List[PhiFinding],
@@ -587,8 +761,7 @@ class PhiReport:
         self.failures: List[Tuple[str, str]] = list(failures or [])
 
     def to_dataframe(self):
-        """
-        Converts findings to a Pandas DataFrame for analysis.
+        """Convert the findings to a pandas DataFrame, one row each.
 
         Returns:
             pd.DataFrame: A dataframe containing flattened finding details.
@@ -632,11 +805,11 @@ class PhiReport:
 
 
 class PhiInspector:
-    """
-    Scans the Object Graph for attributes that are known to contain Protected Health Information (PHI).
+    """Scans the object graph for PHI under a policy.
 
-    Implements rules based on HIPAA Safe Harbor identifiers and Configurable PHI Tags.
-    Also handles Private Tag scanning/flagging.
+    Applies the policy's tag rules at every depth, the owners' rules for
+    Patient Name, Patient ID, Study Date and the Study and Series UIDs,
+    and, when asked, the private-tag sweep.
     """
 
     def __init__(self,
@@ -644,34 +817,34 @@ class PhiInspector:
                                    str] = None,
                  remove_private_tags: bool = False,
                  project_secret: bytes = None):
-        """
-        Initializes the inspector.
+        """Build an inspector over one policy.
 
         Args:
             config_tags (Dict[str, Union[str, Dict]], optional): The PHI
                 policy, as `configuration.phi_tags` holds it; None applies
                 a copy of the floor, `profiles.FLOOR_POLICY`, as a bare
-                session does (#495). There is no path argument: a
-                configuration file is read by `load_config()` or
-                `audit(config_path=)`, the one loader, and the
-                `config_path` this took until 1.0 read it a weaker second
-                way that nothing called (#729). A tag's value is either a **rule** --
+                session does. There is no path argument: a configuration
+                file is read by `load_config()` or `audit(config_path=)`,
+                the one loader. A tag's value is either a **rule** --
                 `{"name": ..., "action": "REMOVE"|"EMPTY"|"SHIFT"|"JITTER"}`
                 -- or a plain string, which is the tag's **display name**
                 and leaves the action as `REPLACE`. The string form names
                 the tag; it does not choose what happens to it. Passing a
                 bare action name (`{"0008,0080": "REMOVE"}`) therefore
                 replaces the value instead, and is warned about at
-                construction (#111). Study Date is the exception: its
-                REPLACE with no value is the per-patient shift (#537).
-                A rule the scan cannot honour raises `ValueError` here
-                (`config_manager.validate_phi_policy`).
+                construction. Study Date is the exception: its REPLACE
+                with no value is the per-patient shift. Keys are
+                lowercased here, with a WARNING when two keys collide.
             remove_private_tags (bool): If True, scans all attributes for non-whitelisted private tags.
             project_secret (bytes, optional): The store's project secret,
                 which keys the PatientID replacement. Optional here and
                 required at use: `scan_patient` raises `RuntimeError`
                 when it has to mint a keyed replacement without one.
                 `Session.audit()` always passes it.
+
+        Raises:
+            ValueError: For a rule the scan cannot honour
+                (`config_manager.validate_phi_policy`).
         """
         self.remove_private_tags = remove_private_tags
         self.project_secret = project_secret
@@ -683,31 +856,24 @@ class PhiInspector:
             # edit it.
             self.phi_tags = copy.deepcopy(FLOOR_POLICY)
 
-        # Normalize tag-key casing HERE, once, at the boundary between
-        # "however phi_tags got built" (a built-in PRIVACY_PROFILES entry,
-        # a user's own YAML, an external custom-profile file, or the
-        # floor policy) and "how it's looked up"
-        # (`_scan_instance`'s `self.phi_tags.get(tag)` below). Every
-        # ingested attribute key on the object graph is lowercased
-        # (`io_handlers.py`'s `populate_attrs`,
-        # `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), so a config
-        # source that spells a tag with an uppercase hex letter (A-F) --
-        # as `isocenter/profiles.py`'s Basic profile did for Series
-        # Description, `0008,103E` -- would otherwise never match and
-        # silently disable a declared policy with no error anywhere.
-        # Normalizing at this single choke point, rather than fixing the
-        # one known offending key, means this class of bug cannot recur
-        # regardless of which future profile or config file introduces it.
+        # Normalize tag-key casing here, once, at the boundary between
+        # however phi_tags got built (a built-in profile, a user's YAML, an
+        # external profile file, the floor, or a caller's dict) and how
+        # it's looked up. Every ingested attribute key on the object graph
+        # is lowercased (`io_handlers.py`'s `populate_attrs`), so a tag
+        # spelled with an uppercase hex letter -- `0008,103E` for Series
+        # Description -- would otherwise never match and silently disable
+        # a declared policy with no error anywhere.
         self.phi_tags = self._normalize_tag_keys(self.phi_tags)
         # A rule the scan cannot honour raises here, as it does at the
-        # loader and at `audit()` (#537, #560). The inspector is also
-        # built directly, and in every worker; the check is cheap.
+        # loader and at `audit()`. The inspector is also built directly,
+        # and in every worker; the check is cheap.
         from .config_manager import validate_phi_policy  # pylint: disable=import-outside-toplevel
         validate_phi_policy(self.phi_tags, "config_tags")
         self._warn_on_bare_action_values()
         # (tag, action) pairs already warned about as meaningless on a
         # sequence, so an audit says it once rather than once per
-        # instance (#547).
+        # instance.
         self._sequence_actions_warned = set()
 
     # Action names a caller is most likely to write where a description
@@ -719,29 +885,17 @@ class PhiInspector:
     _ACTION_WORDS = frozenset({"REMOVE", "EMPTY", "SHIFT", "JITTER"})
 
     def _warn_on_bare_action_values(self) -> None:
-        """Report tags whose value names an action rather than the tag.
+        """Log a WARNING for each tag whose string value names an action.
 
         A string value is the tag's display name and always leaves the
-        action as `REPLACE`, so `{"0008,0020": "SHIFT"}` replaces the date
-        with `ANONYMIZED` instead of shifting it -- destroying the
-        interval information shifting exists to preserve, with nothing
-        raised and nothing logged.
-
-        Warned rather than raised: the string form works as designed, and
-        rejecting a call that succeeds today would be a breaking change.
-        A caller may also legitimately have a tag *described* as "Shift".
-
-        On a date tag other than Study Date -- `{"0008,0012": "SHIFT"}` --
-        the string form writes the DA dummy `19000101` since #557 (0.9.8
-        refused it, #560), which destroys the date as surely, so it is
-        warned about here like any other tag. On Study Date the string
-        form means the shift (#537), so `{"0008,0020": "SHIFT"}` and
-        `"JITTER"` do what they say and are not warned about. `"REMOVE"`
-        and `"EMPTY"` there still are, naming the shift as what happens:
-        the caller asked for removal and gets a retained, shifted date
-        (review of #574). The warning remains for a tag where REPLACE is
+        action as `REPLACE`, so `{"0008,0012": "SHIFT"}` writes the DA
+        dummy `19000101` instead of shifting the date. On Study Date the
+        string form means the shift, so `"SHIFT"` and `"JITTER"` there are
+        not warned about; `"REMOVE"` and `"EMPTY"` are, naming the shift as
         what happens.
         """
+        # Warned rather than raised: the string form works as designed, and
+        # a caller may legitimately have a tag *described* as "Shift".
         offenders = sorted(
             tag for tag, val in self.phi_tags.items()
             if isinstance(val, str) and val.strip().upper() in self._ACTION_WORDS
@@ -767,9 +921,14 @@ class PhiInspector:
         """Lowercase every string PHI-tag key so it matches the
         lowercased 'gggg,eeee' keys the object graph actually uses.
 
-        Non-string keys (defensive only -- config_tags is caller-supplied
-        and its shape isn't strictly validated elsewhere) pass through
-        unchanged.
+        On a collision the later key wins, with a WARNING.
+
+        Args:
+            phi_tags (Dict[str, Any]): The policy.
+
+        Returns:
+            Dict[str, Any]: A new mapping (or `phi_tags` itself when
+            empty); non-string keys pass through unchanged.
         """
         if not phi_tags:
             return phi_tags
@@ -791,20 +950,27 @@ class PhiInspector:
         return normalized
 
     def scan_patient(self, patient: Patient) -> List[PhiFinding]:
-        """
-        Recursively scans a Patient and their child studies for PHI.
+        """Scan a Patient and everything beneath it for PHI.
+
+        Patient Name and Patient ID are judged under their own rules
+        (`_owned_rule`); a value already holding the rule's replacement,
+        and a synthetic key for a subject with no Patient ID, raise
+        nothing. Then every study, series and instance beneath is scanned.
 
         Args:
             patient (Patient): The patient object to scan.
 
         Returns:
             List[PhiFinding]: A list of all identified PHI findings.
+
+        Raises:
+            RuntimeError: When the inspector has no project secret and
+                a keyed Patient ID replacement has to be minted, or a
+                non-blank UID sits under the keyed UID replacement.
         """
         findings = []
 
-        # 1. Direct Attributes, under their own rules (#537). Until 0.9.8
-        # neither block looked a rule up, so every policy exported
-        # `ANONYMIZED` and the pseudonym.
+        # 1. Direct Attributes, under their own rules.
         name_action, name_value = _owned_rule(self.phi_tags, "0010,0010")
         name_proposal = None
         if name_action == "REMOVE":
@@ -848,20 +1014,17 @@ class PhiInspector:
         id_action, _ = _owned_rule(self.phi_tags, "0010,0020")
         assert id_action in ("KEEP", "REPLACE"), id_action
         if (id_action == "REPLACE" and patient.patient_id
-                # A subject with no Patient ID has nothing to pseudonymize
-                # (#584): its key is never exported, and replacing it would
-                # move its date offset. This read `!= "UNKNOWN"`, which
-                # matched nothing once the placeholder became
-                # `UnknownPatient`.
+                # A subject with no Patient ID has nothing to pseudonymize:
+                # its key is never exported, and replacing it would move
+                # its date offset.
                 and not is_synthetic_patient_id(patient.patient_id)
                 and not _is_replacement_id(patient.patient_id)):
             # Through the constructors, not spelled here: the date
-            # jitter canonicalizes an original id to this value (#517),
-            # so the prefix, lengths and labels have one home. The
-            # scheme is the one the store fixed for this patient at open:
-            # a patient de-identified before 0.9.7 re-mints its old
-            # replacement, or its next pass reads back a different id
-            # and gets a second offset.
+            # jitter canonicalizes an original id to this value, so the
+            # prefix, lengths and labels have one home. The scheme is the
+            # one the store fixed for this patient at open: a legacy
+            # (unkeyed) patient re-mints its old replacement, or its next
+            # pass reads back a different id and gets a second offset.
             if patient._jitter_scheme == JITTER_SCHEME_UNKEYED:
                 hashed_id = _unkeyed_replacement_id_for(patient.patient_id)
             else:
@@ -901,17 +1064,30 @@ class PhiInspector:
 
     def _scan_instance(self, instance: Instance, patient_id: str,
                        study: Study = None, patient: Patient = None) -> List[PhiFinding]:
-        """
-        Scans a single instance for PHI based on configured tags and private tag rules.
+        """Scan one instance, at every depth, under the policy and the
+        private-tag sweep.
 
-        Walks the instance structurally to reach every text node,
-        including nested sequence items. See the comment below before
-        reintroducing an index.
+        Findings on sequences (private sequences, and REMOVE or EMPTY
+        rules on a sequence tag) come last, deepest first
+        (`_innermost_first`), so anything raised inside a sequence is
+        remediated before its container is removed.
 
-        `patient` and `study` are the instance's owners. With them, a
-        top-level copy of a tag they own that already holds their
-        replacement is not a finding (#496); without them nothing is
-        skipped, and the policy judges every copy.
+        Args:
+            instance (Instance): The instance.
+            patient_id (str): Recorded on each finding.
+            study (Study, optional): The owning study.
+            patient (Patient, optional): The owning patient. With the
+                owners, a top-level copy of a tag they own that already
+                holds their replacement is not a finding; without them
+                the policy judges every copy.
+
+        Returns:
+            List[PhiFinding]: The findings.
+
+        Raises:
+            RuntimeError: When the inspector has no project secret and
+                a non-blank UID sits under the keyed UID replacement,
+                minted or not.
         """
         findings = []
 
@@ -925,21 +1101,13 @@ class PhiInspector:
 
         # 0. Determine Scan Targets
         # Walked from the instance itself, not read off a prebuilt index.
-        # It was read off `Instance.text_index` until 0.8.0, and that
-        # index was built once at ingest: not rebuilt when a session was
-        # loaded from the store, and not carried into the worker copies
-        # `session.audit()` scans. So every route into this method except
-        # a direct call arrived with it empty and took a top-level-only
-        # scan, reporting clean on sequence content it never opened
-        # (#57). The index itself was retired in #84, once it was clear
-        # nothing had read it since.
-        #
-        # An index would have to be derived here, per scan, to be worth
-        # having -- a stored one is a second answer to "where does text
-        # live" that can disagree with the graph, which is what #57 was.
-        # Note also that walking drops the index's text-VR filter, which
-        # the top-level path never applied either: a configured PHI tag
-        # is a configured PHI tag wherever it sits and whatever its VR.
+        # A stored index is a second answer to "where does text live" that
+        # can disagree with the graph: one built at ingest is not rebuilt
+        # on load nor carried into the worker copies `session.audit()`
+        # scans, so the scan would go top-level-only and report clean on
+        # sequence content it never opened. If an index is ever wanted,
+        # derive it here, per scan. There is no text-VR filter: a
+        # configured PHI tag is one wherever it sits and whatever its VR.
         scan_targets = [
             (item, tag, path)
             for item, path in iter_item_tree(instance)
@@ -949,19 +1117,15 @@ class PhiInspector:
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
             # Private tags live in odd groups. Remove all of them except
-            # two, which are NOT the reversibility service's tags -- a
-            # previous version of this comment said they were, and that
-            # has been false since v0.5.0 (47278f8). Reversibility uses
-            # the Encrypted Attributes Sequence (0400,0500), an *even*
-            # group, so it never reaches this sweep and was never at risk
-            # from it. See `reversibility.py`.
+            # two, which are NOT the reversibility service's tags:
+            # reversibility uses the Encrypted Attributes Sequence
+            # (0400,0500), an *even* group, which this sweep never reaches.
             #
-            # (0099,0010) and (0099,1001) were the encrypted-identity
-            # payload in exactly one release -- `gantry` v0.4.1, before
-            # both the migration to (0400,0500) and the rename to
-            # Isocenter. The exemption exists so `remove_private_tags`
-            # does not strip the identities out of a store written by
-            # that version, leaving it unrecoverable with its own key.
+            # (0099,0010) and (0099,1001) are the encrypted-identity
+            # payload of a store written by this library's one release
+            # under the name `gantry`. The exemption keeps
+            # `remove_private_tags` from stripping those identities,
+            # leaving them unrecoverable with their own key.
             #
             # This is one of two halves. `DicomExporter._merge`
             # (io_handlers.py) gives the same two tags explicit VRs on
@@ -995,13 +1159,9 @@ class PhiInspector:
                     pass  # Malformed tag?
 
             # A private *sequence* is a private tag. `scan_targets` is
-            # built from `attributes` alone, so before #167 a private SQ
-            # was swept only when it arrived as an opaque `UN` blob --
-            # i.e. only under Implicit VR, and only because the scan
-            # could not see it was a sequence. Restoring the structure
-            # (#167) removes that accident, so the sweep has to ask the
-            # question directly, at every depth, or the default
-            # configuration starts exporting private sequences.
+            # built from `attributes` alone, so the sweep has to ask the
+            # question of `sequences` directly, at every depth, or the
+            # default configuration exports private sequences.
             for owner, path in iter_item_tree(instance):
                 for seq_tag in list(owner.sequences.keys()):
                     try:
@@ -1031,7 +1191,7 @@ class PhiInspector:
 
         for item, tag, path in scan_targets:
             # Parse config
-            # Through the masks (#556): a `60xx,xxxx` rule covers
+            # Through the masks: a `60xx,xxxx` rule covers
             # `6002,0022`, and a concrete key beats it.
             config_val = _rule_for(self.phi_tags, tag)
             if not config_val:
@@ -1045,8 +1205,8 @@ class PhiInspector:
                 description = str(config_val)
                 action_code = "REPLACE"
                 rule_value = None
-            # Study Date's REPLACE with no value is the shift, at any depth
-            # (#537): the owner's rule reader says so, and the validator
+            # Study Date's REPLACE with no value is the shift, at any depth:
+            # the owner's rule reader says so, and the validator
             # lets it through only on that reading, since a DA cannot hold
             # `ANONYMIZED`.
             if tag == "0008,0020":
@@ -1058,22 +1218,21 @@ class PhiInspector:
             if val is None:
                 continue
 
-            # The owner's replacement is not PHI (#496). Since #492 an
-            # owner's remediation writes its value onto every instance's
-            # top-level copy, and without this a re-audit raised the
-            # instance's own rule against it: the instance went
-            # IDENTIFIED, the manifest read false, and a second
-            # `anonymize()` wrote a second value over the owner's.
+            # The owner's replacement is not PHI. An owner's remediation
+            # writes its value onto every instance's top-level copy, and
+            # without this a re-audit would raise the instance's own rule
+            # against it: the instance would go IDENTIFIED, and a second
+            # `anonymize()` would write a second value over the owner's.
             # Top-level only, because that is as far as the owner's write
             # and the exporter's stamp reach. Not for REMOVE, which asks
             # for the copy to be absent whatever it holds: a present copy
             # is raised, and folds into the owner's removal when the owner
-            # removed it (#537).
+            # removed it.
             if (action_code != "REMOVE" and not path
                     and self._holds_owners_replacement(tag, val, patient, study)):
                 continue
 
-            # Isocenter's own redaction note is not PHI (#547). PS3.15
+            # Isocenter's own redaction note is not PHI. PS3.15
             # Table E.1-1 removes Derivation Description, and redaction
             # writes this exact value there; `export(check_burned_in=True)`
             # re-audits and skips every entity with a finding, so without
@@ -1100,29 +1259,21 @@ class PhiInspector:
             elif action_code == "EMPTY":
                 # Zero-length bytes are empty too: a binary element EMPTY
                 # wrote reads back as `b""`, from the file and from the
-                # store, and `b"" != ""` raised it again (#547).
+                # store, and `b"" != ""` would raise it again.
                 if val != "" and val != b"":
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"
                     new_val = ""
             elif action_code in ["SHIFT", "JITTER"]:
-                # Date shifting, decided **per value** (#510, #513).
-                #
-                # This used to read `instance.date_shifted` and, failing
-                # that, `study.date_shifted`. Neither flag speaks for a
-                # value: each says a shift landed somewhere on an entity,
-                # so the shortcut over-suppressed a valid date the
-                # pipeline never touched (a rule first named in pass 2,
-                # or a value left out of `anonymize(findings=[...])`, was
-                # skipped forever while the instance read CLEARED --
-                # #510) and under-suppressed a date inside a sequence (no
-                # flag exists on a `DicomItem`, so a nested date was
-                # re-shifted on every pass with a
-                # `REMEDIATION_SHIFT_DATE` row each time -- #513).
-                # Neither flag is read here any more; a second reading of
-                # them beside the record would be a second answer, and
-                # the legacy branch below already carries the only
-                # persisted evidence that a shift ever ran.
+                # Date shifting, decided **per value**. Do not read
+                # `instance.date_shifted` or `study.date_shifted` here:
+                # each says a shift landed somewhere on an entity, not on
+                # this value, so it would skip a date the pipeline never
+                # touched (a rule first named in a later pass, or a value
+                # left out of `anonymize(findings=[...])`) and re-shift a
+                # date inside a sequence, which has no flag, on every pass.
+                # The legacy branch below carries the only persisted
+                # evidence that a shift ever ran without a record.
                 if item.date_shift_vouches_for(tag, val):
                     # This item shifted this tag to this value, and the
                     # tag still holds it. Shifting again would move it
@@ -1132,46 +1283,34 @@ class PhiInspector:
                     # A blank value is not a `SHIFT`/`JITTER` finding at
                     # all. `val` cannot be `None` here -- the walk above
                     # skips a tag the item does not hold -- so this tests
-                    # blank, not absent. `EMPTY` already tests `val != ""` and
-                    # `REPLACE` tests `val != <the value it writes> and
-                    # val != ""`, so three of the four value-writing actions
-                    # skip blank; and the arm's own reasoning is that an
-                    # empty value is not retained PHI -- there is nothing
-                    # to shift and nothing left behind, which is why it
-                    # is the one non-success path that writes no decline
-                    # row. Spelled as the arm spells it
+                    # blank, not absent, as `EMPTY` and `REPLACE` skip
+                    # blank. An empty value is not retained PHI: there is
+                    # nothing to shift, which is why the arm writes no
+                    # decline row for it. Spelled as the arm spells it
                     # (`str(...).strip()`), so a multi-valued element is
-                    # not mistaken for a blank one. Before the record
-                    # this asymmetry was invisible, because the flag
-                    # suppressed every pass after the first; with a
-                    # per-value record every pass looks like pass 1, so a
-                    # blank would otherwise raise a finding the arm
-                    # declines to act on for ever and #491's pass-end
-                    # demotion would leave a clean instance IDENTIFIED.
-                    # This branch is *above* the legacy one, so
-                    # `_date_shift_declines`' own blank guard is no
-                    # longer reachable from here; it is kept because the
-                    # predicate is also read directly and must answer
+                    # not mistaken for a blank one. Without this, every
+                    # pass would raise a finding the arm declines to act
+                    # on, and the pass-end demotion would leave a clean
+                    # instance IDENTIFIED. This branch is *above* the
+                    # legacy one, so `_date_shift_declines`' own blank
+                    # guard is not reachable from here; it is kept because
+                    # the predicate is also read directly and must answer
                     # the same way alone as it does in place.
                     needs_remediation = False
                 elif getattr(instance, "_legacy_shift_provenance", False):
-                    # A pre-0.9.6 store has no per-value records for the
-                    # dates it already holds, so this instance keeps the
-                    # entity-level rule for them, permanently: reading
-                    # "no record" as "not shifted" here would shift every
-                    # already-shifted date in the archive a second time.
-                    # The load says so once, as a WARNING audit row.
+                    # A store with no per-value shift records for the
+                    # dates it already holds: this instance keeps the
+                    # entity-level rule for them, permanently, because
+                    # reading "no record" as "not shifted" would shift
+                    # every already-shifted date a second time. The load
+                    # says so once, as a WARNING audit row.
                     #
-                    # "The entity-level rule" is #498's version of it,
-                    # not the older one: a value the arm could not parse
-                    # is raised again so its decline recurs and the
-                    # pass-end demotion keeps the instance IDENTIFIED,
-                    # while a value the shift could apply to is skipped
-                    # because it has moved once already. The import is
-                    # local because remediation imports this module.
-                    #
-                    # This whole branch dies when no pre-0.9.6 store
-                    # remains.
+                    # A value the arm could not parse is raised again so
+                    # its decline recurs and the pass-end demotion keeps
+                    # the instance IDENTIFIED, while a value the shift
+                    # could apply to is skipped because it has moved once
+                    # already. The import is local because remediation
+                    # imports this module.
                     from .remediation import (  # pylint: disable=import-outside-toplevel
                         _date_shift_declines)
                     needs_remediation = _date_shift_declines(val)
@@ -1182,25 +1321,25 @@ class PhiInspector:
             elif action_code == "KEEP":
                 needs_remediation = False
             else:  # REPLACE (Default)
-                # The rule's `value:` (#538), or the dummy of the tag's
-                # dictionary VR (#557), or `ANONYMIZED` for a private or
-                # unknown tag (#571). The loader judges the same spelling
+                # The rule's `value:`, or the dummy of the tag's
+                # dictionary VR, or `ANONYMIZED` for a private or
+                # unknown tag. The loader judges the same spelling
                 # (`_refused_phi_rule`). Computed in this arm alone: Study
                 # Date's value-less REPLACE was read as SHIFT above and
                 # must never get the DA dummy. "Already replaced" compares
                 # with the value this rule writes, so a dummied element
                 # reads clear on a re-audit, and a copy left at another
                 # value by an earlier policy is rewritten. A blank value,
-                # text or binary (#547's `b""`), carries nothing and is
-                # not given one.
+                # text or binary (`b""`), carries nothing and is not
+                # given one.
                 #
                 # On a UI with no `value:` it is the keyed UID replacement
-                # instead (#544): each value replaced by the UID derived
-                # from it, at any depth, so every reference to one UID
-                # gets one replacement. "Already replaced" is a UID this
+                # instead: each value replaced by the UID derived from
+                # it, at any depth, so every reference to one UID gets
+                # one replacement. "Already replaced" is a UID this
                 # project minted (`_uid_is_minted`), not agreement with
                 # anything: a copy of an owner's source UID is raised
-                # like any other (#496's shape).
+                # like any other.
                 if rule_value is None and _is_uid_replacement(config_val, tag):
                     new_val = _replaced_uids(val, self.project_secret)
                     needs_remediation = uid_replacement = new_val is not None
@@ -1221,8 +1360,7 @@ class PhiInspector:
                     # computes the offset sees only the finding: a
                     # legacy patient's date shifted with a keyed offset
                     # would carry two offsets. No patient (a direct call)
-                    # is a keyed patient, which is what every patient
-                    # this release creates is.
+                    # is a keyed patient, as every new patient is.
                     metadata={
                         "patient_id": patient_id,
                         "jitter_scheme": getattr(
@@ -1243,17 +1381,16 @@ class PhiInspector:
                     remediation_proposal=proposal
                 ))
 
-        # 3. Configured rules on sequence tags (#547). The loop above
-        # reads `attributes` alone, so until 0.9.8 a `REMOVE` or `EMPTY`
-        # on a sequence raised nothing and the sequence was exported with
-        # its items: every user rule on one, and 56 rows of Table E.1-1.
-        # Container findings, so into `seq_removals` with the private
-        # ones and for their reason -- remediated after anything raised
-        # inside them.
+        # 3. Configured rules on sequence tags. The loop above reads
+        # `attributes` alone, so without this a `REMOVE` or `EMPTY` on a
+        # sequence would raise nothing and the sequence would be exported
+        # with its items. Container findings, so into `seq_removals` with
+        # the private ones and for their reason -- remediated after
+        # anything raised inside them.
         swept = {(id(f.entity), f.tag) for f in seq_removals}
         for owner, path in iter_item_tree(instance):
             for seq_tag in list(owner.sequences.keys()):
-                # One lookup path with the loop above (#556), though no
+                # One lookup path with the loop above, though no
                 # 50xx or 60xx element is a sequence.
                 config_val = _rule_for(self.phi_tags, seq_tag)
                 # The private sweep already raised this one.
@@ -1306,51 +1443,57 @@ class PhiInspector:
     def _innermost_first(seq_removals: List[PhiFinding]) -> List[PhiFinding]:
         """The container findings, deepest first.
 
-        Deepest first, for the same reason the whole list is appended
-        last: a sequence can hold another one, and `iter_item_tree` yields
-        the container before the thing inside it. In that order
-        remediation deletes the outer sequence, and the inner finding --
-        whose `entity` was resolved before either ran -- then deletes from
-        a dict that is no longer reachable from the instance and files a
-        `REMEDIATION_REMOVE` row for it. The export is right either way;
-        the audit trail is not, and "every row describes an item that was
-        still in the graph" is the claim this ordering exists to keep.
-        Stable, so sequences at equal depth keep the walk's order (#167).
+        Stable, so sequences at equal depth keep the walk's order.
 
-        Applied on every return, not only when `remove_private_tags` is
-        on: it sat inside that block while private sequences were the only
-        container findings, and a configured sequence inside a configured
-        sequence needs the same order with the sweep off (#547).
+        Args:
+            seq_removals (List[PhiFinding]): The sequence findings.
+
+        Returns:
+            List[PhiFinding]: Sorted by `entity_path` length, longest
+            first.
         """
+        # A sequence can hold another one, and `iter_item_tree` yields the
+        # container before the thing inside it. In that order remediation
+        # would delete the outer sequence, and the inner finding -- whose
+        # `entity` was resolved before either ran -- would then delete from
+        # a dict no longer reachable from the instance and file a
+        # `REMEDIATION_REMOVE` row for it. The export is right either way;
+        # the audit trail is not, and "every row describes an item that was
+        # still in the graph" is the claim this ordering keeps. Applied on
+        # every return, not only when `remove_private_tags` is on: a
+        # configured sequence inside a configured sequence needs the same
+        # order with the sweep off.
         return sorted(seq_removals, key=lambda f: len(f.entity_path),
                       reverse=True)
 
     def _holds_owners_replacement(self, tag: str, value: Any, patient: Patient,
                                   study: Study) -> bool:
         """Whether `value`, an instance's top-level copy of `tag`, is the
-        replacement its owner already holds (#496).
+        replacement its owner already holds.
 
-        Agreement alone is not enough: before anything is anonymized every
-        copy equals its owner's *original*, and that is PHI. The owner's
-        value has to be what the rule on the tag resolves to, by the owner
-        scans' own test -- `_holds_owned_replacement`, the one
-        `scan_patient` and `_scan_study` stop raising on (#537): the
-        name's `value:` or `ANONYMIZED`, an `ANON_` pseudonym, a study date
-        this pipeline's shift produced (`_study_date_is_this_pipelines`),
-        or a Study Date `value:`. No owner, no skip.
+        The copy must equal the owner's value, and the owner's value must
+        pass `_holds_owned_replacement`, the test `scan_patient` and
+        `_scan_study` stop raising on. No owner, no skip. A Patient ID copy
+        under a subject with no Patient ID is always skipped: the export
+        stamps that ID empty.
 
-        The date arm read `study.date_shifted` until 0.9.6, and that flag
-        cannot tell the shift's own output from a fresh original assigned
-        over it -- so an instance's copy of a hand-replaced study date
-        skipped here as "the owner's replacement", which is #518 reached
-        through #496's door.
+        Args:
+            tag (str): The tag of the copy.
+            value: The copy's value.
+            patient (Patient): The owning patient, or None.
+            study (Study): The owning study, or None.
+
+        Returns:
+            bool: Whether to skip the copy.
         """
+        # Agreement alone is not enough: before anything is anonymized
+        # every copy equals its owner's *original*, and that is PHI.
         if tag == "0008,0020":
             if study is None:
                 return False
             # Lazy: io_handlers is the heavy module, and this is the one
-            # spelling of "a Study's date as a DA string" (#189) -- the
-            # spelling the owner's write put on the copy.
+            # spelling of "a Study's date as a DA string" -- the spelling
+            # the owner's write put on the copy.
             from .io_handlers import format_study_date
             return (value == format_study_date(study.study_date)
                     and _holds_owned_replacement(self.phi_tags, tag,
@@ -1361,7 +1504,7 @@ class PhiInspector:
             return (value == patient.patient_name
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         if tag == "0010,0020":
-            # A subject with no Patient ID (#584): the export stamps its
+            # A subject with no Patient ID: the export stamps its
             # ID empty whatever the copy holds, and its key is never
             # replaced, so a finding here could only write a pseudonym
             # onto a copy no file carries. Not dead: the copy is usually
@@ -1382,18 +1525,30 @@ class PhiInspector:
 
     def _scan_owned_uid(self, entity, tag: str, attr: str, entity_type: str,
                         patient_id: str) -> List[PhiFinding]:
-        """The owner's own UID under the keyed UID replacement (#544).
+        """The owner's own UID under the keyed UID replacement.
 
-        A Study owns `0020,000d` and a Series `0020,000e`: the exporter
-        stamps each file's copy from the entity (`export_stamp_attributes`),
-        so the entity is what has to move, and its remediation writes the
-        new UID onto each instance's top-level copy (#492). Raised against
-        the entity itself -- a Series is a finding entity of its own
-        (Q4 of #544) -- and only for the value-less REPLACE: `KEEP` retains
-        the UID, and a `REPLACE value:` leaves the owner as 0.9.8 did,
-        since one literal written into every Study would merge them under
-        the store's UNIQUE key. A UID this project minted is not raised.
+        Raised against the entity itself, and only for the value-less
+        REPLACE; a UID this project minted is not raised. The remediation
+        writes the new UID onto each instance's top-level copy.
+
+        Args:
+            entity: The Study or Series.
+            tag (str): `0020,000d` or `0020,000e`.
+            attr (str): The entity's UID attribute.
+            entity_type (str): `"Study"` or `"Series"`.
+            patient_id (str): Recorded on the finding.
+
+        Returns:
+            List[PhiFinding]: One finding, or none.
+
+        Raises:
+            RuntimeError: When the rule is the UID replacement, the UID is
+                not blank, and the inspector has no project secret.
         """
+        # The exporter stamps each file's copy from the entity
+        # (`export_stamp_attributes`), so the entity is what has to move. A
+        # `REPLACE value:` leaves the owner alone, since one literal written
+        # into every Study would merge them under the store's UNIQUE key.
         rule = _rule_for(self.phi_tags, tag)
         uid = getattr(entity, attr, None)
         if not _owned_uid_is_open(self.phi_tags, tag, uid, self.project_secret):
@@ -1409,15 +1564,30 @@ class PhiInspector:
                 original_value=uid, metadata={UID_REPLACEMENT: True}))]
 
     def _scan_series(self, series, patient_id: str = None) -> List[PhiFinding]:
-        """A Series' own PHI: its Series Instance UID (#544)."""
+        """A Series' own PHI: its Series Instance UID.
+
+        Args:
+            series: The Series.
+            patient_id (str, optional): Recorded on the finding.
+
+        Returns:
+            List[PhiFinding]: `_scan_owned_uid`'s findings.
+        """
         return self._scan_owned_uid(series, "0020,000e", "series_instance_uid",
                                     "Series", patient_id)
 
     def _scan_study(self, study: Study, patient_id: str = None,
                     jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
-        """
-        Scans a Study entity for study-level PHI: its Study Instance UID
-        (#544) and its Study Date.
+        """Scan a Study for study-level PHI: its Study Instance UID and its
+        Study Date.
+
+        Args:
+            study (Study): The study.
+            patient_id (str, optional): Recorded on each finding.
+            jitter_scheme (str): The patient's scheme, carried on a shift.
+
+        Returns:
+            List[PhiFinding]: The findings.
         """
         return (self._scan_owned_uid(study, "0020,000d", "study_instance_uid",
                                      "Study", patient_id)
@@ -1425,12 +1595,25 @@ class PhiInspector:
 
     def _scan_study_date(self, study: Study, patient_id: str = None,
                          jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
-        """The Study Date arm of `_scan_study`."""
+        """The Study Date arm of `_scan_study`, under the rule on
+        `0008,0020` (`_owned_rule`).
+
+        Under SHIFT a date this pipeline's shift produced
+        (`_study_date_is_this_pipelines`) is not raised again; anything
+        else is.
+
+        Args:
+            study (Study): The study.
+            patient_id (str, optional): Recorded on the finding.
+            jitter_scheme (str): The patient's scheme, carried on a shift.
+
+        Returns:
+            List[PhiFinding]: One finding, or none.
+        """
         findings = []
         uid = study.study_instance_uid
 
-        # The rule on Study Date governs the study's own date (#537); this
-        # read none until 0.9.8 and always proposed the shift.
+        # The rule on Study Date governs the study's own date.
         action, value = _owned_rule(self.phi_tags, "0008,0020")
         proposal = None
         if action == "KEEP":
@@ -1465,19 +1648,13 @@ class PhiInspector:
 
         # SHIFT. Below the other actions, not above them: a date shifted in
         # an earlier pass and now under EMPTY or REPLACE must still be
-        # raised, and this early return would skip it (#537).
+        # raised, and this early return would skip it.
         #
         # A date this pipeline's own shift produced is not raised again;
-        # anything else under `study_date` is (#518).
-        #
-        # This read `study.date_shifted` and returned no findings at all
-        # while it was set. The flag records *that* a shift happened,
-        # never *what it produced*, so it could not tell its own output
-        # from a new input: shift a study's date, assign a fresh
-        # original to `study.study_date`, re-audit, and the real date was
-        # never raised again and was exported. Measured on `927cb2b`:
-        # `2023-01-01` -> `2022-03-21`, then `study.study_date =
-        # date(2024, 7, 4)`, then `raised=0` with `date_shifted=True`.
+        # anything else under `study_date` is. Not `study.date_shifted`:
+        # the flag records *that* a shift happened, never *what it
+        # produced*, so a fresh original assigned to `study.study_date`
+        # after a shift would never be raised and would be exported.
         if _study_date_is_this_pipelines(study):
             return findings
 

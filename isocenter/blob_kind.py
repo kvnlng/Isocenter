@@ -1,25 +1,20 @@
 """The grammar for `instance_blobs.kind`.
 
-One column, one spelling, decided once (#183). `kind` was two literals --
-`'pixels'` and `'waveform'` -- until nested pixel data needed a third shape,
-and the column is unconstrained `TEXT NOT NULL` so a composite spelling
-needs no DDL change. It is still a schema decision, though: the table's only
-key is `UNIQUE(instance_uid, kind)`, and changing the spelling after rows
-exist is a migration.
-
-**Its own module rather than a pair of functions in `persistence.py`,
-where the gate it feeds lives.** `persistence.py` imports
-`SidecarPixelLoader` from `io_handlers.py`, and `io_handlers.py` has to
-build a kind at ingest -- so putting the grammar in `persistence.py` means
-either an import cycle or a function-local import hiding one. Three modules
-read this and none of them owns it. Stdlib only, so it adds nothing to
-`install_requires`.
+One column, one spelling. A kind is `'pixels'`, `'waveform'`, or one of
+those roots plus the path to a nested element. The column is unconstrained
+`TEXT NOT NULL`, but the spelling is still a schema decision: the table's
+only key is `UNIQUE(instance_uid, kind)`, and changing the spelling after
+rows exist is a migration.
 """
+# Kept in its own module, not in `persistence.py`: `persistence.py` imports
+# from `io_handlers.py`, which builds a kind at ingest, so the grammar there
+# would need an import cycle. Stdlib only, so it adds nothing to
+# `install_requires`.
 
 import re
 from typing import Optional, Tuple
 
-# --- The grammar for `instance_blobs.kind` (#183) ---
+# --- The grammar for `instance_blobs.kind` ---
 #
 #   kind   := root | root ":" path
 #   root   := "pixels" | "waveform"
@@ -41,9 +36,8 @@ from typing import Optional, Tuple
 # answer to the same question.
 #
 # The terminal tag is not decoration -- it is what tells the export writeback
-# which element to create. Inferring it from the root would work only until
-# it did not: #277 wants (5400,1010) under a path and Q5's shape is
-# (7fe0,0008) under one.
+# which element to create. Do not infer it from the root: a root can carry
+# more than one element, such as (5400,1010) or (7fe0,0008) under a path.
 #
 # **There is no escaping and none may be added.** The token alphabets are
 # closed and disjoint from the delimiters: a tag is drawn from `[0-9a-f,]`
@@ -91,14 +85,12 @@ def parse_blob_kind(kind: str) -> Tuple[str, tuple, Optional[str]]:
         Tuple[str, tuple, Optional[str]]: `(root, path, terminal_tag)`.
         `path` is the tuple `iter_item_tree` yields --
         `(("0088,0200", 0), ...)` -- and is `()` for a root blob, whose
-        `terminal_tag` is None. The empty tuple rather than None so that
-        `for tag, index in path` is a no-op at the root and every caller can
-        walk the path without first asking whether there is one.
+        `terminal_tag` is None, so `for tag, index in path` is a no-op at
+        the root.
 
     Raises:
-        ValueError: If `kind` does not match the grammar. Refusal is the
-            whole mechanism; see the grammar comment above for why no
-            escaping exists.
+        ValueError: If `kind` does not match the grammar. A kind is never
+            rewritten or escaped.
     """
     # `fullmatch` rather than `match` with `$`: `$` also matches before a
     # trailing newline, which is exactly how a stored key acquires an
@@ -125,12 +117,9 @@ def serialize_blob_kind(root: str, path: tuple,
                         terminal_tag: Optional[str]) -> str:
     """Build an `instance_blobs.kind` from its parts. The only way to.
 
-    Nothing may assemble a kind by f-string at a call site: that is precisely
-    the "invented at the call site" failure #183 names, and it is what puts
-    three spellings of one thing in one column. This is the inverse of
-    `parse_blob_kind` and re-parses its own output, so it cannot write a key
-    the gate would refuse -- left permissive it would be the f-string it
-    exists to replace.
+    Build every kind through this, never by f-string at a call site. This is
+    the inverse of `parse_blob_kind` and re-parses its own output, so it
+    cannot return a key the gate would refuse.
 
     Args:
         root (str): `'pixels'` or `'waveform'`.

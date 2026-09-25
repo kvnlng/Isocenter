@@ -1,3 +1,4 @@
+"""A minimal IOD validator for the attributes an export writes."""
 from pydicom.dataset import Dataset
 from pydicom.tag import BaseTag, Tag
 from typing import List
@@ -10,34 +11,28 @@ class IODValidator:
     Checks for the presence of Type 1 and Type 2 attributes based on SOP Class rules.
     Currently implements a subset of "Common" and "CTImage" modules.
 
-    **Validate, and fill.** The export worker asks `absent_type2` before it
-    asks `validate`, and writes each tag it names zero-length (#600): Type 2
-    means present and empty when unknown, so an absent one is a gap the
-    writer can close faithfully rather than a reason to refuse the file.
-    Both read `_modules_for`, so the fill covers exactly what the Type 2 arm
-    of `validate` would report and nothing this table does not know.
-    `validate`'s Type 2 arm is kept: it is the guard that goes red if the
-    fill ever stops running. Type 1 is never filled.
+    The export worker calls `absent_type2` before `validate`, and writes
+    each tag it names zero-length. Type 1 is never filled.
     """
+    # Validate, and fill: Type 2 means present and empty when unknown, so an
+    # absent one is a gap the writer can close faithfully rather than a
+    # reason to refuse the file. Both read `_modules_for`, so the fill
+    # covers exactly what the Type 2 arm of `validate` would report.
+    # `validate`'s Type 2 arm stays: it is the guard that reports a gap if
+    # the fill ever stops running.
 
     _MODULE_DEFINITIONS = {
         'Common': {
             '0008,0016': '1', '0008,0018': '1',
             # Study Date is Type 2 in General Study (PS3.3 C.7.2.1), as
-            # Study Time below is. It read '1' until #537, which nothing
-            # noticed while `anonymize()` always wrote a shifted date: a
-            # CT whose source had no or an empty Study Date failed export
-            # ('[Type 1 Error] Missing 0008,0020', 0 files), and once the
-            # rule governs the study's date the basic profile's own EMPTY
-            # would have failed every CT file the same way.
+            # Study Time below is. Under '1', a CT whose source has no or
+            # an empty Study Date, or one the basic profile emptied, would
+            # fail export.
             '0008,0020': '2',
             # Study Time is Type 2 in General Study (PS3.3 C.7.2.1):
-            # present and empty is conformant. It read '1' until #495,
-            # which nothing noticed while no policy touched the tag; the
-            # basic profile empties it, and under '1' the Type-1 arm
-            # below rejected the empty value, so the documented
-            # create_config -> load_config -> anonymize -> export path
-            # raised on every CT file and wrote nothing.
+            # present and empty is conformant. The basic profile empties
+            # it, and under '1' the Type-1 arm below would reject every
+            # CT file on the documented anonymize -> export path.
             '0008,0030': '2', '0008,0060': '1', '0020,000e': '1',
         },
         'CTImage': {
@@ -55,23 +50,36 @@ class IODValidator:
     def _modules_for(ds: Dataset) -> List[str]:
         """The module names this table holds for `ds`'s SOP class, or `[]`.
 
-        The SOP class is the file meta's when the dataset has one -- the
-        export worker's `FileDataset` always does -- and the dataset's own
-        `SOPClassUID` otherwise. One spelling for `validate` and
-        `absent_type2`, so the fill and the refusal cannot read two SOP
-        classes.
+        The SOP class is the file meta's when the dataset has one, and the
+        dataset's own `SOPClassUID` otherwise.
+
+        Args:
+            ds (Dataset): The dataset to classify.
+
+        Returns:
+            List[str]: The module names, or `[]` for an SOP class this
+                table does not know.
         """
+        # One spelling for `validate` and `absent_type2`, so the fill and
+        # the refusal cannot read two SOP classes.
         sop = ds.file_meta.MediaStorageSOPClassUID if hasattr(
             ds, 'file_meta') else ds.get("SOPClassUID")
         return IODValidator._SOP_RULES.get(sop, [])
 
     @staticmethod
     def absent_type2(ds: Dataset) -> List[BaseTag]:
-        """Every Type 2 tag of `ds`'s modules that `ds` does not hold (#600).
+        """Every Type 2 tag of `ds`'s modules that `ds` does not hold.
 
         Exactly the set `validate` reports as `[Type 2 Error]`: absent, not
         empty, since an empty Type 2 element is conformant. Type 1 tags are
         never named, absent or empty.
+
+        Args:
+            ds (Dataset): The dataset to check.
+
+        Returns:
+            List[BaseTag]: The absent Type 2 tags, in table order; `[]` for
+                an SOP class this table does not know.
         """
         absent = []
         for module in IODValidator._modules_for(ds):

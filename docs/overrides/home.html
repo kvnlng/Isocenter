@@ -21,19 +21,18 @@
           <div class="ledger-install"><span>$</span><code>pip install isocenter</code></div>
           <a href="{{ 'quickstart/' | url }}">Read the quick start</a>
         </div>
-        <p class="ledger-hero__note">Python 3.12 or later. Apache-2.0. No command-line tool: the Python API is the whole interface.</p>
+        <p class="ledger-hero__note">Python 3.12 or later, on Linux or macOS. Release candidates: <code>pip install --pre isocenter</code>. Apache-2.0. No command-line tool: the Python API is the whole interface.</p>
       </div>
       <div class="ledger-report" aria-label="Example compliance report excerpt">
         <div class="ledger-report__head"><strong>Compliance report</strong><code>compliance_report.md</code></div>
         <div class="ledger-report__rows">
-          <div class="ledger-report__row"><span>Patients</span><code>14</code></div>
-          <div class="ledger-report__row"><span>Instances written</span><code>191 of 192 requested</code></div>
-          <div class="ledger-report__row"><span>Tags remediated</span><code>6,528</code></div>
-          <div class="ledger-report__row"><span>Pixel zones redacted</span><code>150</code></div>
-          <div class="ledger-report__row"><span>Data loss recorded</span><code>1 · waveform group 2 of 2</code></div>
-          <div class="ledger-report__row"><span>Grade</span><span class="ledger-report__grade">REVIEW_REQUIRED</span></div>
+          <div class="ledger-report__row"><span>Validation Status</span><span class="ledger-report__grade">REVIEW_REQUIRED</span></div>
+          <div class="ledger-report__row"><span>Total Patients</span><code>14</code></div>
+          <div class="ledger-report__row"><span>Total Instances</span><code>192</code></div>
+          <div class="ledger-report__row"><span>Instances Written</span><code>191 of 192 requested</code></div>
+          <div class="ledger-report__row"><span>Privacy Profile</span><code>basic@2026c</code></div>
         </div>
-        <div class="ledger-report__foot">One record lost a waveform group at ingest. The report says which, and the grade will not read PASS until a person has looked. Illustrative figures.</div>
+        <div class="ledger-report__foot">One instance was not written. The report names it and why, and the grade will not read PASS until a person has looked. Illustrative figures.</div>
       </div>
     </div>
   </section>
@@ -41,9 +40,9 @@
     <div class="ledger-pipeline__inner">
       <div class="ledger-pipeline__head">
         <h2>The pipeline</h2>
-        <span>Ten steps. Nothing touches disk until step 9; the report comes last.</span>
+        <span>Ten steps. Until export, step 9, the session writes only the store, isocenter.log and files you ask for (a configuration, a key, a report, a manifest or a cohort table), and the store holds the original identifiers. The report comes last.</span>
       </div>
-      <svg viewBox="0 0 1120 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The ten pipeline steps: ingest, examine, configure, audit, backup, anonymize, redact, verify in memory; then export and report on disk.">
+      <svg viewBox="0 0 1120 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The ten pipeline steps: ingest, examine, configure, audit, lock identities (optional), anonymize, redact, verify in memory; then export and report on disk.">
         <line x1="20" y1="60" x2="1100" y2="60" stroke="#1f1d19" stroke-width="1.5"></line>
         <rect x="8" y="14" width="880" height="92" fill="none" stroke="#b9cfcc" stroke-width="1" stroke-dasharray="4 4" rx="3"></rect>
         <text x="20" y="128" font-family="Source Sans 3, Arial, sans-serif" font-size="13" fill="#2e6b66">In memory. The source tree is never written to.</text>
@@ -54,7 +53,7 @@
           <circle cx="170" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="170" y="65" font-size="12">2</text><text x="170" y="40">Examine</text>
           <circle cx="280" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="280" y="65" font-size="12">3</text><text x="280" y="40">Configure</text>
           <circle cx="390" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="390" y="65" font-size="12">4</text><text x="390" y="40">Audit</text>
-          <circle cx="500" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="500" y="65" font-size="12">5</text><text x="500" y="40">Backup</text>
+          <circle cx="500" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="500" y="65" font-size="12">5</text><text x="500" y="40">Lock identities</text><text x="500" y="92" font-size="12" fill="#2e6b66">(optional)</text>
           <circle cx="610" cy="60" r="14" fill="#2e6b66" stroke="#2e6b66" stroke-width="1.5"></circle><text x="610" y="65" font-size="12" fill="#f6f3ec">6</text><text x="610" y="40">Anonymize</text>
           <circle cx="720" cy="60" r="14" fill="#2e6b66" stroke="#2e6b66" stroke-width="1.5"></circle><text x="720" y="65" font-size="12" fill="#f6f3ec">7</text><text x="720" y="40">Redact</text>
           <circle cx="830" cy="60" r="14" fill="#f6f3ec" stroke="#1f1d19" stroke-width="1.5"></circle><text x="830" y="65" font-size="12">8</text><text x="830" y="40">Verify</text>

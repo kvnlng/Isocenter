@@ -1,4 +1,4 @@
-# Keep a way back to the identities
+# Reversible anonymization: keep a way back
 
 <!-- tutorial: inputs=CT_small.dcm -->
 
@@ -16,13 +16,32 @@ from the pseudonym, and shows what happens without the key.
 !!! tip "Run it yourself"
 
     Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked. To follow
-    along, make a folder called `input` holding pydicom's bundled test
-    file `CT_small.dcm` (`pydicom.data.get_testdata_file("CT_small.dcm")`
-    returns where it is), then paste the blocks into a Python prompt or a
-    notebook. In a `.py` script, put them under
-    `if __name__ == "__main__":`
-    ([why](../quickstart.md#1-initialize-a-session)).
+    Isocenter's test suite, and every output shown is checked.
+
+    - **Start in a new, empty folder.** Each tutorial creates its own
+      `tutorial.db` and export folders, and running one in another
+      tutorial's folder changes what it prints. The first block below
+      copies the input file from pydicom into `input/`.
+    - Paste the blocks into a Python prompt or a notebook. In a `.py`
+      script, put them under `if __name__ == "__main__":`
+      ([why](../quickstart.md#1-initialize-a-session)).
+    - In a block with `>>>`, type what follows each `>>>`; the lines
+      under it are what Python prints. A `...` inside a printed value
+      stands for a part that differs on every run, such as a pseudonym or
+      a UID.
+    - The session also prints progress bars, status lines and `WARNING`
+      lines as it works. They are not shown here.
+      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+shutil.copy(pydicom.data.get_testdata_file("CT_small.dcm"), "input")
+```
 
 ## 1. Ingest one patient
 
@@ -63,15 +82,9 @@ shows how to change the rules and read the grade they give.
 
 ## 3. Lock the identities, then anonymize
 
-Locking has to come **before** `anonymize()`. The lock copies each
+Locking has to come **before** `anonymize()`: the lock copies each
 file's original values into an encrypted token, and after `anonymize()`
-there is no original value left to copy. A lock at that point secures
-nothing, and it does not raise: `lock_identities(report)` looks for the
-report's patients by their original Patient IDs, and after `anonymize()`
-no patient holds them. It logs one `ERROR` line saying the IDs matched no
-patient, returns an empty result, and still creates the key file.
-(Locking one patient by its new ID does raise `RuntimeError`.) That is
-why the page checks the count below.
+there is no original value left to copy.
 
 ```python
 session.enable_reversible_anonymization("isocenter.key")
@@ -96,6 +109,17 @@ locked = session.lock_identities(report)
 >>> os.path.exists("isocenter.key")
 True
 ```
+
+!!! warning "Check the count: a lock after `anonymize()` secures nothing"
+
+    `len(locked)` is the number of instances that now carry a token.
+    Called after `anonymize()`, `lock_identities(report)` does not
+    raise. It looks for the report's patients by their original Patient
+    IDs, and after `anonymize()` no patient holds them, so it logs one
+    `ERROR` line saying the IDs matched no patient, returns an empty
+    result, and still creates the key file. The count is 0, and the key
+    opens nothing. (Passing one patient's new `ANON_` ID instead raises
+    `RuntimeError`.)
 
 The key is a file of its own. Here it sits next to the store; step 6
 moves it where it belongs. Keep its contents to yourself: anyone who
@@ -160,8 +184,7 @@ def logged_warning(text):
 WARNING - 1 of 1 exported instances carry encrypted original identities (0400,0500). They are recoverable with the session key; treat the export as re-identifiable by any holder of it.
 ```
 
-The log does not last: today, the next `Session` you open overwrites
-it.
+Each new `Session` overwrites the log file; copy it if you need it.
 
 **Second, a `REVERSIBLE_EXPORT` row** in the store's audit log. The row
 is kept in the store for good, and the report counts it in section 2.
@@ -319,7 +342,7 @@ separate files, and each one does a different job:
 | :--- | :--- | :--- |
 | **`isocenter.key`**, apart from the store and never with an export | It is the only thing that opens the identity tokens. | Nobody can recover any identity locked under it, and no new key helps. |
 | **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export. | Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key: ingest those files into a new store, and recover as in step 5. |
-| **`config.yaml`**, under version control | It is your policy. Reload it every time you reopen the store. | Nothing you cannot write again, but a rewritten file must be the same policy, or the next report grades `REVIEW_REQUIRED` until you audit again. |
+| **`config.yaml`**, under version control | It is your policy. Reload it every time you reopen the store. | Nothing you cannot write again, but a rewritten file must be the same policy. If it is not, an export before a new `audit()` writes a `WARNING` row that stays in the store, and every later report of this store grades `REVIEW_REQUIRED`. |
 
 Keep them apart. The key opens the tokens in the exported files, so an
 export shipped with its key is not de-identified at all. The store

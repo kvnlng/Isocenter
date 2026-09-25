@@ -49,7 +49,14 @@ plugins:
           paths: [.]
           options:
             show_root_heading: true
-            show_source: true
+            # Source blocks carried maintainer comments and made the
+            # Session page several megabytes; the API pages document the
+            # contract, and the source is one click away on GitHub.
+            show_source: false
+            # Render a type as its source spells it (`sqlite3.Error`), not
+            # as its last name alone (`Error`), which hid the module in
+            # Raises tables.
+            annotations_path: source
             docstring_options:
               # `Returns:` and `Yields:` items here are the canonical
               # Google form, `Type: description`. Griffe's default reads
@@ -90,34 +97,40 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Features:
-      - 'Performance': performance.md
-      - 'Architecture': architecture.md
-      - 'Intelligent OCR': ocr.md
-  - Guides:
+  - Get started:
       - 'Installation': installation.md
       - 'Quick Start': quickstart.md
-      - 'Configuration': configuration.md
-      - 'Environment Variables': environment.md
-      - 'Migration Tools': migration.md
-      - 'Analytics & Reporting': analytics.md
-      - 'Waveforms & WFDB': waveforms.md
   - Tutorials:
-      - 'De-identify and read the grade': tutorials/deidentify-and-read-the-grade.md
+      - 'De-identify a cohort and read the grade': tutorials/deidentify-and-read-the-grade.md
       - 'Select part of a cohort': tutorials/select-part-of-a-cohort.md
-      - 'Keep a way back to the identities': tutorials/reversible-anonymization.md
+      - 'Reversible anonymization: keep a way back': tutorials/reversible-anonymization.md
+      - 'Redact burned-in text for one machine': tutorials/redact-burned-in-pixels.md
+      - 'Write your own export format': tutorials/write-an-exporter.md
+  - Guides:
+      - 'Configuration': configuration.md
+      - 'Analytics & Reporting': analytics.md
+      - 'What the export writes': export-output.md
+      - 'Burned-in text (OCR)': ocr.md
+      - 'Waveforms & WFDB': waveforms.md
+      - 'Codec support': codecs.md
+      - 'Import CTP rules': ctp-import.md
+      - 'Environment Variables': environment.md
+  - 'Upgrading from 0.9.x': migration.md
   - API Reference:
       - 'API stability': api/stability.md
       - 'Session': api/session.md
+      - 'Results and errors': api/results.md
       - 'Configuration': api/configuration.md
       - 'Entities': api/entities.md
-      - 'Persistence': api/persistence.md
       - 'Exporter registry': api/exporters.md
-      - 'Intelligent OCR': api/ocr.md
-  - Project Info:
+      - 'OCR API': api/ocr.md
+      - 'Audit trail': api/persistence.md
+  - About:
       - 'For institutions': for-institutions.md
+      - 'Architecture': architecture.md
+      - 'Performance': performance.md
+      - 'Contributing': developer_guide.md
       # Points at the real file rather than a copy inside docs/. The
       # copy drifted 97 lines behind and stopped at 0.6.0 (#52); a
       # changelog with two homes only ever has one that is current.
       - 'Changelog': https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md
-      - 'Roadmap': roadmap.md

@@ -9,12 +9,12 @@ middle to plausible wrong values and report nothing -- no exception, no
 warning, nothing on fd 2 at `verbose=2` -- and the second decoder a
 cross-check would reach for returns the *same* wrong array, so it
 detects nothing either. Owner ruling Q7: record the limit
-(`docs/installation.md`, and README's "a stream the decoder rejects"),
+(`docs/codecs.md`, and README's "a stream the decoder rejects"),
 and pin it here.
 
 **These tests are pins on a limit, not on a behaviour anyone wants.** If
 one goes red because a codec started refusing corruption, that is good
-news: revisit `docs/installation.md`'s decode limits and README's
+news: revisit `docs/codecs.md`'s decode limits and README's
 wording, then invert the test. What the docs do promise is pinned too: a
 truncated stream is refused, and JPEG-LS (CharLS) refuses all three
 corruptions.
@@ -122,7 +122,7 @@ def test_a_mid_stream_corruption_decodes_to_wrong_values_with_no_error(
     decoded = at_decode_pixels(path)
     assert isinstance(decoded, tuple), (
         f"{name} {corrupt} was refused -- a codec now detects this "
-        f"corruption: revisit docs/installation.md and README, then invert "
+        f"corruption: revisit docs/codecs.md and README, then invert "
         f"this test. {decoded!r}")
     arr = decoded[0]
     assert arr.shape == source.shape and arr.dtype == source.dtype
@@ -219,7 +219,7 @@ def test_a_jpeg_stream_cut_short_and_closed_with_eoi_reads_with_grey_rows(
     looks like, and libjpeg-turbo -- Pillow's decoder at pydicom's door
     for 8 bits, and `jpeg_decode` at the fallback for 12 -- reads it with
     the missing rows filled with mid-grey and no error, as it reads a
-    stream damaged mid-stream. `docs/installation.md` says so.
+    stream damaged mid-stream. `docs/codecs.md` says so.
     """
     stream = encode(source)
     path = _file(tmp_path, ts, source, _truncated_half(stream),
@@ -227,7 +227,7 @@ def test_a_jpeg_stream_cut_short_and_closed_with_eoi_reads_with_grey_rows(
     decoded = at_decode_pixels(path)
     assert isinstance(decoded, tuple), (
         f"refused -- a decoder now detects a lost middle: revisit "
-        f"docs/installation.md, then invert this test. {decoded!r}")
+        f"docs/codecs.md, then invert this test. {decoded!r}")
     arr = decoded[0]
     assert arr.shape == source.shape and arr.dtype == source.dtype
     assert (arr[-1] == fill).all(), arr[-1]

@@ -260,9 +260,12 @@ def test_every_method_named_in_a_package_string_exists():
     # test's own `ours = _ours()` line: rewritten as `frozenset()`, or as
     # a union missing a part, the walk grades fewer claims, finds no
     # offender among them, and passes (review of #637). 83 claims when
-    # the floor was set; each part of the union dropped left 16-66.
+    # the floor was set at 75; each part of the union dropped left 16-66.
+    # The docstring cleanup deleted strings, and it was re-measured then:
+    # 67 claims, and 53/57/39 with the class names, ROOTS or _RECEIVERS
+    # dropped (15 with none), so 60 still fails every dropped part.
     # Lower it only for a string that was deleted, never to pass.
-    assert graded >= 75, (
+    assert graded >= 60, (
         f"only {graded} method claims graded across the package's "
         "strings; the set of receivers read as ours has shrunk, and this "
         "test would otherwise pass while checking almost nothing")

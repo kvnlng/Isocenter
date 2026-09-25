@@ -533,7 +533,7 @@ def _string_literals_in_package():
     `f"{RESOURCES_DIR}/redaction_rules.json"` that is
     `"/redaction_rules.json"`, which is not the basename the caller
     checks for. Measured by review of #391: that rewrite of the
-    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 389 turns
+    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 434 turns
     `test_every_shipped_resource_is_named_by_the_package` red. That is
     the safe direction (a resource the walk cannot
     see reads as unnamed, never as named), and it is the same rule the
@@ -1526,278 +1526,6 @@ def test_the_stall_watchdog_fires_inside_the_run_tests_step():
 
 
 # ---------------------------------------------------------------------------
-# The hang probe (#250) -- instrumentation that must stay off the gate
-# ---------------------------------------------------------------------------
-
-PROBE_WORKFLOW = REPO / ".github" / "workflows" / "hang-probe.yml"
-
-
-#: Characters that make a GitHub Actions expression unparseable. The
-#: documented operator set is `( ) [ ] . ! < <= > >= == != && ||`; there
-#: is no arithmetic, so any of these inside a `${{ }}` is a workflow the
-#: API refuses to load rather than a workflow that computes something.
-_ARITHMETIC = "+-*/"
-
-
-def _expressions(text):
-    """Every `${{ ... }}` body in `text`, with quoted literals removed.
-
-    String literals are stripped first so a hyphen inside one (a branch
-    name, a formatted label) is not read as subtraction.
-    """
-    for body in re.findall(r"\$\{\{(.*?)\}\}", text, re.S):
-        yield body, re.sub(r"'[^']*'", "''", body)
-
-
-def test_the_hang_probe_never_runs_on_the_gate():
-    """The #250 probe is dispatched by hand, and nothing else may start it.
-
-    It loops the suite for hours to catch a hang that shows up in one
-    run out of several. That is the opposite of a PR gate: it must
-    never run on a pull request, a push, or a call from `publish.yml`,
-    and it must never share a file with them -- every edit to tests.yml
-    is an edit to the release path. So the trigger set is exactly
-    `workflow_dispatch`, checked two ways: on the parsed document, and on
-    the raw text, so a second trigger cannot hide behind a YAML alias.
-
-    **PyYAML parses the bare `on` key as the boolean `True`** (YAML 1.1
-    treats `on`/`off`/`yes`/`no` as booleans), so the triggers live at
-    `workflow[True]`, not `workflow["on"]` -- a `KeyError` on the string,
-    and `assert "on" in workflow` would pass vacuously. Do not "fix" the
-    lookup.
-
-    The caps are the same inequality tests.yml carries: the job cap
-    exceeds the sum of every step cap, so whatever hangs, the timeout
-    that fires belongs to a step. Both are plain integers here.
-
-    **And no expression in the file may contain arithmetic**, which is
-    the assertion this test was missing. The two caps were first written
-    as a product of the dispatch inputs plus a constant, and GitHub
-    cannot parse that -- `HTTP 422: failed to parse workflow: (Line:
-    102, Col: 22): Unexpected symbol: '+'` -- because the expression
-    language has no arithmetic operators. The workflow merged and was
-    inert: **this test passed on it**, because it parsed the `+ N` tail
-    out of the string and compared the numbers, grading the arithmetic's
-    text and never whether GitHub could evaluate it. A guard that passes
-    on a workflow nothing can load is worse than no guard, so the
-    arithmetic check below is on the raw `${{ }}` bodies.
-
-    Only *inside* the expressions: the loop script legitimately does
-    shell arithmetic (`ceiling=$(( ${{ inputs.per_iteration_minutes }}
-    * unit ))`), where the `*` is bash's and the expression is only the
-    substitution. Widening this to whole lines would go red on that.
-    """
-    import yaml
-
-    assert PROBE_WORKFLOW.exists(), (
-        f"{PROBE_WORKFLOW.relative_to(REPO)} does not exist; the #250 hang "
-        "probe is the only thing that can turn the next CI hang into a "
-        "stack trace on demand")
-    text = PROBE_WORKFLOW.read_text(encoding="utf-8")
-    workflow = yaml.safe_load(text)
-
-    triggers = workflow[True]
-    assert set(triggers) == {"workflow_dispatch"}, (
-        f"hang-probe.yml triggers on {sorted(triggers)}; it must be "
-        "workflow_dispatch and nothing else -- a multi-hour loop on the "
-        "PR gate or the release path is a CI cost decision nobody made")
-    for forbidden in ("pull_request", "push:", "workflow_call", "schedule:"):
-        assert forbidden not in text, (
-            f"{forbidden!r} appears in hang-probe.yml; even as a comment "
-            "it invites the trigger back, and as an alias it is one")
-
-    inputs = triggers["workflow_dispatch"]["inputs"]
-    # A subset, not equality, so adding an input is free and removing or
-    # renaming one is red: `gh workflow run -f <unknown>=...` is an HTTP
-    # 422, and the release runbook dispatches with
-    # `-f per_iteration_minutes=25`. A deleted input the loop still
-    # substitutes becomes an empty string inside `$(( ))` (#427).
-    assert {"iterations", "start_method", "selection",
-            "per_iteration_minutes", "stall_minutes"} <= set(inputs), (
-        f"the probe's dispatch inputs are {sorted(inputs)}; the loop "
-        "script and the outcome table in the workflow's header assume "
-        "all five")
-
-    job = workflow["jobs"]["probe"]
-    steps = job["steps"]
-    uncapped = [step.get("name") or step.get("uses") or "<unnamed>"
-                for step in steps if "timeout-minutes" not in step]
-    assert not uncapped, (
-        f"probe steps without their own timeout-minutes: {uncapped}; an "
-        "uncapped step makes the job cap the only thing that can stop a "
-        "hang there, and a job cap reports no failing step")
-
-    loop = next((s for s in steps if s.get("id") == "loop"), None)
-    assert loop is not None, "hang-probe.yml has no step with id `loop`"
-    # GitHub runs a `shell: bash` step as `bash --noprofile --norc -eo
-    # pipefail {0}`. With `-e` live, the loop's `wait "$pid"; rc=$?` exits
-    # the script on the first non-zero pytest, so a failing, locked or
-    # hanging iteration leaves no summary row and no `::error::` -- the
-    # probe reports nothing about exactly the runs it exists to report.
-    # Measured with a fake pytest under those flags. Nothing but this
-    # assertion can see the shell's flags, and a future reader will
-    # "clean up" a `set +e` that looks unmotivated.
-    assert re.search(r"^\s*set \+e\b", loop["run"], re.MULTILINE), (
-        "the loop step no longer starts with `set +e`; under GitHub's "
-        "default `-eo pipefail` for `shell: bash` the first failing "
-        "iteration exits the script before its row is written (#250)")
-    literal = [s["timeout-minutes"] for s in steps if s is not loop]
-    assert all(isinstance(cap, int) for cap in literal), (
-        f"every step but the loop carries a literal cap; got {literal!r}")
-
-    # The assertion that would have caught the 422. See the docstring.
-    for body, without_strings in _expressions(text):
-        found = sorted(set(without_strings) & set(_ARITHMETIC))
-        assert not found, (
-            f"the expression `${{{{{body}}}}}` in hang-probe.yml uses "
-            f"{found}, and GitHub Actions expressions have no arithmetic "
-            "operators -- the documented set is ( ) [ ] . ! < <= > >= == "
-            "!= && ||. The whole workflow becomes unparseable: `HTTP 422: "
-            "failed to parse workflow: Unexpected symbol`, and it cannot "
-            "be dispatched at all. Size the value as a literal instead "
-            "(#250)")
-
-    loop_cap = loop["timeout-minutes"]
-    job_cap = job.get("timeout-minutes")
-    for where, cap in (("the loop step's timeout-minutes", loop_cap),
-                       ("jobs.probe.timeout-minutes", job_cap)):
-        assert isinstance(cap, int), (
-            f"{where} is {cap!r}, not an integer; it cannot be an "
-            "expression over the inputs, because GHA expressions have no "
-            "arithmetic -- see the check above (#250)")
-    assert job_cap > loop_cap + sum(literal), (
-        f"jobs.probe.timeout-minutes ({job_cap}) does not exceed the loop "
-        f"step's cap ({loop_cap}) plus the literal step caps "
-        f"({sum(literal)}); some step's timeout is unreachable and a hang "
-        "there dies as 'cancelled' with no failing step in the log -- the "
-        "exact shape of #243/#250")
-    assert job_cap <= 360, (
-        f"jobs.probe.timeout-minutes ({job_cap}) exceeds GitHub's "
-        "360-minute maximum for a job on a hosted runner")
-
-
-def _probe_inputs():
-    import yaml
-
-    workflow = yaml.safe_load(PROBE_WORKFLOW.read_text(encoding="utf-8"))
-    return workflow[True]["workflow_dispatch"]["inputs"], workflow
-
-
-def _module_float(path, name):
-    """A module-level `NAME = <number>` read by AST, never by import."""
-    for node in ast.parse(path.read_text(encoding="utf-8")).body:
-        if (isinstance(node, (ast.Assign, ast.AnnAssign))
-                and any(isinstance(t, ast.Name) and t.id == name
-                        for t in (node.targets if isinstance(node, ast.Assign)
-                                  else [node.target]))):
-            return float(ast.literal_eval(node.value))
-    raise AssertionError(f"{path.relative_to(REPO)} no longer binds {name}")
-
-
-def test_the_hang_probe_stall_deadline_outlasts_every_internal_timeout():
-    """The probe calls `HANG` only after every in-process diagnostic has fired (#427).
-
-    `stall_minutes` is how long the log may go without a new test starting
-    before the iteration is killed as a hang. Every dump the suite makes
-    of itself has to land before that kill, or the kill takes the stack
-    this workflow exists to capture. Those dumps are pytest's
-    `faulthandler_timeout` (300 s in `pytest.ini`), the conftest stall
-    watchdog (`_STALL_S` plus one `_TICK_S`), and the pool workers' 240 s
-    `dump_traceback_later`. The first two are read here from their
-    sources. A default of 4 minutes (240 s < 300 s) would kill a stuck
-    test before faulthandler reports it.
-
-    **And the ceiling must exceed the stall deadline.**
-    `per_iteration_minutes` is the ceiling for a run that is still
-    starting tests. Since the review of PR #480 a stall is judged by
-    `stall_minutes` whatever the ceiling, so this inequality no longer
-    stops a hang from being called `SLOW`; the late-hang test in
-    `test_hang_probe_loop.py` pins that. It stays as a floor: the slowest
-    healthy iteration measured is about 14 minutes, above the 10-minute
-    stall, so a ceiling at or below the stall would call every healthy run
-    `SLOW`, which is no verdict.
-    """
-    import configparser
-
-    inputs, _ = _probe_inputs()
-    stall_s = inputs["stall_minutes"]["default"] * 60
-    ceiling_s = inputs["per_iteration_minutes"]["default"] * 60
-
-    ini = configparser.ConfigParser()
-    ini.read(REPO / "pytest.ini", encoding="utf-8")
-    faulthandler_s = float(ini["pytest"]["faulthandler_timeout"])
-    conftest = REPO / "tests" / "conftest.py"
-    watchdog_s = _module_float(conftest, "_STALL_S") + _module_float(conftest, "_TICK_S")
-
-    assert stall_s > faulthandler_s, (
-        f"stall_minutes defaults to {stall_s / 60:g} minutes, not above "
-        f"faulthandler_timeout ({faulthandler_s:g}s): the probe would kill a "
-        "stuck test before pytest dumps its stack (#427)")
-    assert stall_s > watchdog_s, (
-        f"stall_minutes ({stall_s:g}s) does not exceed the conftest stall "
-        f"watchdog's first report ({watchdog_s:g}s) (#427)")
-    assert ceiling_s > stall_s, (
-        f"per_iteration_minutes ({ceiling_s / 60:g}) does not exceed "
-        f"stall_minutes ({stall_s / 60:g}): the ceiling would sit under the "
-        "slowest healthy iteration (about 14 minutes) and every healthy run "
-        "would read as SLOW, which is no verdict (#427)")
-
-
-#: The loop script's test-only knobs and their production defaults. Each
-#: is unset in CI; `tests/test_hang_probe_loop.py` sets them to run the
-#: script in seconds.
-_PROBE_KNOBS = {"PROBE_UNIT_S": "60", "PROBE_POLL_S": "5",
-                "PROBE_GRACE_S": "45", "PROBE_MARGIN_S": "10"}
-
-
-def test_the_hang_probe_script_budget_sits_inside_its_step_cap():
-    """The script ends every iteration itself, and before its step cap (#427).
-
-    The loop step's `timeout-minutes` is a literal, because GitHub
-    Actions expressions have no arithmetic, so it cannot shrink to fit
-    the inputs. If iterations times the ceiling outgrew it, the cap fired
-    mid-iteration, and the run ended "cancelled" with no row and no
-    failing step: #243's shape. The input description's "hard ceiling 22"
-    was arithmetic nothing enforced, and at `per_iteration_minutes=25` it
-    was already false. The script now carries its own budget, a literal
-    number of minutes, and stops with a `BUDGET` row before an iteration
-    that cannot fit. This pins that budget below the cap.
-
-    It also pins the knobs the budget is read through, because they are
-    what `test_hang_probe_loop.py` turns. Each has a default, and nothing
-    in the workflow may set one: a `PROBE_UNIT_S: "1"` in an `env:` block
-    would make every production deadline sixty times shorter.
-    """
-    _, workflow = _probe_inputs()
-    loop = next(s for s in workflow["jobs"]["probe"]["steps"]
-                if s.get("id") == "loop")
-    run = loop["run"]
-
-    budget = re.search(
-        r"^\s*budget=\$\{PROBE_BUDGET_S:-\$\(\( (\d+) \* 60 \)\)\}", run, re.M)
-    assert budget, (
-        "the loop script no longer reads `budget=${PROBE_BUDGET_S:-$(( <minutes> "
-        "* 60 ))}`; this test cannot find the budget it pins (#427)")
-    assert int(budget.group(1)) < loop["timeout-minutes"], (
-        f"the loop's own budget ({budget.group(1)} minutes) is not inside the "
-        f"loop step's cap ({loop['timeout-minutes']}); the cap fires "
-        "mid-iteration again, with no row and no failing step (#243, #427)")
-
-    for knob, default in _PROBE_KNOBS.items():
-        assert re.search(
-            rf"^\s*\w+=\$\{{{knob}:-{default}\}}", run, re.M), (
-            f"the loop script does not read `{knob}` with the production "
-            f"default {default} (#427)")
-    envs = [workflow.get("env") or {}, workflow["jobs"]["probe"].get("env") or {}]
-    envs += [step.get("env") or {} for step in workflow["jobs"]["probe"]["steps"]]
-    set_here = sorted(k for env in envs for k in env
-                      if k.startswith("PROBE_") and k != "PROBE_SELECTION")
-    assert not set_here, (
-        f"hang-probe.yml sets {set_here}; those are test-only knobs, and in CI "
-        "they must fall through to their production defaults (#427)")
-
-
-# ---------------------------------------------------------------------------
 # Invalid escape sequences (#292)
 # ---------------------------------------------------------------------------
 
@@ -2068,8 +1796,8 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     exists to prevent. Since the release-branch procedure (`RELEASING.md`)
     it is release tags rather than `main`: `main` is the development
     branch, and the documentation follows the latest published release.
-    The trigger set is asserted as an equality for the same reason the
-    hang probe's is: a `pull_request` trigger on a workflow that deploys
+    The trigger set is asserted as an equality because a `pull_request`
+    trigger on a workflow that deploys
     to the live site is not a thing to notice in review. Which tag may
     deploy is the next test's.
 
@@ -2080,8 +1808,7 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     when measured, which is what a second source of truth looks like
     right up to the edit that moves one of them.
 
-    **The caps** are the inequality `tests.yml` and `hang-probe.yml`
-    both carry -- job cap above the sum of the step caps, every step
+    **The caps** are the inequality `tests.yml` carries -- job cap above the sum of the step caps, every step
     capped -- so whatever hangs, the timeout that fires belongs to a
     step and names it. `docs.yml` had it backwards: a job cap of 10 over
     step caps of 3 + 3 + 5 = 11, with three steps uncapped entirely, so
