@@ -384,6 +384,88 @@ catches the common shape: a top heading naming a version `_version.py`
 does not. It cannot catch a merge that also carried `_version.py` to the
 same number.
 
+## Another candidate on an existing line
+
+This applies when `release/X.Y` already exists because a candidate was
+tagged from it (say `vX.Y.Zrc1`), and the next candidate must carry what
+`main` has gained since. **Before X.Y.Z final, a candidate carries
+everything on `main` at the chosen commit,** features included. That is
+the exception to "it takes fixes, never features": the line is not
+released yet. `main`'s work reaches the branch by cherry-pick, never by
+moving the branch: `release/X.Y` is locked, and it holds the commit a
+published tag points to. This is how v1.0.0rc2 was cut (#818, #821, #822).
+
+1. **Choose the commit** on `main`. The previous candidate's step 8 (its
+   record back to `main`) must already be merged.
+2. **Pick `main`'s work onto the branch** in a PR into `release/X.Y`.
+   - **The range is every squash commit on `main` after the commit the
+     line was cut from**, or after the last commit already picked onto
+     the line. It runs up to the chosen commit, in order. Leave out two
+     kinds of commit:
+     - the record-back commits (step 8), which carry the version files;
+     - forward-ports of release-branch fixes, which the branch already
+       has. The `-x` line of one names the fix PR's commit, which may
+       exist only on that PR's deleted work branch. So also compare
+       patches: a `main` commit whose `patch-id` (the command below)
+       equals one already on the branch is a forward-port. A pick that
+       comes out empty is one too: `git cherry-pick --skip` it.
+   - On a work branch off `release/X.Y`, run `git cherry-pick -x` on each.
+     A pick can conflict in `CHANGELOG.md`, because the branch has no
+     `[Unreleased]` section. Resolve it with `git checkout --ours
+     CHANGELOG.md` (ours is the branch), `git add CHANGELOG.md`, then
+     `git cherry-pick --continue`. A conflict in a file a record-back
+     changed (`RELEASING.md` at rc2) is resolved the same way, since the
+     last commit takes that file back.
+   - In a last commit, take back `main`'s `CHANGELOG.md`
+     (`git checkout <chosen sha> -- CHANGELOG.md`), plus only the files
+     the record-back commits changed, apart from the version files
+     (`RELEASING.md` at rc2).
+   - The PR head's tree must then equal the chosen commit's:
+     `git diff --stat <chosen sha> HEAD` prints nothing. **Any other
+     file that still differs means a pick is missing.** Pick it; never
+     copy it into the last commit.
+   - The reviewer checks, on the PR branch before the squash merge
+     removes the picks:
+     - that tree identity;
+     - that each pick's patch equals its source's apart from the
+       changelog: `git show <sha> -- . ':!CHANGELOG.md' | git patch-id
+       --stable` gives the same id for the pick and its `main` commit;
+     - that the range is complete and nothing else rides along.
+
+     The picks were each tested and reviewed on `main`, and the tree is
+     the one `main` tested, so this PR runs no tests of its own: its test
+     is the integration run in step 3. Merge it with
+     `gh pr merge N --squash --admin --match-head-commit <sha>`.
+3. **Cut the candidate** by following "Cutting a release" from step 3,
+   with version `X.Y.Zrc<N+1>`. Three things differ.
+   - **Step 1's integration run is made at the release commit, not at
+     `main`:**
+     - the full suite on 3.12 and 3.14t;
+     - `output_fingerprint check` on both interpreters;
+     - `compare --base` the previous candidate's tag, which
+       `previous-tag` prints because pre-release tags count.
+
+     The release commit's tree differs from the chosen commit's only in
+     the version files and `CHANGELOG.md`: the renamed heading, and any
+     headings the rename merges. The `**Output:**` lines that `compare`
+     requires are then under the renamed `[X.Y.Zrc<N+1>]` section, not
+     under `[Unreleased]`.
+   - **A failure before the release-commit PR merges is fixed on `main`,
+     not on the branch.** This overrides step 3's "fixed on `release/X.Y`
+     by the patch procedure":
+     - pick the fix onto `release/X.Y` in its own PR, as in step 2;
+     - make the release commit again on top;
+     - repeat the integration run in full.
+
+     The branch still carries everything `main` has, so fixing `main`
+     first keeps the two trees equal.
+   - **A failure after the release-commit PR has merged** (a red step 4
+     rehearsal, say) is handled as step 3 already says: fixed on the
+     branch and forward-ported to `main`, with its entry in the existing
+     `[X.Y.Zrc<N+1>]` section. The forward-port is then one of the
+     commits the next candidate's range leaves out.
+   - Step 8 copies the new section to `main` as usual.
+
 ## Documentation site
 
 The site follows the **latest release tag**, not `main`. `docs.yml` runs on
