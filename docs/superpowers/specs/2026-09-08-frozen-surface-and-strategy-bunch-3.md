@@ -24,6 +24,21 @@ sentence that lists it inside `Instance(...)`, and §11 item 9's
 restatement of the same list (including "the nine frozen `Instance`
 fields"), no longer hold -- there are eight. `Study.date_shifted` is
 unchanged. Both clauses are marked in place.
+**Superseded in part:** 1.0.0rc2 docs round (2026-09-24). §5.2's rule,
+that tier-2 names "are rendered on this site", no longer holds:
+`docs/api/stability.md` now defines tier 2 as the names listed on that
+page, rendered in the API reference or named by a guide where a reader
+needs them, because the API pages stopped rendering the recording
+helpers and the store's internals. The clause is struck in place. The
+same round falsifies three more clauses, each struck in place: §0's
+summary that tier 2 is "everything the site renders that is a seam";
+§5.4's `SqliteStore` bullet, which put everything `api/persistence.md`
+rendered in tier 2 (the page now renders the `get_audit_*` readers and
+`get_flattened_instances()`, and the store's other methods, among them
+`persist_pixel_data`, `save_all`, `compact_sidecar` and `stop`, are
+private); and §5.7's Q8 rule, with its recommendation under Q8 in §0.2,
+that no `members:` filter is added to `api/persistence.md` and
+`api/entities.md` (both pages are now filtered).
 
 **Status:** Determinations MADE, with evidence. §1–§5 are the
 recommendations; §0.2 lists the calls that are the owner's, each as
@@ -154,8 +169,9 @@ keys on.
    `__version__`, the 28 public `Session` methods with their parameter
    names, three `Session` attributes, the shapes the frozen methods
    return, the two exceptions and their attributes, the environment
-   registry, and the output vocabularies (§5.3). Tier 2 is everything the
-   site renders that is a seam behind the facade — `SqliteStore` and
+   registry, and the output vocabularies (§5.3). Tier 2 is ~~everything the
+   site renders that is a seam behind the facade~~ *(superseded, 1.0.0rc2
+   docs round: the seams listed on the stability page)* — `SqliteStore` and
    `store_backend`, `TrackedEntity` bookkeeping, `DicomExporter.write_tree`,
    the exporter registry, the OCR page classes (§5.4). Tier 3 is the
    rest (§5.5). Pinned by a new `tests/test_frozen_surface.py` (§7.5),
@@ -281,8 +297,9 @@ the page says so in one sentence at its top. The alternative — filter
 `docs/api/persistence.md` and `docs/api/entities.md` down to the tier-1
 names with a `members:` list — hides the seams from the readers who
 need them most (the 0.9.1 CHANGELOG sends `export_to_parquet` callers to
-`get_flattened_instances`). **Recommended: the sentence, not the
-filter.**
+`get_flattened_instances`). ~~**Recommended: the sentence, not the
+filter.**~~ *(Superseded, 1.0.0rc2 docs round: both pages are now
+filtered.)*
 
 **Q9. The output vocabularies.** Audit `action_type` (DATA_LOSS, ERROR,
 EXPORT, RECONCILE_PRIVATE, REDACTION, REMOVE_TAG, REPLACE_TAG,
@@ -870,7 +887,9 @@ guide names it but it is a seam; tier 3 otherwise.
 > **Frozen (tier 1)** names keep their spelling, their parameter names,
 > their return shapes and their documented behaviour for every 1.x
 > release; a change is a 2.0. **Documented but internal (tier 2)** names
-> are rendered on this site and safe to call, and may change in a 1.x
+> ~~are rendered on this site~~ *(superseded: are listed on the stability
+> page, and rendered or named by a guide where a reader needs them)* and
+> safe to call, and may change in a 1.x
 > release with a CHANGELOG entry that names the old spelling and the new
 > one; they exist so a reader can see the seams, not so a program can
 > lean on them. **Private (tier 3)** names — everything with a leading
@@ -1007,14 +1026,15 @@ Rendered by the site or named by a guide, safe to call, may change in
 1.x with a CHANGELOG entry naming both spellings:
 
 - **`DicomSession`**, the class's own name (Q3).
-- **`session.store_backend` and `SqliteStore`** — everything
+- **`session.store_backend` and `SqliteStore`** — ~~everything
   `api/persistence.md` renders: `__init__(db_path)`, `__getstate__`,
-  `__setstate__`, and the 32 public methods including
+  `__setstate__`, and the 32 public methods including~~
   `get_flattened_instances(patient_ids, instance_uids, page_size)` (Q5),
   `get_audit_losses()` (the one guide use, `docs/configuration.md:191`),
-  the other `get_audit_*`, `persist_pixel_data`, `save_all`,
-  `compact_sidecar`, `stop`. The store's *forward compatibility* is tier
-  1; its API is tier 2.
+  the other `get_audit_*`~~, `persist_pixel_data`, `save_all`,
+  `compact_sidecar`, `stop`~~. *(Superseded, 1.0.0rc2 docs round: only
+  these readers are tier 2; the store's other methods are private.)* The
+  store's *forward compatibility* is tier 1; its API is tier 2.
 - **`session.key_manager`, `session.persistence_manager`,
   `session.reversibility_service`** — attributes that expose services.
 - **`TrackedEntity` bookkeeping**: `has_unsaved_changes`, `phi_status`,
@@ -1089,9 +1109,10 @@ and `ingest()` docstrings already do (the #368 entry says so).
 **Rule (Q8):** every name the site renders that is not in §5.3 is tier 2
 by construction, and each of `api/persistence.md`, `api/entities.md`
 and `api/ocr.md` opens with one sentence saying so, linking
-`api/stability.md`. No `members:` filter is added to the unfiltered
+`api/stability.md`. ~~No `members:` filter is added to the unfiltered
 pages — the seams are rendered *because* the CHANGELOG sends people to
-them.
+them.~~ *(Superseded, 1.0.0rc2 docs round: `api/persistence.md` and
+`api/entities.md` are now filtered.)*
 
 **The API reference omits twelve of the 28 frozen methods.**
 `docs/api/session.md` lists 16 methods plus `configuration` under

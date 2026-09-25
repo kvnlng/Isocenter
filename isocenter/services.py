@@ -105,7 +105,8 @@ class RedactionError(RuntimeError):
     in the graph.
 
     Args:
-        failures: `(entity_uid, details)` pairs, kept as `self.failures`.
+        failures (list): `(entity_uid, details)` pairs, kept as
+            `self.failures`.
         attempted (int): How many instances the pass targeted, kept as
             `self.attempted`.
     """

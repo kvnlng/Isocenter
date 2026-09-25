@@ -113,6 +113,16 @@ class PhiStatus(Enum):
     and nested item must be exactly as before the pass; if anything else
     changed, the status is left UNSCANNED. So the anonymize, redact, export
     order keeps the redacted instances' statuses.
+
+    Attributes:
+        UNSCANNED: Never inspected, or inspected before the entity's
+            current revision.
+        IDENTIFIED: The scan found identifiers here, and nothing has acted
+            on them.
+        REMEDIATED: Identifiers were found and remediation was applied.
+        CLEARED: The tag scan found no identifiers. Burned-in pixel text is
+            a separate scan, and CLEARED does not approve the entity for
+            release.
     """
 
     #: Never inspected, or inspected before the entity's current revision.
@@ -150,6 +160,11 @@ class ScanPolicy:
 
     Frozen, so a slot holding one is replaced whole, and compared by value,
     so each audit's fresh object equals the last one's.
+
+    Attributes:
+        fingerprint (str): `"v1:"` and a sha256 hex digest; equal
+            fingerprints scan identically.
+        base (str): The profile the policy was built on, for a reader.
     """
     fingerprint: str
     base: str
@@ -348,7 +363,7 @@ class DicomItem(TrackedEntity):
         attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.
         sequences (Dict[str, DicomSequence]): A dictionary mapping tags to nested DicomSequences.
         attribute_vrs (Dict[str, str]): The source Value Representation of
-            private tags, where one was known. See `record_attr_vr`.
+            private tags, where one was known.
     """
     # init=False to avoid constructor conflicts during inheritance
     attributes: Dict[str, Any] = field(init=False)
@@ -1058,8 +1073,26 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
 @dataclass(slots=True, eq=False)
 class Instance(DicomItem):
     """
-    Represents a single DICOM image (SOP Instance).
-    Manages lazy loading of pixel data.
+    One DICOM file's worth of data (an SOP Instance), with its pixels
+    loaded on demand.
+
+    `attributes`, `sequences` and `attribute_vrs` come from `DicomItem`.
+
+    Attributes:
+        sop_instance_uid (str): SOP Instance UID (0008,0018). `anonymize()`
+            and `redact()` can replace it.
+        sop_class_uid (str): SOP Class UID (0008,0016).
+        instance_number (int): Instance Number (0020,0013). Not unique
+            within a series.
+        file_path (Optional[str]): A file whose pixels match this instance
+            now, read when the store holds no frame for it. None after
+            redaction.
+        source_path (Optional[str]): The file this instance was read from.
+            Redaction does not change it.
+        pixel_array (Optional[np.ndarray]): The pixels while resident, else
+            None. Read them with `get_pixel_data()`.
+        waveform_array (Optional[np.ndarray]): The waveform samples while
+            resident, else None. Read them with `get_waveform_data()`.
     """
     sop_instance_uid: str = ""
     sop_class_uid: str = ""
@@ -1696,19 +1729,15 @@ class Instance(DicomItem):
         Returns pixel_array, loading it if it is not in memory.
 
         In order, it:
-            1. Returns the cached `pixel_array`.
-            2. Loads the frame from the store's sidecar, if it holds one.
-            3. Reads `file_path` with the decode `ingest()` uses: pydicom,
-               then imagecodecs where pydicom has no plugin. A file ingest
-               refuses is refused here, in the same words. The decoded
-               samples are read under the instance's pixel descriptors where
-               it holds them, as the sidecar's are: the file supplies the
-               samples and any descriptor the instance lacks.
 
-        Returns:
-            Optional[np.ndarray]: The pixel data as a numpy array, or None
-                when the instance carries no pixel element. A frame that
-                could not be decoded is not None: it raises.
+        1. Returns the cached `pixel_array`.
+        2. Loads the frame from the store's sidecar, if it holds one.
+        3. Reads `file_path` with the decode `ingest()` uses: pydicom,
+           then imagecodecs where pydicom has no plugin. A file ingest
+           refuses is refused here, in the same words. The decoded
+           samples are read under the instance's pixel descriptors where
+           it holds them, as the sidecar's are: the file supplies the
+           samples and any descriptor the instance lacks.
 
         A read whose decoder returns RGB from a YBR-labelled file says so.
         An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs
@@ -1720,29 +1749,34 @@ class Instance(DicomItem):
         advances its revision. This is the one write a read makes, and it is
         made only when the decode converted.
 
+        Returns:
+            Optional[np.ndarray]: The pixel data as a numpy array, or None
+                when the instance carries no pixel element. A frame that
+                could not be decoded is not None: it raises.
+
         Raises:
             RuntimeError: If loading fails due to transfer syntax issues,
                 missing codecs, or a pixel element the reader could not
                 decode. Also, from a file, when an encapsulated pixel
                 element's offset table names a different number of frames
-                from NumberOfFrames: "Lazy load failed for instance
+                from NumberOfFrames: `Lazy load failed for instance
                 <uid>: RuntimeError: <table> names N frames;
-                NumberOfFrames declares M". The message names the
+                NumberOfFrames declares M`. The message names the
                 instance, never the source file. From a file ingest would
                 refuse, in ingest's words: a header pydicom's validation
                 rejects, whether or not pydicom has a plugin for its syntax
-                ("Missing required element: (0028,0006) 'Planar
-                Configuration'"), or a 16-bit YBR_FULL frame.
+                (`Missing required element: (0028,0006) 'Planar
+                Configuration'`), or a 16-bit YBR_FULL frame.
                 From the sidecar, when a descriptor written since the
                 frame was stored asks for a reading the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
-                smaller than the stored samples): "Pixel Loader failed
-                for <uid>: Integrity Error: ...". A reopened session
+                smaller than the stored samples): `Pixel Loader failed
+                for <uid>: Integrity Error: ...`. A reopened session
                 gives the same refusal. From a file, the same refusal for
-                the same edit, as "Lazy load failed for instance <uid>:
+                the same edit, as `Lazy load failed for instance <uid>:
                 RuntimeError: Integrity Error: frame for <uid> holds N
                 samples; geometry (R, C) needs M (one trailing pad byte is
-                tolerated, nothing else)".
+                tolerated, nothing else)`.
             FileNotFoundError: If the file path does not exist.
         """
         if self.pixel_array is not None:
@@ -2066,8 +2100,9 @@ class Instance(DicomItem):
     def unload_waveform_data(self) -> bool:
         """Clear cached waveform samples to free memory.
 
-        Unloads only when a `_waveform_loader` can restore the samples; a
-        source file alone is not enough, unlike for `unload_pixel_data`.
+        Unloads only when the store holds the samples to read them back
+        from; a source file alone is not enough, unlike for
+        `unload_pixel_data`.
 
         Returns:
             bool: True if unloaded (or already absent), False if unsafe --
@@ -2331,19 +2366,20 @@ class Instance(DicomItem):
         comes from the array.
 
         Updates tags, each only when the value actually changes:
-            - Rows (0028,0010)
-            - Columns (0028,0011)
-            - SamplesPerPixel (0028,0002)
-            - NumberOfFrames (0028,0008), if > 1 or already declared
-            - PhotometricInterpretation (0028,0004), only to correct an
-              outright contradiction -- YBR_FULL and MONOCHROME1 survive
-            - PlanarConfiguration (0028,0006), only when colour and undeclared
-            - BitsAllocated (0028,0100), from the array's itemsize
-            - PixelRepresentation (0028,0103), from the array's dtype kind:
-              1 for signed integers, 0 for unsigned and bool. Left alone
-              for a float array, because PS3.5 Section 8.2 forbids it
-              beside a float pixel element and the export deletes it
-              there.
+
+        - Rows (0028,0010)
+        - Columns (0028,0011)
+        - SamplesPerPixel (0028,0002)
+        - NumberOfFrames (0028,0008), if > 1 or already declared
+        - PhotometricInterpretation (0028,0004), only to correct an
+          outright contradiction -- YBR_FULL and MONOCHROME1 survive
+        - PlanarConfiguration (0028,0006), only when colour and undeclared
+        - BitsAllocated (0028,0100), from the array's itemsize
+        - PixelRepresentation (0028,0103), from the array's dtype kind:
+          1 for signed integers, 0 for unsigned and bool. Left alone
+          for a float array, because PS3.5 Section 8.2 forbids it
+          beside a float pixel element and the export deletes it
+          there.
 
         A genuinely ambiguous shape is **accepted** with a WARNING, so a
         hand-built graph can take pixels before its attributes (for

@@ -690,20 +690,15 @@ def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
 
 
 class SqliteStore:
-    """Persists the object graph to a SQLite database and a pixel sidecar.
+    """The session's SQLite store and pixel sidecar: `session.store_backend`.
 
-    Manages:
-
-    - reading and writing the Patient -> Study -> Series -> Instance
-      hierarchy;
-    - the append-only `<name>_pixels.bin` sidecar, its references and
-      its compaction;
-    - an asynchronous audit log, written by a background thread.
-
-    Picklable: a clone gets fresh locks and its own audit worker, and
-    never deletes the parent's temporary sidecar. Call `stop()` to settle
-    the audit log before dropping a store.
+    It holds the Patient -> Study -> Series -> Instance hierarchy, the
+    append-only `<name>_pixels.bin` sidecar, and the audit log, which a
+    background thread writes.
     """
+    # Picklable: a clone gets fresh locks and its own audit worker, and
+    # never deletes the parent's temporary sidecar. Call `stop()` to settle
+    # the audit log before dropping a store.
 
     #: Rows `get_flattened_instances` fetches per page.
     #:
@@ -1760,7 +1755,7 @@ class SqliteStore:
         before the call is counted.
 
         Returns:
-            Dict[str, int]: e.g., {'ANONYMIZE': 500, 'EXPORT': 500}
+            Dict[str, int]: e.g., {'REMEDIATION_REPLACE': 1200, 'EXPORT': 1}
         """
         # Above the connection, never inside it: the lock order is
         # `_audit_write_lock` -> `_memory_lock`, and flushing from
@@ -1896,7 +1891,7 @@ class SqliteStore:
     def get_audit_drops(self) -> int:
         """How many audit rows were dropped by a failed batch write.
 
-        The rows themselves are unrecoverable (see `log_audit_batch`). A
+        The rows themselves are unrecoverable: a failed batch write loses them. A
         non-zero count means the audit table under-states what happened, and
         `generate_report` grades it like an exception.
 

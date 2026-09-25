@@ -13,13 +13,33 @@ pipeline, read the [Quick Start](../quickstart.md) first.
 !!! tip "Run it yourself"
 
     Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked. To follow along, make
-    a folder called `input` holding pydicom's bundled test files
-    `CT_small.dcm`, `MR_small.dcm` and `rtdose.dcm`
-    (`pydicom.data.get_testdata_file("CT_small.dcm")` returns where each
-    one is), then paste the blocks into a Python prompt or a notebook.
-    In a `.py` script, put them under `if __name__ == "__main__":`
-    ([why](../quickstart.md#1-initialize-a-session)).
+    Isocenter's test suite, and every output shown is checked.
+
+    - **Start in a new, empty folder.** Each tutorial creates its own
+      `tutorial.db` and export folders, and running one in another
+      tutorial's folder changes what it prints. The first block below
+      copies the input files from pydicom into `input/`.
+    - Paste the blocks into a Python prompt or a notebook. In a `.py`
+      script, put them under `if __name__ == "__main__":`
+      ([why](../quickstart.md#1-initialize-a-session)).
+    - In a block with `>>>`, type what follows each `>>>`; the lines
+      under it are what Python prints. A `...` inside a printed value
+      stands for a part that differs on every run, such as a pseudonym or
+      a UID.
+    - The session also prints progress bars, status lines and `WARNING`
+      lines as it works. They are not shown here.
+      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+for name in ["CT_small.dcm", "MR_small.dcm", "rtdose.dcm"]:
+    shutil.copy(pydicom.data.get_testdata_file(name), "input")
+```
 
 ## 1. Ingest three patients
 
@@ -85,7 +105,11 @@ report = session.audit()
 
 Suppose you are not yet sure about one tag. Your protocol may allow
 Institution Name, and you want to ask before removing it. So you hold
-those findings back and pass the rest to `anonymize()`:
+those findings back and pass the rest to `anonymize()`. Each finding
+says what the scan found and where: `f.tag`, `f.value`, `f.patient_id`
+and `f.entity_type` among others, and `report.to_dataframe()` gives the
+findings as a table
+([Results and errors](../api/results.md)).
 
 ```python
 held = [f for f in report.findings if f.tag == "0008,0080"]
@@ -110,9 +134,9 @@ Two choices here are deliberate:
 - **`use_compression=False`.** `rtdose.dcm` stores 32-bit dose values,
   and Isocenter's JPEG 2000 encoder is exact only to 25 bits, so with
   compression on
-  [that instance fails to export](../quickstart.md#what-the-export-writes)
+  [that instance fails to export](../export-output.md)
   rather than be written wrong
-  ([#771](https://github.com/kvnlng/Isocenter/issues/771) plans to write
+  ([#771](https://github.com/kvnlng/Isocenter/issues/771) tracks writing
   it uncompressed instead). A failure is an `ERROR` row in the audit log,
   and a row, once written, stays in the store for good.
 - **The report comes last,** after `export()`. Export writes rows of its
@@ -155,7 +179,7 @@ def grade_basis(path):
 ```python
 >>> grade_basis("report-draft.md")
 *   **Grade Basis:** REVIEW_REQUIRED, for 1 reason(s):
-    *   2 entities read IDENTIFIED: ...
+    *   2 entities read IDENTIFIED: the last PHI scan raised a finding under the policy it ran with, and no `anonymize()` pass since acted on it (patients 0, studies 0, instances 2)
 ```
 
 !!! note "These helpers read the report's layout, which can change"
@@ -210,8 +234,9 @@ shutil.rmtree("export-draft")
 ## 5. Act on the held findings, and read PASS
 
 Your protocol says Institution Name goes. Pass the held findings to
-`anonymize()`, export again, and generate a new report. The pass writes
-the Basic Profile's replacement for that tag, the word `ANONYMIZED`.
+`anonymize()`, export again, and generate a new report. The Basic Profile
+says to replace that tag with a dummy value, and Isocenter's dummy value
+for text is the word `ANONYMIZED`.
 
 ```python
 session.anonymize(held)
@@ -233,6 +258,11 @@ and recorded doing it. Anything your policy does not name is outside the
 scan. Whether the result meets your protocol is still the data steward's
 call. [What PASS does not mean](../analytics.md#how-the-grade-is-decided)
 spells out the limits.
+
+`PASS` also says nothing about text burned into the pixels. No rule in
+`phi_tags` reads pixels, and this run wrote no redaction zones.
+[Redact burned-in text for one machine](redact-burned-in-pixels.md)
+shows how to handle a machine that prints identifiers into its images.
 
 ## 6. What an exported file says about itself
 
@@ -300,15 +330,21 @@ session.export("export-again", use_compression=False)
 session.generate_report("report-again.md")
 ```
 
-Load the configuration again after reopening. The store remembers which
-policy each finding was scanned under, and no config at all means the
-default floor policy, which is a different one. Exporting under a
-different policy
-[costs the run its `PASS`](../configuration.md#what-to-keep) until the
-next `audit()`.
+Load the configuration again after reopening, before anything else. The
+store remembers which policy each finding was scanned under, and no
+configuration at all means the default floor policy, which is a
+different one. An export under a different policy writes a `WARNING`
+row, and like every row it stays in the store: every later report of
+this store grades `REVIEW_REQUIRED`
+([Select part of a cohort, step 6](select-part-of-a-cohort.md#6-export-with-a-mistyped-id-and-read-the-grade)).
+Running `audit()` and `anonymize()` afterwards stops further warnings
+but does not remove that row.
 
-The export writes what the store holds, and the store holds the
-de-identified graph, so every patient comes out as before:
+The export writes what the store holds. The store holds the
+de-identified graph because each DICOM export above saved the session
+before it wrote. (An exporter of your own does not;
+[Write your own export format](write-an-exporter.md#5-save-before-you-close)
+shows the `save()` it needs.) So every patient comes out as before:
 
 ```python
 def identities(folder):
@@ -378,8 +414,7 @@ True
 This is the store's real job. The pseudonym and the offset are not
 stored per file. They are derived from the patient's original ID and a
 secret the store generated for itself, so any later batch of the same
-patient lands on the same values
-([#548](https://github.com/kvnlng/Isocenter/issues/548)). The
+patient lands on the same values. The
 configuration does not reproduce them. The same configuration over a
 **new** store, with a new secret, gives every patient a different
 pseudonym:
@@ -419,7 +454,7 @@ The run depends on three things. Each one gives you something different:
 | **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret. Lose it and the next export of the same patients gets new pseudonyms, new offsets and new UIDs, which will not link to anything exported before. Never send it with an export: whoever holds it can undo the date shifts. |
 | **The report**, beside the export it describes | It is the record of what this run did. Generate it after `export()`, and read the grade *and* its Grade Basis. |
 
-With [reversible anonymization](../quickstart.md#4-backup-identity-optional)
+With [reversible anonymization](reversible-anonymization.md)
 there is a fourth thing to keep, `isocenter.key`. The Configuration
 guide's [What to keep](../configuration.md#what-to-keep) is the full
 table.

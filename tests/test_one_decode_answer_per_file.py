@@ -161,7 +161,7 @@ def test_a_16_bit_ybr_full_jpeg_ls_file_is_refused_at_every_door(
     returned the YBR samples as stored under the file's YBR_FULL label.
     pydicom refuses the native form too ("Invalid ndarray.dtype 'uint16'
     for color space conversion"), so there is no reference answer to read
-    it by, and `docs/installation.md` records the limit.
+    it by, and `docs/codecs.md` records the limit.
     """
     ds = dataset(JPEGLS, [imagecodecs.jpegls_encode(RGB16)], rows=4, cols=4,
                  samples=3, bits_allocated=16, photometric="YBR_FULL")

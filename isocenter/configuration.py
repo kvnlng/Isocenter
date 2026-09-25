@@ -234,16 +234,23 @@ def _deid_method_value(policy: ScanPolicy, version: str) -> str:
 @dataclass
 class IsocenterConfiguration:
     """
-    Encapsulates the runtime configuration for a DicomSession.
+    The configuration a session applies, reached as `session.configuration`.
+
+    `load_config()` fills it from a file; the methods below change it in
+    memory, and `save()` writes it.
 
     Attributes:
         rules (List[Dict[str, Any]]): List of machine redaction rules.
-        phi_tags (Dict[str, Any]): PHI tag policies (e.g. {tag: action}).
-            With none given, a copy of `profiles.FLOOR_POLICY`, the
-            policy a session applies before any config is loaded. Each
+        phi_tags (Dict[str, Any]): PHI tag policies, keyed by lowercase
+            `"gggg,eeee"` tag. With none given, a copy of the floor policy
+            (`profiles.FLOOR_POLICY`): the PS3.15 `basic@2026c` profile
+            plus three research defaults, which a session applies before
+            any config is loaded (see the Configuration guide). Each
             instance holds its own copy, so one session's `set_phi_tag`
             cannot reach another's policy or the module table.
-        date_jitter (Dict[str, int]): Date shifting parameters.
+        date_jitter (Dict[str, int]): The range the per-patient date
+            offset is derived within, in days, both ends included:
+            `{"min_days": -365, "max_days": -1}` by default.
         remove_private_tags (bool): Global flag to strip private tags.
         config_path (Optional[str]): The file `save()` writes. Set by
             `load_config()`, or by hand.
@@ -524,8 +531,11 @@ class IsocenterConfiguration:
             serial_number (str): The device serial number.
             manufacturer (str, optional): Metadata for reference.
             model_name (str, optional): Metadata for reference.
-            redaction_zones (List[Any], optional): List of redaction zones
-                (ROIs).
+            redaction_zones (List[Any], optional): The zones to set to zero,
+                each `[y1, y2, x1, x2]` in pixels: rows `y1` up to `y2` and
+                columns `x1` up to `x2`, the end excluded. A zone with no
+                area (`y2 <= y1` or `x2 <= x1`) makes `redact()` fail that
+                instance; one that starts past the image's edge is skipped.
 
         Raises:
             ValueError: For a rule `load_config` would refuse (a serial
@@ -626,7 +636,8 @@ class IsocenterConfiguration:
         Args:
             tag (str): The DICOM tag to target (e.g. "0010,0010"), stored
                 lowercase.
-            action (str): The remediation action ('KEEP', 'REMOVE', 'REPLACE', 'JITTER', 'EMPTY').
+            action (str): One of `KEEP`, `REMOVE`, `EMPTY`, `REPLACE`,
+                `SHIFT` and `JITTER` (`JITTER` is `SHIFT`).
             value (str, optional): The value `REPLACE` writes, stored as
                 the rule's `value`, the key a file spells it with.
 
