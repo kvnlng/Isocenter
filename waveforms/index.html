@@ -718,6 +718,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare your own ECGs for a PhysioNet Challenge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -979,6 +1007,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="What is exported">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lead-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lead names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1674,6 +1719,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What is exported">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lead-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lead names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1802,6 +1864,9 @@ to read. Isocenter does not read WFDB back in.</p>
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">sync</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
+<p><a href="../tutorials/physionet-challenge-ecgs/">Prepare your own ECGs for a PhysioNet Challenge</a>
+walks this path end to end, and then shapes each header the way the
+Challenge's code reads it.</p>
 <p>Run it as a script: the <code>if __name__ == "__main__":</code> guard is required,
 because ingest starts worker processes that re-import the script. A WFDB
 export does not save the session (a DICOM export does), so call
@@ -1864,7 +1929,7 @@ its own <code>DATA_LOSS</code> row), attempted nothing and returns <code>[]</cod
 </tr>
 <tr>
 <td>signal description</td>
-<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>: the lead's name (<code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>, <code>aVL</code>, <code>aVF</code>, <code>V1</code>...<code>V6</code>; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
 </tr>
 </tbody>
 </table>
@@ -1873,6 +1938,19 @@ channel-interleaved) -- the same layout DICOM already stores them in,
 so no sample transcoding happens. The gain field is written in
 spec-conformant <code>header(5)</code> form, <code>gain(baseline)/units</code>. If a
 downstream tool mis-parses that field, check the tool's parser first.</p>
+<h3 id="lead-names">Lead names</h3>
+<p>A lead whose Channel Source is coded in DICOM's ECG lead context group,
+CID 3001, is named as PhysioNet records name it: <code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>,
+<code>aVL</code>, <code>aVF</code>, <code>V1</code> to <code>V9</code>, <code>V3R</code>, <code>V4R</code>, <code>V5R</code>, <code>X</code>, <code>Y</code>, <code>Z</code>, and, in
+MDC only, <code>MCL1</code>, <code>MCL6</code>, <code>ES</code>, <code>AS</code> and <code>AI</code>. Both schemes the context
+group has used are read: IEEE 11073 <code>MDC</code> (<code>2:1</code> is lead I) and the
+SCP-ECG codes it used before, <code>SCPECG</code> (<code>5.6.3-9-1</code> is lead I), which
+carts still write. The Coding Scheme Designator is compared ignoring
+case. Any other code, in any scheme, is written as its Code Value: a
+derived or Frank lead, a calibration lead, a lead with no conventional
+short name (<code>-aVR</code>, <code>V2R</code>, <code>V6R</code> to <code>V9R</code>), a code under a local <code>99</code>
+scheme, and a source that is not a lead (a pressure or respiration
+waveform).</p>
 <p>When present, Waveform Annotation Sequence <code>(0040,B020)</code> items --
 cart-generated findings such as rhythm calls -- are exported as
 <code>&lt;record&gt;.annotations.json</code>, in the schema
@@ -1940,7 +2018,9 @@ applies nothing. All three are handled whichever configuration you run:</p>
 <p><strong>Concept Name <code>(0040,A043)</code></strong> -- the annotation's Code Meaning
   reaches <code>annotations.json</code> as <code>label</code>, and its scheme-qualified Code
   Value as <code>category</code>, <strong>only when the Coding Scheme Designator
-  <code>(0008,0102)</code> names a published vocabulary</strong> such as SNOMED CT. A
+  <code>(0008,0102)</code> names a published vocabulary</strong> such as SNOMED CT, LOINC,
+  DICOM's own <code>DCM</code>, IEEE 11073 <code>MDC</code> or SCP-ECG (<code>SCPECG</code>, which ECG
+  carts use for measurements such as QRS Onset). A
   coded finding is
   unaffected: <code>SCT:164889003</code> still arrives with its label
   <code>"Atrial fibrillation"</code>, because SNOMED defined that term, not an
@@ -1994,7 +2074,10 @@ same <code>DD/MM/YYYY</code> format the record line's own date field would have
 used: <code># de-identified start date: DD/MM/YYYY</code> when <code>anonymize()</code> shifted
 the study date, or <code># start date: DD/MM/YYYY</code> when it was not shifted
 (an export without <code>anonymize()</code>, or a date the policy keeps). That
-second form is the real date. A consumer reading the record line alone
+second form is the real date. The comment follows the signal lines, where
+<code>wfdb</code>'s own writer puts comments, so a reader that takes lines
+<code>1..n_sig</code> as the signal lines (the Moody Challenge's helper code does)
+reads the signals and nothing else. A consumer reading the record line alone
 sees no timing at all; a consumer that also reads comments gets the
 date, labelled by whether it was shifted.</p>
 <p>Beyond content, the export path itself avoids two structural PHI
@@ -2015,8 +2098,9 @@ paths a WFDB writer could otherwise open:</p>
   coded channel source over the free-text label wherever a coded
   source exists. That preference is a likelihood argument, not a
   filter: a conformant coded source is far less likely to carry
-  operator-typed text than a free-text label, but the coded value is
-  <strong>not</strong> run through the lead-name allowlist or any content check --
+  operator-typed text than a free-text label, but a coded value other
+  than a CID 3001 lead code is written as it stands, <strong>not</strong> run
+  through the lead-name allowlist or any content check --
   a non-conformant source can still put arbitrary text there. Both the
   <code>.hea</code> writer and the Murmur <code>annotations.json</code> bridge strip
   line-break characters out of it regardless, so it can't forge a
