@@ -255,6 +255,32 @@ def test_a_release_bump_moves_no_recorded_text_long_or_short(tmp_path, monkeypat
     assert short["0012,0021"] == long_["0012,0021"]
 
 
+def test_a_version_of_the_other_length_parity_moves_no_hashed_value(tmp_path, monkeypatch):
+    """#819: a text value is padded to an even length when it is written,
+    so a version one character longer or shorter flips whether the value
+    carries a trailing pad byte. N2 on the raw bytes kept that byte, and
+    the same marker hashed differently under `0.9.8` (5 characters) and
+    `1.0.0rc2` (8): at the rc2 cut, 185 `0012,0063` values read changed
+    (len 104 -> 103) with no output changed. The previous test's versions
+    are 5 and 17 characters, the same parity, which is why it missed
+    this. The padding is stripped before N2 (RECORDER 3)."""
+    def recorded(version):
+        monkeypatch.setattr(fp, "running_version", lambda: version)
+        ds = _dataset()
+        ds.DeidentificationMethod = [
+            "OtherTool 3.2", "site profile 7",
+            f"isocenter/{version}; basic@2026c; v1:0ee566b4"]
+        return fp.normalize(_record(tmp_path, ds, f"{version}.dcm"),
+                            fp.output_substitutions())["elements"]
+
+    odd, even = recorded("0.9.8"), recorded("1.0.0rc2")
+    assert "sha256:" in odd["0012,0063"], "setup: recorded as a hash"
+    assert odd["0012,0063"] == even["0012,0063"]
+    # The length recorded is the value's, without its padding.
+    value = "OtherTool 3.2\\site profile 7\\isocenter/<isocenter-version>; basic@2026c; v1:0ee566b4"
+    assert odd["0012,0063"].endswith(f" len={len(value)}")
+
+
 def test_pydicoms_implementation_identity_is_not_a_difference_but_ours_would_be(tmp_path):
     rec = _record(tmp_path, _dataset(), "pydicom.dcm")
     assert rec["meta"]["0002,0012"] == "UI <pydicom-implementation-uid>"

@@ -144,7 +144,9 @@ SCHEMA = 1
 #: the differences it causes read as a changed measuring stick.
 #: 2 (#554): N2 is applied to a text value before its length test and
 #: its hash, so a hashed long value no longer carries the version.
-RECORDER = 2
+#: 3 (#819): a hashed text value's trailing padding is stripped before
+#: N2, so the version's length parity no longer flips its pad byte.
+RECORDER = 3
 
 #: A public test secret, not a secret: `bytes(range(32))`. The suite's
 #: `tests/support/project_secret.py` FIXED_A is the same constant, and a
@@ -248,7 +250,15 @@ def _n2_text(text: str) -> str:
 
 def _n2_bytes(data: bytes) -> bytes:
     """N2 on a text value's raw bytes before they are hashed. The literal
-    is ASCII, which every character set a text VR is written in keeps."""
+    is ASCII, which every character set a text VR is written in keeps.
+
+    The trailing padding goes first, as `_decode_text` strips it on the
+    text arm (#819): a value is padded to an even length when written, so
+    a version one character longer or shorter adds or drops a pad byte,
+    and a hash kept over it moved with the version's parity although the
+    output had not. UI pads with NUL and the other text VRs with a space;
+    both are stripped, as on the text arm."""
+    data = data.rstrip(b" \x00")
     for literal, token in output_substitutions():
         data = data.replace(literal.encode("ascii"), token.encode("ascii"))
     return data
