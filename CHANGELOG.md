@@ -9,13 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`RELEASING.md` says how to cut another candidate on a line that already exists.** It adds a section, "Another candidate on an existing line", with these rules:
-  - `main` is the development branch and may hold work for a later minor. A candidate carries the commits on `main` that belong to X.Y; later-minor work is left out and named.
-  - `main`'s commits since the line was cut, or since the last pick, reach `release/X.Y` by `git cherry-pick -x` in one reviewed PR. Record-backs and forward-ports are left out.
-  - When nothing is left out, the PR's tree must equal `main`'s at the chosen commit, and a file that still differs is a missing pick, never a copy. When work is left out, the reviewer reads the difference.
-  - Each pick is checked by `patch-id` with the changelog excluded.
-  - "Cutting a release" then continues from step 3. Step 1's full-suite and fingerprint runs are made at the release commit.
-  - A failure before the release-commit PR merges is fixed on `main` and picked. That overrides step 3's fix-on-the-branch, which still applies after that PR merges.
+- **`RELEASING.md` says how to cut a line's later releases (another candidate, or final) once the line exists.** It adds a section, "Later releases on an existing line". `main` is the development branch and may hold work for a later minor; such a PR carries that minor's milestone ("Changes land on `main`").
+  - The release carries the commits on `main` that belong to X.Y, picked onto `release/X.Y` by `git cherry-pick -x` in one reviewed PR. Record-backs, forward-ports (found by `-x` line or by `patch-id`) and later-minor commits are left out, and the later-minor ones are listed.
+  - The branch's `[Unreleased]` holds exactly the picked entries. `fingerprint/output.json` is never resolved by hand, and it is retaken when a left-out commit touched it.
+  - When nothing is left out, the PR's tree must equal `main`'s at the chosen commit, and a file that still differs is a missing pick, never a copy. When work is left out, `git diff` against `main` must be exactly that work.
+  - A pick PR with a hand-resolved code conflict runs `pytest --changed --changed-base=release/X.Y` on both interpreters.
+  - "Cutting a release" then continues from step 3. Step 1's full-suite and fingerprint runs are made at the release commit, and final compares with the last candidate.
+  - A failure before the release-commit PR merges is fixed on `main` and picked when `main` needs it, or on the branch when it does not. That overrides step 3's fix-on-the-branch, which still applies after that PR merges.
+  - Step 1 of "Cutting a release" chooses a commit before any later-minor work.
   - The branch is never moved, because it is locked and holds a published tag's commit.
 
   The procedure is written from the v1.0.0rc2 cut (#818, #821, #822), which had none to follow. No package code and no output change.
