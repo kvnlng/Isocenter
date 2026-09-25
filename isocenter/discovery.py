@@ -8,9 +8,7 @@ from typing import List, Tuple, Any, Dict, Union, Callable
 
 from .logger import describe_exception
 
-# Lazy imports for optional dependencies
-# import pandas as pd
-# import spacy
+# Optional dependencies (pandas, spacy) are imported lazily, where used.
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +41,12 @@ class DiscoveryResult:
         Returns a new result with filtered candidates.
 
         Args:
-            predicate: Either a float (min_confidence) or a callable accepting a DiscoveryCandidate.
+            predicate: Either a float, the minimum confidence kept (default
+                0.0, which keeps every candidate), or a callable that takes a
+                `DiscoveryCandidate` and returns True to keep it.
+
+        Returns:
+            DiscoveryResult: The kept candidates, with the same source count.
         """
         if callable(predicate):
             filtered = [c for c in self.candidates if predicate(c)]
@@ -53,8 +56,13 @@ class DiscoveryResult:
 
     def to_dataframe(self):
         """
-        Returns a pandas DataFrame of the candidates.
-        Requires 'pandas' to be installed.
+        Returns a pandas DataFrame of the candidates, one row per candidate.
+
+        Returns:
+            pandas.DataFrame: One column per `DiscoveryCandidate` field.
+
+        Raises:
+            ImportError: If pandas is not installed.
         """
         try:
             import pandas as pd
@@ -65,10 +73,17 @@ class DiscoveryResult:
     def get_density_matrix(self, bins: Tuple[int, int] = (10, 10)) -> List[List[int]]:
         """
         Returns a 2D matrix (list of lists) representing candidate density.
-        Ideal for plotting with matplotlib (e.g., plt.imshow).
+
+        Each candidate is counted in the cell holding its box centre, on a
+        grid scaled to the largest box origin seen. Suitable for plotting
+        with matplotlib (e.g., `plt.imshow`).
 
         Args:
             bins: Tuple of (rows, cols) for the grid.
+
+        Returns:
+            List[List[int]]: `rows` lists of `cols` counts; all zeros when
+                there are no candidates.
         """
         if not self.candidates:
             return [[0] * bins[1] for _ in range(bins[0])]
@@ -103,6 +118,10 @@ class DiscoveryResult:
 
         Args:
             bins: Tuple of (rows, cols) for the grid.
+
+        Returns:
+            str: A title line, then one `|...|` line per grid row, each cell
+                drawn as ` `, `.`, `o`, `O` or `#` by increasing count.
         """
         grid = self.get_density_matrix(bins)
         rows, cols = bins
@@ -132,7 +151,10 @@ class DiscoveryResult:
         Analyzes candidates to determine if they are static (overlay) or transient (noise).
 
         Returns:
-            List of dicts describing stability of grouped regions.
+            List[Dict[str, Any]]: One dict per zone from `to_zones` with no
+                occurrence floor: `zone`, `occurrence`, `status`
+                (`STATIC_ALWAYS` above 0.9, `STATIC_FREQUENT` above 0.5,
+                else `TRANSIENT`) and one `example` text.
         """
         zones = self.to_zones(min_occurrence=0.0) # a relaxed clustering
         stability_report = []
@@ -159,7 +181,16 @@ class DiscoveryResult:
     def inspect_clusters(self, pad_x: int = 20, pad_y: int = 10) -> List[List[DiscoveryCandidate]]:
         """
         Returns the raw clusters of candidates before they are merged.
+
         Useful for debugging why certain words are grouping together.
+
+        Args:
+            pad_x: Horizontal padding, in pixels, when testing overlap.
+            pad_y: Vertical padding, in pixels, when testing overlap.
+
+        Returns:
+            List[List[DiscoveryCandidate]]: The candidates of each cluster;
+                empty when there are no candidates.
         """
         if not self.candidates:
             return []
@@ -177,6 +208,12 @@ class DiscoveryResult:
             pad_x: Horizontal padding for merging (higher values merge words on same line).
             pad_y: Vertical padding.
             min_occurrence: Fraction of valid sources (0.0-1.0) required to suggest a zone.
+
+        Returns:
+            List[Dict[str, Any]]: One dict per zone: `zone` as
+                `[y1, y2, x1, x2]`, `type` (`LIKELY_NAME`, `PROPER_NOUN` or
+                `TEXT`), `occurrence`, mean `confidence`, and up to three
+                `examples`. Zones 5 pixels or less wide or tall are dropped.
         """
         if not self.candidates:
             return []
@@ -281,7 +318,18 @@ class ZoneDiscoverer:
 
     @staticmethod
     def group_boxes(boxes: List[List[int]], padding: int = 0, pad_x: int = None, pad_y: int = None) -> List[List[int]]:
-        """Groups boxes into overlapping clusters."""
+        """Groups boxes into overlapping clusters.
+
+        Args:
+            boxes: Boxes as `[x, y, w, h]`.
+            padding: Padding on both axes, used where `pad_x` or `pad_y` is
+                not given.
+            pad_x: Horizontal padding when testing overlap.
+            pad_y: Vertical padding when testing overlap.
+
+        Returns:
+            List[List[int]]: The indexes into `boxes` of each cluster.
+        """
         if not boxes:
             return []
 
@@ -337,6 +385,6 @@ class ZoneDiscoverer:
 
     @staticmethod
     def _merge_overlapping_boxes(boxes: List[List[int]], padding: int = 0) -> List[List[int]]:
-        """Legacy helper."""
+        """The union box of each cluster `group_boxes` finds."""
         clusters = ZoneDiscoverer.group_boxes(boxes, padding=padding)
         return [ZoneDiscoverer._union_box_list([boxes[i] for i in cluster]) for cluster in clusters]
