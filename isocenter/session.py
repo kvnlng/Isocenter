@@ -6367,7 +6367,8 @@ class DicomSession:
                 does not take, before anything is flushed or written.
             ValueError: `subset` is a DataFrame carrying none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
-                PatientID.
+                PatientID, or a query string that does not run against
+                the cohort report.
             ExportError: Every planned instance failed (nothing written and
                 at least one failure), raised last, after the audit rows
                 and the `EXPORT` row are written. A partial export and an
