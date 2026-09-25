@@ -54,7 +54,7 @@ from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clon
                        exported_patient_id, is_synthetic_patient_id, PASS_WRITING)
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
-# and diffs against its table, and the two must be one read (#714).
+# and diffs against its table, and the two must be one read.
 from . import profiles
 from . import entities
 from . import pixel_analysis
@@ -83,8 +83,9 @@ def scan_worker(args):
             f"scan_worker expects (Patient, config_source, remove_private, "
             f"project_secret); got a {type(patient).__name__} first")
 
-    # The policy itself: `audit()` resolves it in the parent, and the path
-    # arm read a file a weaker second way, through `load_phi_config` (#729).
+    # The policy itself, never a path: `audit()` resolves it in the
+    # parent, and a worker reading a file would read it a second, weaker
+    # way.
     if not isinstance(config_source, dict):
         raise TypeError(f"scan_worker expects the PHI policy as a mapping of tag "
                         f"to rule; got a {type(config_source).__name__} (#729)")
@@ -188,23 +189,17 @@ def _verify_worker(args):
             describe_exception(e))
 
     # Strip the instance before the findings cross back, as `scan_worker`
-    # does; `scan_pixel_content` puts the live one back (#412). The strip
-    # is not tidiness. OCR decodes the frame first, `get_pixel_data()`
-    # caches it on the instance, and `_findings_for` attaches that
-    # instance to every finding -- so the result carried the decoded
-    # frame back to the parent, once per scanned instance with a finding
-    # (pickle memoises the shared instance, so a second finding on the
-    # same frame adds ~150 bytes, not a frame). Real tesseract, one
-    # 256x256 16-bit frame, two findings, locally: 132519 bytes against
-    # 542 (3.12.14). Rehydration alone would
-    # hide this: it overwrites the copy, so the entity the caller sees is
-    # right while the frame still crosses the pipe. Only
-    # `tests/test_scan_pixel_content_dispatches_its_worker.py`'s T-394a
-    # is red without this loop. Since #428 `_ocr_instance` frees a
-    # loader-backed frame before this result is built, so what the strip
-    # still guards is the entity's identity (one meaning for
-    # `finding.entity`, which `_rehydrate_findings` restores) and an
-    # in-memory instance whose frame was resident before the scan.
+    # does; `scan_pixel_content` puts the live one back. The strip
+    # is not tidiness. `_findings_for` attaches the instance to every
+    # finding, so without it the result would carry the instance, and
+    # any frame resident on it, back to the parent across the pipe.
+    # Rehydration alone would hide this: it overwrites the copy, so the
+    # entity the caller sees is right while the frame still crosses the
+    # pipe. `_ocr_instance` frees a loader-backed frame before this
+    # result is built, so what the strip guards is the entity's identity
+    # (one meaning for `finding.entity`, which `_rehydrate_findings`
+    # restores) and an in-memory instance whose frame was resident
+    # before the scan.
     for f in findings:
         f.entity = None
     return _ScanOutcome(uid, findings, ocr.read, ocr.failure)
@@ -373,9 +368,8 @@ def _load_redaction_knowledge_base() -> List[Dict[str, Any]]:
     """Machine redaction rules shipped with the package, keyed by serial."""
     # Before the `try`, and that placement is load-bearing: the handler
     # below catches `OSError`, and `FileNotFoundError` is one -- a
-    # refusal that drifted inside would be caught and turned straight
-    # back into the `return []` this replaces, with every test still
-    # green (#388). `require_package_resource` raises `RuntimeError`
+    # refusal that drifted inside would be caught and turned into a
+    # silent `return []`. `require_package_resource` raises `RuntimeError`
     # partly so that cannot happen even if it does drift.
     path = require_package_resource(
         RESOURCES_DIR, "redaction_rules.json",
@@ -398,7 +392,7 @@ def _load_ctp_rules() -> List[Dict[str, Any]]:
     # is *not* shipped, so its absence is the ordinary case and routing it
     # through the helper would make every correct installation a broken
     # one. Only the JSON fallback -- which `setup.py` does package and
-    # `publish.yml` does gate on -- is required (#388).
+    # `publish.yml` does gate on -- is required.
     yaml_path = os.path.join(RESOURCES_DIR, "ctp_rules.yaml")
     path = yaml_path if os.path.exists(yaml_path) else require_package_resource(
         RESOURCES_DIR, "ctp_rules.json",
@@ -591,8 +585,8 @@ def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
             series.series_instance_uid, instance.sop_instance_uid)
 
 
-#: The elements `export()` stamps to say how a file was de-identified
-#: (#554): Patient Identity Removed, De-identification Method, and
+#: The elements `export()` stamps to say how a file was de-identified:
+#: Patient Identity Removed, De-identification Method, and
 #: Longitudinal Temporal Information Modified. A rule on any of them, of
 #: any action, KEEP included, means the configuration decides that element
 #: and the export does not stamp it.
@@ -797,8 +791,8 @@ def _print_suggested_config(counts) -> None:
         rule = {tag: {"name": _suggested_tag_name(tag), "action": action}}
         # Dumped per tag rather than as one mapping so the count can sit
         # above its own entry. yaml.dump owns the quoting -- a tag key
-        # contains a comma, and hand-rolling that is how the previous
-        # version produced a document nothing could read.
+        # contains a comma, and hand-rolled quoting produces a document
+        # nothing can read.
         block = yaml.dump(rule, sort_keys=False, default_flow_style=False)
         print(f"  # Found {count} times")
         for line in block.splitlines():
@@ -808,7 +802,7 @@ def _print_suggested_config(counts) -> None:
               f"phi_tags rule can resolve them; review them by hand.")
 
 
-#: The one tag whose suggested rule is not `REMOVE` (#587).
+#: The one tag whose suggested rule is not `REMOVE`.
 _PATIENT_ID_TAG = "0010,0020"
 
 
@@ -940,8 +934,7 @@ def _report_processes_lever_on_a_memory_store(db_path, strategy):
         return
 
     if strategy.use_threads:
-        # Four properties this message holds, and #185's does not.
-        # It names no knob the reader did not set (`force_threads`
+        # Four properties this message holds. It names no knob the reader did not set (`force_threads`
         # appears nowhere -- redact() set that, not them); it says in as
         # many words that the result is correct, because a warning in
         # front of a correct result that does not say so sends the
@@ -1069,8 +1062,8 @@ class DicomSession:
 
         self.store.patients = self.store_backend.load_all()
 
-        # Detect descriptor damage a pre-fix release persisted (#186,
-        # #214) at the moment the store opens, so a session holding it
+        # Detect descriptor damage an earlier release persisted
+        # at the moment the store opens, so a session holding it
         # cannot run to a clean-looking export first. Detection only, on
         # purpose -- the sidecar's bytes are shape-free, so any repair
         # would be a best-effort guess; the remedy is in the message and
@@ -1090,23 +1083,23 @@ class DicomSession:
         # The policy the last `audit()` resolved, whichever door it came
         # by. `audit(config_path=)` does not assign
         # `configuration.phi_tags`, and the lock judges a name or ID by the
-        # rule that wrote it (review of #574). None until an audit runs.
+        # rule that wrote it. None until an audit runs.
         self._audited_phi_tags = None
 
         # What the last DICOM export delivered, so the compliance report
         # can say how many instances were written beside how many are
-        # indexed (#181). None means "no export has run in this
+        # indexed. None means "no export has run in this
         # session", which is not the same as "nothing was written" --
         # the report omits the row rather than claiming a zero.
         self._last_export_written = None
         self._last_export_requested = None
         # What the last `audit()` raised, per scan-time entity uid, so a
         # partial `anonymize(findings=...)` cannot stamp REMEDIATED over
-        # identifiers it was not handed (#553). None until an audit runs,
+        # identifiers it was not handed. None until an audit runs,
         # and not persisted: a reopened session keeps pass accounting.
         self._scan_tally = None
-        # This session's working copy of each kept report's scan tally
-        # (#555, third to fifth reviews of #750): one per *audit*, keyed by
+        # This session's working copy of each kept report's scan tally:
+        # one per *audit*, keyed by
         # the audit token its tally carries (`_ScanTally._audit`), so
         # partial passes over one audit's reports -- copied, deep-copied,
         # pickled or loaded again -- complete one another as they would in
@@ -1119,29 +1112,29 @@ class DicomSession:
         # for the life of the session.
         self._report_tallies = {}
         # Every policy an `audit()` in this session scanned under,
-        # fingerprint -> base (#555). A status recorded under one of these
-        # raises no export notice (owner's ruling Q2): the user chose it in
+        # fingerprint -> base. A status recorded under one of these
+        # raises no export notice: the user chose it in
         # this session, by `audit(config_path=)` or by the configuration
-        # then in force. Not persisted, deliberately: #555's harm crosses
-        # sessions, and a fresh session has scanned nothing.
+        # then in force. Not persisted, deliberately: the notice is about
+        # a policy change across sessions, and a fresh session has
+        # scanned nothing.
         self._scanned_policies = {}
 
         # The verbs this session actually performed ("REDACTION",
         # "ANONYMIZE"), so `generate_report` can demand action-specific
         # evidence: a redacting run whose REDACTION rows were lost to a
         # second defect must not grade PASS on the strength of unrelated
-        # rows (#254). Transient, in-memory and session-scoped on
+        # rows. Transient, in-memory and session-scoped on
         # purpose -- persisted, this would be a second durable answer to
-        # "what happened" that can disagree with the audit log, the
-        # shape this codebase keeps deleting (the retired `text_index`,
-        # #84). A verb is recorded only where the run would have emitted
+        # "what happened" that can disagree with the audit log. A verb
+        # is recorded only where the run would have emitted
         # its audit rows, so a call that performed no work demands no
         # evidence; see the two recording sites.
         self._actions_performed: Set[str] = set()
 
         # Each `scan_pixel_content()` call this session made, for the
-        # report's section 5 (#481), which used to say "pixel data was
-        # scanned" for every session. Transient for `_actions_performed`'s
+        # report's section 5, so it says whether pixel data was scanned.
+        # Transient for `_actions_performed`'s
         # reason above, which is also why section 5 says "in this
         # session": a scan an earlier session ran over this store is not
         # known here, and the report says so rather than guessing.
@@ -1157,10 +1150,9 @@ class DicomSession:
         # open SQLite handles and its sidecar file position, and this
         # session's threads (persistence drain, audit writer) can be
         # mid-write at any fork. Linux 3.12 defaults to fork; macOS to
-        # spawn, which is why nothing local ever saw the difference
-        # (#220, #250).
+        # spawn, so a fork-only failure does not show on a Mac.
         # How wide the pool below was built, and how many `ingest()`
-        # calls are running on it right now (#511). The width is recorded
+        # calls are running on it right now. The width is recorded
         # rather than read back from the executor's private
         # `_max_workers`, and it moves with **every** assignment of
         # `self._executor` -- here, `_restart_executor()` and
@@ -1174,12 +1166,12 @@ class DicomSession:
         # It is **never held while any other lock is taken** -- not the
         # sidecar pass-lock, not the gate, not sqlite, and not a logging
         # handler's own lock, which the `PIXEL_STATE_LOCK` convention
-        # counts as one (#434) -- so it is not part of the documented
+        # counts as one -- so it is not part of the documented
         # lock order in CLAUDE.md and must not be made part of it: it is
         # taken and released at the top of `ingest()` with nothing held,
         # and again in that call's `finally` after the pass-lock has been
         # released, and once more after `import_files` returns, when the
-        # pool broke during it, to replace it (`_restart_executor`, #654)
+        # pool broke during it, to replace it (`_restart_executor`)
         # -- after the pass-lock is released there too.
         # `_ingest_executor()` keeps that true by capturing its decision
         # as data and logging it, and retiring the pool it swapped out,
@@ -1194,18 +1186,17 @@ class DicomSession:
         self._executor = concurrent.futures.ProcessPoolExecutor(
             # Sized by the resolver `run_parallel` uses, so
             # `ISOCENTER_MAX_WORKERS` narrows `ingest()` as it narrows
-            # every other parallel step. Until #501 this was `None`: the
-            # stdlib gave one worker per CPU whatever the variable said,
-            # under a comment claiming CPU * 1.5. Since #511 each
-            # `ingest()` re-resolves this and rebuilds the pool when the
-            # width has changed, so the variable is honoured whenever it
-            # is set rather than only here.
+            # every other parallel step; not `None`, which is the
+            # stdlib's one worker per CPU whatever the variable says.
+            # Each `ingest()` re-resolves this and rebuilds the pool when
+            # the width has changed, so the variable is honoured whenever
+            # it is set rather than only here.
             max_workers=self._executor_width,
             mp_context=multiprocessing.get_context("spawn"),
             # The same env-gated worker setup as run_parallel's pools
             # (GC off, child-side faulthandler watchdog); resolved by
             # the one resolver so the session's own pool cannot drift
-            # from the per-call ones (#250).
+            # from the per-call ones.
             initializer=resolve_worker_initializer())
 
         if db_exists:
@@ -1254,15 +1245,15 @@ class DicomSession:
 
         # Order is load-bearing. `shutdown()` reconciles a save its
         # worker never finished and records an ERROR audit row when it
-        # cannot (#314); `stop()` flushes the audit queue, so those rows
+        # cannot; `stop()` flushes the audit queue, so those rows
         # settle before close() returns. Reversed, they would be written
         # into a queue nothing drains again.
         if hasattr(self, 'persistence_manager'):
             _run_step(self.persistence_manager.shutdown)
 
         # After `shutdown()`, and deliberately not through `_run_step`.
-        # Order: `shutdown()` reconciles a save its worker never finished
-        # (#314), so asking before it would report instances that were
+        # Order: `shutdown()` reconciles a save its worker never finished,
+        # so asking before it would report instances that were
         # about to be marked persisted. Not `_run_step`, because that
         # records the first exception for `close()` to re-raise -- and a
         # bug in a diagnostic that turned `close()` into a raise would
@@ -1343,12 +1334,11 @@ class DicomSession:
                 # raises `TypeError` into the guard below and the warning
                 # is lost outright -- for the graph most in need of one,
                 # since an instance with no UID is the one a caller can
-                # least easily find again (#337).
+                # least easily find again.
                 #
                 # The fallback has to *locate*, not merely be joinable:
                 # three instances rendered as "<unknown>, <unknown>,
-                # <unknown>" is the same non-information this message
-                # exists to replace (#307), without the crash.
+                # <unknown>" tell the caller nothing.
                 # `source_path` and not `file_path` -- redaction detaches
                 # `file_path` (see the field in `entities.py`), and
                 # redaction is exactly what leaves an instance dirty at
@@ -1431,8 +1421,7 @@ class DicomSession:
         if max_workers is None:
             # Not the stdlib's `None`, which is one per CPU. An OOM restart
             # that widened the pool back past `ISOCENTER_MAX_WORKERS`
-            # would undo the setting at exactly the moment memory is short
-            # (#501).
+            # would undo the setting at exactly the moment memory is short.
             max_workers = resolve_max_workers()
         with self._ingest_lock:
             if broken is not None and self._executor is not broken:
@@ -1440,15 +1429,14 @@ class DicomSession:
                 # the one here now is live.
                 return
             # Re-init, with the same spawn pin as construction: an OOM
-            # recovery must not quietly downgrade the pool to fork
-            # (#220), nor drop the worker setup construction resolved
-            # (#250).
+            # recovery must not quietly downgrade the pool to fork,
+            # nor drop the worker setup construction resolved.
             replacement = concurrent.futures.ProcessPoolExecutor(
                 max_workers=max_workers,
                 mp_context=multiprocessing.get_context("spawn"),
                 initializer=resolve_worker_initializer())
             retired, self._executor = self._executor, replacement
-            # The recorded width follows every swap (#511). A restart
+            # The recorded width follows every swap. A restart
             # that narrowed the pool for an OOM recovery and left this at
             # the old number would make the next `ingest()` either
             # rebuild for nothing or -- with the variable narrowed to
@@ -1685,30 +1673,24 @@ class DicomSession:
                             # Both unloads report True when there was
                             # nothing cached, so the return value alone
                             # cannot tell "released" from "there was
-                            # none". Counting it as freed is how this
-                            # used to report every instance in a session
-                            # holding nothing as reclaimed -- the same
-                            # false assurance as not freeing at all.
+                            # none". Counting it as freed would report
+                            # every instance in a session holding nothing
+                            # as reclaimed.
                             had_pixels = inst.pixel_array is not None
                             had_waveform = inst.waveform_array is not None
 
-                            # `unload_pixel_data`, deliberately: since
-                            # #293 an array replaced through
-                            # `set_pixel_data()` and not yet written is
-                            # refused here and stays resident. Do not
-                            # "optimise" this to `discard_pixel_data()`;
-                            # that would free more memory by throwing
-                            # away pixels no one else holds.
+                            # `unload_pixel_data`, deliberately: an array
+                            # replaced through `set_pixel_data()` and not
+                            # yet written is refused here and stays
+                            # resident. Do not "optimise" this to
+                            # `discard_pixel_data()`; that would free more
+                            # memory by throwing away pixels no one else
+                            # holds.
                             #
                             # An array mutated in place is not tracked,
                             # so it is still dropped here silently --
                             # the limit `unload_pixel_data()`'s own
-                            # docstring states. #293 did not make that
-                            # true; #323 narrowed this method's
-                            # docstring to say so, rather than leave it
-                            # promising that nothing is discarded, and
-                            # what would actually close it is stated
-                            # there.
+                            # docstring states.
                             gave_pixels = inst.unload_pixel_data() and had_pixels
                             gave_waveform = (inst.unload_waveform_data()
                                              and had_waveform)
@@ -1766,31 +1748,30 @@ class DicomSession:
         if hasattr(self, 'store_backend'):
             print("Beginning Sidecar Compaction (this may take a while)...")
 
-            # The refusal (#368) comes FIRST, before the leading save,
-            # holding nothing, and is held through the rewire. It sat
-            # between the save and the rewrite until the review of PR
-            # #385 showed the window that leaves: a pass that opens
-            # after the save's rows are written and closes before the
-            # rewrite is admitted with its `instances` rows on the old
+            # The refusal comes FIRST, before the leading save,
+            # holding nothing, and is held through the rewire. Placed
+            # between the save and the rewrite, it would admit a pass
+            # that opens after the save's rows are written and closes
+            # before the rewrite, with its `instances` rows on the old
             # UIDs and its blob rows on the regenerated ones (`redact()`
             # does not save at its end), and `_read_blob_index`'s
-            # EXISTS predicate reclaims every worker frame. Taken here,
-            # a pass opening at any point of this method waits at its
-            # own SH until the rewire is done. `LOCK_NB` still: the
-            # refusal is an answer, not a wait (owner's A1). Lock order
+            # EXISTS predicate would reclaim every worker frame. Taken
+            # here, a pass opening at any point of this method waits at
+            # its own SH until the rewire is done. `LOCK_NB`: the
+            # refusal is an answer, not a wait. Lock order
             # stays acyclic -- EX holding nothing, then the gate via
             # site 6 and below; passes take SH holding nothing; nothing
-            # takes the pass-lock under the gate any more.
+            # takes the pass-lock under the gate.
             with self.store_backend._refuse_while_pass_open():
                 # 1. Sync DB so compaction knows true state
                 self.save(sync=True)
 
-                # The #295 check, between the save and the rewrite. What
-                # it does NOT cover: `has_pending_saves()` reads the
-                # persistence manager's queue and in-flight set, so a
-                # `save(sync=True)` on another thread and a redaction's
-                # `persist_pixel_data` are both invisible to it, measured
-                # `False` in every corrupting ordering (#320). The gate
+                # The pending-save check, between the save and the
+                # rewrite. What it does NOT cover: `has_pending_saves()`
+                # reads the persistence manager's queue and in-flight set,
+                # so a `save(sync=True)` on another thread and a
+                # redaction's `persist_pixel_data` are both invisible to
+                # it. The gate
                 # and the pass-lock are what stop that population.
                 if (hasattr(self, 'persistence_manager')
                         and self.persistence_manager.has_pending_saves()):
@@ -1802,7 +1783,7 @@ class DicomSession:
                         "the persistence manager and stop other writers "
                         "first (#295).")
 
-                # The gate (#368), taken AFTER the leading save above --
+                # The gate, taken AFTER the leading save above --
                 # that save runs site 6 on this thread and would deadlock
                 # against a gate already held -- and released only after
                 # the rewire below: release it at the end of
@@ -1836,7 +1817,7 @@ class DicomSession:
         # cannot ride `updates` for a sharper version of the same
         # reason: that map is keyed by UID alone, and one instance can
         # carry a bare `pixels` blob plus a row per icon. Keyed
-        # `(uid, kind)` instead (#183).
+        # `(uid, kind)` instead.
         nested_updates = self.store_backend.get_nested_pixel_refs()
 
         if not updates and not wave_updates and not nested_updates:
@@ -1939,7 +1920,7 @@ class DicomSession:
                                 # rewrites where a frame lives, not which
                                 # frame it is, so a resident array that had
                                 # diverged from the stored one still has
-                                # (#293). Clearing here would make an
+                                # diverged. Clearing here would make an
                                 # unwritten array look saved because the
                                 # sidecar was tidied.
                                 inst._pixel_loader.offset = pixel_ref[0]
@@ -2144,24 +2125,24 @@ class DicomSession:
                 `compact()` is still saving or rewriting the sidecar.
         """
         print(f"Ingesting from '{directory}'...")
-        # The pass-lock (#368), shared, around the import and not the
-        # save after it (owner's decision D1). Ingest appends every
+        # The pass-lock, shared, around the import and not the
+        # save after it. Ingest appends every
         # result's frames -- and commits the nested-icon and waveform
         # blob rows -- before the `instances` row that references them
-        # exists, so a compaction inside this call reclaimed freshly
+        # exists, so a compaction inside this call would reclaim freshly
         # ingested frames as orphans. While this is held `compact()`
         # refuses; behind a running compaction this waits (bounded)
         # before the first worker is dispatched.
         # Outside the pass-lock, and entered before it: this re-resolves
         # `ISOCENTER_MAX_WORKERS` and rebuilds the shared pool when the
-        # width has changed (#511), and its own lock is never held while
+        # width has changed, and its own lock is never held while
         # the pass-lock is taken. The pool it yields is used as given --
         # `self._executor` is deliberately not read again below, so a
         # peer ingest that resizes between here and the dispatch cannot
         # pull this call's pool out from under it.
         #
         # `broken` receives that pool if a worker process of it ended
-        # during the import (#654). The import carries on by itself, on
+        # during the import. The import carries on by itself, on
         # pools of its own; the shared pool is replaced below, outside
         # both blocks, because `_restart_executor` takes `_ingest_lock`,
         # which is never taken with the pass-lock held.
@@ -2182,9 +2163,8 @@ class DicomSession:
         # "fix the pool, then save". A rebuild that came first and raised
         # anything the guard below does not catch would skip this save,
         # and leave every instance the import linked unsaved with its
-        # frames unreferenced in the sidecar, which is the loss #654
-        # fixes; `test_the_import_is_saved_before_the_pool_is_replaced`
-        # pins the order. `OSError` is what the constructor raises on a
+        # frames unreferenced in the sidecar. `OSError` is what the
+        # constructor raises on a
         # box out of descriptors or memory (EMFILE, ENOMEM); the import
         # has completed and saved by then, so it is a log line, and the
         # next `ingest()` finds the pool broken at its first file and
@@ -2216,7 +2196,7 @@ class DicomSession:
         print(f"  - {n_i} Instances")
         if summary.failed:
             # Declined files are new files this call read, so they are
-            # in the total; leaving them out read "1 of 2" for three.
+            # in the total.
             new_files = summary.ingested + summary.failed + summary.declined
             print(f"  - {summary.failed} file(s) REJECTED -- ingested "
                   f"{summary.ingested} of {new_files} new files; see the "
@@ -2260,15 +2240,11 @@ class DicomSession:
         get_logger().info(f"Loading configuration from {config_file}...")
         print(f"Loading configuration from {config_file}...")
 
-        # No `try`, and nothing assigned until the loader has returned
-        # (#456). This caught every exception, printed `Load failed` beside
-        # an ERROR log of the same text, reset `rules`, `phi_tags` and
-        # `privacy_profile` to empty, and returned normally -- so a file
-        # that failed validation wiped the policy the session already had
-        # and the caller was told nothing. The loader validates every
-        # shape it returns, so the prints below cannot fail after the
-        # assignments either (`date_jitter: soon` used to, leaving half
-        # of a failed file in the session).
+        # No `try`, and nothing assigned until the loader has returned: a
+        # file that fails validation must raise and leave the policy the
+        # session already had. The loader validates every shape it
+        # returns, so the prints below cannot fail after the assignments
+        # either and leave half of a failed file in the session.
         (tags, rules, jitter, remove_private,
          base) = ConfigLoader.load_unified_config(config_file)
 
@@ -2277,14 +2253,14 @@ class DicomSession:
         self.configuration.date_jitter = jitter
         self.configuration.remove_private_tags = remove_private
         self.configuration.config_path = config_file
-        # Both, on every load (#714): the floor and `none` both leave
+        # Both, on every load: the floor and `none` both leave
         # `privacy_profile` at None, and a flag set only when true would
         # still call a later `none` load the floor.
         floor = base is profiles.FLOOR
         self.configuration.privacy_profile = None if floor else base
         self.configuration._floor = floor
         # The file now holds what memory holds, so the next change that
-        # stays in memory says so again (#715). `auto_save` is not
+        # stays in memory says so again. `auto_save` is not
         # assigned: it is the session's choice, and survives the load.
         self.configuration._file_in_sync = True
 
@@ -2361,11 +2337,11 @@ class DicomSession:
 
         data = {
             # The module attribute, read now: one home for the number both
-            # writers stamp (#711).
+            # writers stamp.
             "version": config_manager.CONFIG_VERSION,
             # The floor's base, which `_scaffold_phi_tags` diffs against:
             # one constant, read once, so the file cannot name one table
-            # and carry the overrides of another (#714).
+            # and carry the overrides of another.
             "privacy_profile": base,
             "phi_tags": self._scaffold_phi_tags(base),
             "date_jitter": self.configuration.date_jitter,
@@ -2398,9 +2374,8 @@ class DicomSession:
         configured_serials = {
             rule.get("serial_number") for rule in self.configuration.rules}
 
-        # Both knowledge bases are read once here. The CTP file was
-        # previously opened and parsed inside the per-machine loop, so a
-        # cohort with 40 scanners re-read the same 27KB of rules 40 times.
+        # Both knowledge bases are read once here, not inside the
+        # per-machine loop.
         kb_machines = _load_redaction_knowledge_base()
         ctp_rules = _load_ctp_rules()
 
@@ -2533,13 +2508,13 @@ class DicomSession:
         # A scan ENDS by advancing `_revision` on every entity it
         # touched (`_record_scan_results` -> `record_phi_status`), and
         # `save()` without `sync=True` returns with `save_all` still
-        # running on the persistence manager's thread. Since #287 that
-        # window is as long as all of the save's pixel I/O. An instance
+        # running on the persistence manager's thread, for as long as
+        # all of the save's pixel I/O. An instance
         # dirtied inside it is dropped from the frozen dirty set, left
         # dirty, and never saved -- `close()` shuts the manager down and
         # does not enqueue a save, so nothing says so. The documented
         # order in README and the quickstart is `save()` then `audit()`,
-        # which is exactly this window (#297).
+        # which is exactly this window.
         #
         # Entry is the right place ONLY because nothing inside `audit()`
         # enqueues a save. If that ever changes, this moves to
@@ -2551,15 +2526,11 @@ class DicomSession:
         tags_to_use = self.configuration.phi_tags
 
         if config_path:
-            # The same loader, and the same exceptions, as `load_config`
-            # (#456). A fallback here read the file as a plain tag list
-            # whenever the unified loader refused it, so a rule with no
-            # serial number -- rejected one call earlier -- was audited
-            # against happily, a `.json` file `load_config` refuses was
-            # accepted, and a root-level tag file loaded tags the scan
-            # then never matched.
+            # The same loader, and the same exceptions, as `load_config`.
+            # No fallback to reading the file as a plain tag list: a file
+            # `load_config` refuses must be refused here too.
             tags_to_use, _, _, _, base = ConfigLoader.load_unified_config(config_path)
-            # The policy this scan runs with (#555): the file's rules, and
+            # The policy this scan runs with: the file's rules, and
             # the session's `remove_private_tags` -- the flag the inspector
             # below is given, not the file's -- under the file's base,
             # spelled by the helper the configuration spells its own with.
@@ -2569,22 +2540,23 @@ class DicomSession:
         else:
             policy = self.configuration._scan_policy()
             # `configuration.phi_tags` can be assigned directly, which no
-            # loader sees. The same refusal the loader raises (#537, #560),
-            # and before the project secret below, for #456's reason.
+            # loader sees. The same refusal the loader raises, and before
+            # the project secret below, so a refused policy leaves no new
+            # secret in the store.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
 
         # Two `Patient` objects holding one Patient ID are merged before the
-        # scan, as `anonymize()` and a restore merge them (#563). The scan
+        # scan, as `anonymize()` and a restore merge them. The scan
         # cannot see them as two: `_rehydrate_findings` binds a patient
-        # finding by Patient ID, so every finding raised on either landed
-        # on the last object, and both carry the same dedup key
-        # `(uid, path, attr)`, so `anonymize()` replaced the ID on one and
-        # left the other's original in place. After the policy is
+        # finding by Patient ID, so every finding raised on either would
+        # land on the last object, and both carry the same dedup key
+        # `(uid, path, attr)`, so `anonymize()` would replace the ID on
+        # one and leave the other's original in place. After the policy is
         # validated, so a refused policy leaves the pair as it was; before
         # `_audited_phi_tags` is recorded and before the project secret, so
         # a merge refused across date-offset schemes leaves neither a
         # policy no audit resolved (which the lock reads) nor a new secret
-        # in the store (#456's reason). After the entry drain above, which
+        # in the store. After the entry drain above, which
         # the merge's own `drain` repeats only when there is a pair.
         self.store._merge_patients_sharing_an_id(
             drain=(self.persistence_manager.flush
@@ -2596,7 +2568,7 @@ class DicomSession:
         # refuses here, with nothing scanned. After the config is resolved,
         # not before: on a store with no secret this call generates and
         # commits one, and a config that then raised would have left the
-        # store changed by a call that did nothing (#456). Read from the
+        # store changed by a call that did nothing. Read from the
         # store rather than held on the session, so no session can hold a
         # stale one. Workers get it by value in their tuple.
         project_secret = self.store_backend._project_secret_for_use()
@@ -2608,7 +2580,7 @@ class DicomSession:
         if not inspector.phi_tags:
             # Reachable only when a config said `privacy_profile: none`
             # and listed no tags: a session with no config applies the
-            # floor policy (#495). The scan still runs the hardcoded
+            # floor policy. The scan still runs the hardcoded
             # patient/study checks and the private-tag sweep.
             get_logger().warning(
                 "PHI Scan Warning: No PHI tags defined (privacy_profile: none "
@@ -2642,20 +2614,18 @@ class DicomSession:
         get_logger().info(f"PHI Scan Complete. Found {len(all_findings)} issues.")
 
         report = PhiReport(all_findings)
-        # The policy the report's findings were raised under (#555), for
+        # The policy the report's findings were raised under, for
         # `anonymize()` handed this report after a reopen, when the
         # entities it remediates carry no policy of their own. Private and
         # set here rather than a constructor argument, so `PhiReport`'s
         # shape is unchanged; a report rebuilt from its findings has none.
         report._scan_policy = policy
-        # And the scan's tally (#553), as the audit left it: a pass over
+        # And the scan's tally, as the audit left it: a pass over
         # this report in a session that has no audit of its own -- the
         # report kept across `close()`, pickled or not -- settles against
         # a copy of it, demoting what it leaves unsettled as the same pass
         # would in this session, and gives the policy only to the entities
-        # this scan raised under (ruling on #750, which replaced a
-        # completeness check and a resolution check that each missed a way
-        # to hand over a partial pass). A copy, not the session's object,
+        # this scan raised under. A copy, not the session's object,
         # which this session's own passes drain.
         report._scan_tally = self._scan_tally.copy()
         return report
@@ -2749,10 +2719,10 @@ class DicomSession:
 
         # `is not None`, not truthiness: `''` is a Patient ID a store
         # written before 1.0 can hold, and a hand-built graph too (ingest
-        # keys an ID-less subject on its study since #584), and a
-        # falsy filter stamped such a patient CLEARED with its name finding
-        # outstanding and let its instances through the safe export
-        # (#581). The same test in `_scan_before_export` and `_ScanTally`.
+        # keys an ID-less subject on its study), and a
+        # falsy filter would stamp such a patient CLEARED with its name
+        # finding outstanding and let its instances through the safe
+        # export. The same test in `_scan_before_export` and `_ScanTally`.
         identified = {f.entity_uid for f in findings if f.entity_uid is not None}
         # Keyed on the same scan-time uids as `identified`, and replaced
         # by every audit, so a new report settles against its own scan.
@@ -2815,10 +2785,10 @@ class DicomSession:
         """
         # First, before the graph is read: a scaffolded config would
         # otherwise answer "nothing to scan" without OCR, and the missing
-        # extra would surface only once zones were filled in (#422).
+        # extra would surface only once zones were filled in.
         pixel_analysis._require_ocr("scan_pixel_content()")  # pylint: disable=protected-access
         # Right after the probe, so the workers run the binary it checked
-        # (#458); see `_caller_tesseract_cmd`.
+        # (see `_caller_tesseract_cmd`).
         tesseract_cmd = _caller_tesseract_cmd()
         get_logger().info("Scanning pixel content for text (OCR)...")
         print("Scanning pixel content for text (OCR)...")
@@ -2873,7 +2843,7 @@ class DicomSession:
             print(msg)
             # Recorded: a call that found nothing configured to read still
             # ran, and "no scan ran" would be the wrong thing for section 5
-            # to say about it (#481).
+            # to say about it.
             self._pixel_scans.append(PixelScanSummary(
                 serial_number=serial_number, attempted=0, read=0, unread=0,
                 findings=0, skipped=skipped_count))
@@ -2894,7 +2864,7 @@ class DicomSession:
         # Here, before anything below can raise: a pass that read nothing
         # ends in `PixelScanError`, and recorded after that raise it would
         # read in section 5 as "no scan ran" beside section 4's rows for
-        # the very instances it could not read (#481, #479).
+        # the very instances it could not read.
         self._pixel_scans.append(PixelScanSummary(
             serial_number=serial_number, attempted=len(worker_items),
             read=read, unread=len(failures), findings=len(all_findings),
@@ -2903,12 +2873,12 @@ class DicomSession:
         # Unconditionally, in both strategies: the worker strips the
         # entity, and this is the one path that puts it back, so
         # `PhiFinding.entity` has one meaning however `run_parallel()`
-        # resolved (#412). Deliberately not `_record_scan_results`: OCR
+        # resolved. Deliberately not `_record_scan_results`: OCR
         # findings say nothing about an entity's metadata PHI status.
         self._rehydrate_findings(all_findings)
 
         # Before the warning and the raise, so every exit from here --
-        # the report returned or `PixelScanError` -- leaves the rows (#479).
+        # the report returned or `PixelScanError` -- leaves the rows.
         _audit_unread_instances(self.store_backend, "scan_pixel_content()",
                                 failures)
         _warn_unread_instances("scan_pixel_content()", failures,
@@ -2955,10 +2925,9 @@ class DicomSession:
             # `.save()` writes to `configuration.config_path`, which only
             # `load_config()` sets, so a session configured by
             # `create_config()` reaches here with nothing to save to. The
-            # tip names the attribute rather than hoping (#234). Since
-            # #715 `save()` raises ValueError without one, where it
-            # returned silently -- and the suggestions above changed
-            # memory only, as every change now does without auto-save.
+            # tip names the attribute rather than hoping. `save()` raises
+            # ValueError without one, and the suggestions above changed
+            # memory only, as every change does without auto-save.
             print("Tip: Run .scan_pixel_content() again to verify the fix, "
                   "then .configuration.save() to write it to the loaded file "
                   "(save() raises ValueError when no file was loaded; set "
@@ -3000,10 +2969,10 @@ class DicomSession:
         """
         # First, and read through the module at call time -- never a copy
         # of `HAS_OCR` imported into this module, which a patch or a later
-        # install would not reach (#422).
+        # install would not reach.
         pixel_analysis._require_ocr("discover_redaction_zones()")  # pylint: disable=protected-access
         # Not only for show: `force_threads=True` below does not hold under
-        # `ISOCENTER_MAX_TASKS_PER_CHILD` (#458; see `_discover_worker`).
+        # `ISOCENTER_MAX_TASKS_PER_CHILD` (see `_discover_worker`).
         tesseract_cmd = _caller_tesseract_cmd()
         from isocenter.discovery import DiscoveryResult, DiscoveryCandidate, ZoneDiscoverer
 
@@ -3051,8 +3020,8 @@ class DicomSession:
                 failures.append((uid, ocr.failure))
             # Only a read instance is a source. One that failed outright,
             # or carries no pixel element, saw no text because nobody
-            # looked, and counting it in `n_sources` lowered every zone's
-            # occurrence rate (#423).
+            # looked, and counting it in `n_sources` would lower every zone's
+            # occurrence rate.
             if not ocr.read:
                 continue
             i = n_read
@@ -3071,10 +3040,10 @@ class DicomSession:
                     )
                     candidates.append(cand)
 
-        # Before the warning and the raise, as in `scan_pixel_content()`
-        # (#479). Discovery reads nothing into the configuration, but a
+        # Before the warning and the raise, as in `scan_pixel_content()`.
+        # Discovery reads nothing into the configuration, but a
         # session whose discovery could not read an instance has the same
-        # gap in what it looked at, and the ruling covers both methods.
+        # gap in what it looked at.
         _audit_unread_instances(self.store_backend,
                                 "discover_redaction_zones()", failures)
         _warn_unread_instances("discover_redaction_zones()", failures,
@@ -3272,7 +3241,7 @@ class DicomSession:
             review_reasons.append(
                 f"{verb} ran in this session and the audit trail holds none "
                 "of the rows it writes")
-        # Condition 7 (#573). "The policy it ran with", not "the policy in
+        # Condition 7. "The policy it ran with", not "the policy in
         # force": a status is recorded by a scan, and a later session may
         # load another configuration without rescanning.
         n_unacted = sum(unacted.values())
@@ -3285,11 +3254,11 @@ class DicomSession:
                 f"(patients {unacted['patients']}, "
                 f"studies {unacted['studies']}, "
                 f"instances {unacted['instances']})")
-        # Condition 8 (#767). A status an edit made stale, not the absence
-        # of one: an entity never scanned is UNSCANNED and does not grade
-        # (Q3). Every edit made after a scan costs the PASS until a scan
-        # reads it (owner ruling, widened to instances, nested items and
-        # series fields). Its own line, not folded into condition 7's:
+        # Condition 8. A status an edit made stale, not the absence
+        # of one: an entity never scanned is UNSCANNED and does not grade.
+        # Every edit made after a scan costs the PASS until a scan
+        # reads it (instances, nested items and series fields included).
+        # Its own line, not folded into condition 7's:
         # that one names a finding, this one the absence of a measurement
         # a scan once made.
         n_edited = sum(edited.values())
@@ -3324,7 +3293,7 @@ class DicomSession:
             ValueError: For any other `format`, `'md'` and case variants
                 included; no file is written.
         """
-        # The spelling first (#26, review of #787): a refused format is
+        # The spelling first: a refused format is
         # known before a report over the whole store is built.
         renderer = get_renderer(format)
         get_logger().info(f"Generating Compliance Report ({format}) to {output_path}...")
@@ -3353,7 +3322,7 @@ class DicomSession:
                      "COMPLIANCE_CHECK",
                      f"{msg} - {uid}"))
 
-        # Descriptor damage a pre-fix release persisted (#186, #214).
+        # Descriptor damage an earlier release persisted.
         # Same channel as the BurnedInAnnotation hit above because it is
         # the same claim one attribute over: the store holds an instance
         # whose export cannot be trusted, and a report over such a store
@@ -3366,7 +3335,7 @@ class DicomSession:
                  "COMPLIANCE_CHECK",
                  f"{msg} - {uid}"))
 
-        # Audit rows a failed batch write dropped (#219). Filed as an
+        # Audit rows a failed batch write dropped. Filed as an
         # exception -- not merely rendered -- because everything above
         # was read from a table those rows never reached: any count,
         # loss, or error here may under-state what happened, and a
@@ -3383,11 +3352,10 @@ class DicomSession:
                  "actually taken"))
 
         # Export-side DATA_LOSS rows are written during `export()`, so
-        # a report generated first cannot contain them and used to
-        # grade PASS on a run that then dropped a private element --
-        # same session, same loss, PASS or REVIEW_REQUIRED depending
-        # only on call order (#153). The audit log is the arbiter, not
-        # a session flag: an EXPORT row (#166) survives a session
+        # a report generated first cannot contain them, and can grade
+        # PASS on a run that then drops a private element; this note
+        # says so. The audit log is the arbiter, not
+        # a session flag: an EXPORT row survives a session
         # reopened on this store. A log line only, never an audit row
         # -- a WARNING row would flip the grade this note deliberately
         # leaves alone.
@@ -3401,29 +3369,23 @@ class DicomSession:
         # 3. Determine Context
         #
         # Describe what was configured, never what standard it might
-        # satisfy. `deid_method` used to be a dataclass default reading
-        # "Safe Harbor (Basic Profile)" that nothing assigned, so every
-        # report -- including a bare session's, scanning six tags --
-        # asserted HIPAA Safe Harbor above a DPO signature line.
+        # satisfy: no report asserts a standard such as HIPAA Safe Harbor.
         # The tag count is what `audit()` scans with: the session's
-        # policy, with no fallback. This fell back to the shipped
-        # `phi_tags.json` when `phi_tags` was empty, while `audit()` used
-        # the empty dict -- so a bare session's report said "6 tag rules"
-        # over a scan that applied none (#495). A bare session now
-        # carries the floor; an empty policy means `privacy_profile:
-        # none` with no tags, and "0 tag rules" is then the truth.
+        # policy, with no fallback, so the count and the scan cannot
+        # disagree. A bare session carries the floor; an empty policy
+        # means `privacy_profile: none` with no tags, and "0 tag rules"
+        # is then the truth.
         effective_tags = self.configuration.phi_tags
 
         # Which table the rules were built from, never a claim that the
-        # output conforms to it (#714). The floor and `privacy_profile:
-        # none` both leave `privacy_profile` at None, and were both
-        # "session defaults" until #714; `_floor` is what tells them
-        # apart. The edition is read from the pinned name, not from a
-        # second table that could disagree with it.
+        # output conforms to it. The floor and `privacy_profile:
+        # none` both leave `privacy_profile` at None; `_floor` is what
+        # tells them apart. The edition is read from the pinned name, not
+        # from a second table that could disagree with it.
         #
         # A name assigned into the public field in code (`"basic"`) goes
         # through the aliases as a file would; it is a built-in, not a
-        # custom profile (review of #738).
+        # custom profile.
         profile_name = self.configuration.privacy_profile
         if isinstance(profile_name, str):
             profile_name = profiles.PROFILE_ALIASES.get(profile_name, profile_name)
@@ -3437,7 +3399,7 @@ class DicomSession:
             # `privacy_profile: none`, or an external profile that
             # contributed no rules (the loader drops its path). Worded to be
             # true of both: this row does not quote a line the file may not
-            # have (review of #738).
+            # have.
             privacy_profile = "None (no base profile)"
             method = "No profile"
         elif profile_name in profiles.PRIVACY_PROFILES:
@@ -3454,9 +3416,9 @@ class DicomSession:
         # The rows above describe the configuration in force, and an
         # `audit(config_path=)` scans under another policy without
         # changing it, so a status this session recorded can name a
-        # policy these rows do not (review of #738, N5). Said here, not
+        # policy these rows do not. Said here, not
         # counted: statuses by recorded policy are a report row of their
-        # own (#724). Fingerprints, not bases, decide "another".
+        # own. Fingerprints, not bases, decide "another".
         in_force = self.configuration._scan_policy().fingerprint
         also = [f"{base} ({fingerprint[:15]})"
                 for fingerprint, base in sorted(self._scanned_policies.items())
@@ -3479,10 +3441,10 @@ class DicomSession:
         #
         # A dropped *private* element fails the grade; a dropped
         # standard one does not. The asymmetry is deliberate rather than
-        # a rule half-applied, and is argued once -- CHANGELOG.md, #146.
-        # The one loss parity sat badly on -- the discarded waveform
+        # a rule half-applied; the argument is in CHANGELOG.md.
+        # The one loss parity sits badly on -- the discarded waveform
         # multiplex group, standard-group and not remotely routine -- is
-        # scoped SIGNAL by its emitter since #150 and grades here too.
+        # scoped SIGNAL by its emitter and grades here too.
         #
         # Membership in GRADED_LOSS_SCOPES, never a wider test: the
         # scope is set by the emitter, and grading STANDARD here would
@@ -3498,15 +3460,13 @@ class DicomSession:
         # The row says the scan could not read an element; that only
         # costs the run its PASS if the element is still there to be
         # written. A gap the sweep removed is content the export does
-        # not carry, which is the same test #146 applies to DATA_LOSS --
-        # and grading it REVIEW_REQUIRED made the report disagree with
-        # itself, because a *parseable* private sequence swept by the
-        # same default configuration graded PASS. Measured on both:
-        # same config, both absent from the export, PASS and
-        # REVIEW_REQUIRED. That asymmetry had no argument behind it.
+        # not carry, which is the same test applied to DATA_LOSS --
+        # and grading it REVIEW_REQUIRED would make the report disagree
+        # with itself, because a *parseable* private sequence swept by
+        # the same default configuration grades PASS.
         #
         # `GAP_UNRESOLVED` grades like a retained one. A disposition
-        # nothing could establish is not a clean one (#167).
+        # nothing could establish is not a clean one.
         open_gaps = [row for row in scan_gaps if row[3] != GAP_REMOVED]
 
         # A declined remediation grades exactly like an open gap, and
@@ -3516,19 +3476,18 @@ class DicomSession:
         # on the row existing rather than on any property of it -- there
         # is no disposition to resolve here, because unlike a `SCAN_GAP`
         # nothing downstream removes a value a remediation declined to
-        # touch (#301).
+        # touch.
         #
         # An empty date writes no row at all, so this cannot fire over a
         # graph with nothing wrong in it; that gate is in
         # `_apply_single_remediation`, where the value is in hand.
 
-        # Action-specific evidence (#254). The `audit_summary` arm below
+        # Action-specific evidence. The `audit_summary` arm below
         # asks whether the audit log heard about *anything*; this asks
         # whether it heard about what this session did. Without it, a
-        # session that redacted and whose REDACTION rows were lost to a
-        # second defect (a dropped batch of the #219 shape) graded PASS
-        # on the strength of its other rows -- #247's second reading,
-        # one defect further away. `_actions_performed` is the session's
+        # session that redacted and whose REDACTION rows were lost (a
+        # dropped batch write) would grade PASS on the strength of its
+        # other rows. `_actions_performed` is the session's
         # transient memory of its own verbs; see `__init__` for why it
         # is deliberately not persisted.
         from .remediation import REMEDIATION_ACTION_TYPES
@@ -3539,25 +3498,26 @@ class DicomSession:
         unattested = [verb for verb in sorted(self._actions_performed)
                       if not expected_evidence[verb] & audit_summary.keys()]
 
-        # Findings raised and never acted on (#573, condition 7). `audit()`
+        # Findings raised and never acted on (condition 7). `audit()`
         # writes no audit row for a finding, so every term above is blind
-        # to one nobody passed to `anonymize()`: an audit followed by an
-        # export, or a pass handed part of a report, graded PASS with the
-        # identifiers the user's own policy names still in the file.
+        # to one nobody passed to `anonymize()`: without this, an audit
+        # followed by an export, or a pass handed part of a report, would
+        # grade PASS with the identifiers the user's own policy names
+        # still in the file.
         #
         # Read from `phi_status`, never from the session's scan: the status
         # is persisted per entity, so a session reopened on this store
         # grades as the one that scanned did, like every store-wide term.
         # IDENTIFIED only. UNSCANNED -- never scanned, or edited since --
-        # is the absence of a measurement, not a finding (Q3): it is
+        # is the absence of a measurement, not a finding: it is
         # counted for section 5 and does not grade. Series are left out
         # for the reason `phi_status_summary` gives: nothing scans one.
         unacted = {"patients": 0, "studies": 0, "instances": 0}
         unscanned_instances = 0
-        # Condition 8 (#767, owner rulings 2026-09-23): an entity edited
+        # Condition 8: an entity edited
         # after its status was recorded. Counted beside condition 7 in
         # the same walk, per level, at the levels condition 7 counts.
-        # **Not series** (review of #774, finding 2): the scan records
+        # **Not series**: the scan records
         # nothing on a Series, so a Series status an edit made stale could
         # never be cleared by `audit()`, the one thing the line says does.
         # A Series field edit is counted where it is read -- the cascade
@@ -3577,7 +3537,7 @@ class DicomSession:
                         unscanned_instances += status is PhiStatus.UNSCANNED
                         edited["instances"] += _edited_since_its_status(instance)
 
-        # The grade IS this list: PASS exactly when it is empty (#481). See
+        # The grade IS this list: PASS exactly when it is empty. See
         # `_review_reasons` for why it is a list and not a boolean.
         # Keyword-only: seven lists in a row is an easy pair to transpose,
         # and a transposed pair would still grade -- it would name the
@@ -3673,7 +3633,7 @@ class DicomSession:
             ValueError: For any other `format`, a case variant included; no
                 file is written.
         """
-        # The spelling first (#26, review of #787), before every instance
+        # The spelling first, before every instance
         # is walked.
         renderer = get_manifest_renderer(format)
         get_logger().info(f"Generating Manifest ({format}) to {output_path}...")
@@ -3845,15 +3805,14 @@ class DicomSession:
                 "Reversible anonymization not enabled. Call enable_reversible_anonymization() first.")
 
         # A `str` is the single-id spelling; everything else goes to the
-        # batch, which locks a selection or refuses what is not one
-        # (#696). This read `isinstance(..., (list, tuple, set))` until
-        # then, so a `frozenset` or a generator was looked up as one
-        # Patient ID and locked nobody, and `None`, `bytes` and `42` were
-        # each an ERROR line rather than a refusal -- and a patient left
-        # unlocked loses its identity at `anonymize()`.
+        # batch, which locks a selection or refuses what is not one. Not an
+        # `isinstance` check against a few container types: a `frozenset`
+        # or a generator would be looked up as one Patient ID and lock
+        # nobody, and a patient left unlocked loses its identity at
+        # `anonymize()`.
         if not isinstance(patient_id, str):
             # Read here, under the name the caller used, so a refusal says
-            # `patient_id` (review of #696); the batch gets the tuple and
+            # `patient_id`; the batch gets the tuple and
             # reads it again, which a tuple survives.
             if not hasattr(patient_id, 'findings'):
                 patient_id = _lock_selection(patient_id, "patient_id")
@@ -3863,19 +3822,19 @@ class DicomSession:
         patient = next((p for p in self.store.patients if p.patient_id == patient_id), None)
         if not patient:
             # The ID is not logged: it may be an original Patient ID, and
-            # the log file is not guarded as the store is (0.9.7).
+            # the log file is not guarded as the store is.
             get_logger().error("lock_identities: no patient in the session "
                                "has the Patient ID given.")
             return LockingResult([])
 
         self._key_for_locking()
         # Drained before anything is embedded, as `audit()` and `redact()`
-        # drain on entry (#297): a queued `save()` may be capturing these
+        # drain on entry: a queued `save()` may be capturing these
         # instances, and with `persist=True` the write below updates rows
-        # that save has not committed yet -- it found none, raised, and
-        # left an ERROR row saying the store held no row for instances
-        # whose save the caller had already asked for (review of #732,
-        # finding 2). The batch form drains in `lock_identities_batch`.
+        # that save has not committed yet -- it would find none, raise,
+        # and leave an ERROR row saying the store held no row for
+        # instances whose save the caller had already asked for. The
+        # batch form drains in `lock_identities_batch`.
         if hasattr(self, 'persistence_manager'):
             self.persistence_manager.flush()
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
@@ -3923,7 +3882,7 @@ class DicomSession:
             # the layout releases before 1.0 wrote is one a key created
             # here could not open either, and the patient's own plan
             # refuses it by name; raising that here would refuse every
-            # patient in the session over one (#790).
+            # patient in the session over one.
             if any(self.reversibility_service.holds_a_token_of_ours(inst)
                    for p in self.store.patients for st in p.studies
                    for se in st.series for inst in se.instances):
@@ -3987,16 +3946,16 @@ class DicomSession:
                      for inst in se.instances]
 
         # A name or ID an instance no longer carries is stashed from the
-        # patient (#495), as the no-instances arm below always did. The
+        # patient, as the no-instances arm below does. The
         # floor's instance rules remove those copies, so after an
         # instance-only anonymize() the copies are gone while the patient
         # still holds the originals, nothing reads as a replacement, and a
-        # stash of the copies alone wrote a token holding only
-        # {'0010,0040': 'O'} over the good one (review of #509). Where the
+        # stash of the copies alone would write a token holding only
+        # {'0010,0040': 'O'} over the good one. Where the
         # patient is itself a replacement, the refusal below names it.
         entity_fallback = {"0010,0010": patient.patient_name,
                            # What the export writes: never the synthetic
-                           # key of a subject with no Patient ID (#584).
+                           # key of a subject with no Patient ID.
                            "0010,0020": exported_patient_id(patient)}
 
         def captured(inst, tag):
@@ -4037,7 +3996,7 @@ class DicomSession:
                 record["0010,0020"] = exported_patient_id(patient)
             groups.append((record, []))
 
-        # A replacement is not an identity to keep. Since #492 the
+        # A replacement is not an identity to keep. The
         # instance carries `anonymize()`'s replacement in its own tags,
         # so a lock taken after it -- the reverse of the documented
         # order, or a re-lock of an already-anonymized patient -- would
@@ -4045,11 +4004,11 @@ class DicomSession:
         # success, and `recover_patient_identity()` would then restore
         # the replacements everywhere while export prints that the
         # originals are recoverable. Refused, naming the value, rather
-        # than skipped: a lock that silently kept nothing is #399's shape
-        # again. A re-lock of still-original values is unchanged and is
-        # what recovery answers with (#399).
+        # than skipped: a lock must never silently keep nothing. A
+        # re-lock of still-original values is allowed and is what
+        # recovery answers with.
         #
-        # What is refused, exactly (#495): any value about to be stashed
+        # What is refused, exactly: any value about to be stashed
         # -- each tag's copy on every instance, and for name and ID the
         # patient's own value where that copy is absent (above). A copy
         # that is present is what gets stashed, so it alone is checked: a
@@ -4057,15 +4016,15 @@ class DicomSession:
         # originals has originals to stash.
         #
         # **What a pass wrote is read off the instance, never off a
-        # policy (#537).** Once the rule governs the name, the ID's KEEP
+        # policy.** Once the rule governs the name, the ID's KEEP
         # and every `value:`, `anonymize()` can leave a custom value, an
         # empty one, a shifted date or no element at all, on any tag, and
-        # the constants catch none of it. Every predicate tried in review
-        # asked which rule the session holds, and that is gone after a
-        # reopen and replaced by a re-audit or `load_config()`: measured,
-        # a re-lock after `audit(config_path=)` under a changed rule
-        # stashed `Project-X` over a held name, and a first lock after a
-        # reopen stashed an empty one (review of #574, M-3). So each
+        # the constants catch none of it. The rule the session holds is
+        # gone after a reopen and replaced by a re-audit or
+        # `load_config()`, so a predicate on it would let a re-lock after
+        # `audit(config_path=)` under a changed rule stash `Project-X`
+        # over a held name, or a first lock after a reopen stash an
+        # empty one. So each
         # remediation records on the instance what it left, before it
         # writes (`Instance.record_remediation`), and a value is a
         # replacement when it reads as a constant or when the instance it
@@ -4075,15 +4034,13 @@ class DicomSession:
         # vouches for it. The record is keyed on the value, so a restore
         # puts back originals that nothing vouches for.
         #
-        # **Per value-set, not per first instance (#583).** Each group's
+        # **Per value-set, not per first instance.** Each group's
         # instances are asked about the value they hold, so a patient
         # whose study 2 holds a pass's Accession Number beside a raw study
-        # 1 is refused; the first-instance read accepted it and wrote
-        # study 1's value into study 2's token (measured on e418d3d). The
+        # 1 is refused. The
         # patient's own value is asked of every instance **once per tag**
         # and remembered: it is one value, and asking it for each instance
-        # that lacks a copy made the plan quadratic (10^8 calls at 10k
-        # instances).
+        # that lacks a copy would make the plan quadratic.
         patient_vouched: Dict[str, bool] = {}
 
         def vouches(inst, tag, val, blank):
@@ -4112,9 +4069,9 @@ class DicomSession:
             return (_is_replacement_name(val) or _is_replacement_id(val)
                     or written_by_a_pass(tag, val, members))
 
-        # **No message below names the patient (P6).** Before `anonymize()`
+        # **No message below names the patient.** Before `anonymize()`
         # its Patient ID is the original, and after it the pseudonym, which
-        # #550 kept off the console; so "this patient", and the advice
+        # is kept off the console; so "this patient", and the advice
         # spells the ID as a placeholder -- the caller holds the one it
         # passed, and the batch numbers each refusal. A replaced Patient ID
         # is described rather than quoted, because the validator refuses
@@ -4135,45 +4092,45 @@ class DicomSession:
                     "patient after it; the token this call would have "
                     "written is unchanged.")
 
-        # A re-lock may not stash less than the token it replaces (#537).
+        # A re-lock may not stash less than the token it replaces.
         # Under an EMPTY or REMOVE rule, `anonymize()` leaves `""` or
         # nothing, which no replacement test catches, and a lock taken
         # after it would write a token without the value over one that
         # held it. Every tag the existing token holds non-blank is
         # checked, whether or not `tags_to_lock` names it: a narrower
         # re-lock after `anonymize()` drops the held name just as a blank
-        # does (review of #574, F-7). A tag this lock does not name is lost
+        # does. A tag this lock does not name is lost
         # only where the instance no longer carries an original for it --
         # blank, absent, or a replacement -- so a narrower re-lock of
-        # still-original values stays #399's rule, and a wider re-lock
+        # still-original values is allowed, and a wider re-lock
         # (a tag the token never held) loses nothing.
         #
         # **Every distinct token on the patient is read, not the first
-        # instance's (#617)**, because the write embeds the new token on
+        # instance's**, because the write embeds the new token on
         # every instance: a token on a second study -- a pair merged by
-        # `audit()` (#563), a study ingested after the lock -- was
-        # replaced unexamined. Read through the strict `held_identity`,
+        # `audit()`, a study ingested after the lock -- would otherwise
+        # be replaced unexamined. Read through the strict `held_identity`,
         # so a token of ours this key cannot open is a refusal rather
-        # than "no token" (the tolerant read answered None for both, and
-        # a re-lock under a mistyped key path replaced a token the real
-        # key opened). A foreign `(0400,0500)` is still "no token" and
-        # is replaced, as #399 released. The instances are grouped by
+        # than "no token": a tolerant read answers None for both, and a
+        # re-lock under a mistyped key path would replace a token the
+        # real key opens. A foreign `(0400,0500)` is "no token" and
+        # is replaced. The instances are grouped by
         # token bytes first and each distinct token is decrypted once: a
         # value-set's instances share one, and a 100k-instance patient
         # must not pay 100k decrypts.
         #
-        # **Each token is judged against its first holder's capture
-        # (#583, Q-C).** The token's own first instance, in graph order,
+        # **Each token is judged against its first holder's capture.**
+        # The token's own first instance, in graph order,
         # stands where the patient's first instance stood. Not every
         # holder: a store a release before 0.9.8 wrote carries one token
         # holding study 1's values on every study, and a re-lock of its
         # raw data would then be refused on study 2 -- whose own
         # `ACC-TWO` is not the `ACC-ONE` the token holds -- with advice
         # (restore, then lock) that writes `ACC-ONE` over it. Judged by
-        # the first holder, that store re-locks as it did, and study 2
-        # gets a token of its own. The residual is disclosed with #583: on
+        # the first holder, that store re-locks, and study 2
+        # gets a token of its own. The residual: on
         # such a store *anonymized*, a holder outside study 1 holds the
-        # pass's value, which only a record written since 0.9.8 (#537)
+        # pass's value, which only a record written since 0.9.8
         # could vouch for, so its new token can stash that value -- one
         # the old token never held either.
         if instances:
@@ -4183,10 +4140,10 @@ class DicomSession:
                     content = self.reversibility_service.token_of_ours(inst)
                 except _TokenOfAnEarlierLayout:
                     # Not foreign: read as foreign it would be replaced
-                    # (#399) and the identity lost under a lock that
-                    # reported success, #617's failure one layout over.
+                    # and the identity lost under a lock that
+                    # reported success.
                     # 1.x does not read it, so nothing says what a
-                    # replacement would lose (#790).
+                    # replacement would lose.
                     raise RuntimeError(
                         "lock_identities: this patient carries an identity "
                         "token in the layout Isocenter wrote before 1.0, "
@@ -4204,7 +4161,7 @@ class DicomSession:
                     # It holds a record, so the no-record text below would
                     # be false; a later release's scheme is not this one's
                     # to read, and replacing it unread is what the next
-                    # refusal exists to stop (#652).
+                    # refusal exists to stop.
                     raise RuntimeError(
                         "lock_identities: this patient carries an identity "
                         f"token that the key at {self.key_manager.key_path} "
@@ -4216,10 +4173,10 @@ class DicomSession:
                     # The key *opens* this one, so the wrong-key text
                     # below would be false. Refused all the same: what it
                     # holds cannot be read, so nothing says what a
-                    # replacement would lose (review of #633, P-2). No
+                    # replacement would lose. No
                     # advice that works: a key that opens it is already
                     # in hand, and there is no way to replace a token
-                    # the lock cannot read (#629 is the request for one).
+                    # the lock cannot read.
                     raise RuntimeError(
                         "lock_identities: this patient carries an identity "
                         f"token that the key at {self.key_manager.key_path} "
@@ -4262,20 +4219,20 @@ class DicomSession:
                             "the token this call would have written is unchanged.")
 
             # A token this store did not write may not be replaced with a
-            # value that differs from what it holds (#607). A file
+            # value that differs from what it holds. A file
             # exported with a locked identity carries the token and the
             # pass's values but no record -- a record is never a written
             # byte -- so on a store that ingested it nothing says whether
-            # a `value:` or `KEEP` rule's output is an original, and the
-            # re-lock stashed `Project-X`, or a shifted birth date, over
-            # the held one. The lock stamps every token it embeds
+            # a `value:` or `KEEP` rule's output is an original, and a
+            # re-lock would stash `Project-X`, or a shifted birth date,
+            # over the held one. The lock stamps every token it embeds
             # (`Instance.record_identity_token`, persisted as
             # `__locked__`), and a token nothing vouches for is judged by
             # what it holds: each non-blank value must be exactly what
-            # this lock would stash. A token this store wrote keeps
-            # #399's rule -- a deliberate `set_attr` then a re-lock
-            # stashes the new value -- and a tag the token never held is
-            # not protected (Q4). After the loss check above, so
+            # this lock would stash. For a token this store wrote, a
+            # deliberate `set_attr` then a re-lock
+            # stashes the new value, and a tag the token never held is
+            # not protected. After the loss check above, so
             # `floor_birth_only`'s message stays what it was: a blank is
             # a loss, not a different value. The message names no value:
             # the held one is an original, and the current one may be.
@@ -4290,10 +4247,10 @@ class DicomSession:
                     if not _same_stashed_value(new, kept):
                         # A tag this lock does not name leaves the token
                         # altogether, and the instance keeps whatever the
-                        # pass left there: "nothing", 2(a)'s word for it,
-                        # not "a different one". So the tag named is the
+                        # pass left there: "nothing", not "a different
+                        # one". So the tag named is the
                         # token's own, which the caller need not have
-                        # named (review of #633, F-2 and P-4).
+                        # named.
                         lost = "a different one" if named \
                             else "nothing (tags_to_lock does not name it)"
                         raise RuntimeError(
@@ -4308,10 +4265,8 @@ class DicomSession:
 
             # A first lock of a tag the pass emptied or removed has no
             # token to lose, but would report success over a token without
-            # the value it exists to hold: #399's "a lock that silently
-            # kept nothing" (review of #574, F-1). On 0.9.7 the name read
-            # `ANONYMIZED` here whatever the rule, and a lock naming it was
-            # refused whichever tag was at fault; the record now names the
+            # the value it exists to hold: a lock that silently
+            # kept nothing. The record names the
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
             blanked = [tag for tag in tags_to_lock
@@ -4333,17 +4288,16 @@ class DicomSession:
                     f"{advice}; the token this call would have written is unchanged.")
 
         # A blank Patient's Name under a rule that blanks it is refused
-        # even where no record says a pass wrote the blank (owner ruling on
-        # review of #574). On a store this release wrote, that blank is the
-        # source's own, and the refusal is kept as ruled. It is also what
-        # stands over a store 0.9.5 wrote, which has no record and left
-        # `""` on each copy under an EMPTY rule (measured): with the rule
-        # loaded this refuses it. **Do not gate it on a status.** For one
-        # commit it was gated on the patient reading REMEDIATED, and that
-        # opened a loss: `anonymize() -> audit() -> lock_identities()`
-        # re-records CLEARED over the REMEDIATED, the gate read "not
-        # anonymized", and the lock wrote a token without the original
-        # name. The rule is every policy that can have written the name:
+        # even where no record says a pass wrote the blank. On a store
+        # this release wrote, that blank may be the source's own, and it
+        # is refused all the same. It is also what stands over a store
+        # with no record that left `""` on each copy under an EMPTY rule:
+        # with the rule loaded this refuses it. **Do not gate it on a
+        # status.** `anonymize() -> audit() -> lock_identities()`
+        # re-records CLEARED over the REMEDIATED, so a gate on REMEDIATED
+        # would read "not anonymized", and the lock would write a token
+        # without the original name. The rule is every policy that can
+        # have written the name:
         # the one the last `audit()` resolved, and
         # `configuration.phi_tags`, which `audit(config_path=)` does not
         # assign; the audited one is named first.
@@ -4367,24 +4321,20 @@ class DicomSession:
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
 
-        # Instances to secure and nothing to stash (#638). An empty record
+        # Instances to secure and nothing to stash. An empty record
         # builds no token (`generate_identity_token` returns `b""`) and
         # `embed_identity_token` embeds nothing for it, so the lock
-        # touched no instance -- a re-lock left the earlier token in place
-        # -- and still returned `N instances secured` and logged the
-        # identity as secured. Last among the refusals, so every more
+        # would touch no instance -- a re-lock would leave the earlier
+        # token in place -- and still return `N instances secured`.
+        # Last among the refusals, so every more
         # specific one keeps its message. Not for a patient with no
         # instances, whose `0 instances secured` is already true; and not
         # for a record holding a blank, which is not empty (blanks are the
         # loss checks' concern above). The tags are the caller's own
-        # argument; no patient, no value. **Counted per instance (#583,
-        # Q-D).** Until 0.9.8 the record was the first instance's alone,
-        # so a patient whose study 2 lacked every tag named was accepted
-        # and study 2's token held study 1's value (measured on e418d3d),
-        # while one whose study 1 lacked them was refused although study 2
-        # carried one (review of #640, P-2). Now any instance with nothing
-        # to stash refuses the lock, and the message counts them: a
-        # patient partly locked would be reported secured.
+        # argument; no patient, no value. **Counted per instance:** any
+        # instance with nothing to stash refuses the lock, and the
+        # message counts them: a patient partly locked would be reported
+        # secured.
         if instances:
             empty = sum(len(members) for record, members in groups if not record)
             if empty and tags_to_lock:
@@ -4404,10 +4354,10 @@ class DicomSession:
 
         # The token is built here, in the plan, and not where it is
         # embedded: it is `json.dumps` of the values, and a value JSON
-        # cannot hold (an OB element is ingested as `bytes`) raised
+        # cannot hold (an OB element is ingested as `bytes`) would raise
         # `TypeError` from the write, after every earlier patient of a
-        # batch was locked and persisted (measured on the round-3 review
-        # of #574: one of two). Building it reads and writes nothing, so
+        # batch was locked and persisted. Building it reads and writes
+        # nothing, so
         # the plan still locks no one, and the failure is a refusal like
         # any other, naming the tag. One encryption per value-set, not per
         # instance: equal records share the bytes.
@@ -4563,13 +4513,12 @@ class DicomSession:
             raise RuntimeError("Reversible anonymization not enabled.")
 
         # The selection is read before the key, so a refused argument
-        # creates no key file (#696). Its shape through the one helper
+        # creates no key file. Its shape through the one helper
         # every door uses, with the two knobs that exist for this caller:
         # `None` is refused rather than read as every patient -- which
         # would lock the whole session -- and an item may be a finding,
-        # this method's documented input. Until #696 a bare `str` was
-        # iterated as its characters, and `bytes` as ints that were
-        # skipped in silence; both locked nobody before `anonymize()`.
+        # this method's documented input. A bare `str` or `bytes` is
+        # refused, not iterated.
         if hasattr(patient_ids, 'findings'):  # PhiReport
             iterable_data = patient_ids.findings
         else:
@@ -4583,9 +4532,10 @@ class DicomSession:
             if isinstance(item, str):
                 normalized_ids.add(item)
             # `is not None`, not truthiness: an empty Patient ID is a
-            # patient (#581), and a report that names one must lock it --
-            # skipped, its name was unrecoverable after `anonymize()` and
-            # the `[n of m]` numbering below named the wrong patient.
+            # patient, and a report that names one must lock it --
+            # skipped, its name would be unrecoverable after `anonymize()`
+            # and the `[n of m]` numbering below would name the wrong
+            # patient.
             elif hasattr(item, 'patient_id') and item.patient_id is not None:
                 normalized_ids.add(item.patient_id)
 
@@ -4602,14 +4552,13 @@ class DicomSession:
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
 
-        # Every patient is planned before any is locked (#537). Locking as
-        # it planned, a refusal part-way left an arbitrary subset locked
-        # before `anonymize()`, and nothing said which (measured on the
-        # review of #574: one of six). A plan reads and writes nothing, so
-        # a refusal leaves no token, whatever `persist` or
+        # Every patient is planned before any is locked: locking as it
+        # planned, a refusal part-way would leave an arbitrary subset
+        # locked, and nothing would say which. A plan reads and writes
+        # nothing, so a refusal leaves no token, whatever `persist` or
         # `auto_persist_chunk_size` says.
         #
-        # A refusal names no patient (P6, `_planned_identity_lock`), so each
+        # A refusal names no patient (`_planned_identity_lock`), so each
         # is numbered by its place among the patients found, in Patient ID
         # order -- the order they are planned and locked in -- and
         # `sorted(found)[n - 1]` is the patient. An ID that matched no
@@ -4640,8 +4589,8 @@ class DicomSession:
                 "these as its message says:\n" + "\n".join(refusals))
 
         # Drained after every plan and before the first token is embedded,
-        # for the reason `lock_identities` gives (#297; review of #732,
-        # finding 2). Once, here: nothing below enqueues a save, so the
+        # for the reason `lock_identities` gives. Once, here: nothing
+        # below enqueues a save, so the
         # per-patient writes (`persist=True`) and the chunk flushes
         # (`auto_persist_chunk_size`) all find the rows a queued save was
         # about to write.
@@ -4654,7 +4603,7 @@ class DicomSession:
                 # Forwarded, not hardcoded: a `PhiReport` is the README's
                 # form of `lock_identities`, and a loop that writes
                 # `persist=False` here turns `persist=True` on that call
-                # into one that writes nothing and says nothing (Q10).
+                # into one that writes nothing and says nothing.
                 res = self._write_identity_lock(
                     patient_map[pid], plans[pid], persist=persist, verbose=verbose)
 
@@ -4805,18 +4754,16 @@ class DicomSession:
                              "session holds the Patient ID given")
 
         # Every instance of the patient, in study, series and instance
-        # order, with the token of ours it carries (#616). The walk used
-        # to `break` out of the series loop only, so it ended on the first
-        # instance of the *last* study with instances, and a patient whose
-        # token sits on an earlier study -- a pair merged by `audit()`
-        # (#563), a study ingested after the lock -- was told it had never
-        # been locked. `token_of_ours`, not "any Encrypted Attributes
-        # Sequence": a foreign sequence is "no token" since #617. A
+        # order, with the token of ours it carries. The whole walk, so a
+        # patient whose token sits on an earlier study -- a pair merged
+        # by `audit()`, a study ingested after the lock -- is found.
+        # `token_of_ours`, not "any Encrypted Attributes
+        # Sequence": a foreign sequence is "no token". A
         # patient with instances and no token of ours gets
         # `recover_or_raise`'s "no token", one with none gets the raise
         # below. An instance whose token is in the layout releases before
         # 1.0 wrote raises `_TokenOfAnEarlierLayout` out of this walk,
-        # before anything is opened or written (#790).
+        # before anything is opened or written.
         rs = self.reversibility_service
         walk = [(st, inst, rs.token_of_ours(inst))
                 for st in p.studies for se in st.series for inst in se.instances]
@@ -4830,19 +4777,18 @@ class DicomSession:
         if not carrying:
             rs.recover_or_raise(walk[0][1])  # raises "no token"
 
-        # **Every distinct token is opened before anything is written
-        # (#583).** Since the lock writes one token per value-set, a
+        # **Every distinct token is opened before anything is
+        # written.** Since the lock writes one token per value-set, a
         # patient carries several, and each instance is restored from its
-        # own. Until 0.9.8 the first token found was the one read, and its
-        # values went onto every instance; a token on study 2 this key
-        # cannot open now raises the wrong-key text with nothing written,
+        # own. A token on study 2 this key
+        # cannot open raises the wrong-key text with nothing written,
         # under `restore=False` too, which is how that call answers "is
         # this patient recoverable under this key". One decrypt per
         # distinct token, in the order found, so a token on study 1 the
         # key cannot open is still the one the message is about.
         #
-        # The scheme each token names comes from **that same decrypt**
-        # (#652): `schemes` is filled beside `opened` and never by a
+        # The scheme each token names comes from **that same decrypt**:
+        # `schemes` is filled beside `opened` and never by a
         # second read. `open_token_with_scheme(content)` is what
         # `recover_or_raise(holders[0][1])` read, since `carrying` holds
         # only `token_of_ours(inst)` of its holders.
@@ -4850,7 +4796,7 @@ class DicomSession:
         schemes: Dict[bytes, int] = {}
         for content in carrying:
             opened[content], schemes[content] = rs.open_token_with_scheme(content)
-        # **What the call returns (#586)**: each instance carrying a token
+        # **What the call returns**: each instance carrying a token
         # of ours, by the SOP Instance UID it holds now, mapped to a copy
         # of what its own token holds, in graph order. Taken here, before
         # the restore writes anything, and from `opened`, not from the
@@ -4860,22 +4806,22 @@ class DicomSession:
         # copy per key: instances sharing a token share one `opened` dict,
         # and the restore below writes that dict's very values onto them,
         # so a multi-valued tag (a list once the token is read, e.g. Other
-        # Patient Names) copied shallowly was the list the graph holds --
-        # an in-place edit of the result reached the sibling's entry and
-        # the graph, and moved no revision (review of #732, finding 1).
+        # Patient Names) copied shallowly would be the list the graph
+        # holds -- an in-place edit of the result would reach the
+        # sibling's entry and the graph, and move no revision.
         # From `walk`, not `carrying`: `carrying` groups by token, and a
         # token reappearing after another would put its later holder out
         # of graph order.
         recovered: Dict[str, Dict[str, Any]] = {
             inst.sop_instance_uid: copy.deepcopy(opened[content])
             for _, inst, content in walk if content is not None}
-        # One token speaks for the patient -- its name and ID, the #548
+        # One token speaks for the patient -- its name and ID, the merge's
         # scheme check, and the instances carrying no token. The first
-        # found, as before, unless its Patient ID is blank and a later
-        # token's is not (review of #584, R3-1): a patient whose first
+        # found, unless its Patient ID is blank and a later
+        # token's is not: a patient whose first
         # file had an empty ID and whose second carried `PA` (a re-key, or
         # a join) holds a token of `''` first, since the lock stashes each
-        # copy as it is, and a restore from it wrote `''` over `PA`. **Not
+        # copy as it is, and a restore from it would write `''` over `PA`. **Not
         # for a subject with no Patient ID**: its first token is the file
         # that made it, and a later token holding a real ID is a file that
         # linked under it (the WARNING case) -- taking that ID would
@@ -4890,8 +4836,8 @@ class DicomSession:
         # The Patient ID a restore gives the patient. A subject with no
         # Patient ID locked a blank one; writing that back would make every
         # restored ID-less subject `''`, and `audit()`'s shared-ID merge
-        # (#563) would collapse them into one -- #584 again, by another
-        # door. So a blank token ID leaves the synthetic key in place.
+        # would collapse them into one. So a blank token ID leaves the
+        # synthetic key in place.
         restored_id = original_attrs.get("0010,0020", p.patient_id)
         if (is_synthetic_patient_id(p.patient_id)
                 and not str(restored_id or "").strip()):
@@ -4903,13 +4849,13 @@ class DicomSession:
                 # refuses a group mixing jitter schemes too, but after the
                 # loop every instance already holds the original values,
                 # and a refusal there would leave two patients with one
-                # ID under two schemes in the graph (#548).
+                # ID under two schemes in the graph.
                 self.store._refuse_a_merge_across_schemes(
                     renamed=(p, restored_id))
                 # Drained before the first write, as `audit()` and
                 # `redact()` drain on entry: the loop below writes onto
                 # every instance and the patient, and a queued save could
-                # be walking them (#297). After the refusal, so a refused
+                # be walking them. After the refusal, so a refused
                 # restore leaves the queue as it found it. The merge's own
                 # drain cannot stand in -- it runs only on a collision,
                 # after these writes.
@@ -4919,8 +4865,8 @@ class DicomSession:
                     return {tag: val for tag, val in values.items()
                             if tag.startswith("0010,")}
 
-                # **A token a release before 0.9.8 shared across studies
-                # (#583, Q-B).** That lock captured study 1's values and
+                # **A token a release before 0.9.8 shared across
+                # studies.** That lock captured study 1's values and
                 # embedded them on every study, so its token, on study 2,
                 # holds study 1's Accession Number. It is told from a
                 # token this release writes by three things together: it
@@ -4930,17 +4876,17 @@ class DicomSession:
                 # is not stamped by this store on every holder. Its first
                 # holding study, in graph order, takes it in full; the
                 # others take its group 0010 only. **And it names no
-                # scheme (#652)**: every token 1.0 writes carries
+                # scheme**: every token 1.0 writes carries
                 # `"__isocenter_token__": 2` inside its encryption, which
                 # says it was captured per value-set, so a marked token is
                 # restored in full on every holder in any store -- the
                 # stamp never reaches a file, the scheme travels with the
                 # token. The stamp check stays for unmarked tokens, because
-                # a 0.9.8 pre-release stamped its shared token (residual
-                # i). The WARNING names no release: a token 0.9.8 wrote per
-                # value-set carries no scheme, so exported and re-ingested
-                # over values equal across studies it still reads as one
-                # an earlier release shared (review of #650, F-2).
+                # a 0.9.8 pre-release stamped its shared token (case (i)
+                # below). The WARNING names no release: a token 0.9.8 wrote
+                # per value-set carries no scheme, so exported and
+                # re-ingested over values equal across studies it still
+                # reads as one an earlier release shared.
                 #
                 # **"First in graph order" is the owner only in the store
                 # that locked.** There graph order is the lock's order, so
@@ -4950,11 +4896,9 @@ class DicomSession:
                 # so the full restore goes to the earliest-dated study,
                 # which may not be the owner: that study then holds another
                 # study's values, and the owner keeps the pass's and is the
-                # one the WARNING counts (review of #650, F-1; kept and
-                # disclosed, and pinned by
-                # `test_an_earlier_releases_export_reingested_whole_...`).
+                # one the WARNING counts. Kept, and disclosed.
                 #
-                # What this cannot tell, disclosed with #583: (i) a 0.9.8
+                # What this cannot tell: (i) a 0.9.8
                 # pre-release stamped its shared token, and reads as this
                 # release's; (ii) two studies whose values were equal read
                 # as two that differed; (iii) a token shared inside one
@@ -4963,7 +4907,7 @@ class DicomSession:
                 # token whose other studies are not in the session -- one
                 # of its studies ingested from its export -- is shared
                 # across none, and is restored in full with values that may
-                # be another study's, silently (review of #650, M-1).
+                # be another study's, silently.
                 partial: Dict[bytes, "Study"] = {}
                 for content, holders in carrying.items():
                     values = opened[content]
@@ -4982,13 +4926,12 @@ class DicomSession:
                 for st, inst, content in walk:
                     if content is None:
                         # **An instance carrying no token takes the
-                        # patient-level identifiers only (#583, Q-A)**:
+                        # patient-level identifiers only**:
                         # group 0010, from the token that speaks for the
-                        # patient (`original_attrs`, above). Until
-                        # 0.9.8 it took every value of that token, so a
-                        # study ingested after the lock, or the unlocked
-                        # half of a pair `audit()` merged, took another
-                        # study's Accession Number (review of #640, F-1).
+                        # patient (`original_attrs`, above). Every value of
+                        # that token would give a study ingested after the
+                        # lock, or the unlocked half of a pair `audit()`
+                        # merged, another study's Accession Number.
                         # Nothing at all would leave a half-restored file:
                         # `export()` stamps the name and ID from the
                         # `Patient` whatever the instance holds, and birth
@@ -4997,7 +4940,7 @@ class DicomSession:
                         # Weight, which can differ by study; disclosed.
                         values = fallback
                         tokenless += 1
-                        # **Not a blank token ID over a real one (#584).**
+                        # **Not a blank token ID over a real one.**
                         # An ID-less patient's token holds the ID the
                         # export writes, `''`. A file carrying a Patient ID
                         # that linked under it after the lock (the WARNING
@@ -5022,8 +4965,8 @@ class DicomSession:
                     for tag, val in values.items():
                         inst.set_attr(tag, val)
                     count += 1
-                # Log lines, not audit rows, as #566's was: a restore is
-                # not a de-identification step. Counts only (P6).
+                # Log lines, not audit rows: a restore is not a
+                # de-identification step. Counts only, never an ID.
                 if tokenless:
                     get_logger().warning(
                         "%d of %d instances of this patient carry no identity "
@@ -5047,19 +4990,18 @@ class DicomSession:
                         "patient-level identifiers (group 0010), and their other "
                         "locked identifiers keep what anonymize() left (#583).",
                         elsewhere, count)
-                # **Tokens that disagree on the name or ID (#583, Q-F).**
+                # **Tokens that disagree on the name or ID.**
                 # Each instance keeps its own token's, so a re-lock after
                 # the restore stashes each again; the `Patient` has one
                 # name and one ID, and takes the speaking token's
                 # (`original_attrs`), which is what `export()` stamps on
-                # every study -- as the #548 merge already stamps the
+                # every study -- as the shared-ID merge stamps the
                 # surviving patient's. The speaker is not always the first
-                # token found (#584): the WARNING names it, and a token
+                # token found: the WARNING names it, and a token
                 # whose Patient ID is blank does not count as disagreeing
                 # on the ID -- for a patient with one, the speaker rule
                 # passed that token over on purpose, and its `''` is the
-                # file's own empty copy, not a rival ID (review round 4 of
-                # #584, R4-1). A later token holding `PA` under an ID-less
+                # file's own empty copy, not a rival ID. A later token holding `PA` under an ID-less
                 # patient still disagrees: the patient keeps its key.
                 def disagrees(values, tag):
                     if tag not in values or tag not in original_attrs:
@@ -5088,9 +5030,9 @@ class DicomSession:
                 if "0010,0020" in original_attrs:
                     p.patient_id = restored_id
                 # Recorded, because `Patient` tracks no assignment: a
-                # restore that marked nothing was skipped by the next save,
-                # which then deleted the pseudonym's row and every study
-                # under it (#552). It also retires the patient's stale
+                # restore that marked nothing would be skipped by the next
+                # save, which would then delete the pseudonym's row and
+                # every study under it. It also retires the patient's stale
                 # REMEDIATED -- a status recorded at an earlier revision
                 # reads UNSCANNED, which is the truth for a patient holding
                 # its original identifiers again.
@@ -5098,30 +5040,26 @@ class DicomSession:
                     p.mark_modified()
                 # Study Date is written onto the instances above, but the
                 # exporter stamps it from the `Study` (`export_stamp_attributes`),
-                # so an instance-only restore never reached the file (#566).
-                # **Each study from its own token (#583)**: the first of
+                # so an instance-only restore would never reach the file.
+                # **Each study from its own token**: the first of
                 # its instances restored in full from a token holding
-                # `0008,0020`. Until 0.9.8 the one token held study 1's
-                # date, so only a single-study patient's `Study` took it and
-                # a multi-study patient kept every de-identified date with a
-                # WARNING. A study whose instances carry no token, or only a
-                # shared pre-0.9.8 token's group 0010, keeps its date.
+                # `0008,0020`. A study whose instances carry no token, or
+                # only a shared pre-0.9.8 token's group 0010, keeps its date.
                 # Taken before the merge below, which can move a raw
                 # patient's studies onto `p`. `_shifted_study_date` is left
                 # as it is: it vouches only for the value the shift wrote,
-                # so the next `audit()` raises the restored date again
-                # (#518).
+                # so the next `audit()` raises the restored date again.
                 for study, restored in study_dates.values():
                     # Read as `Study` would hold it, through the one parser
                     # its setter and hydration share: ingest maps a blank
-                    # or unreadable Study Date to `None`, and this wrote the
-                    # token's `''` or `'20041399'` over it -- dirty, saved,
+                    # or unreadable Study Date to `None`, and writing the
+                    # token's `''` or `'20041399'` over it would be saved,
                     # exported, and raised by the next `audit()` as a
-                    # Study-level date to shift (#619). A value that is not
+                    # Study-level date to shift. A value that is not
                     # a date is not written; the instances above still take
                     # it, which is what the source held, so the instance's
                     # unreadable copy is still raised, as the source's own
-                    # was (review of #640, P-5). `isinstance`, not
+                    # was. `isinstance`, not
                     # truthiness: `'20041399'` is truthy. One WARNING per
                     # such study. No date in the text, and no ID.
                     restored_date = entities.normalize_study_date(restored)
@@ -5140,7 +5078,7 @@ class DicomSession:
                 # restore, is a second `Patient` holding it: the same
                 # subject by construction, so the two are merged as
                 # `anonymize()` merges them, or refused if they were
-                # de-identified under different date-offset schemes (#548).
+                # de-identified under different date-offset schemes.
                 self.store._merge_patients_sharing_an_id(
                     drain=self.persistence_manager.flush)
 
@@ -5261,7 +5199,7 @@ class DicomSession:
         # save that is serializing the very pixels it is about to
         # replace: `save()` without `sync=True` returns with `save_all`
         # still running on the persistence manager's thread, against
-        # these same instances (#274). The store's `_pixel_swap_lock` is
+        # these same instances. The store's `_pixel_swap_lock` is
         # what protects direct `RedactionService` users; the pipeline
         # can simply refuse to open the window at all.
         if hasattr(self, 'persistence_manager'):
@@ -5271,13 +5209,13 @@ class DicomSession:
         # a few lines into `_apply_redaction_rules` names the strategy
         # off this object and `run_parallel` is handed the same object,
         # so the sentence a user reads and the pool that runs are two
-        # readings of one decision rather than two guesses at it (#384).
+        # readings of one decision rather than two guesses at it.
         # A second reading of the environment at the print site would be
         # a second implementation of `_resolve_execution_choice`'s four
         # ranks, and a second implementation is a second thing that can
         # disagree.
         #
-        # Threads for a `:memory:` store, asked for per call (#381). The
+        # Threads for a `:memory:` store, asked for per call. The
         # redaction worker is the only one that *writes to the store*
         # from inside the child (`execute_redaction_task` ->
         # `persist_pixel_data`), and `SqliteStore.__setstate__` hands a
@@ -5285,7 +5223,7 @@ class DicomSession:
         # fresh, empty in-memory database with no `instance_blobs`
         # table. Threads share the parent's connection. The argument
         # rather than `ISOCENTER_FORCE_THREADS`: the variable is
-        # process-global and does not reach every pool (#390).
+        # process-global and does not reach every pool.
         strategy = _resolve_strategy(
             max_workers=_redaction_worker_count(),
             chunksize=1,
@@ -5304,12 +5242,11 @@ class DicomSession:
         # preceded by `Redaction failed. Images already processed are
         # still redacted in memory; ...`, a sentence about work that
         # never started. Before task preparation, so a configuration
-        # that cannot run is refused whether or not it had work to do
-        # (#400).
+        # that cannot run is refused whether or not it had work to do.
         _report_processes_lever_on_a_memory_store(
             self.store_backend.db_path, strategy)
 
-        # The project secret each redacted UID is derived under (#544),
+        # The project secret each redacted UID is derived under,
         # read once, in the parent, and handed to task preparation: no
         # worker and no task ever holds it. Created on a store that has
         # none, as `audit()` and `anonymize()` create it, and refused on a
@@ -5320,7 +5257,7 @@ class DicomSession:
 
         service = RedactionService(self.store, self.store_backend)
         try:
-            # The pass-lock (#368), shared, held from before the first
+            # The pass-lock, shared, held from before the first
             # worker can call `regenerate_uid()` until after
             # `_apply_redaction_outcomes` has bound every loader --
             # `_apply_redaction_rules` is both -- and released by this
@@ -5365,7 +5302,7 @@ class DicomSession:
             # takes rules verbatim from user YAML with no serial
             # de-duplication, so two rules can share one serial spelling
             # -- keyed on the serial they collapse into one row carrying
-            # the first rule's zone count (#247).
+            # the first rule's zone count.
             for task in rule_tasks:
                 task['pass_key'] = pass_key
             tasks.extend(rule_tasks)
@@ -5379,13 +5316,12 @@ class DicomSession:
               f"{len(self.configuration.rules)} rules.")
         # The parenthetical is read off the resolved strategy -- the very
         # object the pool below is built from -- and not derived a second
-        # time here (#384). It says *what*, never *why*: a
+        # time here. It says *what*, never *why*: a
         # `(threads: the store is in memory)` would put the four-rank
-        # order in a second place, and the `why` is what #400's warning
-        # and refusal are for, said only when it matters. The retired
-        # `(Process Isolation)` named an implementation property rather
-        # than the choice and left the recycling pool ambiguous; the
-        # recycling pool is processes and says so.
+        # order in a second place, and the `why` is what
+        # `_report_processes_lever_on_a_memory_store`'s warning and
+        # refusal are for, said only when it matters. The recycling pool
+        # is processes and says so.
         named_strategy = "threads" if strategy.use_threads else "processes"
         print(f"Executing using {strategy.max_workers} workers "
               f"({named_strategy})...")
@@ -5403,13 +5339,13 @@ class DicomSession:
         # Keyed on the *task's* capture, not on a fresh read of the live
         # attribute: `prepare_redaction_tasks` recorded each instance's
         # pre-dispatch UID on its task, the worker keys its mutation on
-        # that same value (#257), and one authority for "what was this
+        # that same value, and one authority for "what was this
         # instance called before redaction" is what keeps the two sides
         # of the round-trip agreeing. Two rules on one instance put the
         # same key here twice; the map deduplicates to the one object.
         instances = {t['original_sop_uid']: t['instance'] for t in tasks}
 
-        # Audit accounting per rule-pass (#247). `targeted` is countable
+        # Audit accounting per rule-pass. `targeted` is countable
         # here; `applied` is tallied by `_apply_redaction_outcomes` from
         # each mutation's own `pass_key`, because outcomes carry no
         # order and a UID join back to tasks has the two-rules-one-
@@ -5427,25 +5363,24 @@ class DicomSession:
         # than held until the end.
         # `yield_exceptions=True` is what makes `_apply_redaction_outcomes`'
         # Exception arm reachable. Without it every strategy re-raises a
-        # lost worker at the point of iteration, so the `for` below
-        # terminated mid-pass: every mutation still queued was discarded
-        # unapplied, no ERROR row was written for anything, and the caller
-        # got a bare `BrokenProcessPool` instead of `RedactionError` (#232).
+        # lost worker at the point of iteration, so the `for` below would
+        # end mid-pass: every mutation still queued discarded unapplied,
+        # no ERROR row written for anything, and a bare
+        # `BrokenProcessPool` raised instead of `RedactionError`.
         # The strategy `redact()` resolved, handed over rather than
         # resolved again: `max_workers`, `chunksize`, `desc`, the
         # progress-bar setting and the threads-or-processes decision are
         # all inside it, and the console line above printed from the same
-        # object (#384). The `:memory:` store's request for threads is on
+        # object. The `:memory:` store's request for threads is on
         # the `_resolve_strategy` call in `redact()`, with the comment
-        # explaining why it has to be an argument (#381, #390); it beats
+        # explaining why it has to be an argument; it beats
         # `ISOCENTER_FORCE_PROCESSES` by the documented order and loses to
         # worker recycling, which is why that combination is refused
-        # before this point rather than failing here (#400).
+        # before this point rather than failing here.
         # Before dispatch, not when each outcome lands: under threads the
         # worker writes to the live instance, so by the time the parent
         # sees an outcome the status it would read is already UNSCANNED.
-        # See `capture_phi_status_for_redaction` for what is kept and why
-        # (#486; confirmed by the owner on 2026-09-11).
+        # See `capture_phi_status_for_redaction` for what is kept and why.
         captured = {sop: capture_phi_status_for_redaction(inst)
                     for sop, inst in instances.items()}
 
@@ -5468,10 +5403,10 @@ class DicomSession:
             carry_phi_status_across_redaction(inst, captured[sop])
 
         # The audit row for every pass that targeted anything, written in
-        # the parent (#126) and before the failure raise below, exactly
+        # the parent and before the failure raise below, exactly
         # as the serial path orders it: a caller that catches
         # `RedactionError` still holds a report whose section 2 accounts
-        # for this run (#247). Before `scan_burned_in_annotations` too,
+        # for this run. Before `scan_burned_in_annotations` too,
         # so a crash in the risk scan cannot cost the run its redaction
         # accounting.
         for acct in passes.values():
@@ -5481,7 +5416,7 @@ class DicomSession:
         # Recorded beside the emitter, not at the top of `redact()`: the
         # grade demands REDACTION evidence only from a session that
         # would have emitted it, and a call with no rules loaded or no
-        # matching images returned before this point (#254).
+        # matching images returned before this point.
         self._actions_performed.add("REDACTION")
 
         if applied < len(tasks):
@@ -5502,7 +5437,7 @@ class DicomSession:
         # or not the caller catches this, and every successful mutation is
         # already on the graph -- so a caller that catches `RedactionError`
         # still has a correct object graph and a report that grades
-        # REVIEW_REQUIRED (#213).
+        # REVIEW_REQUIRED.
         if failures:
             raise RedactionError(failures, len(tasks))
         return applied
@@ -5568,7 +5503,7 @@ class DicomSession:
             elif isinstance(outcome, Exception):
                 # `run_parallel` handing back a worker that died -- a shape
                 # that only exists because the dispatch above asks for it
-                # with `yield_exceptions=True` (#232). There is no outcome
+                # with `yield_exceptions=True`. There is no outcome
                 # to name the instance with, and the row still has to
                 # exist.
                 failures.append(
@@ -5583,11 +5518,9 @@ class DicomSession:
 
             # `original_sop_uid` only. `instances` is keyed on
             # **pre**-redaction UIDs (see `_apply_redaction_rules`), and
-            # `sop_uid` is the **post**-redaction one, so the old
-            # `or mutation.get('sop_uid')` fallback could never find
-            # anything -- and now that `sop_uid` is assigned below, one
-            # name meaning both the lookup key and the new identity is
-            # how #228 reads wrong (#228).
+            # `sop_uid` is the **post**-redaction one, so a fallback to
+            # `sop_uid` could never find anything, and one name meaning
+            # both the lookup key and the new identity would read wrong.
             sop = mutation.get('original_sop_uid')
             instance = instances.get(sop)
             if instance is None:
@@ -5610,20 +5543,20 @@ class DicomSession:
                 # array before the worker redacted its copy must not
                 # publish its loader *after* this one lands, or the
                 # instance reads back unredacted pixels under a full
-                # redaction attestation (#274). A store-less call (unit
+                # redaction attestation. A store-less call (unit
                 # tests drive this method directly) has no second writer
                 # to race, so it also needs no lock.
                 lock = (store_backend._pixel_swap_lock
                         if store_backend is not None
                         else contextlib.nullcontext())
-                # And the pixel-state leaf inside it (#434, Q6): the rebind,
+                # And the pixel-state leaf inside it: the rebind,
                 # the record clear and the null below land wholly before or
                 # after a `set_pixel_data()` or `discard_pixel_data()` on
                 # another thread. Nothing under it logs or takes a lock.
                 with lock, entities.PIXEL_STATE_LOCK:
                     if loader:
                         instance._pixel_loader = loader
-                        # And the label of the frame it reads (#482). The
+                        # And the label of the frame it reads. The
                         # worker's read relabelled its own copy wherever
                         # the decode converted, so this is `RGB` over a YBR
                         # file that pydicom or the handler returned as RGB.
@@ -5632,12 +5565,9 @@ class DicomSession:
                         #
                         # Not `Instance._relabel_to_decoded_colour`, which
                         # is a *read's* relabel, called only by a read that
-                        # publishes into an empty slot (#465): this copies
+                        # publishes into an empty slot: this copies
                         # a result across, beside the loader it describes,
-                        # whatever is resident. (That helper used to take
-                        # `PIXEL_STATE_LOCK` itself, which this block holds,
-                        # and calling it here would have deadlocked; since
-                        # #465 its caller holds the lock instead.) A dict
+                        # whatever is resident. A dict
                         # write takes no lock and logs nothing, so the leaf
                         # stays a leaf. The `mark_modified()` after the
                         # lock moves the revision.
@@ -5647,9 +5577,8 @@ class DicomSession:
                         # below gives: the label describes the frame the
                         # loader reads, and a mutation carrying only a hash
                         # leaves the loader, and so the label, where they
-                        # were. That placement is reasoned, not pinned: no
-                        # test here sends a hash-only mutation that
-                        # carries a label.
+                        # were. That placement is reasoned, not pinned by
+                        # a test.
                         label = mutation.get('photometric_interpretation')
                         if label is not None:
                             instance.attributes["0028,0004"] = label
@@ -5658,13 +5587,13 @@ class DicomSession:
                         # from a `set_pixel_data()` made before the pass
                         # describes the frame this rebind replaced, and a
                         # discard restoring it would put those over the
-                        # redacted frame (#434). Inside `if loader:`, never
+                        # redacted frame. Inside `if loader:`, never
                         # one indent out, for the reason the null below
                         # gives: a mutation carrying only a hash leaves the
                         # loader on the frame the record describes.
                         instance._pixel_descriptors_replaced = None
-                        # And drop whatever this process is still holding
-                        # (#322). Under processes the worker redacted a
+                        # And drop whatever this process is still holding.
+                        # Under processes the worker redacted a
                         # *copy*: its `discard_pixel_data()` freed the
                         # child's array, and the parent kept the
                         # pre-redaction one. Rebinding the loader without
@@ -5687,44 +5616,42 @@ class DicomSession:
                         # the *stale* loader frame stamped with the *new*
                         # hash -- store, sidecar and `_pixel_hash` all
                         # agreeing on the wrong frame with every integrity
-                        # check passing, which is #293's shape exactly.
+                        # check passing.
                         #
                         # Inside the lock, and it belongs there: this is
                         # the same `_pixel_swap_lock` `_persist_pixels`
                         # reads under, so the null is atomic against a
                         # concurrent background save rather than a second
-                        # window into it -- it strengthens #274. The
+                        # window into it. The
                         # `mark_modified()` below runs after the lock and
                         # the null does not depend on that ordering; do
                         # not tidy the null out to join it.
                         #
-                        # Not a memory hazard, whatever the issue's
-                        # caveat says: nulling the instance's reference
-                        # does not invalidate an array the caller already
-                        # holds. It only stops the *instance* serving
-                        # pre-redaction pixels.
+                        # Not a memory hazard: nulling the instance's
+                        # reference does not invalidate an array the
+                        # caller already holds. It only stops the
+                        # *instance* serving pre-redaction pixels.
                         #
                         # This is the third `pixel_array = None` site, and
                         # `_persist_pixels`' `arr is None` arm enumerates
                         # them -- it is updated with this one.
                         #
                         # The null is also what makes the divergence flag
-                        # irrelevant here, which is why the
-                        # `_pixel_array_unwritten = False` that used to
-                        # stand on this line is deleted rather than kept
-                        # (#326): `unload_pixel_data()` returns True on a
-                        # `None` array *before* it consults the flag, and
-                        # `get_pixel_data()`'s loader arm clears it on the
-                        # next read. Restore one without the other -- put
-                        # the array back and leave the flag set -- and
-                        # #293's silently-unfreeable instance returns:
-                        # `release_memory()` refuses it for the rest of
-                        # the session and only logs a count.
+                        # irrelevant here, so no `_pixel_array_unwritten =
+                        # False` stands beside it: `unload_pixel_data()`
+                        # returns True on a `None` array *before* it
+                        # consults the flag, and `get_pixel_data()`'s
+                        # loader arm clears it on the next read. Restore
+                        # one without the other -- put the array back and
+                        # leave the flag set -- and the instance becomes
+                        # silently unfreeable: `release_memory()` refuses
+                        # it for the rest of the session and only logs a
+                        # count.
                         #
                         # On the threads path the worker mutated this very
                         # instance and its `finally` already discarded the
                         # array, so this null lands on `None`; both
-                        # executors now leave identical state.
+                        # executors leave identical state.
                         instance.pixel_array = None
                     if mutation.get('pixel_hash'):
                         instance._pixel_hash = mutation['pixel_hash']
@@ -5734,29 +5661,17 @@ class DicomSession:
                 # A `None`-safety guard on a `dict.get`, not a gate. The
                 # gate was passed above: reaching here means the worker
                 # returned a mutation, which it does only after
-                # `regenerate_uid()` (#235). `and new_uid != sop` used to
-                # stand here as #228's gate, back when the mutation dict
-                # was built outside `if modified:` -- it is provably
-                # always true now, and a condition that reads as a gate
-                # while deciding nothing is the second answer #235 was
-                # deferred to avoid.
-                #
-                # Re-widening the mutation construction is what that
-                # inequality guarded against, and it is still guarded --
-                # measured, by re-widening it on this tree.
-                # `tests/test_redaction_attestation.py` catches it four
-                # ways (the count, the absent attributes, the absent
-                # exported elements, the risk-scan crash), and
-                # `test_an_instance_nothing_was_applied_to_keeps_its_identity`
-                # catches it on `file_path`: the two UID assignments below
-                # become no-ops when `new_uid == sop`, but the third
-                # statement beside them does not.
+                # `regenerate_uid()`. Do not add `and new_uid != sop`: it
+                # is always true, and a condition that reads as a gate
+                # while deciding nothing is a second answer to the one
+                # question. A mutation built for an instance nothing was
+                # applied to is caught by the tests, not by this line.
                 #
                 # Assign all three or none. Under processes the child
-                # mutated a copy, so without this the parent kept the
-                # source's identity while carrying `DERIVED` and a
+                # mutated a copy, so without this the parent would keep
+                # the source's identity while carrying `DERIVED` and a
                 # Derivation Code Sequence -- and the blob the worker
-                # persisted under the regenerated UID was stranded.
+                # persisted under the regenerated UID would be stranded.
                 instance.sop_instance_uid = new_uid
                 instance.attributes["0008,0018"] = new_uid
                 # Recorded here as well as in `regenerate_uid()`, and
@@ -5767,8 +5682,8 @@ class DicomSession:
                 # authority for the same fact. `setdefault` makes the
                 # two paths agree and keeps a `force=True` re-redaction
                 # from replacing the original identity with a generated
-                # one (#237, #238). Same shape and same reason as the
-                # `file_path = None` below it (#228).
+                # one. Same shape and same reason as the
+                # `file_path = None` below it.
                 instance.attributes.setdefault(SOURCE_SOP_UID_ATTR, sop)
                 # `regenerate_uid()` ends the same way, deliberately: the
                 # instance no longer matches the file it was read from.
@@ -5779,7 +5694,7 @@ class DicomSession:
             # Attributed by the mutation's own `pass_key` rather than
             # by joining the UID back to a task: two rules matching one
             # instance produce two mutations under one pre-redaction UID,
-            # and each belongs to its own pass's row (#247).
+            # and each belongs to its own pass's row.
             if passes is not None:
                 acct = passes.get(mutation.get('pass_key'))
                 if acct is not None:
@@ -5874,13 +5789,11 @@ class DicomSession:
             # scan's own first use and its notices are written once.
             #
             # `is None`, not `not findings`: `PhiReport` has `__len__`,
-            # so an empty report was falsy and read as "no argument" --
-            # `anonymize([])` and any filtered report that matched
-            # nothing ran a full audit and a full pass (222 applied over
-            # CT_small and MR_small under the floor, #660), while an
-            # empty *iterator* applied 0, because an iterator is truthy.
-            # An empty argument is a request for nothing, whatever
-            # container it arrives in.
+            # so an empty report is falsy, and `anonymize([])` or a
+            # filtered report that matched nothing would run a full audit
+            # and a full pass, while an empty *iterator*, which is
+            # truthy, would apply 0. An empty argument is a request for
+            # nothing, whatever container it arrives in.
             findings = self.audit()
 
         # Asked for here as well as in `audit()`, and never skipped: the
@@ -5896,11 +5809,11 @@ class DicomSession:
             project_secret=project_secret,
         )
 
-        # What `audit()` put on this report (#555): the policy it scanned
+        # What `audit()` put on this report: the policy it scanned
         # under and its tally. Read before `findings` is rebound below.
         report_policy = getattr(findings, "_scan_policy", None)
         report_tally = getattr(findings, "_scan_tally", None)
-        # The session's own tally when it has one, as before (#553);
+        # The session's own tally when it has one;
         # otherwise this session's working copy of the report's, so a pass
         # over a kept report records what the same pass would have in the
         # session that scanned it, and the report stays as its audit left
@@ -5922,11 +5835,11 @@ class DicomSession:
             named = (self._named_by(tally)
                      if from_report and report_policy is not None
                      else frozenset())
-            # Resolved against the live graph before the service sees them
-            # (#644), and only here, after the blind-execution check above:
+            # Resolved against the live graph before the service sees them,
+            # and only here, after the blind-execution check above:
             # a report every finding of which a pass already settled
             # resolves to an empty list, and that is not the `None` that
-            # asks for a full audit and pass. Since #660 an argument that
+            # asks for a full audit and pass. An argument that
             # arrived empty reaches here too, and what this guard saves
             # then is cost, not behaviour: the three resolvers would walk
             # the whole graph for nothing and `apply_remediation([])`
@@ -5952,15 +5865,15 @@ class DicomSession:
             remediator._use_series(
                 (series for patient in self.store.patients
                  for study in patient.studies for series in study.series),
-                # The policy the lock reads a rule by (review of #574): the
+                # The policy the lock reads a rule by: the
                 # last audit's, which `audit(config_path=)` does not put on
                 # the configuration, else the configuration's.
                 (self._audited_phi_tags if self._audited_phi_tags is not None
                  else self.configuration.phi_tags))
             # The pass's own Series writes do not cascade to its instances
-            # (`entities.PASS_WRITING`, #767 Q-W1); set here rather than in
-            # `apply_remediation`, whose five pinned `mark_modified()` lines
-            # would move.
+            # (`entities.PASS_WRITING`); set here rather than in
+            # `apply_remediation`, whose five line-pinned `mark_modified()`
+            # calls would move.
             passing = PASS_WRITING.set(True)
             try:
                 count = remediator.apply_remediation(findings)
@@ -5972,11 +5885,11 @@ class DicomSession:
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
         # already carries: two objects, one row, and the next save's
-        # scoped deletes removed each other's studies (#548). Merged
+        # scoped deletes would remove each other's studies. Merged
         # here, after every proposal in the report has been applied
         # under the scheme its scan stamped -- never inside
-        # `apply_remediation`, which would move the five `mark_modified()`
-        # line pins in `tests/test_remediation_invariants.py`. The drain
+        # `apply_remediation`, which would move the five line-pinned
+        # `mark_modified()` calls. The drain
         # runs only when there is something to merge: `audit()` drains on
         # entry and this path, handed its findings, does not.
         self.store._merge_patients_sharing_an_id(
@@ -5986,7 +5899,7 @@ class DicomSession:
             # A nonzero count is the session claiming remediations were
             # applied, and an applied remediation queues its audit row
             # -- so this is where "performed" and "would have emitted"
-            # coincide (#254). A call that applied nothing records
+            # coincide. A call that applied nothing records
             # nothing and owes the summary no evidence.
             self._actions_performed.add("ANONYMIZE")
 
@@ -6068,34 +5981,32 @@ class DicomSession:
         in the API reference.
         """
         # Cleared first, before the exporter is even resolved. These are
-        # session-scoped, and assigning them only on success let an
+        # session-scoped, and assigning them only on success would let an
         # export with an empty plan -- or one whose batch died at the
-        # pool -- leave a *previous* export's numbers standing: the
-        # report read "3 of 3 requested" under a PASS beside an empty
-        # folder (#196). None makes the report omit the row, and an
+        # pool -- leave a *previous* export's numbers standing. None
+        # makes the report omit the row, and an
         # absent row says "not answered here" -- which is the truth
         # about an export that never completed, where a zero would say
         # "nothing was written" and a stale pair answers for the wrong
         # export.
         #
-        # Here and not in `_export_dicom`, where #196 put it: a call that
+        # Here and not in `_export_dicom`: a call that
         # raises before any exporter runs (an unknown format), inside one
         # (an option it does not take), or that goes through an exporter
         # which does not report delivery (`wfdb`) answers nothing about
-        # DICOM delivery either, and left the last DICOM export's pair
-        # answering for it (#579). `_export_dicom` is private; a caller
-        # reaching it directly bypasses this and inherits the pair.
+        # DICOM delivery either, and must not leave the last DICOM
+        # export's pair answering for it. `_export_dicom` is private; a
+        # caller reaching it directly bypasses this and inherits the pair.
         self._last_export_written = None
         self._last_export_requested = None
 
         from . import exporters
 
         exporter = exporters.get_exporter(format)
-        # Every export gate lives inside the two built-ins (#527), so an
+        # Every export gate lives inside the two built-ins, so an
         # exporter that is neither runs behind none of them and its
         # output is not something this report can vouch for. One
-        # `WARNING` row, so the run grades `REVIEW_REQUIRED` (owner ruling
-        # Q2, 2026-09-23); #783 moves the gates above this line in 1.1.
+        # `WARNING` row, so the run grades `REVIEW_REQUIRED`.
         # By class identity: `__module__` is whatever a plugin spells and
         # a subclass inherits it, a subclass may override anything, and a
         # format name is whatever was registered over. `is not`, never
@@ -6239,12 +6150,12 @@ class DicomSession:
         """
         # One helper for every door that selects patients, so
         # `patient_ids` means the same thing whichever format was named
-        # (#678) and whichever door was used (#696): only `None` is every
+        # and whichever door was used: only `None` is every
         # patient, an iterator is materialised before the walk can eat
         # it, and a bare `str`, a bytes-like value, a non-iterable or a
         # non-`str` element is refused. The wfdb door and
-        # `get_cohort_report` call the same function -- reading the
-        # argument here and not there is how the doors came to disagree.
+        # `get_cohort_report` call the same function; a door that reads
+        # the argument its own way would disagree with the others.
         #
         # First statement in the method, and before the `save(sync=True)`
         # below on purpose: a refusal that arrives after the flush has
@@ -6255,10 +6166,10 @@ class DicomSession:
             target_ids = frozenset(p.patient_id for p in self.store.patients)
 
         # The subset, read whole -- shape, query and count -- before the
-        # pre-export scan (#725). It was read after it, so a subset
-        # refused for its shape arrived once `check_burned_in=True` had
-        # re-recorded every status: an export that never ran had moved
-        # the session.
+        # pre-export scan: read after it, a subset refused for its shape
+        # would arrive once `check_burned_in=True` had re-recorded every
+        # status, and an export that never ran would have moved the
+        # session.
         subset_selection = self._resolve_subset(subset)
         allowed_uids = subset_selection.uids
 
@@ -6275,25 +6186,16 @@ class DicomSession:
         # holding both the pending edits and the frames being written has
         # been enough to run a redaction session out of memory.
         #
-        # `sync=True`, and it is the whole fix for #343. A plain `save()`
-        # enqueues on the persistence worker and returns, so this did
-        # not flush before the walk, it flushed *concurrently with* it:
-        # `release_memory()` frees an instance only once the background
-        # save has attached its `_pixel_loader`, so which instances were
-        # swept depended on which thread got there first. Idle, the
-        # sweep won and the resident arrays reached the workers; under
-        # load the save won for some subset and those were reloaded
-        # through the loader instead -- correct for an ingested
-        # instance, and an empty image for one whose `pixel_array` was
-        # assigned directly with no Rows/Columns (measured 0/200 idle,
-        # 2/300 under two concurrent suites). CHANGELOG's #183 entry is
-        # the first sighting ("once the save won that race"); it fixed
-        # the dtype the reload came back with and left the ordering.
-        # `audit()` and `redact()` already drain on entry; export was
-        # the third verb and did not. The price is `save()`'s documented
-        # one: a wedged worker now wedges the export instead of racing
-        # it. `tests/test_export_flushes_before_it_sweeps.py` holds the
-        # order.
+        # `sync=True`, and it must stay. A plain `save()` enqueues on the
+        # persistence worker and returns, so it would flush *concurrently
+        # with* the walk: `release_memory()` frees an instance only once
+        # the background save has attached its `_pixel_loader`, so which
+        # instances were swept would depend on which thread got there
+        # first, and one whose `pixel_array` was assigned directly with
+        # no Rows/Columns would reload as an empty image. `audit()` and
+        # `redact()` drain on entry for the same reason. The price is
+        # `save()`'s documented one: a wedged worker wedges the export
+        # instead of racing it.
         print("Saving pending changes to free memory...")
         self.save(sync=True)
         self._release_memory(show_progress)
@@ -6304,20 +6206,20 @@ class DicomSession:
             target_ids)
 
         # Before the empty-plan branch, so an export that withheld
-        # everything still leaves one row per instance it held back
-        # (#536). Until then the filter logged a line and nothing else,
-        # and a cohort withheld whole read as an empty plan under PASS.
+        # everything still leaves one row per instance it held back,
+        # rather than reading as an empty plan under PASS.
         _audit_withheld_instances(self.store_backend, folder, withheld)
 
-        # The ids that selected nobody, counted and never named (#686),
-        # and the subset's values that name nothing (#725), the same way.
+        # The ids that selected nobody, counted and never named,
+        # and the subset's values that name nothing, the same way.
         # Here and not at the selections above: `_scan_before_export` can
         # still refuse after them, and a row saying an export selected
-        # short, for an export that never ran, is a fabrication. Before both empty-plan branches and
+        # short, for an export that never ran, is a fabrication. Before
+        # both empty-plan branches and
         # outside the `if tasks:` below, so an export whose every id was
         # unknown -- which plans nothing -- still says why. `WARNING`, so
         # the report grades `REVIEW_REQUIRED`: a short export under PASS
-        # read as a complete one (owner ruling Q3 on #686).
+        # would read as a complete one.
         if selection.unmatched:
             sentence = unmatched_patient_ids_sentence(selection)
             get_logger().warning(sentence)
@@ -6334,7 +6236,7 @@ class DicomSession:
         # Over the instances this export will write, after the pre-export
         # scan -- which re-records every status under the policy in force,
         # so `check_burned_in=True` never draws it -- and only when there
-        # are some (#555). The plan holds instances; the notice reads
+        # are some. The plan holds instances; the notice reads
         # their patient and study too.
         if tasks:
             planned = {id(task.instance) for task in tasks}
@@ -6354,7 +6256,7 @@ class DicomSession:
             # Counted, unlike a true empty plan: the caller asked for
             # these instances and none was written, which is exactly what
             # "0 of K requested" says. A zero here is a fact about this
-            # export, not a stand-in for "not answered" (#196).
+            # export, not a stand-in for "not answered".
             self._last_export_written = 0
             self._last_export_requested = len(withheld)
             self.store_backend.log_audit(
@@ -6371,10 +6273,10 @@ class DicomSession:
 
         if not tasks:
             get_logger().warning("No instances found to export.")
-            # Still an export run, so it still writes its row (#166): a
+            # Still an export run, so it still writes its row: a
             # subset that matched nothing is a fact about this run the
             # audit trail has to carry, and the report's export boundary
-            # keys on the row's existence, not on files (#153).
+            # keys on the row's existence, not on files.
             self.store_backend.log_audit(
                 action_type="EXPORT",
                 entity_uid=folder,
@@ -6384,7 +6286,7 @@ class DicomSession:
             # plan that matched nothing is not an export that failed,
             # and the row above already says so. The caller still gets a
             # summary rather than `None`, so `.written` and `.failures`
-            # are askable on every return path (#191).
+            # are askable on every return path.
             return ExportSummary()
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
@@ -6395,32 +6297,28 @@ class DicomSession:
 
         # After the batch, not before it. The disclosure is a statement
         # about files a recipient holds, so it has to be made from what
-        # was written rather than from what was planned (#187).
+        # was written rather than from what was planned.
         if check_reversibility:
             self._report_recoverable_identities(tasks, summary.written_uids)
 
-        # Recorded for `generate_report`, which counted the object graph
-        # and nothing else: a run that wrote none of its three instances
-        # still reported "Total Instances | 3" under a PASS (#181).
+        # Recorded for `generate_report`, so the report counts what was
+        # written, not only the object graph.
         self._last_export_written = summary.written
         # Withheld instances were requested and not written, so they are
-        # in the denominator (#536); "1 of 1 requested" beside a withheld
-        # second instance answered for the plan, not for the cohort.
+        # in the denominator: the count answers for the cohort, not for
+        # the plan.
         self._last_export_requested = len(tasks) + len(withheld)
 
         # The run itself is an audited action, not only its failures.
-        # 'EXPORT' had been `log_audit`'s first documented example since
-        # the docstring was written, and nothing ever wrote it: the
-        # report's Audit Trail counted Anonymize and Redact and never an
-        # Export (#166). One row per run rather than per instance -- the
+        # One row per run rather than per instance -- the
         # per-instance record is the output tree itself; this row says
         # how much of the plan reached it, and its existence is what
-        # `generate_report` keys the export boundary on (#153), durably
+        # `generate_report` keys the export boundary on, durably
         # across a session reopened on this store.
         #
         # The withheld clause is appended only when something was
-        # withheld, so a run that withheld nothing writes the row it
-        # always has, byte for byte.
+        # withheld, so a run that withheld nothing writes the row
+        # without it, byte for byte.
         withheld_clause = (f"; {len(withheld)} more withheld by the "
                            f"pre-export scan (check_burned_in=True)"
                            if withheld else "")
@@ -6511,12 +6409,9 @@ class DicomSession:
                       if task.instance.sop_instance_uid not in delivered
                       and os.path.exists(task.output_path)}
         # A set, like `delivered`: the numerator and the denominator
-        # must be counted over the same collection. Counting `affected`
-        # over the tasks while `delivered` collapsed a duplicate SOP
-        # Instance UID rendered "2 of 1 exported instances" -- arithmetic
-        # that cannot be true under any reading, in the row whose job is
-        # telling a recipient how many re-identifiable files they hold
-        # (#197). One UID is one file, whatever wrote it.
+        # must be counted over the same collection, or a duplicate SOP
+        # Instance UID renders "2 of 1 exported instances". One UID is
+        # one file, whatever wrote it.
         affected = {
             task.instance.sop_instance_uid
             for task in tasks
@@ -6546,16 +6441,16 @@ class DicomSession:
                             else "MULTIPLE"),
                 details=detail)
 
-        # A token in the layout releases before 1.0 wrote (#790) is
+        # A token in the layout releases before 1.0 wrote is
         # written as the graph holds it -- the file 0.9.x would have
         # written, which 0.9.x recovers with its key -- and counted above,
         # because it is re-identifiable all the same. 1.x does not read
         # it, so the export says so: a `WARNING` row, which grades the
         # report REVIEW_REQUIRED. Passed through rather than refused or
-        # dropped (owner ruling on #790): refusing would leave a 0.9.x
+        # dropped: refusing would leave a 0.9.x
         # store that holds a lock with no export at all, and dropping
         # the item would lose the one way back to the identity silently.
-        # A set over `affected`, for `affected`'s reason (#197).
+        # A set over `affected`, for `affected`'s reason.
         earlier = {
             task.instance.sop_instance_uid for task in tasks
             if task.instance.sop_instance_uid in affected
@@ -6623,7 +6518,7 @@ class DicomSession:
             # `_report_export_failures`: the detail is rendered straight
             # into a markdown table row. No `path`: it is
             # `<folder>/Subject_<Patient ID>/...`, and the UID already
-            # names the file (review of #589).
+            # names the file.
             detail = " ".join(
                 f"{len(group)} exported instances share SOP Instance UID "
                 f"{uid} and were written to one file: each "
@@ -6657,7 +6552,7 @@ class DicomSession:
         get_logger().warning(
             "Safe export: identifiers detected. Exporting only the instances "
             "that carry none, and skipping the rest.")
-        # `''` is a uid: an empty Patient ID (#581, `_record_scan_results`).
+        # `''` is a uid: an empty Patient ID (see `_record_scan_results`).
         return {f.entity_uid for f in findings if f.entity_uid is not None}
 
     def _resolve_subset(self, subset) -> _SubsetSelection:
@@ -6802,7 +6697,7 @@ class DicomSession:
 
         return held, names_of
 
-    #: The substring the export notice is pinned by (#555).
+    #: The substring the export notice is pinned by.
     _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "
                             "in force")
 
@@ -6965,8 +6860,8 @@ class DicomSession:
         named = [f"{' or '.join(sorted(bases))} ({fingerprint[:15]})"
                  for fingerprint, bases in sorted(others.items())]
         if legacy:
-            # True of all three routes to None (review of #750, finding
-            # 2): a store from 0.9.x, a findings list with no scan behind
+            # True of all three routes to None: a store written before
+            # 1.0, a findings list with no scan behind
             # it, and a report that scan did run for but that was rebuilt
             # or narrowed, so no longer speaks for it.
             named.append(f"{legacy} with no recorded policy (written "
@@ -7006,7 +6901,7 @@ class DicomSession:
         patient_count = 0
 
         drop_foreign = self._foreign_icon_gate()
-        # Here, in the parent, and never in the graph or the worker (#554):
+        # Here, in the parent, and never in the graph or the worker:
         # the statuses it rests on are not on a process worker's copy, and
         # a stamp in the graph would be a second answer that goes stale.
         deid_markers = self._deid_markers_planner()
@@ -7024,8 +6919,8 @@ class DicomSession:
                     series_path = os.path.join(
                         options.folder,
                         *export_folder_names(patient, study, series))
-                    # The one stamping helper both write doors call
-                    # (#570): `write_tree` gets exactly these.
+                    # The one stamping helper both write doors call:
+                    # `write_tree` gets exactly these.
                     patient_attrs, study_attrs, series_attrs = \
                         export_stamp_attributes(patient, study, series)
                     # What the worker merges over each instance's own,
@@ -7159,12 +7054,9 @@ class DicomSession:
             gc.collect()
 
         if summary.written < len(tasks):
-            # Partial failure used to be invisible here: the count came back
-            # and was dropped, and "Export complete." printed whether 1200 of
-            # 1200 instances survived or 3 did. Per-file errors are in the
-            # audit log as of #181 -- when this line was written they were
-            # not, so it told the reader to go and read rows that did not
-            # exist. This is the summary that says to go and read them.
+            # A partial failure must be said here, not only counted: the
+            # per-file errors are in the audit log, and this is the
+            # summary that says to go and read them.
             get_logger().warning(
                 "Export finished with failures: %d of %d instances exported. "
                 "See the audit log for per-instance errors.",
@@ -7223,7 +7115,7 @@ class DicomSession:
                 "Please install pandas to use this feature: "
                 "pip install pandas pyarrow") from e
 
-        # Before `makedirs` below: a refused `patient_ids` (#696) must
+        # Before `makedirs` below: a refused `patient_ids` must
         # leave no directory and no file behind.
         df = self.get_cohort_report(
             expand_metadata=expand_metadata, patient_ids=patient_ids)
@@ -7274,8 +7166,7 @@ class DicomSession:
             for s in p.studies:
                 study_map[s.study_instance_uid] = s
                 for se in s.series:
-                    # A Series is a finding entity since #544 (Q4): it
-                    # owns `0020,000e`.
+                    # A Series is a finding entity: it owns `0020,000e`.
                     series_map[se.series_instance_uid] = se
                     for i in se.instances:
                         instance_map[i.sop_instance_uid] = i
@@ -7511,8 +7402,8 @@ class DicomSession:
                     if p._jitter_scheme == JITTER_SCHEME_UNKEYED]
             return candidates
         # A Study or a Series under its UID, and under the UID this store
-        # replaced it with (#544): a pass since the report replaced the
-        # UID the report names. A Series is a finding entity since #544.
+        # replaced it with: a pass since the report may have replaced the
+        # UID the report names. A Series is a finding entity.
         owners = {"Study": by_study, "Series": by_series or {}}.get(finding.entity_type)
         if owners is None:
             return []
@@ -7787,7 +7678,7 @@ class DicomSession:
         for sequence_tag, index in path or ():
             # A position is a non-negative int. `-1` would read the last
             # item and `True` the second, each a different element from
-            # the one the address was raised on (review of #639 r4, F2).
+            # the one the address was raised on.
             # `type() is int` because `bool` is an `int`.
             if type(index) is not int or index < 0:  # pylint: disable=unidiomatic-typecheck
                 return None
@@ -7796,8 +7687,7 @@ class DicomSession:
                 # Removed only if a sequence could ever have been stored
                 # under this key: `0040,A730`, `(0008,1140)` or a keyword
                 # misses because the graph never uses that spelling, not
-                # because a pass removed anything (review of #639 r4, M1 --
-                # round 1's M1, one level down).
+                # because a pass removed anything.
                 if (isinstance(sequence_tag, str) and _is_tag_key(sequence_tag)
                         and sequence_tag == _canonical_tag(sequence_tag)):
                     return DicomItem()
@@ -7874,11 +7764,12 @@ class DicomSession:
             )
             if hasattr(s, "date_shifted"):
                 s_new.date_shifted = s.date_shifted
-            # The study's own date record travels too (#518).
+            # The study's own date record travels too.
             # `_scan_study` runs inside `scan_patient`, which the worker
             # calls on this clone, so without this line every worker
-            # sees a study that looks pre-0.9.6 and raises nothing --
-            # the whole fix invisible on both parallel paths at once.
+            # sees a shifted study with no shift record, which counts as
+            # shifted whatever its date, and raises nothing for it -- on
+            # both parallel paths at once.
             s_new._shifted_study_date = s._shifted_study_date
 
             p_new.studies.append(s_new)
@@ -7907,31 +7798,30 @@ class DicomSession:
                     # anyway; the clone is read by `scan_worker` and
                     # discarded, and no finding carries provenance back.
                     # If a clone is ever written to the store, this is
-                    # the line that has to change first (#238).
+                    # the line that has to change first.
                     #
                     # Key: Ensure attributes are copied so workers can scan tags
                     if hasattr(i, 'attributes'):
                         i_new.attributes = i.attributes.copy()
 
-                    # Sequences travel too. Dropping them was #57: the
-                    # worker got a top-level-only instance, so the scan
-                    # reported clean on every nested tag -- report text,
+                    # Sequences travel too: without them the worker gets
+                    # a top-level-only instance, and the scan reports
+                    # clean on every nested tag -- report text,
                     # annotations, anything below the first level.
                     i_new.sequences = clone_sequences(i, i_new)
 
-                    # `date_shifted` is not carried because `Instance` no
-                    # longer has one (#510): the scan reads the per-value
-                    # records below instead, and the study's flag rides
-                    # `s_new.date_shifted` above.
+                    # `Instance` has no `date_shifted`: the scan reads the
+                    # per-value records below instead, and the study's
+                    # flag rides `s_new.date_shifted` above.
                     #
                     # The per-value date records and the store's own
-                    # provenance travel too (#510, #513). `audit()`
+                    # provenance travel too. `audit()`
                     # scans this clone unconditionally, threads and
                     # processes alike, so without these two lines every
                     # worker sees an instance with no record against any
                     # of its dates, raises them all, and the arm shifts
-                    # each a second time -- the defect, with the fix in
-                    # place. The nested half is `clone_sequences`, above.
+                    # each a second time. The nested half is
+                    # `clone_sequences`, above.
                     if i._shifted_dates:
                         i_new._shifted_dates = dict(i._shifted_dates)
                     i_new._legacy_shift_provenance = i._legacy_shift_provenance
