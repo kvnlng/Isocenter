@@ -3,8 +3,8 @@ Configuration manager for handling Isocenter system settings.
 
 This module provides functionality to load, validate, and manage configuration
 files for the Isocenter application: the unified YAML configuration
-(schema version 2, checked key by key and type by type since #711-#713),
-external privacy profile files, and the built-in profiles.
+(schema version 2, checked key by key and type by type), external
+privacy profile files, and the built-in profiles.
 """
 
 import os
@@ -111,17 +111,16 @@ _VERSION_DIGITS = re.compile(r"[0-9]+\.[0-9]+")
 
 
 def _declared_version(data: Dict[Any, Any], source: str) -> str:
-    """The schema version `data` declares, or a `ValueError` (#711).
+    """The schema version `data` declares, or a `ValueError`.
 
     Absent means `_UNVERSIONED_MEANS`. Present, it must be a `str` of the
     form `MAJOR.MINOR` whose major is `_READABLE_MAJOR`. An unquoted
     number is refused rather than coerced -- YAML reads `version: 2.10`
-    as the float 2.1, the octal-serial trap again -- and so is `null`:
-    only an absent line means "unversioned", and a bare `version:` is a
-    typo, not a choice. A leading zero (`"2.00"`, `"02.0"`) is refused as
-    a spelling (#730). `"1.0"` is refused too: it is the label the
-    machines-only rules file carried before 2.0 (December 2025), its
-    content loads as 2.0, and one schema has one spelling.
+    as the float 2.1 -- and so is `null`: only an absent line means
+    "unversioned", and a bare `version:` is a typo, not a choice. A
+    leading zero (`"2.00"`, `"02.0"`) is refused as a spelling. `"1.0"`
+    is refused too, as a major this library does not read: one schema
+    has one spelling.
     """
     if "version" not in data:
         return _UNVERSIONED_MEANS
@@ -149,12 +148,12 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
 
 def _newer_minor_note(declared: str, source: str) -> str:
     """The sentence a refusal gains when the file at `source` declares a
-    minor newer than `CONFIG_VERSION`, else "" (#711).
+    minor newer than `CONFIG_VERSION`, else "".
 
     Any minor of the readable major loads. A newer minor that only changed
-    how a file is applied (#762) loads with no note, is applied as this
-    library applies it, and nothing flags it (#784 asks whether it should).
-    A key or value this library lacks is refused, and this says why. Minors
+    how a file is applied loads with no note, is applied as this library
+    applies it, and nothing flags it. A key or value this library lacks
+    is refused, and this says why. Minors
     compare as integers: "2.10" is newer than "2.9". Read at call time,
     not import time, so the constant has one home.
     """
@@ -181,14 +180,12 @@ def _noting_a_newer_minor(declared: str, source: str):
     refusal. With no note to add, the original exception propagates
     untouched.
 
-    Only the innermost file judges a refusal (review of #728). An
-    external profile's refusal passes through the configuration's own
-    wrap on its way out, and the configuration's version says nothing
-    about the profile file: with no path in the note the configuration's
-    `2.5` was blamed on a profile that declared nothing, and a `2.7`
-    profile inside a `2.5` configuration got both notes. So the note
-    names its file, and an exception an inner wrap has judged -- noted
-    or not -- is marked and passed through unchanged by every outer one.
+    Only the innermost file judges a refusal. An external profile's
+    refusal passes through the configuration's own wrap on its way out,
+    and the configuration's version says nothing about the profile file.
+    So the note names its file, and an exception an inner wrap has
+    judged -- noted or not -- is marked with `_JUDGED_BY` and passed
+    through unchanged by every outer one.
     """
     try:
         yield
@@ -206,14 +203,14 @@ def _noting_a_newer_minor(declared: str, source: str):
 
 def _unknown_keys(keys, known, where: str, whose: str,
                   refused_elsewhere=frozenset()) -> Optional[str]:
-    """The refusal for `keys` outside `known`, or None (#712).
+    """The refusal for `keys` outside `known`, or None.
 
     Names **every** unknown key (sorted by `str`, since YAML allows
     `2:` and `yes:` as keys), offers `difflib`'s closest known key where
     it has one, and always lists the known keys. `where` follows the key
     list ("at the top level", or ""); `whose` names the level's keys ("A
     machine rule's"). `refused_elsewhere` is keys a later check refuses
-    with better words -- only `replacement` in a phi rule (#538) -- and is
+    with better words -- only `replacement` in a phi rule -- and is
     passed by that one caller alone, so no other level exempts it.
     """
     unknown = sorted((k for k in keys if k not in known and k not in refused_elsewhere),
@@ -239,15 +236,13 @@ def _unknown_keys(keys, known, where: str, whose: str,
 
 def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
     """Check a configuration's version, then its top-level keys; return
-    the declared version (#711, #712).
+    the declared version.
 
     The version first: a file written for another major may carry keys
     this library has never heard of, and the version is the true reason
-    to refuse it. `machine_rules` gets its own message: it was an alias
-    `load_config` read as `machines` (and silently dropped when both were
-    present), never documented, and a deleted spelling is named rather
-    than reported as a typo -- the `replacement` -> `value` precedent
-    (#538).
+    to refuse it. `machine_rules` gets its own message, naming it as an
+    old spelling of `machines` rather than reporting it as a typo.
+    Raises `ValueError` for each refusal.
     """
     declared = _declared_version(data, source)
     with _noting_a_newer_minor(declared, source):
@@ -286,49 +281,35 @@ def require_package_resource(directory: str, basename: str,
                              consequence: str) -> str:
     """The path to a resource this package ships, or a refusal.
 
-    Three loaders returned an empty collection when a shipped file was
-    absent, with no log line and no audit row: the run then scanned every
-    frame with no redaction rules, or audited against an empty PHI tag
-    list, and reported clean (#388).
-
-    **A refusal rather than a warning**, on #400's reasoning: a warning in
-    front of a run that then succeeds is a line nobody reads, and there is
-    nothing to *annotate*, because a missing shipped resource is never a
-    correct state. The degrade-gracefully rule is about the optional
-    extras (`ocr`, `nlp`, `docs`); a shipped package resource is the
-    opposite kind of thing -- `setup.py`'s `package_data` promises it and
-    `publish.yml` refuses to release a wheel without it, so this is the
-    runtime half of a promise CI already makes. No audit row is written
-    either, for the same reason.
+    A missing shipped resource is a broken install, never a correct
+    state, so the caller must not continue with an empty collection: that
+    would scan every frame with no redaction rules, or audit against an
+    empty PHI tag list, and report clean. **A refusal rather than a
+    warning**, and no audit row is written. (Unlike the optional extras,
+    which degrade gracefully, `setup.py`'s `package_data` promises the
+    resource and `publish.yml` refuses to release a wheel without it.)
 
     **`RuntimeError`, and deliberately not `FileNotFoundError`.**
-    `ConfigLoader._load_yaml` already raises that for a *user's* config
-    file, which is a different failure with a different remedy, and a
-    caller writing `except FileNotFoundError` around `load_config` would
-    silently swallow "your install is broken". The sharper reason is that
-    the callers' own handlers are `except (OSError, ...)` and
-    `FileNotFoundError` **is** an `OSError`: a refusal of that type, if it
-    ever drifted inside one of those `try` blocks, would be caught and
-    turned straight back into the empty collection this function exists to
-    replace. Call it **before** the `try`.
+    `ConfigLoader._load_yaml` raises that for a *user's* config file,
+    which is a different failure with a different remedy. And the
+    callers' own handlers are `except (OSError, ...)`: a
+    `FileNotFoundError` **is** an `OSError`, so a refusal of that type
+    inside one of those `try` blocks would be caught and turned straight
+    back into the empty collection. Call it **before** the `try`.
 
-    `directory` is a parameter rather than a module global read in here.
-    Both callers' `RESOURCES_DIR` is what tests monkeypatch, and a helper
-    that closed over its own copy would make every such test pass against
-    the real source tree.
-
-    `consequence` is the caller's own words for what continuing would have
-    done. A generic sentence would be the same failure as a generic loss
-    row: accurate, not generic, is the standard this applies to refusals
-    as much as to anything else.
+    `directory` is a parameter rather than a module global read in here,
+    because tests monkeypatch the callers' `RESOURCES_DIR`; a helper that
+    closed over its own copy would make every such test pass against the
+    real source tree.
 
     Args:
         directory (str): the resources directory to look in.
         basename (str): the file's name, passed as a bare literal by every
             caller so `test_every_shipped_resource_is_named_by_the_package`
             can still see it in the AST.
-        consequence (str): what a silent continue would have done, e.g.
-            "scanned every frame with no machine redaction rules".
+        consequence (str): the caller's own words for what a silent
+            continue would have done, e.g. "scanned every frame with no
+            machine redaction rules"; it is quoted in the refusal.
 
     Returns:
         str: the resolved path, which exists.
@@ -368,9 +349,7 @@ def _names_no_profile(profile_name: Any) -> bool:
     """True for `privacy_profile: none`.
 
     Not for `privacy_profile: null` (a bare `privacy_profile:` line), which
-    is absent and means the floor (#730). It meant `none` until 1.0, so a
-    template's blank left unfilled switched off every rule of the floor --
-    the opposite of what leaving the line out does."""
+    is absent and means the floor, as leaving the line out does."""
     return isinstance(profile_name, str) and profile_name.strip().lower() == "none"
 
 
@@ -388,9 +367,8 @@ def _is_tag_key(key: str) -> bool:
     """True for a `gggg,eeee` key: four hex digits, a comma, four more.
 
     The spelling every tag table here uses, and the only one the scan
-    looks up. `'8,80'` (for 0008,0080) or a keyword such as `PatientName`
-    loaded before #456 and matched nothing, so the rule never ran and
-    nothing said so.
+    looks up: a rule keyed `'8,80'` (for 0008,0080) or by a keyword such
+    as `PatientName` would match nothing and never run.
     """
     return (len(key) == 9 and key[4] == ","
             and all(ch in _HEX_DIGITS for ch in key[:4] + key[5:]))
@@ -404,15 +382,13 @@ _GROUP_MASK_KEY = re.compile(r"(50|60)xx,(xxxx|[0-9a-f]{4})")
 
 
 def _is_group_mask_key(key: str) -> bool:
-    """True for a repeating-group key (#556).
+    """True for a repeating-group key (`50xx,xxxx`, `60xx,eeee`, ...).
 
     Such a key names the **even** groups 5000-501E (retired Curve) or
     6000-601E (Overlay) and nothing else (PS3.5 7.6); the odd groups
     between them are private and belong to the `remove_private_tags`
     sweep. `privacy._rule_for` resolves a mask to the concrete tags it
-    covers, the most specific key first. Until #556 no key could spell
-    Table E.1-1's `Curve Data (50xx,xxxx)` row, so every curve element
-    survived every profile.
+    covers, the most specific key first.
     """
     return isinstance(key, str) and _GROUP_MASK_KEY.fullmatch(key.lower()) is not None
 
@@ -420,18 +396,17 @@ def _is_group_mask_key(key: str) -> bool:
 def _external_profile_tags(path: str) -> Dict[str, Any]:
     """The validated `phi_tags:` mapping of an external profile file.
 
-    A file with no `phi_tags` key had its root mapping used as the tags
-    (the fallback of `load_phi_config`, deleted in #729), so a profile written as a
-    config -- `privacy_profile: basic` and its rules at the top level --
-    loaded `privacy_profile` itself as a "tag" (review of #509). Refused,
-    naming the file.
+    Raises `ValueError`, naming the file, for a file whose root is not a
+    mapping or that has no `phi_tags` key: its root mapping is never read
+    as the tags, so a profile written as a config is not loaded with
+    `privacy_profile` as a "tag".
 
-    The file's own `version` is checked as a configuration's is (#711),
-    and any key but `phi_tags` and `version` is refused (#712, owner
-    ruling Q1): a profile carrying `privacy_profile: basic` beside one
-    rule loaded as that one rule, where its author plainly meant 621. The
-    version first, as in a configuration; the no-`phi_tags` refusal
-    before the key check, so a root mapping of tags keeps its own
+    The file's own `version` is checked as a configuration's is, and any
+    key but `phi_tags` and `version` is refused: an external profile
+    contributes its `phi_tags` and nothing else, so a
+    `privacy_profile: basic` line in one would otherwise be silently
+    ignored. The version first, as in a configuration; the no-`phi_tags`
+    refusal before the key check, so a root mapping of tags keeps its own
     message rather than being told every tag is an unknown key.
     """
     data = ConfigLoader._load_yaml(path)
@@ -457,15 +432,14 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
     """Why a rule mapping's keys or `name` are not the schema's, or None.
 
-    First on every door, ahead of the action and VR checks (#712): a key
-    outside `name`, `action` and `value` was ignored, so `{actoin: KEEP}`
-    left the action at REPLACE and the value the file asked to keep was
-    replaced -- and on a DA tag `{actoin: JITTER}` defaulted to REPLACE
-    and was refused by #560 for a value it never asked to write. `name`
-    must be a string when present (#713); null is absent, as for the
+    First on every door, ahead of the action and VR checks: an ignored
+    key outside `name`, `action` and `value` would leave a misspelt
+    `{actoin: KEEP}` at REPLACE, replacing the value the file asked to
+    keep, or be refused for a value it never asked to write. `name`
+    must be a string when present; null is absent, as for the
     other optional metadata strings (see the comment above
     `_VERSION_SHAPE`). `replacement` is exempt here
-    and refused by `_refused_phi_rule` with its #538 rename advice.
+    and refused by `_refused_phi_rule` with its rename advice.
     """
     reason = _unknown_keys(rule, _PHI_RULE_KEYS, "", "A rule's",
                            refused_elsewhere=frozenset({"replacement"}))
@@ -480,13 +454,13 @@ def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
 def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
     """`tags` as a lowercase-keyed mapping, or a `ValueError` naming the tag.
 
-    A tag's value is a display name (a string, which leaves the action at
-    REPLACE) or a rule mapping whose `action`, if present, is one the
-    inspector implements. Each of the other shapes loaded silently before
-    #456 and failed, or misbehaved, later: a list-shaped `phi_tags` broke
-    the scan when it iterated the mapping, an int rule was read as a name, and an unknown
-    action was scanned as REPLACE. `None` (a bare `phi_tags:` line) is the
-    empty mapping it plainly means.
+    A tag's key is a `gggg,eeee` string or a repeating-group key, and its
+    value is a display name (a string, which leaves the action at
+    REPLACE) or a rule mapping whose keys are the schema's and whose
+    `action`, if present, is one the inspector implements. Any other
+    shape is refused here rather than failing or misbehaving later in the
+    scan. `None` (a bare `phi_tags:` line) is the empty mapping it
+    plainly means.
     """
     if tags is None:
         return {}
@@ -576,11 +550,11 @@ VR_DUMMY = {
 def _vr_dummy(tag: str) -> Any:
     """The dummy a value-less REPLACE writes on `tag` (`VR_DUMMY`), or None
     when its dictionary VR has none, and for a private, unknown or
-    malformed tag (#557).
+    malformed tag.
 
     The dictionary VR and never the recorded one, so the value a rule
     writes does not depend on the file it meets; a private or unknown tag
-    keeps `ANONYMIZED` and the exporter's LO fallback (#571). One value,
+    keeps `ANONYMIZED` and the exporter's LO fallback. One value,
     whatever the tag's multiplicity: every D-arm row of Table E.1-1 is VM
     1 or 1-n."""
     return VR_DUMMY.get(_standard_dictionary_vr(tag))
@@ -599,9 +573,8 @@ def _standard_dictionary_vr(tag: str) -> Optional[str]:
     private tag, an unknown one, and a key that is not a tag.
 
     No parity test: pydicom's standard dictionary, repeaters included,
-    holds no odd-group entry (measured, pydicom 3.0.2), so a private tag
-    is a `KeyError` like any unknown one. A parity test here was an
-    equivalent mutant."""
+    holds no odd-group entry, so a private tag is a `KeyError` like any
+    unknown one."""
     # Local: pydicom is wanted only when a rule is checked, and this
     # module is imported by everything that reads a config.
     from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
@@ -625,8 +598,8 @@ def _dictionary_vm(tag: str) -> Optional[str]:
 
 
 def _vm_allows(vm: str, count: int) -> bool:
-    """Whether `count` values meet a dictionary VM (review of #574 round 2,
-    P-4). pydicom's dictionary spells a VM four ways: `'N'`, `'N-M'`,
+    """Whether `count` values meet a dictionary VM. pydicom's dictionary
+    spells a VM four ways: `'N'`, `'N-M'`,
     `'N-n'`, `'N-Nn'` (`'2-2n'`: 2, 4, 6, ...). A spelling outside those
     allows any count, so a dictionary refresh cannot refuse a rule by an
     unparsed VM."""
@@ -649,8 +622,8 @@ def _vm_allows(vm: str, count: int) -> bool:
 
 
 def _dt_is_a_range(value: str) -> bool:
-    """True when a `-` in a DT string is not its UTC offset (review of #574
-    round 2, P-3). The offset is `&ZZXX` at the end -- `+` or `-`, hours at
+    """True when a `-` in a DT string is not its UTC offset. The offset
+    is `&ZZXX` at the end -- `+` or `-`, hours at
     most 14, minutes below 60 (PS3.5 Table 6.2-1) -- so one such suffix is
     set aside and any `-` left is a range: `20230101-20230201`,
     `-20230201`, `20230101-`, and `2023-2024`, whose 20 is no hour of an
@@ -665,7 +638,7 @@ def _dt_is_a_range(value: str) -> bool:
 def _is_oversized_tag_key(tag: str) -> bool:
     """True for a key that reads as hex but names no 32-bit tag, such as
     `'10000,0010'`. pydicom's `Tag` raises `OverflowError` for it, which
-    is not the `ValueError` every other refusal is (review of #574)."""
+    is not the `ValueError` every other refusal is."""
     try:
         number = int(tag.replace(",", ""), 16)
     except ValueError:
@@ -675,11 +648,11 @@ def _is_oversized_tag_key(tag: str) -> bool:
 
 def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     """The dictionary VR of a **standard** tag when that VR cannot hold
-    `value`, else None (#560).
+    `value`, else None.
 
     None as well for a private (odd-group) tag, an unknown tag, and a
     sequence: the exporter writes a private value its recorded VR cannot
-    hold under one that holds it, with a WARNING row (#571), so a refusal
+    hold under one that holds it, with a WARNING row, so a refusal
     there would keep an identifier the write removes; an unknown tag has
     no VR to judge by; and a value on a sequence is warned about by the
     scan, not written.
@@ -695,9 +668,10 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
 
     On a tag whose multiplicity allows several values, a string is judged
     one `\\`-separated value at a time: `validate_value` reads the whole
-    string as one value, so `A\\P` on Patient Orientation (CS, VM 2) was
-    refused for the backslash CS's repertoire lacks. One value on a VM-1
-    tag holding a backslash is `_refused_phi_rule`'s to refuse.
+    string as one value, and would refuse `A\\P` on Patient Orientation
+    (CS, VM 2) for the backslash CS's repertoire lacks. A list or tuple
+    is judged one element at a time. One value on a VM-1 tag holding a
+    backslash is `_refused_phi_rule`'s to refuse.
     """
     from pydicom import config as pydicom_config  # pylint: disable=import-outside-toplevel
     from pydicom.valuerep import validate_value  # pylint: disable=import-outside-toplevel
@@ -731,55 +705,51 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
 
 
 def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
-    """Why this one rule cannot be honoured, or None (#537, #538, #559,
-    #560). The shape checks -- a tag key, an action the inspector
-    implements, a rule that is a string or a mapping -- are
-    `_validated_phi_tags`' and are repeated only for the action, because
-    `PhiInspector(config_tags=)` and `configuration.phi_tags` assigned
-    directly reach the scan without the loader.
+    """Why this one rule cannot be honoured, or None. The shape checks --
+    a tag key, an action the inspector implements, a rule that is a
+    string or a mapping -- are `_validated_phi_tags`' and are repeated
+    only for the action, because `PhiInspector(config_tags=)` and
+    `configuration.phi_tags` assigned directly reach the scan without
+    the loader.
 
     The checks, in the order their messages are tested:
 
     0. A key outside `name`, `action` and `value`, and a `name` that is
-       not a string (`_phi_rule_shape_refused`, #712/#713) -- first, so a
-       misspelt `actoin:` is named rather than judged as the REPLACE it
-       silently became.
-    1. `replacement:` is 0.9.7's `set_phi_tag` spelling of `value:`,
-       which nothing read (#538). One spelling, so it is refused by name.
+       not a string (`_phi_rule_shape_refused`) -- first, so a misspelt
+       `actoin:` is named rather than judged as the REPLACE it would
+       otherwise default to.
+    1. `replacement:` is an old spelling of `value:`, refused by name.
     2. A `value:` under anything but REPLACE writes nothing.
     3. A `value:` that is not a string cannot be written as one.
-    3a. A repeating-group key (`60xx,xxxx`, #556) takes REMOVE or KEEP:
+    3a. A repeating-group key (`60xx,xxxx`) takes REMOVE or KEEP:
        it names elements of many VRs, so an action whose effect depends
        on the VR could not say what it writes. Nothing after this reads a
        mask, which names no dictionary tag.
     4. Patient ID can only be kept or pseudonymised: the ID is what keeps
        two patients apart, and `anonymize()` merges patients that share
-       one (#548), so an emptied or literal ID would merge every patient.
-    5. SHIFT/JITTER on a standard tag that is not DA or DT declined on
-       every pass (#559).
-    6. REPLACE on a standard tag whose VR cannot hold what it writes
-       (#560). Study Date's REPLACE with no value is the shift (#537, Q3)
-       and is not judged as a literal. With no `value:` it writes the
-       VR's dummy (`VR_DUMMY`, #557), and on UI the keyed UID replacement
-       (#544), so it is refused only on a VR with neither: numeric VRs,
-       AT and a compound VR. A `value:` a UI cannot hold is refused with
-       advice naming the value-less spelling. Until #557 DA, DT, TM, AS
-       and the binary VRs were refused here too, for the `ANONYMIZED`
-       they could not hold; until #544, UI was.
+       one, so an emptied or literal ID would merge every patient.
+    5. SHIFT/JITTER on a standard tag that is not DA or DT (a sequence is
+       exempt), which would decline on every pass.
+    6. REPLACE on a standard tag whose VR cannot hold what it writes.
+       Study Date's REPLACE with no value is the shift and is not judged
+       as a literal. With no `value:` it writes the VR's dummy
+       (`VR_DUMMY`), and on UI the keyed UID replacement, so it is
+       refused only on a VR with neither: numeric VRs, AT and a compound
+       VR. A `value:` a UI cannot hold is refused with advice naming the
+       value-less spelling.
     7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
-       still cannot hold (review of #574): a `-` in a DA or TM, which is
-       a range, and a `\\` on a tag of multiplicity 1, which is a second
-       value. In a DT a `-` is a range only where it is not the UTC offset
-       at the end (`_dt_is_a_range`), and on any other tag the count of
-       `\\`-separated values must meet the dictionary VM (`_vm_allows`;
-       review of #574 round 2, P-3 and P-4). Only a `value:` is counted:
-       REPLACE with no value writes one value (`ANONYMIZED` on text, as in
-       0.9.7, or the VR's dummy), and no rule of that shape is refused by
-       its count.
+       still cannot hold: a `-` in a DA or TM, which is a range, and a
+       `\\` on a tag of multiplicity 1, which is a second value. In a DT
+       a `-` is a range only where it is not the UTC offset at the end
+       (`_dt_is_a_range`), and on any other tag the count of
+       `\\`-separated values must meet the dictionary VM (`_vm_allows`).
+       Only a `value:` is counted: REPLACE with no value writes one value
+       (`ANONYMIZED` on text, or the VR's dummy), and no rule of that
+       shape is refused by its count.
 
     Before all of them, a key naming no 32-bit tag is refused as the
-    loader refuses a key that is not `gggg,eeee`; on the in-code doors it
-    raised pydicom's `OverflowError` (review of #574).
+    loader refuses a key that is not `gggg,eeee`, rather than letting
+    pydicom raise `OverflowError`.
     """
     if isinstance(tag, str) and _is_oversized_tag_key(tag):
         return (f"phi_tags key {tag!r} is not a 'gggg,eeee' tag (four hex "
@@ -893,8 +863,8 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
     """Raise `ValueError` naming `source` and the first rule in `tags` the
     pipeline cannot honour (see `_refused_phi_rule`); return otherwise.
 
-    Called on every door a policy comes in by, before anything changes
-    (#456): the merged policy a config file resolves to
+    Called on every door a policy comes in by, before anything changes:
+    the merged policy a config file resolves to
     (`ConfigLoader.load_unified_config`, so `load_config` and
     `audit(config_path=)`), `set_phi_tag`, `audit()` over
     `configuration.phi_tags` before a project secret is minted, and
@@ -915,10 +885,12 @@ def load_unified_config(path: str) -> Dict[str, Any]:
     """
     Loads the unified configuration file (YAML).
 
-    The root must be a mapping (a root-level list, the pre-0.5.2 format,
-    is refused), its `version` one this library reads (#711) and its
-    top-level keys the schema's (#712). Merges 'privacy_profile' if
-    specified (built-in or external).
+    The root must be a mapping (a root-level list is refused), its
+    `version` one this library reads and its top-level keys the
+    schema's. Merges the file's `phi_tags` over its `privacy_profile`
+    (built-in or external), or over the floor policy when the file has no
+    `privacy_profile` line; `privacy_profile: none` makes the file's own
+    `phi_tags` the whole policy.
 
     Args:
         path (str): Path to the YAML configuration file.
@@ -927,8 +899,11 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         Dict[str, Any]: The loaded configuration dictionary.
 
     Raises:
-        ValueError: If the file is not YAML, or fails any check above or
-            in the `phi_tags` and profile validation below.
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file does not end in `.yaml`/`.yml`, is not
+            valid YAML, or fails any check above or in the `phi_tags` and
+            profile validation, including a `privacy_profile` that is
+            neither a shipped profile, `none`, nor an existing file.
     """
     return _loaded_unified_config(path)[0]
 
@@ -941,7 +916,7 @@ def _loaded_unified_config(path: str):
     `privacy_profile` line, or None for `privacy_profile: none` (and for an
     external profile that contributed no rules). Returned beside the dict
     rather than stored in it, so the floor's sentinel never becomes a
-    value of a configuration mapping (#714).
+    value of a configuration mapping.
     """
     if not (path.endswith('.yaml') or path.endswith('.yml')):
         raise ValueError("Configuration file must be a YAML file (.yaml or .yml)")
@@ -971,7 +946,7 @@ def _loaded_unified_config(path: str):
 
 def _unshipped_profile_refusal(profile_name: str, path: str) -> ValueError:
     """The refusal for a `privacy_profile` holding `@` that names no
-    profile this version ships (#714)."""
+    profile this version ships."""
     aliases = ", ".join(f"{alias!r} means {pinned}"
                         for alias, pinned in sorted(PROFILE_ALIASES.items()))
     return ValueError(
@@ -1087,11 +1062,11 @@ def _resolved_policy(config: Dict[str, Any], path: str):
 
 def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str, Any]:
     """The rules a saved file's `privacy_profile` line brings in, which
-    `IsocenterConfiguration.save()` diffs `phi_tags` against (#715).
+    `IsocenterConfiguration.save()` diffs `phi_tags` against.
 
     The inverse of `_resolved_policy`: a built-in name through
     `PROFILE_ALIASES` to `PRIVACY_PROFILES` (a pinned name is its own
-    alias target, so the table is the pinned one's, #738 review N8); a
+    alias target, so the table is the pinned one's); a
     string naming a file, that file's `phi_tags` as the loader reads them;
     no profile and `floor`, `FLOOR_POLICY`; no profile otherwise (`none`,
     or an external profile that contributed nothing), no rules.
@@ -1103,7 +1078,11 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
     refusal the loader gives a missing profile, which a snapshot would only
     defer to the next load; this one adds where a relative path was looked
     for, because under `auto_save` every change method raises it, and the
-    usual cause is a `chdir` since the load (review of #742).
+    usual cause is a `chdir` since the load.
+
+    Raises `ValueError` for a `privacy_profile` that is not a string, an
+    unshipped `@` name, or neither a built-in profile nor an existing
+    file.
 
     The returned mapping is the module's own table for a built-in; callers
     read it and never write it.
@@ -1143,11 +1122,10 @@ class ConfigLoader:
     files (schema version 2). It handles configuration validation,
     normalization, and file I/O operations.
 
-    One door reads a configuration file, `load_unified_config` (#729).
-    `load_redaction_rules` read only `machines` and checked nothing at the
-    top level; `load_phi_config` returned a file's own `phi_tags` with no
-    profile merged and no `validate_phi_policy`. Each accepted files the
-    other refused, and both were deleted before the 1.0 freeze.
+    One door reads a configuration file, `load_unified_config`. Do not
+    add a second loader: a partial reader (only `machines`, or `phi_tags`
+    with no profile merged and no `validate_phi_policy`) accepts files
+    the full one refuses.
 
     The class also provides utility methods for filename sanitization and YAML parsing.
     """
@@ -1165,15 +1143,32 @@ class ConfigLoader:
         Args:
             filepath (str): Path to the config file.
 
+        Every check runs before this returns, so a caller that assigns
+        only what it returns leaves its configuration unchanged when a
+        file fails.
+
         Returns:
             tuple: (phi_tags, machine_rules, date_jitter_config,
-            remove_private_tags, policy_base). The last element is what
-            the policy was built on (#714): a built-in profile's pinned
+            remove_private_tags, policy_base). `date_jitter_config` is
+            `{min_days, max_days}`, `{-365, -1}` when the file has none;
+            `remove_private_tags` defaults to True. The last element is
+            what the policy was built on: a built-in profile's pinned
             name (`basic@2026c`, also when the file said `basic`), an
             external profile's path, `profiles.FLOOR` -- an object,
             compared with `is` -- for a file with no `privacy_profile`
             line, or None for `privacy_profile: none` and for an external
             profile that contributed no rules.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: For every refusal of `load_unified_config` (the
+                module function), a merged policy `validate_phi_policy`
+                refuses, a `machines` that is not a list of mappings, a
+                machine rule `_validate_rule` refuses, a `date_jitter`
+                that is not `{min_days: int, max_days: int}` with
+                `min_days <= max_days`, and a `remove_private_tags` that
+                is not a bool. A file declaring a newer minor gains a
+                note saying so.
         """
         # The version, the top-level keys, the phi_tags and the profile.
         data, base = _loaded_unified_config(filepath)
@@ -1309,27 +1304,28 @@ class ConfigLoader:
 
         The one function every rule door calls: the loader, and
         `add_rule`/`update_rule` before they store (and, with auto-save on,
-        write) a rule (#712). The order is load-bearing, and each
-        step is pinned by a test:
+        write) a rule. The order is load-bearing, and each step is pinned
+        by a test:
 
-        1. Unknown keys (#712), before the serial, so a misspelt
+        1. Unknown keys, before the serial, so a misspelt
            `serial_numbr:` is named rather than reported as a missing
            serial.
-        2. `serial_number`: present and non-empty, then a `str` (#713),
-           then not blank (#730).
-           An unquoted serial is a YAML number -- `0123` loads as the
-           octal 83 -- and never equals a Device Serial Number, so the
-           rule matched nothing and the machine was not redacted.
+        2. `serial_number`: present and non-empty, then a `str`, then not
+           blank. An unquoted serial is a YAML number -- `0123` loads as
+           the octal 83 -- and never equals a Device Serial Number, so the
+           rule would match nothing and the machine would not be redacted.
         3. `manufacturer`, `model_name` and `comment` are strings when
-           present and not null (#713; a null is absent -- 0.9.x
-           auto-save wrote one, review of #728). Nothing reads them; they are checked so no key
-           the loader accepts carries an unchecked type.
+           present and not null (a null is absent; see the comment above
+           `_VERSION_SHAPE`). Nothing reads them; they are checked so no
+           key the loader accepts carries an unchecked type.
         4. `redaction_zones` is a list, and only then are its zones
-           walked: walked first, `redaction_zones: 5` escaped as a
+           walked, so `redaction_zones: 5` is a `ValueError`, not a
            `TypeError`.
-        5. Per zone mapping: unknown keys and `note`'s type, then the ROI
-           checks, so a misspelt `rio:` is named rather than reported as
-           a bad ROI.
+        5. Per zone: a list or a mapping; for a mapping, unknown keys and
+           `note`'s type, then the ROI checks, so a misspelt `rio:` is
+           named rather than reported as a bad ROI. The ROI is a list of
+           four non-negative integers (not bools) with start <= end on
+           both axes.
         """
         sn = rule.get("serial_number")
         label = f"Rule #{index} ({sn})" if isinstance(sn, str) and sn.strip() else f"Rule #{index}"

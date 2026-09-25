@@ -38,17 +38,15 @@ _WORKER_FAULTHANDLER_TIMEOUT_S = 240
 def _worker_init(disable_gc=False, faulthandler_timeout=None):
     """Runs once inside each freshly spawned or recycled worker process.
 
-    Module scope because it must pickle into the child; imports live
-    inside because they execute there, and keeping them with the only
-    code that uses them makes clear whose collector and whose
-    faulthandler are being touched -- the worker's, not the parent's.
+    Module scope because it must pickle into the child. The imports sit
+    inside because they act on the worker's collector and faulthandler,
+    not the parent's.
 
-    `exit=False` is load-bearing: the dump is diagnosis, and a
-    slow-but-healthy worker must go on to finish its task rather than be
-    killed by its own instrumentation -- `exit=True` would turn every
-    long task into a lost one, which under the recycling pool is a hang
-    (`run_parallel`'s docstring). Each child arms its own timer, so
-    worker recycling re-arms it with the fresh process.
+    `exit=False` must stay: the dump is diagnostic, and a slow but
+    healthy worker must go on to finish its task. `exit=True` would lose
+    every long task, which under the recycling pool is a hang (see
+    `run_parallel`). Each child arms its own timer, so worker recycling
+    re-arms it with the fresh process.
     """
     # pylint: disable=import-outside-toplevel
     if disable_gc:
@@ -65,13 +63,13 @@ def resolve_worker_initializer(disable_gc: bool = False):
     Resolved in the *parent*, at pool-construction time: the returned
     `functools.partial` carries its settings as pickled arguments, so
     the child obeys what the parent decided rather than re-reading
-    environment or module state after a spawn -- which is also what
-    makes `_WORKER_FAULTHANDLER_TIMEOUT_S` patchable in tests.
+    environment or module state after a spawn. That is also what makes
+    `_WORKER_FAULTHANDLER_TIMEOUT_S` patchable in tests.
 
     `Session._executor` uses this directly; `run_parallel`'s strategies
     reach it through `_Strategy.worker_initializer`, which adds the
-    threads-get-nothing rule. One resolver, so the two kinds of pool
-    cannot drift apart on what a worker's first act is.
+    threads-get-nothing rule. Both kinds of pool go through this one
+    resolver, so they agree on what a worker runs first.
     """
     disable_gc = disable_gc or _env_is("ISOCENTER_DISABLE_GC", ("1",))
     faulthandler_timeout = (
@@ -88,13 +86,12 @@ class _ExceptionAsResult:
 
     This is the worker-side half of `yield_exceptions=True`. A class at
     module scope rather than a closure because it has to pickle into a
-    process-pool worker alongside the `func` it wraps -- the same
-    constraint that keeps `scan_worker` and friends at module scope.
+    process-pool worker alongside the `func` it wraps.
 
-    `except Exception` is the contract, not sloppiness: whatever one
-    task raises must cost that task alone, never the pass. What it
-    deliberately does not catch is `BaseException` -- a `KeyboardInterrupt`
-    or a dying interpreter should still tear the run down.
+    `except Exception` is the contract: whatever one task raises costs
+    that task alone, never the pass. It does not catch `BaseException`,
+    so a `KeyboardInterrupt` or a dying interpreter still tears the run
+    down.
     """
 
     def __init__(self, func):
@@ -116,9 +113,8 @@ def _trailing_exception(iterator):
     failing: a worker killed outright (`BrokenProcessPool`), a result
     that would not unpickle. The tasks queued behind that failure are
     gone and cannot be named -- the pool does not say which they were --
-    so the one fact that survives is yielded as the last value, and the
-    results already produced are kept rather than discarded with the
-    raise (#232).
+    so the exception is yielded as the last value, and the results
+    already produced are kept rather than discarded with the raise.
     """
     try:
         yield from iterator
@@ -129,42 +125,37 @@ def _trailing_exception(iterator):
 class _Choice(NamedTuple):
     """What the threads-or-processes ranking decided, and who asked.
 
-    `_resolve_execution_choice` returns three facts where it used to
-    return one bool, because the bool is not enough to report on: a
-    caller that wants to say *why* it is running the way it is would
-    otherwise have to rank the levers a second time, and a second
-    implementation of the order is a second thing that can disagree with
-    it (#384, #400).
+    Callers that report *why* a run uses threads or processes read these
+    fields rather than ranking the levers a second time, so there is one
+    implementation of the order.
 
     `processes_requested_by` names the lever that **asked** for
     processes, whether or not it got them, and is `None` when nobody
-    asked. Two different silences share that `None` and both are
-    deliberate: nothing was set at all, and the operator's own
-    `ISOCENTER_FORCE_THREADS` superseded their `ISOCENTER_FORCE_PROCESSES`
-    by the documented order -- in which case their effective request was
-    threads and nothing has been denied. A *default* is likewise not a
-    request: on a GIL build with no lever set the ranking ends in
-    processes and this field is `None`, which is the single line that
-    keeps `Session(":memory:")` working out of the box on the floor
+    asked. Two cases share that `None`: nothing was set at all, and the
+    operator's own `ISOCENTER_FORCE_THREADS` superseded their
+    `ISOCENTER_FORCE_PROCESSES` by the documented order, so their
+    effective request was threads and nothing was denied. A *default* is
+    not a request either: on a GIL build with no lever set the ranking
+    ends in processes and this field is `None`, which keeps
+    `Session(":memory:")` working out of the box on the floor
     interpreter.
 
     `threads_request_overridden_by` names the threads lever that lost to
     worker recycling -- `"ISOCENTER_FORCE_THREADS"` or
     `"force_threads=True"` -- and is `None` otherwise. It carries what
-    #185's warning needs so the warning can be emitted at *dispatch*
-    rather than here; see `_resolve_execution_choice`.
+    the recycling-override warning needs, so the warning is emitted at
+    *dispatch* rather than here; see `_resolve_execution_choice`.
 
     `threads_requested_by` names the threads lever that asked **and
     won** -- `"ISOCENTER_FORCE_THREADS"` or `"force_threads=True"`, the
-    variable taking the name when both are set, as it does above -- and
-    is `None` otherwise: when nobody asked, when recycling beat the
-    request (the field above covers that, and #185's warning is the one
-    line), and for the free-threaded default, which resolves to threads
-    without anyone asking. `DicomImporter.import_files` reads it to say
-    that `ISOCENTER_FORCE_THREADS` had no effect on an `ingest()`, which
-    runs on the session's process pool whatever the strategy says
-    (#393). It is last and defaulted so a positional three-field
-    construction still means what it meant.
+    variable taking the name when both are set -- and is `None`
+    otherwise: when nobody asked, when recycling beat the request (the
+    field above covers that), and for the free-threaded default, which
+    resolves to threads without anyone asking.
+    `DicomImporter.import_files` reads it to say that
+    `ISOCENTER_FORCE_THREADS` had no effect on an `ingest()`, which runs
+    on the session's process pool whatever the strategy says. It is last
+    and defaulted so a positional three-field construction still works.
     """
     use_threads: bool
     processes_requested_by: Optional[str]
@@ -184,14 +175,14 @@ class _Strategy:  # pylint: disable=too-many-instance-attributes
     below read settings rather than each deriving their own.
 
     The three attribution fields carry `_Choice`'s answer out to callers
-    that report on the decision. Two do. `redact()` resolves a strategy
-    itself, prints the parenthetical on `Executing using N workers
-    (...)` from `use_threads`, and reads `processes_requested_by` to
-    decide whether an operator's lever was ignored (#384, #400).
-    `DicomImporter.import_files` resolves one for `ingest()` and reads
-    `threads_requested_by` to say that a threads lever had no effect on
-    the session's process pool (#393). `run_parallel` reads
-    `threads_request_overridden_by` for #185's warning.
+    that report on the decision. `redact()` resolves a strategy itself,
+    prints the parenthetical on `Executing using N workers (...)` from
+    `use_threads`, and reads `processes_requested_by` to decide whether
+    an operator's lever was ignored. `DicomImporter.import_files`
+    resolves one for `ingest()` and reads `threads_requested_by` to say
+    that a threads lever had no effect on the session's process pool.
+    `run_parallel` reads `threads_request_overridden_by` for the
+    recycling-override warning.
     """
     max_workers: int
     chunksize: int
@@ -221,34 +212,23 @@ class _Strategy:  # pylint: disable=too-many-instance-attributes
 def _env_int(name: str, *, minimum: Optional[int]) -> Optional[int]:
     """Reads an integer tuning variable, or None if unset or unusable.
 
-    A malformed value is reported rather than dropped. It used to be
-    swallowed by a bare `except ValueError: pass`, so a typo in
-    `ISOCENTER_MAX_WORKERS` silently reverted to the default and the only
-    symptom was a cohort running at the wrong width.
+    A malformed value, or one below `minimum`, is logged as a WARNING
+    naming the variable and the value, and dropped. The floor is checked
+    here rather than at the call sites so every read of a variable gets
+    the same floor.
 
-    A value below `minimum` is reported the same way and dropped the
-    same way (#341). The floor lives here and not at the call sites
-    because a floor at a call site is a floor at *one of the places* a
-    variable is read: #335 guarded `ISOCENTER_MAX_WORKERS` where
-    `_resolve_strategy` reads it, and `_redaction_worker_count` in
-    `session.py` went on reading the same variable and clamping `0` to a
-    single worker in silence. `ISOCENTER_CHUNKSIZE` meanwhile kept the
-    `or` both fixed arms had removed. Four reads, one helper, one floor.
-
-    `minimum` is keyword-only and has **no default**, on purpose. A
-    default of `1` would make the floor invisible at the read site and
-    turn a future variable that legitimately accepts `0` into a silent
-    rejection; a default of `None` would let a fifth read site inherit
-    #335's defect by omission. Every read states its floor, or states
-    `minimum=None` and is seen to.
+    `minimum` is keyword-only and has **no default**, on purpose: every
+    read states its floor, or states `minimum=None` visibly. A default
+    of `1` would silently reject a future variable that legitimately
+    accepts `0`; a default of `None` would let a new read site skip the
+    floor by omission.
 
     On rejection this returns `None` and **never `0`**, so a caller's
-    `is not None` is the only test it needs. `or` is the spelling that
-    got this wrong twice (#335, #341): `0` is the one value that must be
-    reported and the one value that is falsey, so `_env_int(...) or
-    default` discards exactly the value it should be shouting about, and
-    passes a negative -- truthy -- straight through to a pool constructor
-    that raises naming no environment variable.
+    `is not None` is the only test it needs. Never write
+    `_env_int(...) or default`: `0` is falsey, so `or` would discard it
+    without the reader noticing, and would pass a negative -- truthy --
+    straight through to a pool constructor that raises naming no
+    environment variable.
     """
     raw = os.environ.get(name)
     if not raw:
@@ -285,11 +265,10 @@ def progress_enabled(show: bool = True) -> bool:
     """Whether a progress bar is drawn: the caller's `show`, unless
     `ISOCENTER_SHOW_PROGRESS` switches it off.
 
-    The one spelling of that rule (#540). It was written once, inside
-    `_resolve_strategy`, so it reached the bars `run_parallel` draws and
-    no other: `anonymize()`, `release_memory()` and `lock_identities()`
-    each imported `tqdm` themselves and drew with the variable at `0`.
-    Read per call, not cached, so a variable set after import applies.
+    The one spelling of that rule: `_resolve_strategy` and
+    `progress_bar` both call it, so every bar in the package obeys the
+    variable. Read per call, not cached, so a variable set after import
+    applies.
     """
     return bool(show) and not _env_is("ISOCENTER_SHOW_PROGRESS", _FALSEY)
 
@@ -297,11 +276,12 @@ def progress_enabled(show: bool = True) -> bool:
 def progress_bar(iterable=None, *, show: bool = True, **kwargs):
     """`tqdm`, drawn only when `progress_enabled(show)`.
 
-    Every bar outside `run_parallel` goes through here, and
-    `tests/test_progress_bars_honour_the_environment.py` fails if a module
-    other than this one imports `tqdm`: a second import is a bar the
-    variable does not reach. It calls this module's `tqdm` global, so a
-    test that patches `isocenter.parallel.tqdm` sees these bars too.
+    Every bar outside `run_parallel` goes through here. No other module
+    may import `tqdm`, because a bar drawn by a second import is one
+    `ISOCENTER_SHOW_PROGRESS` does not reach
+    (`tests/test_progress_bars_honour_the_environment.py` enforces this).
+    It calls this module's `tqdm` global, so a test that patches
+    `isocenter.parallel.tqdm` sees these bars too.
     """
     return tqdm(iterable, disable=not progress_enabled(show), **kwargs)
 
@@ -309,21 +289,15 @@ def progress_bar(iterable=None, *, show: bool = True, **kwargs):
 def resolve_max_workers() -> int:
     """The default worker count: `ISOCENTER_MAX_WORKERS`, else one per CPU.
 
-    The one place that expression is computed (#333). `_resolve_strategy`
-    calls it when no `max_workers` argument is given, and `Session` calls
-    it to size its shared pool and every restart of that pool (#501).
-    Until #501 the shared pool was built with `max_workers=None` and the
-    stdlib chose its width, so the variable narrowed every `run_parallel`
-    call and `redact()`, but never the pool `ingest()` runs on. It is a
-    helper rather than a `_resolve_strategy` call because the session
-    needs this one number, and resolving a whole strategy at `Session()`
-    would read five other variables and emit their warnings when the
-    session opens.
+    The one place that expression is computed. `_resolve_strategy` calls
+    it when no `max_workers` argument is given, and `Session` calls it to
+    size its shared pool (the one `ingest()` runs on) and every restart
+    of that pool. It is a helper rather than a `_resolve_strategy` call
+    because resolving a whole strategy at `Session()` would read five
+    other variables and emit their warnings when the session opens.
 
-    One worker per CPU, not the 1.5x an earlier version used:
-    predictable beats marginally faster when a run is hours long. A value
-    below 1 is reported by `_env_int` and dropped, so this never returns
-    less than 1 (#335, #341).
+    A value below 1 is reported by `_env_int` and dropped, so this never
+    returns less than 1.
     """
     configured = _env_int("ISOCENTER_MAX_WORKERS", minimum=1)
     return configured if configured is not None else (os.cpu_count() or 1)
@@ -408,25 +382,21 @@ def _resolve_execution_choice(
         recycling_lever: Optional[str]) -> _Choice:
     """Whether to run in threads rather than processes, and who asked.
 
-    Worker recycling has the last word: on 3.12, the floor, only
-    `multiprocessing.Pool` recycles workers (`ProcessPoolExecutor`'s
-    `max_tasks_per_child`, new in 3.11, deadlocks `map` on 3.12 at the
-    first replacement -- measured in the review of #504), so asking for
-    it rules threads out however the rest of the environment is set. This is the whole of the
-    precedence, and the whole of it lives here: any second reading of
-    these variables anywhere else would be a second copy of the order,
-    which is the defect class #384 and #400 are both instances of.
+    Precedence, highest first: worker recycling (`maxtasksperchild`)
+    forces processes, because on 3.12 only `multiprocessing.Pool`
+    recycles workers (`ProcessPoolExecutor`'s `max_tasks_per_child`
+    deadlocks `map` there at the first replacement); then
+    `force_threads` or `ISOCENTER_FORCE_THREADS` gives threads; then
+    `ISOCENTER_FORCE_PROCESSES` gives processes; otherwise threads on a
+    free-threaded build and processes on a GIL build. The whole of the
+    precedence lives here; nothing else may read these variables to
+    decide, or there are two copies of the order.
 
-    **This function emits nothing.** It used to announce #185's
-    recycling override itself, and could not go on doing so once
-    `redact()` began resolving a strategy *before* deciding whether to
-    run at all: the one configuration it refuses is exactly the one
-    whose resolution warned "so this run uses processes", which would
-    have put that sentence one line above a refusal of a run that never
-    starts. The attribution travels on `_Choice` instead and
-    `run_parallel` speaks at dispatch, where the strategy is used.
-    Frequency is unchanged for every path that exists today: resolution
-    and dispatch are one-to-one inside `run_parallel`.
+    **This function emits nothing.** `redact()` resolves a strategy
+    before deciding whether to run at all, so a warning here could
+    precede a refusal of a run that never starts. The attribution
+    travels on `_Choice` instead and `run_parallel` warns at dispatch,
+    where the strategy is used.
 
     `recycling_lever` is which spelling supplied `maxtasksperchild` --
     `"ISOCENTER_MAX_TASKS_PER_CHILD"` or `"the maxtasksperchild
@@ -485,7 +455,7 @@ def _resolve_execution_choice(
 
 
 def _announce_recycling_override(strategy: _Strategy) -> None:
-    """Says that worker recycling beat a request for threads (#185).
+    """Logs a WARNING that worker recycling beat a request for threads.
 
     Emitted at **dispatch**, from `run_parallel`, rather than where the
     ranking is resolved: a strategy that is resolved and then not run
@@ -559,12 +529,11 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
 
     This exists for the imaging paths, where the C libraries behind
     decoding and compression leak steadily. `ProcessPoolExecutor` has had
-    `max_tasks_per_child` since 3.11, but on 3.12 -- the floor -- its `map`
-    deadlocks the first time a worker is replaced (3.12.14, spawn; 3.14
-    and 3.14t are fine). So the older `multiprocessing.Pool` is the only
-    way to get memory back during a long run on every supported
-    interpreter. Do not "modernise" this to the executor kwarg while 3.12
-    is supported (#501).
+    `max_tasks_per_child`, but on 3.12 -- the floor -- its `map`
+    deadlocks the first time a worker is replaced (3.14 and 3.14t are
+    fine). So the older `multiprocessing.Pool` is the only way to get
+    memory back during a long run on every supported interpreter. Do not
+    replace it with the executor keyword while 3.12 is supported.
 
     Spawn, not fork: a forked worker inherits the parent's open SQLite
     handles and its sidecar file position.
@@ -664,11 +633,7 @@ def run_parallel(
             pool can no longer deliver are over. Only for callers that
             branch on `isinstance(result, Exception)`; by default a raise
             is a raise, because a caller with no such arm must never
-            receive an exception as data (#232). `ingest()` goes further
-            with the trailing failure than reporting it: when it is a dead
-            worker, `io_handlers._ingest_results` reads the files not yet
-            returned again and names the one that ends a worker (#654).
-            One promise the recycling
+            receive an exception as data. One promise the recycling
             pool cannot keep: `multiprocessing.Pool` answers a *killed*
             worker by respawning it and waiting forever for the lost task,
             so under `maxtasksperchild` that case hangs rather than
@@ -680,11 +645,8 @@ def run_parallel(
             -- `max_workers`, `chunksize`, `maxtasksperchild`,
             `disable_gc`, `force_threads`, `show_progress`, `progress`,
             `desc` and `total` -- because the caller has settled them
-            already. `redact()` is the one caller that does, so that the
-            strategy it *names* on the console and the pool it *gets*
-            are two readings of one object rather than two resolutions
-            that can disagree (#384). `import_files` does too, so that
-            #393's warning reads the strategy the dispatch uses.
+            already. `redact()` and `import_files` pass one, so the
+            strategy they report on is the one the dispatch uses.
             `executor`, `return_generator`, `yield_exceptions` and
             `ordered` are not resolution settings and still apply.
         ordered (bool): If True, results come back in submission order
@@ -693,8 +655,8 @@ def run_parallel(
             (`executor.map`, or a Pool's `imap`) and the per-call
             executor path (`executor.map`) are ordered already, so it
             changes nothing there. `import_files` passes it, because
-            the order it links files in decides which duplicate is kept
-            (#450); `export()` does not.
+            the order it links files in decides which duplicate is kept;
+            `export()` does not.
 
     Returns:
         Union[List[R], Iterator[R]]: The results of the parallel execution.

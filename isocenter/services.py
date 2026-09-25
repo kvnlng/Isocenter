@@ -59,26 +59,21 @@ class MachinePixelIndex:
 
 @dataclass
 class RedactionOutcome:
-    """What one worker has to tell the parent about one instance (#213).
+    """What one worker has to tell the parent about one instance.
 
-    `None` used to mean three things -- already redacted under this
-    configuration, no pixel data to redact, and an exception -- and the
-    parent read all three as "nothing to apply". Only the third is a
-    failure, and it is the one that leaves burned-in PHI in an instance
-    the pipeline then reports as fine.
+    `ok=True` with no `mutation` is a legitimate skip (already redacted
+    under this configuration, or nothing to redact); `ok=False` is a
+    failure, which leaves burned-in PHI in the instance and must be
+    reported rather than read as "nothing to apply".
 
     `sop_instance_uid` is the **pre-redaction** UID, for the same reason
     the mutation dict carries `original_sop_uid`: a redacted image gets a
     new UID and the parent's map is keyed on the old one.
 
-    `error` is prose, not a `BaseException`, and that is a deliberate
-    divergence from `ExportOutcome.error`. Every consumer of that field
-    stringifies it, and carrying an object across a process boundary adds
-    a failure mode that turns a reportable failure into an unreportable
-    one: an exception whose `__init__` does not round-trip through
-    `pickle` fails to serialise, and what the parent receives is a
-    pickling error about the *result* rather than the failure the worker
-    was trying to report.
+    `error` is prose, not a `BaseException`, unlike `ExportOutcome.error`.
+    Every consumer stringifies it, and an exception whose `__init__` does
+    not round-trip through `pickle` would reach the parent as a pickling
+    error about the *result* rather than the failure it reports.
     """
     ok: bool
     sop_instance_uid: str
@@ -87,22 +82,22 @@ class RedactionOutcome:
 
 
 class RedactionError(RuntimeError):
-    """Redaction did not remove what it was asked to remove (#213).
+    """Redaction did not remove what it was asked to remove.
 
     Raised after the whole pass, not at the first failure: the instances
     that could be redacted are redacted, and the failures are already in
     the audit log, so a caller that catches this still gets a compliance
     report that grades REVIEW_REQUIRED.
 
-    **`RuntimeError`, not `Exception`, and not to be demoted to a bare
-    `RuntimeError` later for symmetry.** `write_tree` and
-    `_export_instance_worker` already raise bare `RuntimeError`s on this
-    same pipeline, so `except RuntimeError` around a full run cannot tell
-    the three apart -- but subclassing keeps every existing
-    `except RuntimeError` catching this one, where subclassing `Exception`
-    directly would turn a caught error into an escaping one. The
-    asymmetry with the export raises is the point: those mean "nothing
-    was written", this one means "something unsafe is still in the graph".
+    `failures` is the list of `(entity_uid, details)` pairs and
+    `attempted` the number of instances the pass targeted.
+
+    **A `RuntimeError` subclass, and to stay one.** Subclassing keeps
+    every existing `except RuntimeError` catching it, where subclassing
+    `Exception` directly would let a caught error escape. It is a
+    distinct class, not a bare `RuntimeError` like the ones `write_tree`
+    and `_export_instance_worker` raise, because those mean "nothing was
+    written" and this one means "something unsafe is still in the graph".
     """
 
     def __init__(self, failures, attempted):
@@ -133,10 +128,10 @@ def _report_redaction_failures(failures, store_backend=None):
     exist. An `ERROR` row lands in `get_audit_errors()`, populates
     `exceptions`, and takes `validation_status` to `REVIEW_REQUIRED`.
 
-    Warning and auditing are deliberately not the same condition, for the
-    reason `_report_export_losses` gives: `RedactionService(store)` with no
-    backend is a supported construction, and gating the report on one would
-    lose the failure entirely.
+    Every failure is logged at ERROR; the audit row is written only when
+    there is a backend. The log must not be gated on the backend, because
+    `RedactionService(store)` with no backend is a supported construction
+    and would otherwise lose the failure entirely.
 
     The detail is flattened to one line and its pipes escaped because it is
     rendered straight into a markdown table row in the compliance report.
@@ -163,8 +158,8 @@ def _report_redaction_failures(failures, store_backend=None):
 
 
 def _redacted_uid_for(inst, config_hash, secret) -> str:
-    """The SOP Instance UID `inst` takes when redacted under `config_hash`
-    (#544): derived from the UID it was **ingested** under -- the source
+    """The SOP Instance UID `inst` takes when redacted under `config_hash`:
+    derived from the UID it was **ingested** under -- the source
     recorded by an earlier UID replacement or redaction, else its own --
     so redacting before or after `anonymize()` gives one UID, and a
     `force=True` re-redaction under other zones another. Always computed
@@ -234,8 +229,7 @@ def _metadata_outside_redaction(inst: Instance) -> tuple:
     """Everything a tag scan could conclude from, minus redaction's own writes.
 
     The whole tree, not the top level: an edit inside a nested item is as
-    much an edit the scan has not seen as one at the top, and #57 is what
-    a nested value skipped by a top-level-only view cost once. `repr`
+    much an edit the scan has not seen as one at the top. `repr`
     because values include lists, and comparison is all this is for.
     Sequence keys are included per item, so an emptied or added sequence
     counts as a change even though it holds no attribute.
@@ -277,9 +271,8 @@ def _flags_are_redactions(before: tuple, after: tuple) -> bool:
     captured values in place, and neither is an edit. Anything else --
     a caller's text in DerivationDescription, a value appended to
     ImageType, a second item in the Derivation Code Sequence -- is an
-    edit the scan has not seen. These tags used to be skipped by the
-    fingerprint, so such an edit was carried (found in the review of
-    #486).
+    edit the scan has not seen, and returns False so the status is not
+    carried.
     """
     (before_values, before_items), (after_values, after_items) = before, after
     image_type = None if before_values[0] is _NO_VALUE else before_values[0]
@@ -292,19 +285,17 @@ def _flags_are_redactions(before: tuple, after: tuple) -> bool:
 
 
 def capture_phi_status_for_redaction(inst: Instance) -> Optional[tuple]:
-    """What to carry across a redaction pass, read before the pass (#486).
+    """What to carry across a redaction pass, read before the pass.
 
     Returns `(status, metadata, flags)` when the instance's status is REMEDIATED
     or CLEARED at its current revision, else None. **Call it before
     dispatch**: under threads the worker writes to the live instance, so a
     status read when the outcome lands is already UNSCANNED.
 
-    This is option 2 on #486, confirmed by the owner on 2026-09-11.
-    Without it,
-    `redact()`'s own writes move every redacted instance to UNSCANNED --
-    measured, revision 12 to 19 -- and the documented anonymize -> redact
-    -> export path produces a manifest saying `"anonymized": false` for
-    every instance it redacted.
+    Redaction's own writes advance the revision, so without this capture
+    and `carry_phi_status_across_redaction` every redacted instance would
+    read UNSCANNED after the pass, and an anonymize -> redact -> export
+    run would report its redacted instances as not anonymized.
     """
     status = inst.phi_status
     if status not in _CARRIED_STATUSES:
@@ -350,7 +341,7 @@ _ABSENT = object()
 
 
 def _capture_attestation(inst: Instance) -> tuple:
-    """The instance as it stands before the attestation is written (#474).
+    """The instance as it stands before the attestation is written.
 
     References, not copies: `_apply_redaction_flags` replaces each value
     and the Derivation Code Sequence whole, and `regenerate_uid()`
@@ -364,18 +355,18 @@ def _capture_attestation(inst: Instance) -> tuple:
 
 
 def _withdraw_attestation(inst: Instance, attested_from: tuple) -> None:
-    """Put back what `_capture_attestation` saw: the persist failed (#474).
+    """Put back what `_capture_attestation` saw, after a failed persist.
 
     Both redaction arms write the attestation -- `ImageType` DERIVED,
     `BurnedInAnnotation` NO, the derivation description and code
     sequence, a new SOP Instance UID and the configuration hash -- and
-    then persist the redacted pixels. When that persist raised, the
-    instance kept the attestation over pixels the loader still read
-    unredacted: the serial arm returned normally, and the threads arm,
-    whose instance is the live one, raised but left the hash that made
-    the retry skip it as already redacted. Withdrawn here, the instance
-    is as it was found, which is what `Session.redact()` promises for a
-    failed instance.
+    then persist the redacted pixels. If that persist raises, the
+    attestation would claim a redaction over pixels the loader still
+    reads unredacted, and the hash would make a retry skip the instance.
+    This restores the SOP Instance UID, `file_path`, the flag tags, the
+    hash and the Derivation Code Sequence, then calls `mark_modified()`,
+    leaving the instance as it was found, which is what
+    `Session.redact()` promises for a failed instance.
 
     **Withdrawn after a failure rather than withheld until a success.**
     `_swap_pixels_under_gate` records the new frame's blob row under the
@@ -408,17 +399,15 @@ def _withdraw_attestation(inst: Instance, attested_from: tuple) -> None:
 
 def rule_applies_to(rule_serial, serial) -> bool:
     """Does a redaction rule written for `rule_serial` cover a series whose
-    Device Serial Number is `serial`? (#580)
+    Device Serial Number is `serial`?
 
-    The one spelling of the predicate. Exact spelling, or `"*"` for every
-    series; a series with no serial matches nothing, and neither does a
-    rule with none. That last half is not a choice made here:
-    `MachinePixelIndex` indexes only series with equipment and a serial,
-    so `redact()` has never reached a serial-less series under any rule,
-    and the export has to agree with it. `redact()`'s target walk and the
-    export's zones both ask this, which is what #580 was: the export
-    asked `Configuration.get_rule`, exact and first-match, while
-    `redact()` honoured `"*"` and every rule.
+    The one spelling of the predicate: `redact()`'s target walk and the
+    export's zones both ask this, so the two agree on which series a
+    rule covers. Exact spelling, or `"*"` for every series; a series with
+    no serial matches nothing, and neither does a rule with none. That
+    last half follows `MachinePixelIndex`, which indexes only series with
+    equipment and a serial, so `redact()` never reaches a serial-less
+    series under any rule and the export must agree with it.
     """
     if not serial:
         return False
@@ -426,13 +415,12 @@ def rule_applies_to(rule_serial, serial) -> bool:
 
 
 def rules_matching(rules, serial) -> List[dict]:
-    """Every rule that covers a series with this serial, in rule order
-    (#580).
+    """Every rule that covers a series with this serial, in rule order.
 
     Every one, not the first: `redact()` runs each loaded rule as its own
     pass, so an exact rule and a `"*"` rule, or two rules on one serial,
-    both redact that series, and an export that took the first match
-    exported the second rule's zones unredacted. The session's
+    both redact that series, and an export that took only the first
+    match would leave the second rule's zones unredacted. The session's
     `_redaction_zones_for` and, through it, the store-wide icon gate read
     this.
     """
@@ -441,18 +429,15 @@ def rules_matching(rules, serial) -> List[dict]:
 
 
 def zone_rois(zones, on_invalid=None) -> List[tuple]:
-    """The ROIs a rule's `redaction_zones` names, each as a 4-tuple (#580).
+    """The ROIs a rule's `redaction_zones` names, each as a 4-tuple.
 
     Two shapes are accepted, because both are in use: a bare
     `[y1, y2, x1, x2]`, and `{"roi": [y1, y2, x1, x2], ...}` -- the shape
-    the shipped knowledge base and `create_config`'s scaffolder write,
-    which `load_config` accepts and `redact()` applied, and which failed
-    every export of a matching instance with `ValueError: invalid literal
-    for int() with base 10: 'roi'` because the export passed the raw zone
-    through. Anything without exactly four values is dropped, and handed
-    to `on_invalid` when one is given. A tuple zone is not a third shape:
-    `load_config` refuses one ("must be list or dict") and nothing builds
-    one, so accepting it here would be a spelling no door produces.
+    the shipped knowledge base and `create_config`'s scaffolder write.
+    Anything else, or anything without exactly four values, is dropped,
+    and handed to `on_invalid` when one is given. A tuple zone is not
+    accepted: `load_config` refuses one ("must be list or dict") and
+    nothing builds one.
 
     **The values are passed through as given, as a tuple -- no `int()`.**
     `prepare_redaction_tasks` hashes `sorted()` of these tuples into the
@@ -496,7 +481,8 @@ class RedactionService:
         Scans all instances for 'Burned In Annotation' (0028,0301) == 'YES'.
 
         Logs warnings for any found that have NOT been remediated (i.e. Image Type
-        does not contain 'DERIVED'). This is a post-process safety check.
+        does not contain 'DERIVED'), and writes a `RISK` audit row for each
+        when there is a store backend. This is a post-process safety check.
         """
         self.logger.info("Scanning for untreated Burned In Annotations...")
         count = 0
@@ -548,25 +534,23 @@ class RedactionService:
 
         This is the row `generate_report`'s section 2 counts and the
         grade's `audit_summary` arm sees, so its unit and its wording are
-        the published shape (#247), decided here rather than inherited:
+        the published shape. Writes nothing when the service has no
+        store backend.
 
         - **Per rule-pass**, keyed on the serial spelling the rule was
-          configured with (`"*"` included) -- bounded like the serial
-          path's old per-machine row, where per-instance rows would put
-          10k lines in a 10k-instance session's report.
-        - **Outcome, not intent.** The row is written after the pass, and
-          `applied`/`targeted` say what happened. The serial path used to
-          write "Redacting N images..." before its loop, which attested a
-          pass whose every instance was then skipped or failed.
-        - **In the parent, always** (#126): a worker's audit thread is
-          torn down at pool shutdown without `stop()`, so a row queued
-          there can be lost -- and for a `:memory:` database the child
-          writes nowhere at all.
+          configured with (`"*"` included), so the report stays bounded;
+          per-instance rows would put 10k lines in a 10k-instance
+          session's report.
+        - **Outcome, not intent.** Call it after the pass:
+          `applied`/`targeted` say what happened.
+        - **In the parent, always**: a worker's audit thread is torn down
+          at pool shutdown without `stop()`, so a row queued there can be
+          lost -- and for a `:memory:` database the child writes nowhere
+          at all.
 
         Both `redact_machine_instances` and `Session._apply_redaction_rules`
-        call this and nothing else writes `REDACTION` rows;
-        `tests/test_redaction_audit_accounting.py` pins the two paths to
-        byte-identical accounting for identical work.
+        call this and nothing else writes `REDACTION` rows, so the two
+        paths account identically for identical work.
         """
         if not self.store_backend:
             return
@@ -577,8 +561,8 @@ class RedactionService:
                      f"with {zone_count} zones"))
 
     def _targets_for(self, rule_serial) -> List[Instance]:
-        """Every indexed instance a rule for `rule_serial` covers (#580):
-        the index-side half of `rule_applies_to`, in index order."""
+        """Every indexed instance a rule for `rule_serial` covers: the
+        index-side half of `rule_applies_to`, in index order."""
         targets = []
         for serial in self.index._index:
             if rule_applies_to(rule_serial, serial):
@@ -601,17 +585,22 @@ class RedactionService:
                 only by `execute_redaction_task`'s attestation skip. See
                 `Session.redact()`, which is where a caller chooses it, and
                 `redact_machine_instances`, which takes the same flag as a
-                keyword so the two paths stay symmetrical (#237).
+                keyword so the two paths stay symmetrical.
             project_secret (bytes, optional): What each task's
-                `new_sop_uid` is derived under (#544); without it, the
+                `new_sop_uid` is derived under; without it, the
                 store backend's. `Session.redact()` passes it.
 
         Returns:
-            List[dict]: A list of task dictionaries ready for `execute_redaction_task`.
+            List[dict]: A list of task dictionaries ready for
+                `execute_redaction_task`; empty when the rule has no
+                serial, no zones, no targets or no valid ROI. Each task's
+                `new_sop_uid` and `original_sop_uid` are computed here, in
+                the parent, so a worker needs no secret and never re-reads
+                a UID a sibling task may have moved.
 
         Raises:
             RuntimeError: When a rule has targets and there is no project
-                secret to derive their UIDs under (#544), as
+                secret to derive their UIDs under, as
                 `redact_machine_instances` raises.
         """
         serial = machine_rules.get("serial_number")
@@ -704,24 +693,28 @@ class RedactionService:
                 and `ok=False` with an `error` string when a zone could not
                 be applied.
 
-        **The mutation dict exists only when a zone landed**, which is
-        what makes its presence the parent's honest signal. It used to be
-        built unconditionally, so an instance whose every zone started
-        past the edge of the image came back carrying
-        `{"0028,0301": None, "0008,0008": None, ...}` -- read from the
-        worker's own instance, where `_apply_redaction_flags` had never
-        run -- and the parent wrote those nulls onto the graph and counted
-        the instance as updated. `redact_machine_instances` never had that
-        shape, and this is the change that stopped the two paths
-        disagreeing (#235).
+        **The mutation dict exists only when a zone landed**, so its
+        presence is the parent's signal that there is something to apply.
+        Building it for an instance no zone reached would hand the parent
+        null flag values read from an instance `_apply_redaction_flags`
+        never touched, which it would write onto the graph and count as
+        updated.
 
         **The worker never raises.** `_apply_redaction_rules` consumes
         `run_parallel(..., return_generator=True)` incrementally, and an
         exception escaping a worker terminates that generator mid-iteration
         -- so every mutation still queued behind it would be lost, and the
         instances that *were* redacted would silently never reach the graph.
-        Returning an outcome is what makes "all successful mutations are
-        applied before the raise" true rather than aspirational (#213).
+        Returning an outcome is what lets every successful mutation be
+        applied before the parent raises.
+
+        On success the worker has written the flags, the new SOP Instance
+        UID and `_ISOCENTER_REDACTION_HASH`, and persisted the pixels
+        through the store backend. If that persist raises, the attestation
+        is withdrawn (`_withdraw_attestation`) and the task fails. On every
+        path the resident array is discarded afterwards, so a failed
+        redaction's partly zeroed array is never persisted and the next
+        `get_pixel_data()` reloads the original.
         """
         inst = task["instance"]
         # From the task, never `inst.sop_instance_uid`. Under threads the
@@ -944,18 +937,23 @@ class RedactionService:
         """
         Applies all zones defined in a single machine config object sequentially.
 
-        Legacy/Single-threaded entry point (mostly replaced by parallel approach).
+        The serial entry point; `Session.redact()` uses the parallel path
+        (`prepare_redaction_tasks` and `execute_redaction_task`). Returns
+        without redacting when the rule has no serial, no zones, no
+        targets or no valid ROI.
 
         Args:
             machine_rules (dict): The rule configuration.
             show_progress (bool): If True, shows progress bar.
             verbose (bool): If True, logs details.
+            project_secret (bytes, optional): Passed to
+                `redact_machine_instances`.
 
         Raises:
             RedactionError: Propagated from `redact_machine_instances` when
-                any instance's zone could not be applied. This method used
-                to return normally in that case, because the failure was
-                logged and dropped one frame down (#213).
+                any instance's zone could not be applied.
+            RuntimeError: Propagated from `redact_machine_instances` when
+                there is no project secret to derive a UID under.
         """
         serial = machine_rules.get("serial_number")
         zones = machine_rules.get("redaction_zones", [])
@@ -999,7 +997,7 @@ class RedactionService:
                 project_secret=project_secret)
 
     def _redaction_secret(self, project_secret: Optional[bytes]) -> bytes:
-        """The project secret a redaction derives its UIDs under (#544).
+        """The project secret a redaction derives its UIDs under.
 
         The one given; otherwise the store backend's, read in the parent
         (`_project_secret_for_use`, which creates one on a store that has
@@ -1041,37 +1039,34 @@ class RedactionService:
             force (bool): If True, re-redact an instance whose
                 `_ISOCENTER_REDACTION_HASH` already matches this
                 configuration. Suppresses that skip and nothing else. It
-                is **last in the signature and defaulted** deliberately:
-                `test_redaction_optimization.py`, `test_redaction_rgb.py`,
-                `test_services.py` and `test_pixel_geometry_pipeline.py`
-                all call this method positionally with two arguments.
+                stays **last in the signature and defaulted**: callers
+                pass the first two arguments positionally.
                 `Session.redact(force=True)` is the same lever on the
-                parallel path (#237).
+                parallel path.
             project_secret (bytes, optional): The project secret each
-                redacted instance's SOP Instance UID is derived under
-                (#544). Without it, the store backend's; a service with
-                no backend has to be given one.
+                redacted instance's SOP Instance UID is derived under.
+                Without it, the store backend's; a service with no
+                backend has to be given one.
+
+        Each instance's PHI status is captured before it is touched and
+        re-recorded after it if only redaction changed it
+        (`carry_phi_status_across_redaction`). One `REDACTION` audit row
+        is written after the pass when there were targets
+        (`record_redaction_pass`), before any raise.
 
         Raises:
             RedactionError: If any instance's zone could not be applied.
                 Raised at the end of the pass, for the same reasons as
                 `Session.redact()`: the instances that could be redacted
                 are redacted and every failure is already an `ERROR` row.
-                This is the serial path, so it must answer the same
-                question the parallel one does -- it is public, it is what
-                `process_machine_rules` calls, and a failure here left the
-                burned-in identifier in the pixels just as silently (#213).
             RuntimeError: Before any instance is touched, when there is
                 no project secret to derive a UID under -- no
                 `project_secret` and no store backend -- or the backend's
                 store refuses one (it lost the secret its dates or UIDs
-                were derived under). Until 1.0 this drew a random UID and
-                needed no secret (#544).
+                were derived under).
 
         Returns:
-            None. The signature is unchanged;
-            `test_redaction_optimization.py` mocks this method and asserts
-            on the call, not the result.
+            None.
         """
         if targets is None:
             targets = self.index.get_by_machine(machine_sn)
@@ -1253,15 +1248,25 @@ class RedactionService:
                 from `isocenter.pixel_geometry`. **It must have been
                 resolved from the shape of *this* array** -- that is the
                 invariant the axis selection below depends on, and nothing
-                here can check it. Required, with no default: the default
-                was the last-axis heuristic, which could not tell a
-                4-frame 8x4 grayscale array from a 2x8 RGBA one and
-                addressed the wrong axes, so 32 of 32 identifier cells
-                reached an exported file while redaction reported success
-                (#186, #205, #217).
+                here can check it. Required, with no default: a guess from
+                the array's shape cannot tell a multi-frame grayscale
+                array from a single-frame colour one, and addresses the
+                wrong axes.
+
+        A zone starting past the image edge is skipped; one extending
+        past it is clipped. The array must be writeable; callers copy a
+        read-only one first.
 
         Returns:
             bool: True if any modification was applied.
+
+        Raises:
+            ValueError: A zone selects no pixels (`y2 <= y1` or
+                `x2 <= x1`), or its values are not integers.
+            IndexError, TypeError: A zone could not be applied.
+                Every failure is logged at ERROR and re-raised, never
+                skipped, because a skipped zone leaves PHI in the pixels;
+                zones before the failing one are already zeroed.
         """
         modified = False
 
@@ -1377,10 +1382,10 @@ class RedactionService:
         caller that called it once per zone would hand it the pristine
         original again every time and keep only the last zone's work -- with
         `modified` True, a redaction hash written, and a report grading
-        PASS. That was #229. There is deliberately no per-zone entry point
-        to call in a loop, and a caller must not read its own `arr` after
-        this returns: on the not-writeable arm the array the instance now
-        holds is a different object.
+        PASS. There is deliberately no per-zone entry point to call in a
+        loop, and a caller must not read its own `arr` after this returns:
+        on the not-writeable arm the array the instance now holds is a
+        different object.
 
         **This method dirties the instance on one arm only, and the callers
         are load-bearing for the other.** A not-writeable array is copied and
@@ -1388,22 +1393,22 @@ class RedactionService:
         `mark_modified()`, so that arm returns with the instance needing a
         save. A writeable array is redacted *in place*: `set_pixel_data` is
         never called, no attribute changes, and this method returns True
-        leaving `has_unsaved_changes` False. Measured, both arms:
+        leaving `has_unsaved_changes` False:
 
             writeable=False  returned=True  dirty=True   zone_zeroed=True
             writeable=True   returned=True  dirty=False  zone_zeroed=True
 
-        Nothing is wrong today, because both callers close it -- the serial
-        `redact_machine_instances` and `execute_redaction_task` each call
-        `inst.mark_modified()` under `if modified:` and persist the pixels
-        afterwards. But a third caller that trusts the return value and
-        skips that call silently drops the redacted pixels on the writeable
-        arm: the zone really is zeroed in memory, the instance reports
-        itself saved, and an incremental `save_all` writes nothing, so the
-        exported file still carries the burned-in identifiers. No test can
-        catch that, because the writeable arm's dirtying does not live in
-        the function under test. Move or remove either `mark_modified()`
-        only together with this arm.
+        Both callers -- the serial `redact_machine_instances` and
+        `execute_redaction_task` -- call `inst.mark_modified()` under
+        `if modified:` and persist the pixels afterwards. A caller that
+        trusts the return value and skips that call silently drops the
+        redacted pixels on the writeable arm: the zone is zeroed in memory,
+        the instance reports itself saved, an incremental `save_all`
+        writes nothing, and the exported file still carries the burned-in
+        identifiers. A test of this method alone cannot catch that. Move
+        or remove either `mark_modified()` only together with this arm.
+
+        Raises whatever `apply_redaction_to_array` raises.
         """
         if not arr.flags.writeable:
             arr = arr.copy()

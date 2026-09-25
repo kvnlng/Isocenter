@@ -29,20 +29,19 @@ def _is_replacement_id(value) -> bool:
 
 
 def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
-    """`(action, value)` under which the owner of `tag` is remediated (#537).
+    """`(action, value)` under which the owner of `tag` is remediated.
 
-    Until 0.9.8 `scan_patient` and `_scan_study` read no rule: the name
-    was always `ANONYMIZED`, the ID always the keyed pseudonym, the date
-    always the per-patient shift. This is the one reading of the rule for
-    the three, so the owner scans and the instance scan cannot disagree.
+    `tag` is one of the three owned tags: Patient Name, Patient ID and
+    Study Date. This is the one reading of the rule for the three, so the
+    owner scans and the instance scan cannot disagree.
 
-    No rule and the string form are `REPLACE` with no value, which is the
-    replacement these tags always had: `ANONYMIZED`, the pseudonym, the
-    shift. On Study Date, `REPLACE` with no value and `SHIFT`/`JITTER` all
-    read `SHIFT`, because the string form (`"0008,0020": "Study Date"`) has
-    always meant the shift and a DA cannot hold `ANONYMIZED` (Q3 of #537).
-    A rule the validator refuses (an emptied Patient ID, say) never gets
-    here: `PhiInspector.__init__` raises first.
+    No rule and the string form are `REPLACE` with no value: `ANONYMIZED`
+    for the name, the keyed pseudonym for the ID, the per-patient shift
+    for the date. On Study Date, `REPLACE` with no value and
+    `SHIFT`/`JITTER` all read `SHIFT`, because the string form
+    (`"0008,0020": "Study Date"`) means the shift and a DA cannot hold
+    `ANONYMIZED`. A rule the validator refuses (an emptied Patient ID,
+    say) never gets here: `PhiInspector.__init__` raises first.
     """
     rule = (phi_tags or {}).get(tag)
     if isinstance(rule, dict):
@@ -59,16 +58,14 @@ def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
 def _rule_name(rule: Dict[str, Any]) -> str:
     """A rule mapping's display name, or `Unknown Tag`.
 
-    `name: null` is absent, as the loader reads it (#728): the finding
-    was named `None` while `get("name", "Unknown Tag")` saw the key
-    present (#730)."""
+    `name: null` is absent, as the loader reads it, so it also gives
+    `Unknown Tag` rather than `None`."""
     name = rule.get("name")
     return "Unknown Tag" if name is None else name
 
 
 def _rule_for(phi_tags, tag):
-    """The rule for the concrete `tag`, or None: the most specific key wins
-    (#556).
+    """The rule for the concrete `tag`, or None: the most specific key wins.
 
     `tag` itself first; then, for an even group in 5000-501E or 6000-601E
     (PS3.5 7.6), the table's element mask (`60xx,0022`) and then its group
@@ -92,7 +89,7 @@ def _rule_for(phi_tags, tag):
 
 def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
     """Whether `value`, an owner's value for `tag`, is already what the rule
-    on `tag` resolves to (#537).
+    on `tag` resolves to.
 
     The scan's "already replaced?" test, action by action. Only the value
     the rule resolves to *now* counts: a name holding `ANONYMIZED` under
@@ -240,7 +237,7 @@ def _mint_uid(secret, label: bytes, text: str) -> str:
 
 
 def _replacement_uid_for(uid, secret) -> str:
-    """The UID that replaces `uid` in this project (#544).
+    """The UID that replaces `uid` in this project.
 
     A function of the value alone -- never the tag it sits under, the
     patient or the study -- so a SOP Instance UID, the Referenced SOP
@@ -252,12 +249,12 @@ def _replacement_uid_for(uid, secret) -> str:
 
 
 def _redaction_uid_for(source_uid, config_hash, secret) -> str:
-    """The SOP Instance UID a redaction gives an instance (#544).
+    """The SOP Instance UID a redaction gives an instance.
 
     Keyed on the instance's **source** SOP Instance UID and the redaction
     configuration's hash, so the same redaction in the same project gives
     the same UID whether it runs before or after `anonymize()`, a
-    different set of zones gives a different one (#237), and the label
+    different set of zones gives a different one, and the label
     keeps it from ever equalling `_replacement_uid_for(source_uid)`: the
     redacted pixels never share a UID with the unredacted image.
     """
@@ -304,8 +301,8 @@ def _minted_uid_bytes(value) -> Optional[bytes]:
 
 def _has_minted_uid_shape(value) -> bool:
     """Whether `value` has a minted UID's shape, verifiable or not: the
-    evidence a store that lost its secret refuses on (#544, Q-B), where
-    there is no secret left to verify with."""
+    evidence a store that lost its secret refuses on, where there is no
+    secret left to verify with."""
     return _minted_uid_bytes(value) is not None
 
 
@@ -317,30 +314,30 @@ UID_REPLACEMENT = "uid_replacement"
 
 
 def _owned_uid_is_open(phi_tags, tag, uid, secret) -> bool:
-    """Whether the owner holding `uid` under `tag` is raised (#544): the
+    """Whether the owner holding `uid` under `tag` is raised: the
     policy's rule on `tag` is the value-less REPLACE, and `uid` is a
     non-blank UID this project did not mint.
 
     One spelling for `PhiInspector._scan_owned_uid`, which raises the
     finding, and `RemediationService._settle_statuses`, which asks the
-    same question of every Series at a pass end (review of #544, round 2):
-    a Series has no stored status, so after a reopen a pass handed a plain
-    list has nothing else to say its UID is still open.
+    same question of every Series at a pass end, so the two cannot
+    disagree. A Series has no stored status, so after a reopen a pass
+    handed a plain list has nothing else to say its UID is still open.
     """
     return (_is_uid_replacement(_rule_for(phi_tags, tag), tag) and uid is not None
             and bool(str(uid).strip()) and not _uid_is_minted(str(uid), secret))
 
 
 def _is_uid_replacement(rule, tag) -> bool:
-    """Whether `rule` on `tag` is the keyed UID replacement (#544): REPLACE
+    """Whether `rule` on `tag` is the keyed UID replacement: REPLACE
     with no `value:` (or the string form, which is that), on a tag whose
     standard dictionary VR is UI.
 
     One reading for the instance scan and the owners' scans, and the
     loader admits exactly this spelling (`_refused_phi_rule`). A private
-    key has no dictionary VR, so it keeps writing `ANONYMIZED` (#765); a
-    rule with a `value:` writes the value, as in 0.9.8; and no rule is not
-    this rule, so `privacy_profile: none` with no tags keeps every UID.
+    key has no dictionary VR, so it keeps writing `ANONYMIZED`; a rule
+    with a `value:` writes the value; and no rule is not this rule, so
+    `privacy_profile: none` with no tags keeps every UID.
     """
     if isinstance(rule, dict):
         if (str(rule.get("action") or "REPLACE").upper() != "REPLACE"
@@ -417,13 +414,14 @@ def _unkeyed_replacement_id_for(patient_id) -> str:
 
 
 def _unkeyed_jitter_digest(patient_id) -> str:
-    """The unkeyed scheme's jitter seed, for a legacy patient (#517).
+    """The unkeyed scheme's jitter seed, for a legacy patient.
 
-    Exactly what 0.9.6 computed: an `ANON_` id whose first eight
-    characters after the prefix are lowercase hex seeds from those
-    characters, anything else from `sha256(text)[:8]`. Kept bit for bit
-    so a patient whose dates a store already shifted under it gets the
-    same offset for a date shifted now, and never a second one.
+    An `ANON_` id whose first eight characters after the prefix are
+    lowercase hex seeds from those characters, anything else from
+    `sha256(text)[:8]`. Must stay bit for bit as the unkeyed scheme
+    computed it, so a patient whose dates a store already shifted under
+    it gets the same offset for a date shifted now, and never a second
+    one.
     """
     text = str(patient_id)
     if _is_replacement_id(text):
@@ -437,7 +435,7 @@ def _unkeyed_jitter_digest(patient_id) -> str:
 
 def canonical_patient_key(patient_id, secret, scheme) -> int:
     """The integer that seeds a patient's date offset, from either
-    spelling of its identity (#517).
+    spelling of its identity.
 
     `_get_date_shift` reads a scan's PatientID, and `anonymize()`
     replaces that id in its first pass -- so a later pass reads the
@@ -473,25 +471,23 @@ def canonical_patient_key(patient_id, secret, scheme) -> int:
 
 def _study_date_is_this_pipelines(study) -> bool:
     """Whether `study.study_date` is a value this pipeline's shift
-    produced -- as far as the store can tell (#518).
+    produced -- as far as the store can tell.
 
     Spelled once because two places ask it: `_scan_study`, which raises
     a study date the pipeline did not produce, and
     `_holds_owners_replacement`, which skips an instance's top-level
     copy of a study date only when the owner's value is one this
-    pipeline produced (#496). It was `bool(study.date_shifted)` in both,
-    and that flag records *that* a shift happened, never *what it
-    produced* -- so a fresh original assigned to `study_date` was never
-    raised again, and an instance's copy of that fresh original skipped
-    as "the owner's replacement". Leaving either on the flag keeps half
-    of #518 alive.
+    pipeline produced. Neither may test `study.date_shifted` alone: that
+    flag records *that* a shift happened, never *what it produced*, so a
+    fresh original assigned to `study_date` would never be raised again,
+    and an instance's copy of it would be skipped as "the owner's
+    replacement".
 
-    A study shifted before 0.9.6 reads `date_shifted` with no record,
-    and what its shift produced is unknowable. That counts as "this
-    pipeline's", which keeps the pre-0.9.6 behaviour for such a store
-    exactly as the instance half does -- the owner's ruling is that
-    nothing in an existing store changes under the user. The load says
-    so once, as a WARNING audit row.
+    A study with `date_shifted` set and no record of the shifted value
+    (a store from before per-value records) cannot say what its shift
+    produced. That counts as "this pipeline's", so nothing in such a
+    store changes under the user; the load says so once, as a WARNING
+    audit row.
 
     `getattr` throughout because the arm and the scan both fire for any
     object carrying these names, test doubles included.
@@ -529,11 +525,8 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
     """
     Represents a potential PHI breach discovered during a scan.
 
-    The attribute count is the point of the record -- it is a report line,
-    and every field below is something a reader of that report needs. The
-    same reasoning that disables `too-few-public-methods` for DTOs in
-    `pylintrc.toml` applies here; splitting it would only move fields
-    behind another name.
+    It is a report line, and every field below is something a reader of
+    that report needs, so it is not split to satisfy the attribute count.
 
     Attributes:
         entity_uid (str): Unique identifier of the entity (PatientID, SOPInstanceUID).
@@ -568,17 +561,15 @@ class PhiReport:
     """
     A container for PHI findings that supports analysis and export.
 
-    Acts as a list wrapper for backward compatibility but enables
-    DataFrame export features.
+    Iterates, indexes and measures like the list of findings it wraps,
+    and adds DataFrame export.
 
     `failures` is a list of `(entity_uid, reason)`, one per instance a
     pixel scan could not read in full: its pixels could not be loaded, or
     OCR raised on at least one of its frames. `scan_pixel_content()` fills
-    it (#423); an instance that failed on some frames keeps the findings
-    of the frames that were read. It is always a list, never `None` -- an
-    attribute that is sometimes a list and sometimes `None` is a trap for
-    every caller that iterates it. `audit()`'s is always empty: a failure
-    in its workers raises instead.
+    it; an instance that failed on some frames keeps the findings of the
+    frames that were read. It is always a list, never `None`. `audit()`'s
+    is always empty: a failure in its workers raises instead.
     """
 
     def __init__(self, findings: List[PhiFinding],
@@ -651,19 +642,18 @@ class PhiInspector:
             config_tags (Dict[str, Union[str, Dict]], optional): The PHI
                 policy, as `configuration.phi_tags` holds it; None applies
                 a copy of the floor, `profiles.FLOOR_POLICY`, as a bare
-                session does (#495). There is no path argument: a
-                configuration file is read by `load_config()` or
-                `audit(config_path=)`, the one loader, and the
-                `config_path` this took until 1.0 read it a weaker second
-                way that nothing called (#729). A tag's value is either a **rule** --
+                session does. There is no path argument: a configuration
+                file is read by `load_config()` or `audit(config_path=)`,
+                the one loader. A tag's value is either a **rule** --
                 `{"name": ..., "action": "REMOVE"|"EMPTY"|"SHIFT"|"JITTER"}`
                 -- or a plain string, which is the tag's **display name**
                 and leaves the action as `REPLACE`. The string form names
                 the tag; it does not choose what happens to it. Passing a
                 bare action name (`{"0008,0080": "REMOVE"}`) therefore
                 replaces the value instead, and is warned about at
-                construction (#111). Study Date is the exception: its
-                REPLACE with no value is the per-patient shift (#537).
+                construction. Study Date is the exception: its REPLACE
+                with no value is the per-patient shift. Keys are
+                lowercased here, with a WARNING when two keys collide.
                 A rule the scan cannot honour raises `ValueError` here
                 (`config_manager.validate_phi_policy`).
             remove_private_tags (bool): If True, scans all attributes for non-whitelisted private tags.
@@ -732,15 +722,13 @@ class PhiInspector:
         A caller may also legitimately have a tag *described* as "Shift".
 
         On a date tag other than Study Date -- `{"0008,0012": "SHIFT"}` --
-        the string form writes the DA dummy `19000101` since #557 (0.9.8
-        refused it, #560), which destroys the date as surely, so it is
-        warned about here like any other tag. On Study Date the string
-        form means the shift (#537), so `{"0008,0020": "SHIFT"}` and
-        `"JITTER"` do what they say and are not warned about. `"REMOVE"`
-        and `"EMPTY"` there still are, naming the shift as what happens:
-        the caller asked for removal and gets a retained, shifted date
-        (review of #574). The warning remains for a tag where REPLACE is
-        what happens.
+        the string form writes the DA dummy `19000101`, which destroys the
+        date as surely, so it is warned about here like any other tag. On
+        Study Date the string form means the shift, so
+        `{"0008,0020": "SHIFT"}` and `"JITTER"` do what they say and are
+        not warned about. `"REMOVE"` and `"EMPTY"` there still are, naming
+        the shift as what happens: the caller asked for removal and gets a
+        retained, shifted date.
         """
         offenders = sorted(
             tag for tag, val in self.phi_tags.items()
@@ -794,11 +782,20 @@ class PhiInspector:
         """
         Recursively scans a Patient and their child studies for PHI.
 
+        Patient Name and Patient ID are judged under their own rules
+        (`_owned_rule`); a value already holding the rule's replacement,
+        and a synthetic key for a subject with no Patient ID, raise
+        nothing. Then every study, series and instance beneath is scanned.
+
         Args:
             patient (Patient): The patient object to scan.
 
         Returns:
             List[PhiFinding]: A list of all identified PHI findings.
+
+        Raises:
+            RuntimeError: When a keyed Patient ID replacement has to be
+                minted and the inspector has no project secret.
         """
         findings = []
 
@@ -910,8 +907,13 @@ class PhiInspector:
 
         `patient` and `study` are the instance's owners. With them, a
         top-level copy of a tag they own that already holds their
-        replacement is not a finding (#496); without them nothing is
+        replacement is not a finding; without them nothing is
         skipped, and the policy judges every copy.
+
+        Findings on sequences (private sequences, and REMOVE or EMPTY
+        rules on a sequence tag) come last, deepest first
+        (`_innermost_first`), so anything raised inside a sequence is
+        remediated before its container is removed.
         """
         findings = []
 
@@ -1315,12 +1317,11 @@ class PhiInspector:
         `REMEDIATION_REMOVE` row for it. The export is right either way;
         the audit trail is not, and "every row describes an item that was
         still in the graph" is the claim this ordering exists to keep.
-        Stable, so sequences at equal depth keep the walk's order (#167).
+        Stable, so sequences at equal depth keep the walk's order.
 
         Applied on every return, not only when `remove_private_tags` is
-        on: it sat inside that block while private sequences were the only
-        container findings, and a configured sequence inside a configured
-        sequence needs the same order with the sweep off (#547).
+        on: a configured sequence inside a configured sequence needs the
+        same order with the sweep off.
         """
         return sorted(seq_removals, key=lambda f: len(f.entity_path),
                       reverse=True)
@@ -1328,22 +1329,18 @@ class PhiInspector:
     def _holds_owners_replacement(self, tag: str, value: Any, patient: Patient,
                                   study: Study) -> bool:
         """Whether `value`, an instance's top-level copy of `tag`, is the
-        replacement its owner already holds (#496).
+        replacement its owner already holds.
 
         Agreement alone is not enough: before anything is anonymized every
         copy equals its owner's *original*, and that is PHI. The owner's
         value has to be what the rule on the tag resolves to, by the owner
         scans' own test -- `_holds_owned_replacement`, the one
-        `scan_patient` and `_scan_study` stop raising on (#537): the
+        `scan_patient` and `_scan_study` stop raising on: the
         name's `value:` or `ANONYMIZED`, an `ANON_` pseudonym, a study date
-        this pipeline's shift produced (`_study_date_is_this_pipelines`),
-        or a Study Date `value:`. No owner, no skip.
-
-        The date arm read `study.date_shifted` until 0.9.6, and that flag
-        cannot tell the shift's own output from a fresh original assigned
-        over it -- so an instance's copy of a hand-replaced study date
-        skipped here as "the owner's replacement", which is #518 reached
-        through #496's door.
+        this pipeline's shift produced (`_study_date_is_this_pipelines`,
+        never `study.date_shifted` alone), or a Study Date `value:`. No
+        owner, no skip. A Patient ID copy under a subject with no Patient
+        ID is always skipped: the export stamps that ID empty.
         """
         if tag == "0008,0020":
             if study is None:
@@ -1382,17 +1379,17 @@ class PhiInspector:
 
     def _scan_owned_uid(self, entity, tag: str, attr: str, entity_type: str,
                         patient_id: str) -> List[PhiFinding]:
-        """The owner's own UID under the keyed UID replacement (#544).
+        """The owner's own UID under the keyed UID replacement.
 
         A Study owns `0020,000d` and a Series `0020,000e`: the exporter
         stamps each file's copy from the entity (`export_stamp_attributes`),
         so the entity is what has to move, and its remediation writes the
-        new UID onto each instance's top-level copy (#492). Raised against
-        the entity itself -- a Series is a finding entity of its own
-        (Q4 of #544) -- and only for the value-less REPLACE: `KEEP` retains
-        the UID, and a `REPLACE value:` leaves the owner as 0.9.8 did,
-        since one literal written into every Study would merge them under
-        the store's UNIQUE key. A UID this project minted is not raised.
+        new UID onto each instance's top-level copy. Raised against
+        the entity itself -- a Series is a finding entity of its own --
+        and only for the value-less REPLACE: `KEEP` retains the UID, and a
+        `REPLACE value:` leaves the owner alone, since one literal written
+        into every Study would merge them under the store's UNIQUE key. A
+        UID this project minted is not raised.
         """
         rule = _rule_for(self.phi_tags, tag)
         uid = getattr(entity, attr, None)
@@ -1409,7 +1406,7 @@ class PhiInspector:
                 original_value=uid, metadata={UID_REPLACEMENT: True}))]
 
     def _scan_series(self, series, patient_id: str = None) -> List[PhiFinding]:
-        """A Series' own PHI: its Series Instance UID (#544)."""
+        """A Series' own PHI: its Series Instance UID."""
         return self._scan_owned_uid(series, "0020,000e", "series_instance_uid",
                                     "Series", patient_id)
 
@@ -1417,7 +1414,7 @@ class PhiInspector:
                     jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
         """
         Scans a Study entity for study-level PHI: its Study Instance UID
-        (#544) and its Study Date.
+        and its Study Date.
         """
         return (self._scan_owned_uid(study, "0020,000d", "study_instance_uid",
                                      "Study", patient_id)
@@ -1425,7 +1422,10 @@ class PhiInspector:
 
     def _scan_study_date(self, study: Study, patient_id: str = None,
                          jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
-        """The Study Date arm of `_scan_study`."""
+        """The Study Date arm of `_scan_study`, under the rule on
+        `0008,0020` (`_owned_rule`). Under SHIFT a date this pipeline's
+        shift produced (`_study_date_is_this_pipelines`) is not raised
+        again; anything else is."""
         findings = []
         uid = study.study_instance_uid
 
