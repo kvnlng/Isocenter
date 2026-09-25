@@ -1224,9 +1224,9 @@ class DicomSession:
 
         The store is the SQLite file and a pixel file beside it
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
-        original identifiers and pixels** of everything ingested: nothing
-        de-identified is written anywhere until `export()`. Keep it where
-        you keep the source data.
+        original identifiers and pixels** of everything ingested, and
+        nothing else is written until `export()`. Keep it where you keep
+        the source data.
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`

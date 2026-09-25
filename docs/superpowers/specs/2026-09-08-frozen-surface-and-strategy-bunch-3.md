@@ -24,6 +24,12 @@ sentence that lists it inside `Instance(...)`, and §11 item 9's
 restatement of the same list (including "the nine frozen `Instance`
 fields"), no longer hold -- there are eight. `Study.date_shifted` is
 unchanged. Both clauses are marked in place.
+**Superseded in part:** 1.0.0rc2 docs round (2026-09-24). §5.2's rule,
+that tier-2 names "are rendered on this site", no longer holds:
+`docs/api/stability.md` now defines tier 2 as the names listed on that
+page, rendered in the API reference or named by a guide where a reader
+needs them, because the API pages stopped rendering the recording
+helpers and the store's internals. The clause is struck in place.
 
 **Status:** Determinations MADE, with evidence. §1–§5 are the
 recommendations; §0.2 lists the calls that are the owner's, each as
@@ -870,7 +876,9 @@ guide names it but it is a seam; tier 3 otherwise.
 > **Frozen (tier 1)** names keep their spelling, their parameter names,
 > their return shapes and their documented behaviour for every 1.x
 > release; a change is a 2.0. **Documented but internal (tier 2)** names
-> are rendered on this site and safe to call, and may change in a 1.x
+> ~~are rendered on this site~~ *(superseded: are listed on the stability
+> page, and rendered or named by a guide where a reader needs them)* and
+> safe to call, and may change in a 1.x
 > release with a CHANGELOG entry that names the old spelling and the new
 > one; they exist so a reader can see the seams, not so a program can
 > lean on them. **Private (tier 3)** names — everything with a leading

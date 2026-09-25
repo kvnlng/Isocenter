@@ -690,20 +690,15 @@ def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
 
 
 class SqliteStore:
-    """Persists the object graph to a SQLite database and a pixel sidecar.
+    """The session's SQLite store and pixel sidecar: `session.store_backend`.
 
-    Manages:
-
-    - reading and writing the Patient -> Study -> Series -> Instance
-      hierarchy;
-    - the append-only `<name>_pixels.bin` sidecar, its references and
-      its compaction;
-    - an asynchronous audit log, written by a background thread.
-
-    Picklable: a clone gets fresh locks and its own audit worker, and
-    never deletes the parent's temporary sidecar. Call `stop()` to settle
-    the audit log before dropping a store.
+    It holds the Patient -> Study -> Series -> Instance hierarchy, the
+    append-only `<name>_pixels.bin` sidecar, and the audit log, which a
+    background thread writes.
     """
+    # Picklable: a clone gets fresh locks and its own audit worker, and
+    # never deletes the parent's temporary sidecar. Call `stop()` to settle
+    # the audit log before dropping a store.
 
     #: Rows `get_flattened_instances` fetches per page.
     #:

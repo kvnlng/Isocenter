@@ -692,7 +692,7 @@ class PhiRemediation:
         original_value (Any): The original value for audit/reversion.
         metadata (Dict[str, Any]): Context metadata (e.g. patient linkage for date shifting).
     """
-    action_type: str  # e.g., "REPLACE_TAG", "REDACT_REGION"
+    action_type: str  # "REMOVE_TAG", "REPLACE_TAG" or "SHIFT_DATE"
     target_attr: str  # e.g., "patient_name", "study_date"
     new_value: Any = None
     original_value: Any = None
