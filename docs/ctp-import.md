@@ -22,7 +22,7 @@ GE LOGIQ ultrasound banner
 
 the output is
 
-```yaml
+```text
 rules:
 - manufacturer: GE
   model_name: LOGIQ E9
