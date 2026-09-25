@@ -28,6 +28,10 @@ if __name__ == "__main__":
         session.save(sync=True)
 ```
 
+[Prepare your own ECGs for a PhysioNet Challenge](tutorials/physionet-challenge-ecgs.md)
+walks this path end to end, and then shapes each header the way the
+Challenge's code reads it.
+
 Run it as a script: the `if __name__ == "__main__":` guard is required,
 because ingest starts worker processes that re-import the script. A WFDB
 export does not save the session (a DICOM export does), so call
