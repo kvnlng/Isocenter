@@ -30,10 +30,10 @@ class ManifestItem:
             current revision. Not "`anonymize()` ran": an input the scan
             found clean reads True after `audit()` alone. Not a statement
             about burned-in pixel text, which the tag scan does not read.
-            A remediation inside a sequence counts as one on its instance
-            (#494). False when the status does not establish it: never
-            scanned, edited since, or a remediation declined on it or
-            inside it in its last pass (#486).
+            A remediation inside a sequence counts as one on its instance.
+            False when the status does not establish it: never scanned,
+            edited since, or a remediation declined on it or inside it in
+            its last pass. False by default.
     """
     patient_id: str
     study_instance_uid: str
@@ -186,9 +186,8 @@ def get_manifest_renderer(format: str):
     exactly.
 
     Raises:
-        ValueError: For any other spelling, `None` included. A case variant
-            (`'HTML'`) was accepted until the 1.0 freeze (#26); one spelling
-            per behaviour, so it is refused rather than frozen.
+        ValueError: For any other spelling, `None` and case variants
+            (`'HTML'`) included.
     """
     if format == "json":
         return JSONManifestRenderer()

@@ -1,11 +1,10 @@
 """One answer to "which axis of this pixel array means what".
 
-Four places in this codebase used to decide what an image looked like by
-reading a numpy array's ``.shape`` and breaking the ``(frames, rows, cols)``
-vs. ``(rows, cols, samples)`` tie with ``if shape[-1] in [3, 4]``. Both
-readings are rank 3, so that test is a guess -- and the information that
-settles it was sitting unread in ``Instance.attributes`` at every one of the
-four sites (#186, #205).
+A rank-3 array is either ``(frames, rows, cols)`` or ``(rows, cols,
+samples)``, and its shape alone cannot say which; a test such as
+``if shape[-1] in [3, 4]`` is a guess. The descriptors in
+``Instance.attributes`` settle it, and every caller that needs a layout
+asks this module rather than reading ``.shape`` itself.
 
 The rule this module implements:
 
@@ -23,12 +22,12 @@ Import constraints, deliberate and load-bearing:
 - **No numpy.** The input is a shape tuple, not an array.
 - **No `entities`, no `io_handlers`.** Both import *this*; going the other
   way would be a cycle.
-- **No third-party import at all**, so `tests/test_packaging_contract.py`
-  needs no new `install_requires` entry.
+- **No third-party import at all**, so it adds no `install_requires`
+  entry.
 - `_export_instance_worker` runs in a **separate process under
   `session.export()` on every interpreter; by default `write_tree()`
   spawns it on a GIL build and runs it in the caller's own threads on a
-  free-threaded one** (#521; the `ExportOutcome.corrections` note in
+  free-threaded one** (the `ExportOutcome.corrections` note in
   `io_handlers.py`). So this has to be importable at module scope in a
   bare child, and a dependency-free module is all that child needs.
 
@@ -122,7 +121,7 @@ _IMPLICIT_SAMPLE_COUNTS = (3, 4)
 
 
 class GeometryEvidence(Enum):
-    """What settled the layout question -- not how confident we are.
+    """What settled the layout question -- not a confidence level.
 
     The distinction matters because the callers apply different policies to
     ``GUESSED``: `Instance.set_pixel_data` accepts it with a warning, so a
@@ -164,13 +163,10 @@ def declared_int(attributes: Any, tag: str) -> Optional[int]:
     would silently choose the frames arm for every fixture-generator RGB
     image.
 
-    The `str` coercion is load-bearing rather than defensive. `set_pixel_data`
-    used to write `str(frames)` for (0028,0008) while `ingest_worker` stores
-    an `int`, so a graph that has been through the buggy path once holds
-    ``"3"`` where ingest had ``3``; comparing raw values would fail the frames
-    check on exactly the instances the bug already touched. It also keeps the
-    `MagicMock` instances in `tests/test_pixel_analysis.py` working, since
-    ``int(str(MagicMock()))`` raises and so reads as "not declared".
+    The `str` coercion is load-bearing rather than defensive: a graph can
+    hold ``"3"`` where ingest stores ``3``, and both must read as 3. It
+    also makes an object with no integer spelling, such as a `MagicMock`,
+    read as "not declared", since ``int(str(MagicMock()))`` raises.
 
     Args:
         attributes: The instance's attributes mapping, or anything with a
@@ -212,8 +208,8 @@ def _contradiction(shape, s_d, f_d, r_d, c_d) -> ValueError:
 
     Raising is the only outcome that neither corrupts nor lies. Trusting the
     attributes writes descriptors that do not describe the bytes. Trusting the
-    array is the behaviour that produced #186. Logging a DATA_LOSS row
-    misnames it: nothing was dropped, two statements disagree.
+    array is guessing the layout. A DATA_LOSS row would misname it: nothing
+    was dropped, two statements disagree.
     """
     return ValueError(
         f"Pixel array shape {tuple(shape)} cannot be reconciled with the "
@@ -228,8 +224,9 @@ def _resolve_rank1(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
 
     The sidecar loader returns a 1-D array only when the stored metadata is
     too small for the buffer, in which case this is consulting the same
-    metadata that just failed. Nothing is gained or lost by trying; the
-    fall-through below is the existing behaviour and stays.
+    metadata that just failed. When the declared size fits in the buffer
+    (the caller truncates any padding) the result is DECLARED; otherwise
+    it is a single STRUCTURAL row of ``shape[0]`` columns.
     """
     rows = r_d or 0
     cols = c_d or 0
@@ -361,9 +358,8 @@ def resolve_photometric_interpretation(attributes: Any,
     """Decide what to write for PhotometricInterpretation (0028,0004).
 
     Photometric Interpretation is **not derivable from an array**: a 3-sample
-    array is equally RGB, YBR_FULL, YBR_FULL_422 or YBR_RCT. The old
-    ``if samples >= 3: "RGB"`` is what relabelled every ``YBR_FULL`` instance
-    on the way through ``get_pixel_data()``.
+    array is equally RGB, YBR_FULL, YBR_FULL_422 or YBR_RCT, so
+    ``if samples >= 3: "RGB"`` would relabel every ``YBR_FULL`` instance.
 
     So: correct only an outright contradiction, and only to the neutral
     default for the sample count.
@@ -393,10 +389,11 @@ def resolve_photometric_interpretation(attributes: Any,
 def planar_configuration_default(attributes: Any, samples: int) -> bool:
     """Whether to write PlanarConfiguration (0028,0006) = 0.
 
-    Only when the instance is colour **and has not declared one**. Forcing it
-    to 0 whenever ``samples >= 3`` -- the old behaviour -- overwrote a
-    declared planar-1 value with a claim about a layout nothing had
-    converted (#217).
+    Only when the instance is colour **and has not declared one**. A
+    declared value, planar 1 included, is kept: forcing 0 would claim a
+    layout nothing had converted. Ingest is not the only way a declared 1
+    reaches the graph; a hand-built instance and a reloaded one both carry
+    whatever was set.
 
     **One caller: `Instance.set_pixel_data()`.** That is the question this
     answers -- what descriptor should the graph carry when the caller
@@ -407,15 +404,8 @@ def planar_configuration_default(attributes: Any, samples: int) -> bool:
     `_write_pixel_geometry` describes the pixel element it has just
     written, and that element is interleaved whatever `attributes` says,
     so it writes 0 for every colour instance and spells the `samples >= 3`
-    gate out itself. Leaving that site on this predicate is what let
-    `write_tree` emit interleaved bytes under a `PlanarConfiguration` of 1
-    (#210).
-
-    An earlier version of this docstring said `ingest_worker`'s
-    normalisation means "on every live path there is nothing here to
-    correct". That was incomplete: ingest is not the only way a declared 1
-    reaches the graph -- a hand-built instance and a reloaded one both
-    carry whatever was set -- and #217's own narrowing is what preserves it.
+    gate out itself. Do not move that site onto this predicate: it would
+    write interleaved bytes under a `PlanarConfiguration` of 1.
 
     Args:
         attributes: The instance's attributes mapping.

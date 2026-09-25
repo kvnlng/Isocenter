@@ -10,7 +10,7 @@ replace them rather than extend them, with a CHANGELOG entry naming both
 spellings. A third-party exporter runs behind none of the export gates,
 which all live inside the two built-in formats, and each of its runs
 writes one `WARNING` audit row so the report grades `REVIEW_REQUIRED`.
-`docs/api/exporters.md` is the plugin author's page; #783 is the 1.1 work.
+`docs/api/exporters.md` is the plugin author's page.
 """
 from typing import Any, Dict, List
 

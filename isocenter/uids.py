@@ -1,6 +1,6 @@
-"""UIDs this library derives rather than reads (#584; L10 reuses the first helper).
+"""UIDs this library derives rather than reads.
 
-Two rules, each learned the expensive way:
+Two rules:
 
 - **Never pydicom's `generate_uid(prefix=None, entropy_srcs=...)`.** With
   `prefix=None`, pydicom 3.0.2 ignores `entropy_srcs` and returns
@@ -52,8 +52,8 @@ def generated_uid(kind: str, anchor: str) -> str:
 
     **Unkeyed, and safe only because the anchor is a UID.** The anchor is
     never the Patient ID: an unkeyed hash of an MRN written into an
-    exported UID lets anyone confirm a guessed MRN by hashing it
-    (GHSA-phg9-vcvc-j4r7's shape). A UID the source already carried
+    exported UID lets anyone confirm a guessed MRN by hashing it. A UID
+    the source already carried
     reveals nothing new.
     """
     digest = hashlib.sha256(

@@ -1,18 +1,14 @@
 """The grammar for `instance_blobs.kind`.
 
-One column, one spelling, decided once (#183). `kind` was two literals --
-`'pixels'` and `'waveform'` -- until nested pixel data needed a third shape,
-and the column is unconstrained `TEXT NOT NULL` so a composite spelling
-needs no DDL change. It is still a schema decision, though: the table's only
-key is `UNIQUE(instance_uid, kind)`, and changing the spelling after rows
-exist is a migration.
+One column, one spelling. A kind is `'pixels'`, `'waveform'`, or one of
+those roots plus the path to a nested element. The column is unconstrained
+`TEXT NOT NULL`, but the spelling is still a schema decision: the table's
+only key is `UNIQUE(instance_uid, kind)`, and changing the spelling after
+rows exist is a migration.
 
-**Its own module rather than a pair of functions in `persistence.py`,
-where the gate it feeds lives.** `persistence.py` imports
-`SidecarPixelLoader` from `io_handlers.py`, and `io_handlers.py` has to
-build a kind at ingest -- so putting the grammar in `persistence.py` means
-either an import cycle or a function-local import hiding one. Three modules
-read this and none of them owns it. Stdlib only, so it adds nothing to
+Kept in its own module, not in `persistence.py`: `persistence.py` imports
+from `io_handlers.py`, which builds a kind at ingest, so the grammar there
+would need an import cycle. Stdlib only, so it adds nothing to
 `install_requires`.
 """
 
@@ -125,12 +121,10 @@ def serialize_blob_kind(root: str, path: tuple,
                         terminal_tag: Optional[str]) -> str:
     """Build an `instance_blobs.kind` from its parts. The only way to.
 
-    Nothing may assemble a kind by f-string at a call site: that is precisely
-    the "invented at the call site" failure #183 names, and it is what puts
-    three spellings of one thing in one column. This is the inverse of
+    Nothing may assemble a kind by f-string at a call site; that puts
+    several spellings of one thing in one column. This is the inverse of
     `parse_blob_kind` and re-parses its own output, so it cannot write a key
-    the gate would refuse -- left permissive it would be the f-string it
-    exists to replace.
+    the gate would refuse.
 
     Args:
         root (str): `'pixels'` or `'waveform'`.

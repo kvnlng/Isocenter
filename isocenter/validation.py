@@ -11,13 +11,13 @@ class IODValidator:
     Currently implements a subset of "Common" and "CTImage" modules.
 
     **Validate, and fill.** The export worker asks `absent_type2` before it
-    asks `validate`, and writes each tag it names zero-length (#600): Type 2
+    asks `validate`, and writes each tag it names zero-length: Type 2
     means present and empty when unknown, so an absent one is a gap the
     writer can close faithfully rather than a reason to refuse the file.
     Both read `_modules_for`, so the fill covers exactly what the Type 2 arm
     of `validate` would report and nothing this table does not know.
-    `validate`'s Type 2 arm is kept: it is the guard that goes red if the
-    fill ever stops running. Type 1 is never filled.
+    `validate`'s Type 2 arm stays: it is the guard that reports a gap if
+    the fill ever stops running. Type 1 is never filled.
     """
 
     _MODULE_DEFINITIONS = {
@@ -67,7 +67,7 @@ class IODValidator:
 
     @staticmethod
     def absent_type2(ds: Dataset) -> List[BaseTag]:
-        """Every Type 2 tag of `ds`'s modules that `ds` does not hold (#600).
+        """Every Type 2 tag of `ds`'s modules that `ds` does not hold.
 
         Exactly the set `validate` reports as `[Type 2 Error]`: absent, not
         empty, since an empty Type 2 element is conformant. Type 1 tags are

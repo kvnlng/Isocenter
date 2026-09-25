@@ -21,8 +21,7 @@ class DicomBuilder:
     def start_patient(patient_id, name):
         """Begin building a Patient.
 
-        The first parameter was `id` until the 1.0 freeze (#26), which
-        shadowed the builtin; it was renamed, not aliased, so
+        The first parameter is `patient_id`; there is no `id` keyword, so
         `start_patient(id=...)` raises `TypeError`.
         """
         return PatientBuilder(patient_id, name)
@@ -75,20 +74,16 @@ class SeriesBuilder:
 
         Routed through `Equipment.from_parts`, so a call with neither a
         manufacturer nor a model name leaves `series.equipment` as
-        `None` -- the same answer ingest and reload give (#290). Before
-        that this was the one construction site with no predicate, and
-        `.set_equipment("", "", "SN")` built an `Equipment` that
-        `save_all` wrote and no reload could return.
+        `None`, the same answer ingest and reload give.
 
         **Also writes the equipment onto every instance** -- those already
         added, and (through `add_instance`) those added later -- as
         Manufacturer (0008,0070), Manufacturer's Model Name (0008,1090)
-        and Device Serial Number (0018,1000), each only when given (#570).
-        The instance is where the export reads equipment from; the writer
-        re-stamping it from `Series.equipment` put a serial back into a
-        file after `anonymize()` had removed it from the instance. The
-        latest write wins: a `set_attribute` of one of the three tags
-        before this call is overwritten by it, and one after is kept.
+        and Device Serial Number (0018,1000), each only when given. The
+        export reads equipment from the instance, not from
+        `Series.equipment`. The latest write wins: a `set_attribute` of
+        one of the three tags before this call is overwritten by it, and
+        one after is kept.
         """
         self.series.equipment = Equipment.from_parts(man, mod, sn)
         for inst in self.series.instances:
@@ -108,7 +103,7 @@ class SeriesBuilder:
 
     def add_instance(self, uid, cls, num):
         """Adds a child Instance to this Series, carrying the series'
-        equipment tags if `set_equipment` has already run (#570)."""
+        equipment tags if `set_equipment` has already run."""
         inst = Instance(uid, cls, num)
         self._stamp_equipment(inst)
         self.series.instances.append(inst)

@@ -9,12 +9,12 @@ overridden by the user's specific "phi_tags" configuration.
 `BASIC_PROFILE` is the Basic Prof. column of DICOM PS3.15 Annex E, Table
 E.1-1, edition 2026c: one rule per row, apart from the departures
 `tests/support/annex_e.py` names with their reasons. Its `U` rows replace
-each UID with one derived from the project secret (#544). It is not the
-whole of Annex E -- the attributes that record de-identification are not
-written (#554). See docs/configuration.md.
+each UID with one derived from the project secret. It is not the whole
+of Annex E: the attributes that record de-identification are not rules
+here; the export writes them. See docs/configuration.md.
 
-A profile's name is pinned to the PS3.15 edition its table was taken from
-(#714): `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
+A profile's name is pinned to the PS3.15 edition its table was taken
+from: `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
 `basic` means `basic@2026c` in every 1.x (`PROFILE_ALIASES`). A later
 edition arrives as a second literal under a new name (`basic@2027a`),
 never as an edit to this one. How a name resolves is `config_manager`'s:

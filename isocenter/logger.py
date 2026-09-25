@@ -101,25 +101,22 @@ def describe_exception(exc: BaseException) -> str:
 
     **Why the type leads.** `str()` is `''` for `KeyError()`,
     `StopIteration()`, `OSError()`, `AssertionError()` and most bare
-    raises, so a reason built as `f"...: {e}"` ended in a colon and said
-    a step failed without saying how, and one built as `str(e)` was
-    empty -- which ingest tested with `if err:` and dropped, so the file
-    was counted nowhere (#435). A message alone also cannot tell
-    `KeyError('x')` from the string `'x'`.
+    raises, so a reason built from the message alone can be empty, and a
+    caller testing it for truth would drop the failure. A message alone
+    also cannot tell `KeyError('x')` from the string `'x'`.
 
     **Why the cause, and only the direct one.** `get_pixel_data()` wraps
     a loader's error in `RuntimeError("Pixel Loader failed ...") from e`,
-    so without the cause a sidecar `OSError` reaches `PhiReport.failures`
-    named only as a `RuntimeError` (#423). `__context__` -- an exception
-    raised while handling another, without `from` -- is not followed: the
-    raiser did not say the two were one failure.
+    so without the cause a sidecar `OSError` would reach
+    `PhiReport.failures` named only as a `RuntimeError`. `__context__` --
+    an exception raised while handling another, without `from` -- is not
+    followed: the raiser did not say the two were one failure.
 
-    **One spelling.** Bunch E (#423) wrote this as
-    `pixel_analysis._describe_failure`, with a trailing `: ` for an empty
-    message; this replaced it, and every site that turns an exception
-    into audit text, a summary reason or a report failure calls this.
-    Here because `logger` is a leaf every one of those modules already
-    imports, so no caller imports another caller for it.
+    **One spelling.** Every site that turns an exception into audit text,
+    a summary reason or a report failure calls this. It lives here
+    because `logger` is a leaf every one of those modules already
+    imports. Never raises: an exception whose `__str__` raises is
+    spelled by its type.
     """
     text = _type_and_message(exc)
     cause = exc.__cause__
@@ -135,12 +132,9 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     its `strerror` alone (`NotADirectoryError: Not a directory`), because
     its `str()` appends `filename` and `filename2`, and an export path is
     built from the graph: `Subject_<Patient ID>/...` for a DICOM file,
-    `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB
-    exporter's `ERROR` rows interpolated the exception whole (#588), the
-    DICOM export worker printed the output path and then the exception
-    to stderr (P8, bunch E), and the DICOM `ERROR` row
-    (`DicomExporter._report_export_failures`) recorded both the same
-    way. An `OSError` with no `strerror` -- `OSError("cannot open
+    `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB and
+    DICOM export `ERROR` rows and the DICOM export worker's stderr use
+    this. An `OSError` with no `strerror` -- `OSError("cannot open
     <path>")` -- is its type alone: its message is whatever the raiser
     wrote, and the one exception this exists for is the one whose
     message is built around a path.
@@ -150,12 +144,9 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     report exists to show, and there is no general way to tell a path in
     one from prose. An exception type that writes a path into its own
     message is not caught by this, so the fix belongs at the raise:
-    name the instance there. Found and fixed that way (review of #589):
-    the export worker's `Refusing to write <output path>` refusals
-    (`io_handlers._export_instance_worker`), `get_pixel_data()`'s
-    `Lazy load failed for <source path>` and `Failed to decompress pixel
-    data for <file name>`, and `_verify_readback`'s inner exception.
-    Name any further one here.
+    name the instance there, as the export worker's refusals
+    (`io_handlers._export_instance_worker`), `get_pixel_data()`'s load
+    and decompress failures, and `_verify_readback`'s inner exception do.
     """
     text = _type_and_reason(exc)
     cause = exc.__cause__

@@ -177,14 +177,13 @@ class TrackedEntity:
     This is persistence bookkeeping and nothing else. It says whether the
     object in memory has been written to the session store -- not whether
     it still carries identifiers, which is a separate question with its
-    own vocabulary. Both were called "dirty" once, which made them
-    indistinguishable in the code and in the output users read.
+    own vocabulary (`phi_status`).
 
     State is read through `has_unsaved_changes` and moved through
     `mark_modified()` and `mark_persisted()`. There is deliberately no
     setter: an entity can be told what happened to it, but not told what
-    it is. "Declare this saved" is precisely the operation that let a
-    rolled-back save leave instances claiming they had been written.
+    it is. A "declare this saved" setter would let a rolled-back save
+    leave instances claiming they had been written.
 
     The revision counter is what makes a concurrent edit survive. A save
     records the revision it actually wrote; an edit arriving while that
@@ -489,12 +488,9 @@ class DicomItem(TrackedEntity):
         Delegates the creating half to `add_sequence()` rather than
         repeating it, so there is one spelling of "a sequence comes into
         existence". The first item on a brand-new sequence therefore
-        advances `_revision` twice where it advanced once -- harmless,
-        because `_revision` is a monotonic counter and
-        `has_unsaved_changes` is a comparison rather than arithmetic, but
-        real, and `tests/test_empty_sequence_roundtrip.py::
-        test_adding_the_first_item_to_a_new_sequence_still_leaves_one_dirty_entity`
-        is what says so.
+        advances `_revision` twice -- harmless, because `_revision` is a
+        monotonic counter and `has_unsaved_changes` is a comparison rather
+        than arithmetic. Sets the item's `_parent` to this item.
 
         Args:
             tag (str): The DICOM tag for the sequence.
@@ -737,35 +733,22 @@ def _defer(notes, level, message, *args):
 
 
 def _decode_from_file(ds):
-    """A file's pixels through ingest's own decode, and their colour space (#453).
+    """A file's pixels through ingest's own decode, and their colour space.
 
     **`io_handlers._decode_pixels`, the function `ingest()`, the export
     readback and an icon decode through**, so this door refuses what
     ingest refuses, in the same words, and reads what ingest reads, to
-    the same array under the same label. It used to make its own pydicom
-    call and hand *any* failure, validation errors included, to
-    `imagecodecs_handler.get_pixel_data`, which had no colour-space
-    allow-list, no 16-bit conversion refusal and no dtype, shape or size
-    guard: a 16-bit RGB JPEG 2000 file missing PlanarConfiguration was
-    refused at ingest and read here, and a 16-bit YBR_FULL JPEG-LS file
-    came back as its stored YBR samples. Imported at call time, because
-    `io_handlers` imports this module.
+    the same array under the same label. Do not give it a decode path of
+    its own. Imported at call time, because `io_handlers` imports this
+    module.
 
     The colour space is the decoder's statement about the array, not the
     file's label: with pydicom's default `as_rgb=True` every 8-bit YBR
-    family comes back RGB while the dataset keeps its YBR label (#482),
-    and the fallback returns the label it measured (#448). The caller
-    relabels from it.
-
-    `as_pixel_options(ds)` is no longer passed. `as_array(ds)` reads the
-    same Image Pixel elements from the dataset itself, and returns the
-    same arrays with and without them -- NumberOfFrames absent, `0`, an
-    Extended Offset Table, native and encapsulated (measured, pydicom
-    3.0.2); the only difference was a second "A value of '0' for
-    (0028,0008) 'Number of Frames' is invalid" warning.
+    family comes back RGB while the dataset keeps its YBR label, and the
+    fallback returns the label it measured. The caller relabels from it.
 
     **Where pydicom would refuse before decoding -- no Transfer Syntax
-    UID (#281's header-less population), or one no decoder implements --
+    UID (a header-less file), or one no decoder implements --
     this asks `ds.pixel_array` instead**, which refuses in pydicom's own
     words. Those words reach the caller through `get_pixel_data()`'s
     `Lazy load failed for instance <uid>: <Type>: ...`, and they are not
@@ -775,7 +758,7 @@ def _decode_from_file(ds):
     Returns:
         ``(array, photometric)``. The `ds.pixel_array` branch has no meta
         and puts None beside its array in form only: every case that
-        reaches it raises (measured: no Transfer Syntax UID raises
+        reaches it raises (no Transfer Syntax UID raises
         `AttributeError`, and one no decoder implements raises
         `NotImplementedError`).
     """
@@ -883,12 +866,12 @@ _FILE_DESCRIBED_KEYWORDS = (
 
 
 class _FileReadCapture:
-    """What a file-arm read was shaped by, for `_publish_loaded_frame` (#595).
+    """What a file-arm read was shaped by, for `_publish_loaded_frame`.
 
-    The file arm's twin of the sidecar loader's capture (#531). The file
+    The file arm's twin of the sidecar loader's capture. The file
     holds the samples and declares six descriptors; the instance may hold
     its own, and **the instance's win** where it holds one, as they do for
-    the sidecar (#417). `descriptors` is `SidecarPixelLoader._descriptors_of`
+    the sidecar. `descriptors` is `SidecarPixelLoader._descriptors_of`
     over the file's six overlaid with the instance's; `file_descriptors`
     the same over the file's alone. Equal, and the decode is the frame
     (every unedited instance, and a bare one that holds no descriptors);
@@ -903,7 +886,7 @@ class _FileReadCapture:
     `describes()` is asked under `PIXEL_STATE_LOCK`, so it keeps the leaf a
     leaf: one `dict()` copy of the attributes and six `int()`s, no log, no
     sqlite, no lock. It can raise `ValueError`/`TypeError` for a descriptor
-    that does not parse, as the sidecar's does -- the #417 refusal.
+    that does not parse, as the sidecar's does.
     """
 
     __slots__ = ("_descriptors_of", "_file", "_carrier", "descriptors",
@@ -960,11 +943,10 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
     """Why an edit over an unsaved array was refused, in tags and sizes only.
 
     **No value a caller passed is echoed, on either branch.** This text
-    reaches audit rows through a raising remediation (#553), and a
-    `REPLACE` rule can carry a config- or patient-derived value to a
-    descriptor: an unparseable one can be anything, and an integer a US
-    tag can hold passes #560's VR check and reaches here parsed (measured:
-    `REPLACE_TAG` Rows 1965 declined with the value in the row). So an
+    reaches audit rows through a raising remediation, and a `REPLACE`
+    rule can carry a config- or patient-derived value to a descriptor: an
+    unparseable one can be anything, and an integer a US tag can hold
+    passes the VR check and reaches here parsed. So an
     unparseable value is named only as unparseable, and a parsed one only
     by what it would read the bytes as -- the sample count, the itemsize
     and the byte total -- never by the value or a shape that repeats it.
@@ -982,9 +964,8 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
     because `io_handlers` imports this module. The defaults the "reads
     as" clause names are read from it -- `descriptors_of({})` is the six
     descriptors with nothing set, in the order `_DESCRIBED_TAG_KEYWORDS`
-    lists them -- rather than kept as a table here: a table was a second
-    statement of the loader's rule, and it drifted unpinned (review of
-    #628 round 2, F2).
+    lists them -- rather than kept as a table here, which would be a
+    second statement of the loader's rule.
     """
     keyword = _DESCRIBED_TAG_KEYWORDS[tag]
     held = (f"the unsaved {array.dtype.name} {tuple(array.shape)} array "
@@ -1333,7 +1314,7 @@ class Instance(DicomItem):
         get_logger().debug(f"  -> Identity regenerated: {new_uid}")
 
     def _take_sop_uid(self, new_uid: str, *, pixels_changed: bool) -> None:
-        """Move this instance to `new_uid` (#544): the property and the
+        """Move this instance to `new_uid`: the property and the
         `0008,0018` element together, and `SOURCE_SOP_UID_ATTR` the first
         time only.
 
@@ -1341,13 +1322,13 @@ class Instance(DicomItem):
         replacement at `anonymize()` (`pixels_changed=False`) and
         redaction (`pixels_changed=True`, through `regenerate_uid`) -- so
         "the UID this instance was ingested under" has one record, which
-        the ingest gate (#238), a report from before the move
+        the ingest gate, a report from before the move
         (`Session._instances_by_uid`) and redaction's own UID all read.
 
         Only the first one is recorded. The UIDs written here exist in no
         source file, so recording a later one would replace the single
         value a re-ingested source file could actually carry. A second
-        redaction (`force=True`, #237), or a redaction after UID
+        redaction (`force=True`), or a redaction after UID
         replacement, must leave it alone. Direct assignment, not
         `set_attr`: `set_attr` lowercases the key. The revision already
         moved on the `set_attr`, so the store still sees this instance as
@@ -1368,8 +1349,8 @@ class Instance(DicomItem):
             self.file_path = None
 
     def __setattr__(self, name, value):
-        """An assignment of `sop_instance_uid` that changes it is a change
-        (#767, review finding 3), as an owner's tracked field is
+        """An assignment of `sop_instance_uid` that changes it is a change,
+        as an owner's tracked field is
         (`_assign_tracked_field`): the export names the file by it and
         writes it as `0008,0018`, so a UID set back after the pass is a
         value no scan read, and the status recorded before it goes stale.
@@ -2085,12 +2066,15 @@ class Instance(DicomItem):
 
         This is not an optimisation. `set_attr` bumps `_revision`, so an
         idempotent call would otherwise dirty the instance and have the
-        next `save()` rewrite a row that did not change (#186).
+        next `save()` rewrite a row that did not change.
 
         The comparison parses the stored value the way the resolver does,
-        so an instance holding `"3"` from the old string form of
-        NumberOfFrames compares equal to `3` and is left alone. The
-        canonicalisation to `int` therefore does not churn existing graphs.
+        so an instance holding `"3"` for NumberOfFrames compares equal to
+        `3` and is left alone.
+
+        Writes through `DicomItem.set_attr`, never `Instance.set_attr`: the
+        callers hold `PIXEL_STATE_LOCK`, which `Instance.set_attr` takes
+        for a described tag, so the override would deadlock.
         """
         if declared_int(self.attributes, tag) == value:
             return False
@@ -2114,14 +2098,14 @@ class Instance(DicomItem):
         return True
 
     def _relabel_to_decoded_colour(self, label: str) -> None:
-        """`get_pixel_data()`'s decode converted: say so (#464, #482).
+        """`get_pixel_data()`'s decode converted: say so.
 
         The decoder converted the frame this read is about to publish and
         said so: the handler by relabelling its dataset (8-bit YBR_FULL
         JPEG-LS, J2K YBR_RCT/ICT), pydicom in its decoder's meta (8-bit
         YBR sources). The instance's PhotometricInterpretation follows, as
-        ingest's does. Otherwise the door returns RGB bytes under a YBR
-        label, which is #372's defect, and export writes the two together.
+        ingest's does, so RGB bytes are never returned or exported under a
+        YBR label.
         It bumps the revision, because a new label is a change the store
         should hold. **Every read arm relabels through here, and only
         `_publish_loaded_frame` calls it**, so every relabel gets the
@@ -2129,19 +2113,19 @@ class Instance(DicomItem):
         frame is not a read: `Session._apply_redaction_outcomes` copies a
         process worker's redaction result across, the worker's label with
         its loader, under the same lock and without this helper, which
-        writes only on a read's publishing branch (#482).
+        writes only on a read's publishing branch.
 
         **Only when the instance already carries a label.** A bare
         `Instance(file_path=...)` holds no descriptors, so nothing on it
         is false. Neither arm adds one: a lone PhotometricInterpretation
-        beside no Rows would be a write no read has made before. After
+        beside no Rows would be a write no read makes. After
         `ingest()` the label is RGB already, so on that path this writes
         nothing. It is for hand-built graphs.
 
         **Called under `PIXEL_STATE_LOCK`, on the publishing branch
         only.** `_publish_loaded_frame` holds the leaf, finds `pixel_array`
-        still None, and relabels and publishes the frame in that one hold
-        (#465). A `set_pixel_data()` that landed during the load has
+        still None, and relabels and publishes the frame in that one hold.
+        A `set_pixel_data()` that landed during the load has
         filled the slot, so neither happens and the set keeps its label and
         its pixels; a set that lands after the hold writes its own label
         over this one. It takes no lock of its own: the caller holds a
@@ -2155,67 +2139,48 @@ class Instance(DicomItem):
     def _publish_loaded_frame(self, arr: np.ndarray,
                               relabel: Optional[str] = None,
                               capture=None) -> np.ndarray:
-        """Cache the frame a read arm loaded, unless a set got there first (#465).
+        """Cache the frame a read arm loaded, unless a set got there first.
 
-        The two read arms -- the sidecar loader and the file (a third,
-        the file arm's imagecodecs fallback, went with #453) -- load with
+        The two read arms -- the sidecar loader and the file -- load with
         no lock held, since a decode can take seconds and
-        `PIXEL_STATE_LOCK` is a leaf held for
-        microseconds, and then publish here. They used to assign the
-        frame and clear the unwritten flag unconditionally: a
-        `set_pixel_data()` that landed during the load was overwritten by
-        the stale stored frame, the clear marked the lost pixels written,
-        `unload_pixel_data()` then dropped the only copy, and the next
-        save dedup'd against the stored frame. A set of another geometry
-        left the stored frame resident under the set's descriptors, with
-        the #434 record set beside a flag that said written.
+        `PIXEL_STATE_LOCK` is a leaf held for microseconds, and then
+        publish here. Publishing unconditionally would let a
+        `set_pixel_data()` that landed during the load be overwritten by
+        the stale stored frame and then be marked written, so a later
+        `unload_pixel_data()` would drop the only copy.
 
         So: under the leaf, publish only while the slot is still empty,
         and otherwise return what is resident, the set's array. **The
         predicate is the slot**, not the flag and not the revision. The
         flag stays set after a `discard_pixel_data()`, and the read that
-        follows must publish (A10 and S6 in
-        `tests/test_descriptor_edit_with_pixels_unloaded.py`). The
-        revision moves on every `set_attr`, every PHI status and the
-        relabel below, none of which makes the loaded frame wrong, so a
-        revision guard would refuse to cache under an audit running on
-        another thread.
+        follows must publish. The revision moves on every `set_attr`,
+        every PHI status and the relabel below, none of which makes the
+        loaded frame wrong, so a revision guard would refuse to cache
+        under an audit running on another thread.
 
-        **The one other predicate is the capture, and it is not the
-        revision guard rejected above.** `capture` is the loader the
-        sidecar arm read `arr` through (or the file arm's
-        `_FileReadCapture`, #595), and its `describes(self)` asks
-        one question: are the six descriptors the frame was shaped and
-        typed by still the instance's? A descriptor edit that lands while
-        the read is inside its sidecar read is the one change that makes
-        the loaded frame wrong -- published, it sits under a declaration
-        the store reads the other way, and it sticks (#531; measured in
-        the review of PR #628's first push: 92 of 200 trials on 3.14t)
-        -- and it is the only change this asks about. A PHI status, a
-        name edit, the relabel below: none moves the capture. So the
-        guard cannot false-trigger the way a revision guard would, and
-        on a stale capture it returns
-        `_STALE_CAPTURE` without publishing, and the sidecar arm reads
-        again. Asked under the leaf, as it must be: asked outside it, an
-        edit between the answer and the publish is the same window. It
-        keeps the leaf a leaf -- `describes()` is one `dict()` copy of the
-        attributes and six `int()`s: no log call, no sqlite, no frame
-        write, and no lock. The file arm passes one too since #595
-        (`_FileReadCapture`): it reads the decoded samples under the
-        instance's descriptors, so an edit during its decode is the same
-        window, and on `_STALE_CAPTURE` it reinterprets the decode it
-        already holds rather than decoding again.
+        **The one other predicate is the capture, and it is not a
+        revision guard.** `capture` is the loader the sidecar arm read
+        `arr` through (or the file arm's `_FileReadCapture`), and its
+        `describes(self)` asks one question: are the six descriptors the
+        frame was shaped and typed by still the instance's? A descriptor
+        edit that lands while the read is in flight is the one change
+        that makes the loaded frame wrong -- published, it would sit under
+        a declaration the store reads the other way -- and it is the only
+        change this asks about. A PHI status, a name edit, the relabel
+        below: none moves the capture. On a stale capture this returns
+        `_STALE_CAPTURE` without publishing: the sidecar arm reads again,
+        and the file arm reinterprets the decode it already holds under
+        the new descriptors. Asked under the leaf, as it must be: asked
+        outside it, an edit between the answer and the publish is the
+        same window. `describes()` keeps the leaf a leaf -- one `dict()`
+        copy of the attributes and six `int()`s: no log call, no sqlite,
+        no frame write, and no lock. It can raise for a descriptor that
+        does not parse; the slot is then left empty and the lock released.
 
-        `relabel` is the colour space the decode converted to (#464,
-        #482), written only when this read publishes.
-
-        The imagecodecs arm is a read like the other two, and its clear
-        through here is pinned by
-        `tests/test_single_frame_encapsulated_decode.py`'s
-        `test_the_imagecodecs_fallback_reads_a_frame_pydicom_cannot`
-        (set, discard, read, and `unload_pixel_data()` must come back
-        True). Until #407 no transfer syntax reached that arm, and its
-        clear was the one line in this method no test could see.
+        `relabel` is the colour space the decode converted to, written
+        only when this read publishes. Publishing clears the unwritten
+        flag: the resident array is then what is stored, so it is
+        freeable again.
         """
         with PIXEL_STATE_LOCK:
             if self.pixel_array is None:
@@ -2263,19 +2228,18 @@ class Instance(DicomItem):
         - `'b'` -- carried by name in the dtype carrier.
         - `'f'` whose name is in `SIDECAR_DTYPE_NAMES` -- likewise.
 
-        Everything else round-tripped wrongly and nothing refused it:
-        `complex64` recorded no carrier, declared `BitsAllocated 128` and
-        reloaded through the loader's fallback as `uint16`, silently
-        (#386).
+        Everything else would round-trip wrongly and is refused: a
+        `complex64` array, for example, would record no carrier, declare
+        `BitsAllocated 128` and reload through the loader's fallback as
+        `uint16`.
 
         **Byte order is normalised rather than refused.** A big-endian
         `>i2` is kind `'i'` at 2 bytes and passes every clause -- but the
         sidecar stores raw bytes and the loader reads them with a
-        native-order dtype, so it reloaded byte-swapped. Refusing an
-        array that is exactly representable and merely spelled unusually
-        would be the wrong answer; `>i2` and `<i2` now produce
-        byte-identical frames, which is what a caller means by handing
-        over either. Note that the normalised array is a **copy**, so a
+        native-order dtype, so stored as given it would reload
+        byte-swapped. Such an array is exactly representable and merely
+        spelled unusually, so it is converted: `>i2` and `<i2` produce
+        byte-identical frames. Note that the normalised array is a **copy**, so a
         caller who mutates a big-endian array in place after this call no
         longer reaches the frame the instance holds -- the one place
         where "callers mutate arrays in place" stops being true.
@@ -2875,16 +2839,15 @@ class Patient(TrackedEntity):
 
 
 def _assign_tracked_field(entity, name, value) -> None:
-    """Assign a tracked field, and record the change when it is one (#767).
+    """Assign a tracked field, and record the change when it is one.
 
     `Patient`, `Study` and `Series` route the fields the export writes
     from them, or the scan reads on them, through here (their
-    `_TRACKED_FIELDS`), and `Instance` its `sop_instance_uid` (review of
-    #774, finding 3). A plain assignment used to leave `_revision` where
-    it was, so a status recorded before it went on describing a value no
-    scan had read -- the export stamped the real name beside a PASS --
-    and the save, which writes an owner row only when it holds unsaved
-    changes, never stored it.
+    `_TRACKED_FIELDS`), and `Instance` its `sop_instance_uid`. A change
+    advances `_revision`, so a PHI status recorded before it goes stale
+    and the next save writes the row. A change to a `Series` field also
+    marks each of its instances modified, except while `PASS_WRITING` is
+    set.
 
     - **The value first, then the revision.** A background `save()`
       captures the revision before it reads the fields. Moved first, a

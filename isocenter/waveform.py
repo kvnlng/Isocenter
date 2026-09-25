@@ -182,12 +182,10 @@ def _item_index(group_ordinal: int) -> int:
     the group Isocenter keeps.
 
     A group ordinal of 0 is not a valid 1-based ordinal, and `max` reads
-    it as the first group rather than discarding it. That is the only
-    sane reading: 0 cannot be confused with a group that survived,
-    because there is no other group it could name, whereas rejecting it
-    would drop every annotation a 0-counting source carries. Isocenter's
-    own fixture generator wrote 0 until #159, which is exactly how long
-    the value went unread. Do not "simplify" the `max` away.
+    it as the first group rather than discarding it: 0 cannot be confused
+    with a group that survived, because there is no other group it could
+    name, whereas rejecting it would drop every annotation a 0-counting
+    source carries. Do not "simplify" the `max` away.
     """
     return max(0, int(group_ordinal) - 1)
 
@@ -212,12 +210,11 @@ def filter_dangling_annotation_refs(entity, kept_items: int):
     """Drop annotation references to Waveform Sequence items not kept.
 
     Runs wherever multiplex groups beyond `kept_items` have just been
-    removed from the graph (#160's `del` at ingest, and the hydration
-    heal for stores written before it). Waveform Annotation Sequence
-    (0040,B020) lives at instance level, not inside the group it refers
-    to, so removing an item leaves any annotation naming its ordinal
-    pointing at nothing in the exported file -- exactly the kind of
-    reference a strict downstream reader rejects (#177).
+    removed from the graph (the discard at ingest, and the same repair
+    at hydration). Waveform Annotation Sequence (0040,B020) lives at
+    instance level, not inside the group it refers to, so removing an
+    item leaves any annotation naming its ordinal pointing at nothing in
+    the exported file, a reference a strict downstream reader rejects.
 
     It is a filter on (group, channel) PAIRS before it is a drop of
     items: an annotation may name all of group 1 plus a channel of
@@ -410,9 +407,7 @@ class WaveformChannel:
         lead-name allowlist below or `_sanitize_description`, and pydicom
         does not enforce SH's content restrictions on read or write, so a
         non-conformant (or malicious) source can still put anything here,
-        including an embedded newline (see
-        `test_coded_channel_source_newline_cannot_manufacture_a_hea_comment`
-        in `tests/test_wfdb_conformance.py`, which proves exactly that).
+        including an embedded newline.
         The `.hea` writer and the Murmur bridge both sanitize line-break
         characters out of whatever this returns as their own last line of
         defense.
@@ -424,8 +419,8 @@ class WaveformChannel:
 
         The check lives here rather than in the privacy profile on purpose:
         the PHI scan is tag-gated, so a profile entry protects only a
-        session whose policy carries it. The floor (#495) and the basic
-        profile (#547) remove Channel Label, but `privacy_profile: none`
+        session whose policy carries it. The floor and the basic
+        profile remove Channel Label, but `privacy_profile: none`
         or a `KEEP` on it leaves the label to this check alone.
 
         Args:

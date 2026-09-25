@@ -5,7 +5,7 @@ This module contains the `IsocenterConfiguration` dataclass which encapsulates e
 needed to drive a session's behavior, including redaction rules, PHI profiling,
 and date shifting parameters. It also handles the persistent state of these
 settings in a backing YAML file, which it writes only when asked:
-`save()`, or every change once `auto_save` is on (#715).
+`save()`, or after every change while `auto_save` is on.
 """
 import copy
 import hashlib
@@ -29,10 +29,8 @@ class FlowList(list):
     """A list YAML should render inline, as [a, b, c].
 
     Redaction zones read as coordinates, not as a bulleted list four
-    lines tall. Defined once here and registered once at import: this
-    class and its representer previously existed twice, and
-    `create_config` re-registered the representer -- mutating global PyYAML
-    state -- on every call.
+    lines tall. The representer is registered once, at import; registering
+    it again per call mutates global PyYAML state each time.
     """
 
 
@@ -135,7 +133,7 @@ def _scan_policy_for(phi_tags, remove_private_tags, base: str) -> ScanPolicy:
 
 
 def _policy_base_label(base) -> str:
-    """The loader's fifth element as the label a person reads (#714, #555).
+    """The loader's fifth element as the label a person reads.
 
     `profiles.FLOOR` is the floor, None is `privacy_profile: none`, and a
     string is a pinned profile name or an external profile's path. The one
@@ -156,8 +154,8 @@ EXTERNAL_PROFILE_LABEL = "external profile"
 
 
 def _deid_method_label(base: str) -> str:
-    """A recorded `ScanPolicy.base` as De-identification Method names it
-    (#554): verbatim when it is one of the shapes this library spells --
+    """A recorded `ScanPolicy.base` as De-identification Method names it:
+    verbatim when it is one of the shapes this library spells --
     a pinned profile name, `none`, or the floor's label -- and
     `external profile` for anything else, which is a path.
 
@@ -173,19 +171,18 @@ def _deid_method_label(base: str) -> str:
 
 
 def _deid_method_value(policy: ScanPolicy, version: str) -> str:
-    """This step's De-identification Method `(0012,0063)` value (#554,
-    owner ruling Q4): `isocenter/<version>; <label>; v1:<8 hex>`.
+    """This step's De-identification Method `(0012,0063)` value:
+    `isocenter/<version>; <label>; v1:<8 hex>`.
 
     - `isocenter/<version>` is the exact spelling the output fingerprint's
       N2 substitution normalises (`scripts/output_fingerprint.py`), so a
       release bump moves no recorded output. Any other spelling would.
     - The label is the recorded policy's, through `_deid_method_label`.
     - 8 hex characters of `ScanPolicy.fingerprint`, never recomputed, so
-      there is one answer to "which policy". It carries `CONFIG_VERSION`
-      (#762), so a minor bump moves it in every exported file. Eight,
-      not more, for LO's 64: the floor's label with a 17-character
-      version is exactly 64 (`tests/test_an_export_says_how_it_was_de_
-      identified.py`, M12).
+      there is one answer to "which policy". It carries `CONFIG_VERSION`,
+      so a minor bump moves it in every exported file. Eight, not more,
+      for LO's 64: the floor's label with a 17-character version is
+      exactly 64.
     """
     scheme, _, digest = policy.fingerprint.partition(":")
     return (f"isocenter/{version}; {_deid_method_label(policy.base)}; "
@@ -247,17 +244,17 @@ class IsocenterConfiguration:
 
     @property
     def _policy_base(self) -> str:
-        """What the policy in force was built on, as one string (#714):
+        """What the policy in force was built on, as one string:
         the pinned profile name or external path, `floor over
         basic@2026c`, or `none`. The identifier the report prints and the
-        store's policy record (#555) is to carry."""
+        store's policy record carries."""
         if self.privacy_profile:
             return self.privacy_profile
         return _policy_base_label(profiles.FLOOR if self._floor else None)
 
     def _scan_policy(self) -> ScanPolicy:
-        """The policy in force: what `audit()` with no argument scans with
-        (#555). Computed on every call, never cached: `phi_tags` and
+        """The policy in force: what `audit()` with no argument scans with.
+        Computed on every call, never cached: `phi_tags` and
         `remove_private_tags` can be assigned directly."""
         return _scan_policy_for(self.phi_tags, self.remove_private_tags,
                                 self._policy_base)
@@ -347,7 +344,7 @@ class IsocenterConfiguration:
 
     def _missing_base_rules_refusal(self, missing: List[str]) -> str:
         """Why `save()` cannot write a policy that lacks rules its base
-        supplies (#715). There are two ways there: a rule deleted from
+        supplies. There are two ways there: a rule deleted from
         `phi_tags` directly (no method removes one), or, for an external
         profile only, a rule the profile file gained after the load. The
         save cannot tell them apart without a snapshot, so it names both
@@ -373,15 +370,15 @@ class IsocenterConfiguration:
 
     def _refuse_auto_save_without_a_file(self) -> None:
         """First in every mutator, before anything changes: an opted-in
-        configuration with nowhere to write is a mistake to report, not a
-        no-op (#715). About the setting, not the call, so a `delete_rule`
+        configuration with nowhere to write raises `ValueError` rather than
+        doing nothing. About the setting, not the call, so a `delete_rule`
         that would change nothing refuses too."""
         if self.auto_save and not self.config_path:
             raise ValueError(_NO_FILE)
 
     def _apply(self, change: Callable[["IsocenterConfiguration"], Any]) -> Any:
         """Make `change` to this configuration, and write it when
-        `auto_save` is on (#715). The four mutators all come through here,
+        `auto_save` is on. The four mutators all come through here,
         after their validation, so they cannot drift apart.
 
         Under auto-save the change is tried first on a deep copy and that
@@ -393,7 +390,8 @@ class IsocenterConfiguration:
         must be deterministic: it runs twice.
 
         With auto-save off, the change stays in memory, and the first one
-        after a load or a save says so, once (owner ruling Q4).
+        after a load or a save prints a one-line notice that the file is
+        unchanged.
         """
         self._refuse_auto_save_without_a_file()
         if self.auto_save:

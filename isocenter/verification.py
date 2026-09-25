@@ -19,7 +19,8 @@ class RedactionVerifier:
     def get_matching_rule(self, equipment: Any) -> Dict[str, Any]:
         """
         Finds the redaction rule that applies to this equipment.
-        Uses exact Serial Number match first, then Model/Manufacturer logic.
+        Exact Serial Number match only, first rule wins; None when there is
+        no equipment, no serial, or no rule for it.
         """
         if not equipment:
             return None
@@ -49,10 +50,8 @@ class RedactionVerifier:
         `redaction_zones` entry in zone space (y1, y2, x1, x2) -- the
         order every consumer that touches pixels reads
         (`apply_redaction_to_array`, both redact paths, the export
-        worker). Reading the zone as (x, y, w, h) here made the
-        classifier disagree with redaction about what every zone covers,
-        so covered text classified as a leak and uncovered text as
-        covered (#258, #264).
+        worker). Reading the zone as (x, y, w, h) here would make the
+        classifier disagree with redaction about what every zone covers.
         """
         tx, ty, tw, th = text_box
         zy1, zy2, zx1, zx2 = zone_box
@@ -107,7 +106,8 @@ class RedactionVerifier:
         Split out of `verify_instance` so the Session worker can read the
         instance through `pixel_analysis._ocr_instance`, which reports a
         failed load or frame, and still classify here: `verify_instance`
-        reads through `analyze_pixels`, which can only log one (#423).
+        reads through `analyze_pixels`, which can only log one. Text of two
+        characters or fewer is skipped as noise.
         """
         if not text_regions:
             return []

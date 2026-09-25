@@ -106,12 +106,10 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
 
     The attribute is a list of (multiplex group, channel) pairs, both
     1-based. `waveform.channels` is the INGESTED group's channel list, so
-    a pair naming any other group resolves to nothing here -- until #159
-    the group half was read for the length check and then discarded, and
-    an annotation on group 2 came back wearing group 1's channel name.
-    Callers drop such an annotation outright rather than emit it leadless
-    (see `build_annotations`); returning None keeps this function honest
-    for the case where it is asked anyway.
+    a pair naming any other group resolves to None here, never to the
+    ingested group's channel of that number. Callers drop such an
+    annotation outright rather than emit it leadless (see
+    `build_annotations`).
 
     Sanitized with the same `_sanitize_description` the `.hea` signal
     line gets (`isocenter.exporters.wfdb`): `wfdb_description()` returns a
@@ -141,10 +139,9 @@ def _sample_positions(item, waveform) -> List[int]:
     expressed on its sample axis: a sample position is an index into it,
     and `sampling_frequency` is its rate. Callers must therefore have
     established that the annotation names that group before calling --
-    `build_annotations` does, and drops the ones that do not. Applying
-    this to an annotation on another group is #159's second defect: a
-    1.0 s offset on a 1000 Hz group converted at the kept group's 500 Hz
-    lands at half its true position, in a record it does not describe.
+    `build_annotations` does, and drops the ones that do not. On another
+    group the result is wrong: a 1.0 s offset on a 1000 Hz group
+    converted at the kept group's 500 Hz lands at half its true position.
     """
     positions = _as_list(item.attributes.get(TAG_REFERENCED_SAMPLE_POSITIONS))
     resolved = []
@@ -202,16 +199,15 @@ def _concept(item, include_text: bool = False):
 
 def _real_note(item) -> str:
     """`item`'s Unformatted Text Value as a note, or `""` when it is the
-    dummy a value-less REPLACE writes there (#557).
+    dummy a value-less REPLACE writes there.
 
     The tag is D in PS3.15 Table E.1-1, so `basic` and the floor write
     the text dummy `ANONYMIZED` over the annotation's text; read as a
-    note, every finding would carry that placeholder where 0.9.8, which
-    emptied the tag, wrote none (owner's ruling, 2026-09-22). The same
-    reading as `exporters.wfdb._real_timing` gives the DT dummy, and
-    compared with `config_manager._vr_dummy`, the one table, never a
-    literal of its own. Text that really is `ANONYMIZED` is no note
-    either: omitted, not invented.
+    note, every finding would carry that placeholder. The same reading as
+    `exporters.wfdb._real_timing` gives the DT dummy, and compared with
+    `config_manager._vr_dummy`, the one table, never a literal of its
+    own. Text that really is `ANONYMIZED` is no note either: omitted, not
+    invented.
     """
     value = str(item.attributes.get(TAG_UNFORMATTED_TEXT, "") or "")
     return "" if value == _vr_dummy(TAG_UNFORMATTED_TEXT) else value
@@ -250,7 +246,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             discarded group must file one audit row, not forty. Same
             channel and same shape as `populate_attrs`'s
             `dropped_private_binary`, which likewise hands back the tag
-            and lets the caller word the message (#125).
+            and lets the caller word the message.
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the

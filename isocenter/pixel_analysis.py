@@ -42,7 +42,7 @@ except ImportError as _exc:
 
 
 class OcrUnavailableError(RuntimeError):
-    """OCR was asked for and cannot run; nothing was scanned (#422).
+    """OCR was asked for and cannot run; nothing was scanned.
 
     Raised by `Session.scan_pixel_content()` and
     `Session.discover_redaction_zones()` before any worker is dispatched,
@@ -55,18 +55,16 @@ class OcrUnavailableError(RuntimeError):
 
 
 class PixelScanError(RuntimeError):
-    """An OCR pass could read none of the instances it tried (#423).
+    """An OCR pass could read none of the instances it tried.
 
     Raised by `Session.scan_pixel_content()` and
     `Session.discover_redaction_zones()` **after** the pass, and after the
     warning that counts the failures, when at least one instance failed
     and none was read. Not on a partial scan: an instance read is a
     result, and the others are in `PhiReport.failures` (or, for discovery,
-    which has no failure field, in the log). This is
-    `ExportError`'s rule (#191) -- a partial result is returned and
-    nothing-at-all is not -- and it keeps `ExportError`'s reason for being
-    a subclass rather than a bare `RuntimeError`: raising bare would throw
-    away the failure list, which is the whole of what a caller can act on.
+    which has no failure field, in the log). This is `ExportError`'s
+    rule: a partial result is returned and nothing-at-all raises, with the
+    failure list on the exception.
 
     `.failures` is a list of `(entity_uid, reason)`; `.attempted` is how
     many instances the pass dispatched, which is more than the failures
@@ -93,9 +91,9 @@ def _ocr_unavailable_reason() -> Optional[str]:
     """`None` when OCR can run, otherwise why it cannot.
 
     "Can run" includes the binary. `HAS_OCR` means only that pytesseract
-    imported, and a machine that ran `pip install` but not `brew install`
-    has that and still reads nothing: measured before #422, 0 findings
-    and 0 candidates behind one `OCR failed` ERROR per frame.
+    imported, and a machine with pytesseract but no working `tesseract`
+    binary has that and still reads nothing. A binary that fails the
+    version probe, `SystemExit` included, is reported as unusable.
 
     Reads the module globals at call time, so `patch.object` on this
     module reaches it; a caller that copied `HAS_OCR` at import would not
@@ -210,8 +208,8 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
     """`detect_text_regions` without its catch: an OCR failure raises.
 
     The Session path calls this, through `_ocr_instance`, so that a frame
-    whose OCR failed can be told apart from a frame with no text on it
-    (#423). Assumes OCR is available; `_ocr_instance` checks first.
+    whose OCR failed can be told apart from a frame with no text on it.
+    Assumes OCR is available; `_ocr_instance` checks first.
     """
     # Normalize pixel types for PIL if not already uint8
     # Note: VOI LUT should have theoretically handled contrast, but we still need
@@ -280,14 +278,14 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
 
 
 def detect_text(pixel_data: np.ndarray) -> str:
-    """Legacy wrapper for simple string return."""
+    """The text of every region `detect_text_regions` finds, space-joined."""
     regions = detect_text_regions(pixel_data)
     return " ".join([r.text for r in regions])
 
 
 @dataclass
 class _InstanceOcr:
-    """What one instance's OCR pass produced, failures included (#423).
+    """What one instance's OCR pass produced, failures included.
 
     `read` is True when at least one frame went through OCR without
     raising. `failure` is `None`, or why the instance -- or some of its
@@ -346,9 +344,9 @@ def _ocr_instance(instance: Instance) -> _InstanceOcr:
     - around each frame's OCR: that frame failed, the loop goes on, and
       the frames that succeeded keep their findings.
 
-    Until #423 these were the catches in `analyze_pixels` and
-    `detect_text_regions`, which logged and returned `[]`, so an instance
-    nobody had read reported exactly like a clean one.
+    An instance nobody could read is therefore reported as a failure,
+    never as a clean result. An instance with no pixel element is neither
+    read nor failed.
     """
     # No pixel element to read is neither read nor failed. Checked from
     # the instance's state, not from `get_pixel_data()`'s messages, which
