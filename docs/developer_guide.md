@@ -259,7 +259,7 @@ erDiagram
 
 Several numbers in [Environment Variables](environment.md) are pinned by tests, so the page and the code cannot drift apart silently:
 
-- `tests/test_documented_env_vars.py` fails when the package reads an `ISOCENTER_*` variable that has no row in the table (a row is `| **`NAME`** |`).
+- `tests/test_documented_env_vars.py` fails when the package reads an `ISOCENTER_*` variable that has no row in the table: a table row whose first cell is the variable's name in bold code.
 - `tests/test_parallel_contract.py` holds the default worker count (one per CPU), the order the threads-or-processes levers resolve in, and the rule that only the literal `1` switches a flag on.
 - `tests/test_redaction_worker_count.py` holds `redact()`'s own default (half the CPUs, capped at eight) at fixed CPU counts, so the cap is exercised on any machine.
 - `tests/test_shared_executor_lifecycle.py` holds the `WARNING`s `ingest()` logs when `ISOCENTER_FORCE_THREADS` or `ISOCENTER_MAX_TASKS_PER_CHILD` is set.

@@ -1,6 +1,6 @@
 # Environment Variables
 
-These variables tune logging, the session store and parallelism. Set them in your shell or in your process's environment before you import `isocenter`. `isocenter` does not read a `.env` file; to use one, call `dotenv.load_dotenv()` yourself before importing `isocenter`.
+These variables tune logging, the session store and parallelism. Set them in your shell or in your process's environment. `isocenter` does not read a `.env` file; to use one, call `dotenv.load_dotenv()` yourself before importing `isocenter`.
 
 Flags whose default is `0` are on only when set to exactly `1`; `true`, `yes` and `on` are ignored, without a warning.
 
