@@ -100,23 +100,6 @@ that was found, pass `min_occurrence=0` or read `to_dataframe()`. Each zone's
 `LIKELY_NAME` if any member matched the name pattern, `PROPER_NOUN` if any was
 classified as one, and `TEXT` otherwise.
 
-This example builds a result by hand, so it runs without OCR:
-
-<!-- runnable: none -->
-```python
->>> from isocenter.discovery import DiscoveryCandidate, DiscoveryResult
->>> result = DiscoveryResult([
-...     DiscoveryCandidate("SMITH^JOHN", 92.0, [10, 8, 60, 12], 0, "NAME_PATTERN"),
-...     DiscoveryCandidate("MERCY GENERAL", 88.0, [200, 180, 50, 10], 1, "PROPER_NOUN"),
-... ], n_sources=2)
->>> list(result.to_dataframe().columns)
-['text', 'confidence', 'box', 'source_index', 'classification']
->>> result.get_density_matrix(bins=(2, 2))
-[[1, 0], [0, 1]]
->>> result.to_zones(min_occurrence=0.5)
-[{'zone': [8, 20, 10, 70], 'type': 'LIKELY_NAME', 'occurrence': 0.5, 'confidence': 92.0, 'examples': ['SMITH^JOHN']}, {'zone': [180, 190, 200, 250], 'type': 'PROPER_NOUN', 'occurrence': 0.5, 'confidence': 88.0, 'examples': ['MERCY GENERAL']}]
-```
-
 `filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
 `get_density_matrix()`, `visualize_heatmap()`, `analyze_temporal_stability()`
 and `n_sources` are documented but internal: they may change in a 1.x release,
@@ -160,14 +143,11 @@ print(result.visualize_heatmap(bins=(20, 20)))
 matrix = result.get_density_matrix(bins=(100, 100))
 ```
 
-**`get_density_matrix()` is not an image-space heatmap, and the difference matters.**
-It bins each candidate's box *centre* into a grid, but it normalises by the largest
-box *origin* among the candidates, not by the image's Rows and Columns. The grid
-therefore stretches to fit whatever was found, so two scans of the same machine are
-not comparable to each other and neither is comparable to the image; a centre lying
-past the largest origin clamps into the last bin. `visualize_heatmap()` uses the
-same grid. Read either as "where did the hits fall relative to each other", and
-take the actual coordinates from `to_zones()` or from each candidate's `box`.
+**`get_density_matrix()` is not an image-space heatmap.** It bins each candidate's
+box centre on a grid scaled to the largest box *origin* among the candidates, not
+to the image's Rows and Columns, so the grid stretches to fit whatever was found,
+and two scans are not comparable to each other or to the image. `visualize_heatmap()`
+uses the same grid. Take coordinates from `to_zones()` or from each candidate's `box`.
 
 ### Entity Detection Modes
 
