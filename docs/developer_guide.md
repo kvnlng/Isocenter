@@ -155,3 +155,29 @@ things about it are easy to get wrong and are pinned by
 
 Record metadata can be corrected on Zenodo after publication; the DOI
 itself cannot be reissued.
+
+## Notes moved from the user pages
+
+### Dependencies
+
+Dependencies are declared in one place, `setup.py`. There is deliberately no `requirements.txt`: two lists drift apart, and only `install_requires` is consulted when you `pip install`. `.[tests]` is enough to run the suite; `.[dev]` adds pylint and coverage.
+
+### `pylibjpeg-libjpeg` on the free-threaded build
+
+Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CPython 3.14t, `pip install` builds it from the sdist, and the build either fails or produces a wheel with no extension module in it, depending on the compiler pip picks. The second was measured here: the install reported success and `import libjpeg` then failed with `ModuleNotFoundError: No module named '_libjpeg'`. Built from the sdist by hand it imports, with `RuntimeWarning: The global interpreter lock (GIL) has been enabled to load module '_libjpeg', which has not declared that it can run safely without the GIL`, so a 3.14t process that imports it runs with the GIL back on unless `PYTHON_GIL=0` is set. [Codec support](codecs.md) carries the user-facing summary.
+
+### Decode limits: the evidence
+
+[Codec support](codecs.md#decode-limits) states each limit. The measurements behind the two precision limits:
+
+- A precision-12 JPEG Lossless stream under BitsStored 16 reads `0..4970` through `imagecodecs` (lj92) and `0..4095` through pydicom with `pylibjpeg-libjpeg`, which saturates.
+- The signed arm is measured unreachable for JPEG Baseline and Extended (`.50`/`.51`), whose decode is not sign-extended at all.
+- `693_J2KR.dcm` from pydicom's test data (a signed JPEG 2000 codestream) reads `int16 [-2000, 2492]` identically through Pillow and through `imagecodecs`, and writes no row.
+- An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision; measured at BitsStored 12, 13 and 16, it reads `int16 [-1996, 1470]` on both routes, with no row.
+- 12-bit JPEG Extended decodes through `imagecodecs.jpeg_decode` value for value as DCMTK decodes pydicom's `JPEG-lossy.dcm`.
+
+Code comments in `isocenter/imagecodecs_handler.py` and `isocenter/io_handlers.py`, and several test docstrings, still cite `docs/installation.md` for these limits; they now live in `docs/codecs.md`.
+
+### `DicomExporter.write_tree()` and `session.export()`
+
+The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and a study with no Study Time is written with an empty one. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.

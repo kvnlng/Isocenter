@@ -1,251 +1,131 @@
 # Quick Start
 
+This page walks the pipeline once, step by step, on your own data. Each step is one or two calls. For a walkthrough that runs as written on files bundled with pydicom, and shows each step's output, start with the tutorial [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md).
+
 ## 1. Initialize a Session
 
-Isocenter uses a **persistent session** to manage your workflow. Unlike scripts that run once and forget, a Session creates a local SQLite database (`isocenter.db`) to index your data. This allows you to pause, resume, and audit your work without re-scanning thousands of files.
+A `Session` keeps its work in a **session store**, so you can pause, resume and audit a job without re-scanning thousands of files.
 
 ```python
 from isocenter import Session
 
-# Initialize a new session (creates 'isocenter.db' by default)
 session = Session("my_project.db")
 ```
 
-!!! tip "Context Manager"
-    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()` for you, releasing the background threads and worker pool the session holds -- steps 2-6 below work the same way indented inside that block. Step 7 ("Recover Identity") opens a *separate* `Session`, so it needs its own `with` block (or its own `close()` call) rather than being nested inside the first one.
+The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocenter.db`) plus a sidecar beside it. `Session("my_project.db")` creates:
 
-    Leaving the block does **not** save: edits made since the last `save()` or `export()` are dropped, and `close()` warns naming the instances. Call `session.save(sync=True)` first to keep them. `export()` saves the session itself before it writes, so after an export the store holds the de-identified graph, and the rows of patients whose identifier was replaced are removed.
+- `my_project.db`, the SQLite index, with its `-wal` and `-shm` files;
+- `my_project_pixels.bin`, the pixel and waveform data, with two `.lock` files beside it;
+- `isocenter.log` in the current directory.
+
+!!! warning "The session store holds PHI"
+    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels, and nothing else is written until `export()`. Keep the store where PHI may live, and do not hand it out with the export.
+
+!!! tip "Context manager"
+    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.
+
+    Leaving the block does **not** save: edits made since the last `save()` or `export()` are dropped, and `close()` warns naming the instances. Call `session.save(sync=True)` first to keep them. `export()` saves the session itself before it writes.
 
 !!! warning "Scripts need a main guard"
-    Isocenter starts its worker processes by *spawn* on every platform and every Python build, and a spawned worker re-imports the script that launched it. In a `.py` file, put everything that uses the session under `if __name__ == "__main__":`. Without it the first `ingest()` fails with `BrokenProcessPool` and a `RuntimeError` about the bootstrapping phase. Notebooks and the interactive interpreter need no guard.
+    Isocenter starts its worker processes by *spawn*, and a spawned worker re-imports the script that launched it. In a `.py` file, put everything that uses the session under `if __name__ == "__main__":`. Without it the first `ingest()` fails with `BrokenProcessPool`. Notebooks and the interactive interpreter need no guard.
 
 ## 2. Ingest & Examine
 
-Ingestion builds a lightweight **metadata index** of your DICOM files. Isocenter scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
+Ingest reads your folders recursively and indexes every DICOM file into the store. It never moves or modifies the source files, and it skips non-DICOM clutter.
 
 ```python
 summary = session.ingest("/path/to/dicom/data")
-session.save() # Persist the index to disk
+session.save()
 
-# Print a summary of the cohort and equipment
-session.examine()
+print(summary)      # IngestSummary(ingested=..., failures=[...], declined=..., skipped=...)
+session.examine()   # the cohort and its equipment
 ```
 
-### What ingest reports
-
-`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary`, the `summary` above, that puts every file it found in exactly one of four places, so check it:
-
-```python
-print(summary.ingested)   # files read into the session
-print(summary.failed)     # files rejected, the same as len(summary.failures)
-for path, reason in summary.failures:
-    print(path, reason)
-print(summary.declined)   # files refused because their SOP Instance UID is already held
-print(summary.skipped)    # files an earlier ingest() already read, not read again
-```
-
-- **`ingested`**: files read into the graph.
-- **`failures`**: one `(path, reason)` pair per rejected file, for example a file that is not DICOM (`ValueError: Missing SOPInstanceUID. Likely not a valid DICOM file.`). `failed` is the count. Each rejected file also writes one `ERROR` audit row naming the path and the reason, so a report on this session grades `REVIEW_REQUIRED` and lists it in section 4. A rejected file is not recorded as read, so the next `ingest()` of the same folder tries it again and rejects it again, with another row.
-- **`declined`**: files whose SOP Instance UID an instance in the session already holds, from this call, an earlier one, or the store. The instance already held is kept, and among files new to the same call, the one whose path sorts first. The declined file is not read into the store, and it writes one `WARNING` audit row naming the UID and both files, which also grades `REVIEW_REQUIRED`. Offering it again declines it again.
-- **`skipped`**: files an earlier `ingest()` into this store already read. They are left as they are and write no row.
-
-A file that makes the worker process reading it exit (the out-of-memory killer, a decoder crash) does not end the call either: the files not yet returned are read again on fresh worker processes, and a file that is rejected for it lands in `failures` like any other (the [`ingest()` reference](api/session.md) says when). The console prints the rejected and declined counts at the end of the call; the returned summary and the audit rows are what a script can check.
+`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
 
 ## 3. Configure & Audit
 
-Before changing anything, define your privacy rules. Use `create_config` to generate a scaffolding based on your inventory, then `audit` to scan that inventory against your rules. This "Measure Twice, Cut Once" approach lets you identify all PHI risks before applying any irreversible changes. Skipping this step does not skip de-identification: a session that has loaded no configuration still applies a **floor policy** of 646 tag rules (the PS3.15 Annex E Basic Profile table, 2026c, plus Study Date jittered, Sex and Age kept), and removes private tags. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
+Write down the policy you want, then measure the cohort against it before anything changes.
 
 ```python
-# Create a default configuration file (v2.0 YAML)
-session.create_config("config.yaml")
-
-# Load the configuration (rules, tags, jitter)
+session.create_config("config.yaml")   # a scaffold built from the inventory
+# edit config.yaml for your protocol
 session.load_config("config.yaml")
 
-# Run an audit to find PHI
-report = session.audit() 
+report = session.audit()
 session.save_analysis(report)
-
-print(f"Found {len(report)} potential PHI issues.")
+print(f"{len(report)} findings")
 ```
+
+`audit()` checks the tags against the policy. Each finding is one value a rule acts on, so a small cohort can have hundreds. It does not read the pixels.
+
+With no configuration loaded, a **floor policy** of 646 tag rules still applies: the PS3.15 Annex E Basic Profile table (2026c), with Study Date jittered and Patient's Sex and Age kept, and private tags removed. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
+
+The scaffold lists each machine in the cohort with empty `redaction_zones`. `redact()` changes nothing until you fill them in: see [Pixel Redaction (Machines)](configuration.md#pixel-redaction-machines), and [Burned-in text (OCR)](ocr.md) to find where a machine writes text.
 
 ## 4. Backup Identity (Optional)
 
-To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token, and the lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, except one holding a token a release before 1.0 wrote, which it refuses by name: 1.x does not read that layout, and Isocenter 0.9.x recovers it with its key.
+Reversible anonymization encrypts each patient's original identifiers into the Encrypted Attributes Sequence `(0400,0500)` of their files, so whoever holds the key can recover them later. Lock **before** `anonymize()`.
 
 ```python
-# Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist.
-# The key, the store and the configuration are three different things to keep:
-# see "What to keep" in docs/configuration.md.
-session.enable_reversible_anonymization()
+# Keep the key outside the project: whoever holds the key and an export
+# can read the identities in it. The first lock creates the key file.
+session.enable_reversible_anonymization("/secure/keys/my_project.key")
 
-# cryptographically lock identities for all patients found in the audit
-# Optional: Specify custom tags to preserve (defaults to Name, ID, DOB, Sex, Accession)
-session.lock_identities(report, tags_to_lock=["0010,0010", "0010,0020", "0010,0030"])
+# Lock every patient the audit found, by the Patient ID in the findings.
+# tags_to_lock is optional (default: Name, ID, Birth Date, Sex, Accession Number).
+locked = session.lock_identities(report, tags_to_lock=["0010,0010", "0010,0020", "0010,0030"])
+print(locked)   # <LockingResult: N instances secured>
 session.save()
 ```
 
-`lock_identities(report)` locks the patients the report's findings name, so the report `audit()` returns locks every patient with at least one finding, by the Patient ID the finding holds. After `anonymize()` has replaced a patient's ID, the report no longer names that patient, so lock before you anonymize. A list of Patient IDs works too, and may mix IDs and findings.
+`lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
 
-A `Session()` created while a file named `isocenter.key` is in the current working directory enables reversible anonymization with that key by itself, as if you had called `enable_reversible_anonymization()`. The key is looked for there only, not beside the store. With no such file nothing is enabled and no key is created, and a malformed one makes `Session()` raise `ValueError`. Keep the key somewhere else than the store and the exported data: whoever holds the key and an export can read the identities it carries ([What to keep](configuration.md#what-to-keep)).
+Locking after `anonymize()` secures nothing. Given the report, `lock_identities()` finds none of its Patient IDs (they have been replaced), logs one `ERROR`, returns an empty result and still creates the key file. Given a patient's new ID, it raises `RuntimeError`. Check the count it returns.
+
+`Session()` loads a key by itself only from `./isocenter.key` in the current working directory. A key kept anywhere else is named with `enable_reversible_anonymization(path)`, as above. [What to keep](configuration.md#what-to-keep) lists the key, the store and the configuration, and what each is for.
+
+Worked example: [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md) locks, exports, and recovers one patient.
 
 ## 5. Anonymize, Redact & Export
 
-Remediation is a multi-stage process performed in-memory:
-
-1. **Anonymize**: Strips or replaces metadata tags (PatientID, Names, Dates) based on your config.
-2. **Redact**: Loads pixel data and scrubs burned-in PHI from defined regions.
-3. **Export**: The final "Gatekeeper". Writes clean files to a new directory. With `check_burned_in=True` the export runs `audit()` first and skips every instance that still carries an identifier, on itself or a parent, under the policy in force -- so on a session that has not run `anonymize()`, that is every instance carrying a value any rule of the policy would act on. Each withheld instance writes one `WARNING` audit row naming the instance and the level (patient, study, series or instance) that carried the identifier -- never the value -- so the report grades `REVIEW_REQUIRED` and lists each one in section 4. "Instances Written" counts withheld instances as requested ("1 of 2 requested"), and the `EXPORT` row says how many were withheld ([#536](https://github.com/kvnlng/Isocenter/issues/536)). An export that withheld everything returns an empty `ExportSummary` and does not raise: nothing failed. An instance outside `subset` is not withheld; it was never asked for.
+`anonymize()` and `redact()` change the in-memory graph. `export()` writes the result to a new directory.
 
 ```python
-# Apply metadata remediation (anonymization) using the findings
-session.anonymize(report)
-
-# Apply pixel redaction rules (requires config to be loaded)
-session.redact()
-
-# Export only safe (clean) data to a new folder
-# Compression is on by default (lossless JPEG 2000); use_compression=False writes uncompressed
-session.export("/path/to/export_clean", check_burned_in=True, use_compression=True)
+session.anonymize(report)   # remove, replace or shift tags, as the policy says
+session.redact()            # blank the configured zones on matching machines
 ```
 
-`session.redact()` returns how many instances had at least one configured
-zone applied to their pixels. An instance a rule matched but whose every
-zone fell outside the image is not counted, and nothing is written onto
-it. A zone with no area (end not greater than start on either axis) is
-not a skip: it fails the instance, which is left as it was found, and the
-pass raises `RedactionError`.
+`anonymize()` acts on the findings it is given. `redact()` returns how many instances had at least one zone applied, and each redacted instance takes a new SOP Instance UID.
 
-Each redacted instance is a new, derived image: it takes a **new SOP
-Instance UID**, so its exported filename is not its source's, and it no
-longer points at the file it was ingested from. This happens on every
-redaction, not only under `force=True` below.
+### Verify
+
+Audit again before exporting. A clean run leaves no findings, and every patient, study and instance reads `CLEARED` or `REMEDIATED`.
+
+```python
+remaining = session.audit()
+print(len(remaining))                 # 0 when nothing is left to change
+print(session.phi_status_summary())
+```
+
+### Export
+
+```python
+# Lossless JPEG 2000 by default; use_compression=False writes uncompressed.
+session.export("/path/to/export_clean", check_burned_in=True)
+```
+
+Files land at `<folder>/Subject_<PatientID>/Study_…/Series_…/<SOPInstanceUID>.dcm`. The folder names are built from the exported values, so run `anonymize()` first.
+
+`check_burned_in=True` runs `audit()` again and withholds every instance that still carries an identifier in its tags, with a `WARNING` row for each. It checks tags, not pixels. Burned-in text is handled by redaction zones and found by `scan_pixel_content()`.
 
 ### What the export writes
 
-Files land at
-`<folder>/Subject_<PatientID>/Study_<date>_<description>_<uid>/Series_<number>_<modality>_<description>_<uid>/<SOPInstanceUID>.dcm`.
-The directory names are built from the values being exported, so **run
-`anonymize()` first**; otherwise the real Patient ID and descriptions
-appear in the paths. Each file is written under a temporary name and
-renamed when complete, so a crash never leaves a partial file under a
-real name; a stray `*.tmp` left by a killed worker is safe to delete.
-
-**Compression is on by default** and lossless, but it changes how colour
-images are labelled. An `RGB` image is encoded with JPEG 2000's reversible
-colour transform and declared `YBR_RCT`, as the standard requires; a YBR
-source that decodes to RGB is already stored as `RGB`. 32- and 64-bit
-images cannot be compressed and fail export with a message naming
-`use_compression=False`. A 16-bit colour image is compressed too, and
-pydicom cannot read it with Pillow alone. With `pylibjpeg-openjpeg`
-installed, pydicom reads it exactly. The export names each such
-instance at INFO ([#670](https://github.com/kvnlng/Isocenter/issues/670)).
-If a recipient's reader cannot handle JPEG 2000, export with
-`use_compression=False`.
-
-**The export writes two transfer syntaxes and no others**
-([#526](https://github.com/kvnlng/Isocenter/issues/526)): Implicit VR
-Little Endian with `use_compression=False`, and JPEG 2000 Lossless
-(`1.2.840.10008.1.2.4.90`) with `use_compression=True`. A file with no
-pixel data is always Implicit VR Little Endian. A source in any other
-syntax this library reads -- JPEG-LS, JPEG Lossless, RLE, JPEG Baseline or
-Extended -- is decoded at ingest and re-encoded into one of those two.
-Nothing in the log or the audit trail records that, because the samples
-are unchanged and the source syntax is not stored. A source that was
-compressed lossily is re-encoded losslessly from its decoded samples, and
-its `LossyImageCompression (0028,2110)` is carried only if the source
-declared it: a near-lossless JPEG-LS source that did not declare it exports
-with no record that it was lossy
-([#601](https://github.com/kvnlng/Isocenter/issues/601)).
-
-A Photometric Interpretation spelled in lower case or with a leading space
-(`' rgb '`) is written upper-cased and stripped (`RGB`), with an INFO line,
-because pydicom and `ingest()` refuse the declared spelling
-([#532](https://github.com/kvnlng/Isocenter/issues/532)). The graph keeps
-what it declared.
-
-The patient, study and series tags written over each instance's own are
-the same on both write paths, `session.export()` and
-`DicomExporter.write_tree()`
-([#570](https://github.com/kvnlng/Isocenter/issues/570)): equipment comes
-from the instance, which is what `anonymize()` edits, and a study with no
-Study Time is written with an empty one, which is what the standard means
-by unknown. A private element whose value no longer fits the VR recorded
-for it at ingest -- after a `REPLACE`, typically -- is written under a VR
-that holds it, with one `WARNING` row per instance naming the tags and
-both VRs ([#571](https://github.com/kvnlng/Isocenter/issues/571)).
-
-**`verify_readback=True`** decodes every file it writes through the same
-decoder `ingest()` uses and compares every pixel sample with what it meant
-to write. It also refuses a Photometric Interpretation the file's transfer
-syntax does not admit (for example `YBR_ICT` on an uncompressed file, and
-`YBR_PARTIAL_422` or `YBR_PARTIAL_420` under either syntax the export
-writes, [#525](https://github.com/kvnlng/Isocenter/issues/525)), and a file
-`ingest()` could not read back because of its colour space: a `YBR_FULL`
-image whose samples are 16-bit or signed 8-bit, since pydicom's colour
-conversion takes unsigned 8-bit samples only
-([#596](https://github.com/kvnlng/Isocenter/issues/596)). An instance that
-fails is not delivered: it gets an `ERROR` audit row, appears in
-`ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`. Without
-verification that same inadmissible label is written as declared with a
-`WARNING` row, which also grades `REVIEW_REQUIRED` -- so turning
-verification on can cost you a file the default export would have
-delivered, by design. The label is judged on a file with no pixel data too
-([#534](https://github.com/kvnlng/Isocenter/issues/534)). The 16-bit or
-signed 8-bit `YBR_FULL` file is conformant DICOM, so the default export writes it, with
-an INFO line saying this library cannot read it back and no audit row.
-
-Nothing scans or redacts a small preview image (an Icon Image Sequence
-item), so the export removes the ones that could show redacted pixels
-([#542](https://github.com/kvnlng/Isocenter/issues/542)). An instance's
-own icon is removed only from that instance's file, when the instance was
-redacted or has redaction zones applied by this export. Every other nested
-icon -- one under Referenced Image Sequence, for instance, which is a
-thumbnail of a different image -- is removed from every file once any
-instance in the store was redacted or a loaded rule's zones match a series
-in the store (a `"*"` rule matches every series with a Device Serial
-Number); a rule for a scanner the store does not hold removes
-nothing. Each removal is a `SIGNAL` `DATA_LOSS` row and grades the run
-`REVIEW_REQUIRED`.
-
-!!! warning "Redacted on 0.9.0 or earlier with a multi-zone rule?"
-
-    Releases up to and including 0.9.0 applied only the last applicable
-    zone of a multi-zone rule to an instance loaded from a saved store,
-    and still recorded a full redaction. Because that record is a hash of
-    the *configuration* rather than of the pixels, the corrected code
-    agrees with it and skips the instance: `session.redact()` returns `0`
-    and the burned-in identifier stays where it is.
-
-    If you redacted with a rule carrying two or more zones, against a
-    store that had been saved and reopened, on 0.9.0 or earlier, repair it
-    with:
-
-    ```python
-    session.redact(force=True)
-    session.save()
-    ```
-
-    No source file is needed -- the identifier is still in the store's own
-    pixels. The cost: every instance the rules match is redacted again,
-    and each takes a **new SOP Instance UID**, so its exported filename
-    changes and it stops matching the source file it was ingested from.
-
-Progress for the save, memory release, and export phases will be displayed:
-
-```text
-Preparing for export (Auto-Save & Memory Release)...
-Releasing Memory: 100%|██████████| 5000/5000 [00:02<00:00, 2000.00img/s]
-Memory Cleanup: Released 5000 images from RAM.
-Executing Redaction Rules...
-Redacting: 100%|██████████| 150/150 [00:05<00:00, 28.00img/s]
-Exporting session to: /path/to/export_clean
-Exporting:  15%|██▌       | 15/100 [00:05<00:30,  2.80patient/s]
-```
+[What the export writes](export-output.md) covers the layout, compression and colour images, the de-identification markers, and what `check_burned_in=True` and `verify_readback=True` add.
 
 ## 6. Report
 
-Generate the compliance report **last, after `export()`**: export is where the final data-loss, error and warning rows are written, and the report grades only what the audit log holds when you call it. A report generated before any export says so in its own Executive Summary.
+Generate the compliance report **last, after `export()`**. Export writes the final data-loss, error and warning rows, and the report grades only what the audit log holds when you call it. A report generated before any export says so.
 
 ```python
 session.generate_report("compliance_report.md")
@@ -255,25 +135,34 @@ See [Analytics & Reporting](analytics.md) for what each section means and how th
 
 ## 7. Recover Identity (Optional)
 
-If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does, exclusively and with mode 0600, unless the session holds an identity token this library wrote that no key here opens, in which case the lock raises `RuntimeError` and creates none ([#617](https://github.com/kvnlng/Isocenter/issues/617)). `recover_patient_identity()` returns the identity it recovered: a `dict` mapping the SOP Instance UID of each instance that carries an identity token to a copy of the values that token holds, in study, series and instance order. A patient locked over several studies usually carries one token per study, so each study's Accession Number is under its own instances; the first entry is the one that speaks for the patient ([#586](https://github.com/kvnlng/Isocenter/issues/586)). The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token, the key does not decrypt it, or the key opens it but it holds no identity record this library writes, or the token is in the layout releases before 1.0 wrote, in which case nothing on the patient is restored ([#790](https://github.com/kvnlng/Isocenter/issues/790)). No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it reads the identity and writes nothing, which also checks that the patient is recoverable under the key; `restore=True` returns the same mapping and writes it back:
+To recover a patient's original identity, open the session under the key the data was locked with, and name the patient by the ID it was exported under: the `ANON_…` value in the exported files' Patient ID `(0010,0020)`, which is also in the `Subject_ANON_…` folder name.
 
 ```python
-# Load the session containing anonymized data
-session = Session("my_project.db")
-session.enable_reversible_anonymization("isocenter.key")
+with Session("my_project.db") as session:
+    session.enable_reversible_anonymization("/secure/keys/my_project.key")
 
-# Read the original identity without writing it back
-identity = session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=False)
-first = next(iter(identity.values()))  # the patient-level answer
-print(first["0010,0020"])  # the original Patient ID
+    # Read the original identity without writing it back.
+    identity = session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=False)
+    first = next(iter(identity.values()))   # the patient-level answer
+    print(first["0010,0020"], first["0010,0010"])   # original Patient ID and name
 
-# Recover the original identity and restore attributes in-memory;
-# a later session.save() stores them.
-# restore=True (default) automatically updates all instances with original values
-session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=True)
-
-# Now, accessing p.patient_name or instance attributes returns original data
-print(f"Restored: {session.store.patients[0].patient_name}")
+    # Or write the original values back onto the instances, in memory.
+    session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=True)
+    session.save(sync=True)
 ```
 
-Restore puts back the locked identity tags only: every other date stays shifted by the patient's offset, so intervals are intact and a later `audit()` does not shift it again. A date you listed in `tags_to_lock` is put back on the instances like any locked tag, and a later `audit()` raises it again. A restored Study Date is also put back on its study, which is where `export()` reads it ([#566](https://github.com/kvnlng/Isocenter/issues/566)). The lock captures the locked values from each instance and writes one identity token per distinct set of them, so a patient with several studies usually carries one token per study, and the restore gives each instance, and each study's Study Date, its own values back ([#583](https://github.com/kvnlng/Isocenter/issues/583)). An instance that carries no token -- a study ingested after the lock -- takes only the patient-level identifiers (group 0010) and keeps its other locked identifiers de-identified, and one `WARNING` gives the count. A token written before 1.0 may hold one study's values on every study. Since 1.0 a token says, inside its encryption, that it was captured per value-set, and it is restored in full on every study in any store ([#652](https://github.com/kvnlng/Isocenter/issues/652)); what follows is about tokens written before 1.0, which carry no such mark. When the session holds more than one of those studies, the restore gives that token in full to the first study carrying it and only its group 0010 to the others, with a `WARNING`. In the store that did that lock, the first study is the one the token was captured from. In a store that ingested an export, studies load in folder order, which puts the earliest date first, so the first study may not be the owner: it then takes another study's values, and the owner keeps its de-identified ones. When the session holds only one study carrying such a token, for example one study ingested from an export, nothing can tell it from a token written for that study alone. It is restored in full, possibly with another study's values, and no `WARNING` fires. A restored patient reads `phi_status` `UNSCANNED`, not `REMEDIATED`: it holds its original identifiers again. (`phi_status` is documented but internal: it may change in a 1.x release, with a changelog entry; the frozen way to read statuses is `session.phi_status_summary()`, see [API stability](api/stability.md).) If another patient in the session already holds the restored Patient ID (raw files for that patient ingested before the restore), the two are merged into the patient that was loaded first ([#548](https://github.com/kvnlng/Isocenter/issues/548), [#552](https://github.com/kvnlng/Isocenter/issues/552)).
+`recover_patient_identity()` returns a `dict` mapping the SOP Instance UID of each instance that carries an identity token to the values that token holds, in study, series and instance order. The first entry speaks for the patient. `restore=False` only reads, which also checks that the patient is recoverable under the key.
+
+It prints nothing, and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path, `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token or the key does not open it. No message names the Patient ID.
+
+Restore puts back the locked tags only. Every other date stays shifted by the patient's offset, so intervals are intact. [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md) works through recovery and what happens without the key.
+
+## Next: the tutorials
+
+Each tutorial follows one question end to end over files bundled with pydicom, and every code block runs in the test suite:
+
+- [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md)
+- [Select part of a cohort](tutorials/select-part-of-a-cohort.md)
+- [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md)
+- [Redact burned-in text for one machine](tutorials/redact-burned-in-pixels.md)
+- [Write your own export format](tutorials/write-an-exporter.md)

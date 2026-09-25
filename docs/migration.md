@@ -256,3 +256,16 @@ This parser extracts:
 
 - Manufacturer/Model matching criteria.
 - Redaction zones (automatically converting `x,y,w,h` to `r1,r2,c1,c2`).
+
+## Redacted on 0.9.0 or earlier with a multi-zone rule
+
+Releases up to and including 0.9.0 applied only the last applicable zone of a multi-zone rule to an instance loaded from a saved store, and still recorded a full redaction. That record is a hash of the *configuration*, not of the pixels, so the current code agrees with it and skips the instance: `session.redact()` returns `0` and the burned-in identifier stays where it is.
+
+If you redacted with a rule carrying two or more zones, against a store that had been saved and reopened, on 0.9.0 or earlier, repair the store with:
+
+```python
+session.redact(force=True)
+session.save()
+```
+
+No source file is needed: the identifier is still in the store's own pixels. Every instance the rules match is redacted again, and each takes a **new SOP Instance UID**, so its exported filename changes and it stops matching the source file it was ingested from.

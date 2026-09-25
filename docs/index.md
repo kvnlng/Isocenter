@@ -22,7 +22,7 @@ There is no command-line tool. The Python API is the whole interface, because a 
 
 ## What it refuses to do
 
-- **Modify a source file.** Ingest reads. Anonymize and redact change an in-memory graph. Nothing reaches disk until `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were.
+- **Modify a source file.** Ingest reads. Anonymize and redact change an in-memory graph. Nothing is written outside the session store until `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were. The store (`<name>.db` and `<name>_pixels.bin`) holds the original identifiers and pixels, so keep it where PHI may live.
 - **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError` rather than returning quietly, in either format.
 - **Pass through pixels it could not decode.** A frame that cannot be decompressed fails its instance's export rather than being copied uninspected.
 - **Advertise a Python version it does not test.** The suite runs on all four supported versions, including the free-threaded 3.14t build, at every release, and 3.12 and 3.14t must pass before anything is uploaded. The PyPI classifiers list only those.
@@ -32,20 +32,32 @@ There is no command-line tool. The Python API is the whole interface, because a 
 - **An object model over pydicom.** `Patient`, `Study`, `Series`, and `Instance`, with attributes keyed by tag. Pixel and waveform data load lazily from the sidecar and can be released. See [Architecture](architecture.md).
 - **A persistent session.** Reopen a 10,000-instance cohort without rescanning, pause and resume a job, and read the audit log of every action. See the [Quick Start](quickstart.md).
 - **De-identification against the DICOM PS3.15 Annex E Basic Profile table.** A profile decides which tags go, are emptied, are replaced, or are date-shifted. A field the protocol permits stays. PHI detection walks nested sequences structurally. With no configuration a 646-rule floor policy applies: the PS3.15 Annex E Basic Profile table (2026c) plus three research defaults. Study, Series, SOP Instance and the other UIDs the table names are replaced by UIDs derived from a secret kept in the store. See [Configuration](configuration.md).
-- **Machine-specific pixel redaction.** Zones are keyed by device. An optional OCR pass finds where burned-in text actually lands, and CTP `DicomPixelAnonymizer.script` rules import directly. See [Intelligent OCR](ocr.md) and [Migration Tools](migration.md).
+- **Machine-specific pixel redaction.** Zones are keyed by device. An optional OCR pass finds where burned-in text actually lands, and CTP `DicomPixelAnonymizer.script` rules import directly. See [Burned-in text (OCR)](ocr.md) and [Import CTP rules](ctp-import.md).
 - **Reversible anonymization, if you choose it.** Original identities encrypted under a Fernet key, stored in the Encrypted Attributes Sequence `(0400,0500)`, recoverable by whoever holds the key. The export discloses when recoverable identities are present.
 - **Waveforms.** DICOM waveform IODs in, PhysioNet WFDB records out, with an annotation bridge to Murmur Studio. See [Waveforms & WFDB](waveforms.md).
 - **A compliance report.** Cohort summary, audit trail, every exception listed, a `PASS` or `REVIEW_REQUIRED` grade, and a signature block for the reviewer who accepts it. See [Analytics & Reporting](analytics.md).
 
 ## Start here
 
+Isocenter needs Python 3.12 or later on Linux or macOS. On Windows, use WSL or a Linux container.
+
 ```bash
 pip install isocenter
 ```
 
-Then the [Quick Start](quickstart.md) walks the pipeline end to end: ingest, examine, configure, audit, anonymize, redact, export, report. The [Configuration](configuration.md) guide is where your protocol becomes a profile.
+Release candidates: `pip install --pre isocenter`.
+
+Check which version you have:
+
+```bash
+python -c "import isocenter; print(isocenter.__version__)"
+```
+
+[Installation](installation.md) covers the optional OCR and NLP extras. Then the [Quick Start](quickstart.md) walks the pipeline end to end: ingest, examine, configure, audit, anonymize, redact, export, report. The [Configuration](configuration.md) guide is where your protocol becomes a profile.
 
 The **Tutorials** each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md): what `PASS` and `REVIEW_REQUIRED` mean, and what to keep so a later export matches this one.
+
+If you used Isocenter 0.9.x, [Upgrading from 0.9.x](migration.md) says what 1.0 does with your stores, configurations and identity tokens.
 
 If you are evaluating Isocenter for an institution rather than running it, [For institutions](for-institutions.md) is the page to read: the license, the citation, and what the report gives a reviewer.
 
@@ -55,6 +67,6 @@ One benchmark has a recorded run behind it: 100 multi-frame files, about 50 GB r
 
 ## License and citation
 
-Apache License 2.0 from the release after 0.9.2; earlier releases remain under AGPL-3.0-or-later. Each release is archived on Zenodo under the concept DOI [10.5281/zenodo.22104298](https://doi.org/10.5281/zenodo.22104298), and the repository carries a `CITATION.cff`. If Isocenter's de-identification is part of how a dataset was prepared, it belongs in the methods section.
+Apache-2.0 (0.9.2 and earlier: AGPL-3.0-or-later). Each release is archived on Zenodo under the concept DOI [10.5281/zenodo.22104298](https://doi.org/10.5281/zenodo.22104298), and the repository carries a `CITATION.cff`. If Isocenter's de-identification is part of how a dataset was prepared, it belongs in the methods section.
 
 Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues), in public and for free. Help beyond that, such as configuring a profile for your protocol, integrating Isocenter into a pipeline, or reviewing a run's report, is available as paid consulting: write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
