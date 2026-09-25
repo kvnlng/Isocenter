@@ -29,8 +29,7 @@ class FlowList(list):
     """A list YAML should render inline, as [a, b, c].
 
     Redaction zones read as coordinates, not as a bulleted list four
-    lines tall. The representer is registered once, at import; registering
-    it again per call mutates global PyYAML state each time.
+    lines tall.
     """
 
 
@@ -39,6 +38,8 @@ def _flow_list_representer(dumper, data):
         'tag:yaml.org,2002:seq', data, flow_style=True)
 
 
+# Registered once, at import: registering it again per call mutates global
+# PyYAML state each time.
 yaml.add_representer(FlowList, _flow_list_representer)
 
 
@@ -86,11 +87,16 @@ yaml.add_representer(FlowList, _flow_list_representer)
 def _tagged(value):
     """A value JSON cannot hold, as text that says what it was.
 
-    `_scan_policy()` runs at export with no validator in front of it, over
-    a `phi_tags` code can assign, so the canonical form must never raise:
-    a rule value YAML read as a `date` hashes as that date, not as a
-    string that happens to spell it.
+    Args:
+        value (Any): Any value.
+
+    Returns:
+        dict: `{"__type__": <type name>, "__str__": str(value)}`.
     """
+    # `_scan_policy()` runs at export with no validator in front of it, over
+    # a `phi_tags` code can assign, so the canonical form must never raise:
+    # a rule value YAML read as a `date` hashes as that date, not as a
+    # string that happens to spell it.
     return {"__type__": type(value).__name__, "__str__": str(value)}
 
 
@@ -101,7 +107,17 @@ def _key(key):
 
 
 def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
-    """The v1 canonical form of a tag policy. Never change it (see above)."""
+    """The v1 canonical form of a tag policy. Never change it (see above).
+
+    Args:
+        phi_tags (dict): The tag policy. Rule `name`s and a string rule's
+            text are left out.
+        remove_private_tags (bool): The private-tag switch.
+
+    Returns:
+        bytes: Sorted, compact ASCII JSON of the rules, the switch and
+            `config_manager.CONFIG_VERSION`.
+    """
     rules = {}
     for tag, rule in (phi_tags or {}).items():
         if isinstance(rule, dict):
@@ -124,7 +140,17 @@ def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
 
 
 def _scan_policy_for(phi_tags, remove_private_tags, base: str) -> ScanPolicy:
-    """The `ScanPolicy` a scan over `phi_tags` records, labelled `base`."""
+    """The `ScanPolicy` a scan over `phi_tags` records, labelled `base`.
+
+    Args:
+        phi_tags (dict): The tag policy.
+        remove_private_tags (bool): The private-tag switch.
+        base: The policy base label.
+
+    Returns:
+        ScanPolicy: `"v1:"` plus the sha256 hex of the v1 canonical form,
+            with `base`.
+    """
     return ScanPolicy("v1:" + hashlib.sha256(
         _canonical_policy_v1(phi_tags, remove_private_tags)).hexdigest(), base)
 
@@ -132,11 +158,16 @@ def _scan_policy_for(phi_tags, remove_private_tags, base: str) -> ScanPolicy:
 def _policy_base_label(base) -> str:
     """The loader's fifth element as the label a person reads.
 
-    `profiles.FLOOR` is the floor, None is `privacy_profile: none`, and a
-    string is a pinned profile name or an external profile's path. The one
-    spelling of each, shared by `IsocenterConfiguration._policy_base` and
-    `Session.audit(config_path=)`, so one base cannot be written two ways.
+    Args:
+        base: `profiles.FLOOR` for the floor, None for `privacy_profile:
+            none`, or a pinned profile name or an external profile's path.
+
+    Returns:
+        str: `floor over <FLOOR_BASE>`, `none`, or `base` unchanged.
     """
+    # The one spelling of each, shared by `IsocenterConfiguration._policy_base`
+    # and `Session.audit(config_path=)`, so one base cannot be written two
+    # ways.
     if base is profiles.FLOOR:
         return f"floor over {profiles.FLOOR_BASE}"
     if base is None:
@@ -159,6 +190,12 @@ def _deid_method_label(base: str) -> str:
     Exact matches only, so no string that merely looks like one of them
     (a pinned name in another case, a relative path beginning `floor
     over `) is written verbatim.
+
+    Args:
+        base: A recorded `ScanPolicy.base`.
+
+    Returns:
+        str: `base`, or `EXTERNAL_PROFILE_LABEL`.
     """
     if (base in profiles.PRIVACY_PROFILES
             or base in (_policy_base_label(None),
@@ -168,19 +205,26 @@ def _deid_method_label(base: str) -> str:
 
 
 def _deid_method_value(policy: ScanPolicy, version: str) -> str:
-    """This step's De-identification Method `(0012,0063)` value:
-    `isocenter/<version>; <label>; v1:<8 hex>`.
+    """This step's De-identification Method `(0012,0063)` value.
 
-    - `isocenter/<version>` is the exact spelling the output fingerprint's
-      N2 substitution normalises (`scripts/output_fingerprint.py`), so a
-      release bump moves no recorded output. Any other spelling would.
-    - The label is the recorded policy's, through `_deid_method_label`.
-    - 8 hex characters of `ScanPolicy.fingerprint`, never recomputed, so
-      there is one answer to "which policy". It carries `CONFIG_VERSION`,
-      so a minor bump moves it in every exported file. Eight, not more,
-      for LO's 64: the floor's label with a 17-character version is
-      exactly 64.
+    `isocenter/<version>; <label>; v1:<8 hex>`: the label is
+    `_deid_method_label` of the recorded base, and the hex is the first 8
+    characters of `ScanPolicy.fingerprint`, never recomputed. The
+    fingerprint carries `CONFIG_VERSION`, so a minor bump moves it in
+    every exported file.
+
+    Args:
+        policy (ScanPolicy): The recorded policy.
+        version (str): The library version.
+
+    Returns:
+        str: The value, at most 64 characters (LO).
     """
+    # `isocenter/<version>` is the exact spelling the output fingerprint's
+    # N2 substitution normalises (`scripts/output_fingerprint.py`), so a
+    # release bump moves no recorded output; any other spelling would.
+    # Eight hex characters, not more, for LO's 64: the floor's label with a
+    # 17-character version is exactly 64.
     scheme, _, digest = policy.fingerprint.partition(":")
     return (f"isocenter/{version}; {_deid_method_label(policy.base)}; "
             f"{scheme}:{digest[:8]}")
@@ -240,18 +284,27 @@ class IsocenterConfiguration:
 
     @property
     def _policy_base(self) -> str:
-        """What the policy in force was built on, as one string:
-        the pinned profile name or external path, `floor over
-        basic@2026c`, or `none`. The identifier the report prints and the
-        store's policy record carries."""
+        """What the policy in force was built on, as one string.
+
+        Returns:
+            str: The pinned profile name or external path, `floor over
+                basic@2026c`, or `none`: the identifier the report prints
+                and the store's policy record carries.
+        """
         if self.privacy_profile:
             return self.privacy_profile
         return _policy_base_label(profiles.FLOOR if self._floor else None)
 
     def _scan_policy(self) -> ScanPolicy:
         """The policy in force: what `audit()` with no argument scans with.
-        Computed on every call, never cached: `phi_tags` and
-        `remove_private_tags` can be assigned directly."""
+
+        Returns:
+            ScanPolicy: The fingerprint of `phi_tags` and
+                `remove_private_tags` as they stand, labelled
+                `_policy_base`.
+        """
+        # Computed on every call, never cached: `phi_tags` and
+        # `remove_private_tags` can be assigned directly.
         return _scan_policy_for(self.phi_tags, self.remove_private_tags,
                                 self._policy_base)
 
@@ -290,7 +343,14 @@ class IsocenterConfiguration:
         self._file_in_sync = True
 
     def _rendered(self) -> str:
-        """The YAML `save()` writes, or the `ValueError` it raises."""
+        """The YAML `save()` writes.
+
+        Returns:
+            str: The document.
+
+        Raises:
+            ValueError: When `phi_tags` lacks a rule its base supplies.
+        """
         # The base lookup sits beside the loader's resolution, so the two
         # cannot resolve a name differently.
         base = config_manager._policy_base_rules(self.privacy_profile, self._floor)
@@ -338,11 +398,23 @@ class IsocenterConfiguration:
 
     def _missing_base_rules_refusal(self, missing: List[str]) -> str:
         """Why `save()` cannot write a policy that lacks rules its base
-        supplies. There are two ways there: a rule deleted from
-        `phi_tags` directly (no method removes one), or, for an external
-        profile only, a rule the profile file gained after the load. The
-        save cannot tell them apart without a snapshot, so it names both
-        where both are possible."""
+        supplies.
+
+        Names up to three missing tags and how to opt one out; for an
+        external profile, also suggests reloading it, since the profile
+        file may have gained the rules after the load.
+
+        Args:
+            missing (List[str]): The tags the base supplies and `phi_tags`
+                lacks.
+
+        Returns:
+            str: The refusal message.
+        """
+        # Two ways here: a rule deleted from `phi_tags` directly (no method
+        # removes one), or, for an external profile only, a rule the profile
+        # file gained after the load. Without a snapshot the save cannot
+        # tell them apart, so the message names both where both are possible.
         if self.privacy_profile:
             base = f"privacy_profile {self.privacy_profile}"
             brings = f"a file naming {self.privacy_profile} brings them in"
@@ -363,30 +435,47 @@ class IsocenterConfiguration:
         return message + " (#715)"
 
     def _refuse_auto_save_without_a_file(self) -> None:
-        """First in every mutator, before anything changes: an opted-in
-        configuration with nowhere to write raises `ValueError` rather than
-        doing nothing. About the setting, not the call, so a `delete_rule`
-        that would change nothing refuses too."""
+        """Refuse an opted-in configuration with nowhere to write.
+
+        Called first in every mutator, before anything changes. About the
+        setting, not the call, so a `delete_rule` that would change nothing
+        refuses too.
+
+        Raises:
+            ValueError: When `auto_save` is on and `config_path` is unset.
+        """
         if self.auto_save and not self.config_path:
             raise ValueError(_NO_FILE)
 
     def _apply(self, change: Callable[["IsocenterConfiguration"], Any]) -> Any:
         """Make `change` to this configuration, and write it when
-        `auto_save` is on. The four mutators all come through here,
-        after their validation, so they cannot drift apart.
+        `auto_save` is on.
 
-        Under auto-save the change is tried first on a deep copy and that
-        copy is saved; only a save that succeeded lets the change reach
-        this object. A refused or failed write therefore leaves memory and
-        the file exactly as they were, with nothing to restore -- and a
-        rule `get_rule()` handed out is still the configuration's own
-        dict, which a snapshot-and-restore would have replaced. `change`
-        must be deterministic: it runs twice.
+        Under auto-save a refused or failed write leaves memory and the
+        file exactly as they were. With auto-save off, the change stays in
+        memory, and the first one after a load or a save prints a one-line
+        notice that the file is unchanged.
 
-        With auto-save off, the change stays in memory, and the first one
-        after a load or a save prints a one-line notice that the file is
-        unchanged.
+        Args:
+            change (Callable[[IsocenterConfiguration], Any]): Applies the
+                change to the configuration it is given. Must be
+                deterministic: under auto-save it runs twice.
+
+        Returns:
+            Any: What `change` returned for this object.
+
+        Raises:
+            ValueError: Under `auto_save`, with no `config_path` or when
+                `save()` refuses.
+            OSError: Under `auto_save`, when the write fails.
         """
+        # The four mutators all come through here, after their validation,
+        # so they cannot drift apart. Under auto-save the change is tried
+        # first on a deep copy and that copy is saved; only a save that
+        # succeeded lets the change reach this object. Nothing needs
+        # restoring, and a rule `get_rule()` handed out stays the
+        # configuration's own dict, which a snapshot-and-restore would
+        # replace.
         self._refuse_auto_save_without_a_file()
         if self.auto_save:
             trial = copy.deepcopy(self)
@@ -405,8 +494,16 @@ class IsocenterConfiguration:
 
     @staticmethod
     def _without_rule(configuration: "IsocenterConfiguration", serial_number: str) -> bool:
-        """Remove `serial_number`'s rule from `configuration`; whether one
-        was there."""
+        """Remove `serial_number`'s rule from `configuration`.
+
+        Args:
+            configuration (IsocenterConfiguration): The configuration to
+                change.
+            serial_number (str): The serial whose rules are removed.
+
+        Returns:
+            bool: Whether a rule was removed.
+        """
         before = len(configuration.rules)
         configuration.rules = [r for r in configuration.rules
                                if r.get("serial_number") != serial_number]
@@ -419,7 +516,8 @@ class IsocenterConfiguration:
         Add a machine redaction rule.
 
         Replaces any existing rule for the same serial number. Changes
-        memory; writes `config_path` only when `auto_save` is on.
+        memory; writes `config_path` only when `auto_save` is on. The
+        keywords are spelled as the rule's keys in a `machines:` file.
 
         Args:
             serial_number (str): The device serial number.
@@ -427,8 +525,6 @@ class IsocenterConfiguration:
             model_name (str, optional): Metadata for reference.
             redaction_zones (List[Any], optional): List of redaction zones
                 (ROIs).
-
-        The keywords are spelled as the rule's keys in a `machines:` file.
 
         Raises:
             ValueError: For a rule `load_config` would refuse (a serial

@@ -1,3 +1,4 @@
+"""Convert a CTP DicomPixelAnonymizer.script into Isocenter redaction rules."""
 import os
 import re
 import sys
@@ -11,6 +12,20 @@ class CTPParser:
 
     @staticmethod
     def parse_script(content: str):
+        """Parse a script's text into machine redaction rules.
+
+        Each `{ condition }` block followed by `(x,y,w,h)` coordinates gives
+        one rule when its condition names a Manufacturer or a
+        ManufacturerModelName (`containsIgnoreCase`); other blocks are
+        skipped. Coordinates are converted to zone space `[y, y+h, x, x+w]`.
+
+        Args:
+            content (str): The script's text.
+
+        Returns:
+            list: Rule dicts with `manufacturer`, `model_name`, `comment`
+                and `redaction_zones` keys, in script order.
+        """
         rules = []
 
         # The format is roughly:

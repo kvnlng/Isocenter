@@ -1,3 +1,4 @@
+"""OCR over pixel data: find burned-in text and where it sits."""
 import numpy as np
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
@@ -45,9 +46,9 @@ class OcrUnavailableError(RuntimeError):
     `Session.discover_redaction_zones()` before any worker is dispatched,
     when `pytesseract` does not import or the `tesseract` binary does not
     answer. The frozen promise is `RuntimeError`; this subclass is tier 2,
-    and exists so a script that treats OCR as optional can catch "OCR is
-    missing" by name without matching message text, which is not frozen.
-    `HAS_OCR` cannot answer that question: it does not cover the binary.
+    and lets a script that treats OCR as optional catch "OCR is missing"
+    by name without matching message text, which is not frozen. `HAS_OCR`
+    does not answer that question: it does not cover the binary.
     """
 
 
@@ -59,22 +60,26 @@ class PixelScanError(RuntimeError):
     warning that counts the failures, when at least one instance failed
     and none was read. Not on a partial scan: an instance read is a
     result, and the others are in `PhiReport.failures` (or, for discovery,
-    which has no failure field, in the log). This is `ExportError`'s
-    rule: a partial result is returned and nothing-at-all raises, with the
-    failure list on the exception.
+    which has no failure field, in the log).
 
     `.failures` is a list of `(entity_uid, reason)`; `.attempted` is how
     many instances the pass dispatched, which is more than the failures
     when some of them carried no pixel element (neither read nor failed).
 
     The frozen promise is `RuntimeError`; this subclass is tier 2. It is
-    deliberately **not** an `OcrUnavailableError`: that name means
-    "refused before anything was scanned", and this is raised after a
-    pass, so a script catching `OcrUnavailableError` to treat OCR as
-    optional does not catch this one.
+    **not** an `OcrUnavailableError`, which means "refused before anything
+    was scanned", so a script catching `OcrUnavailableError` to treat OCR
+    as optional does not catch this one.
     """
 
     def __init__(self, failures, attempted):
+        """Record the failures and build the message.
+
+        Args:
+            failures (Iterable[Tuple[str, str]]): `(entity_uid, reason)` per
+                instance that could not be read.
+            attempted (int): How many instances the pass dispatched.
+        """
         self.failures = list(failures)   # [(entity_uid, reason)]
         self.attempted = attempted
         first = self.failures[0] if self.failures else ("UNKNOWN", "unknown")
@@ -87,15 +92,16 @@ class PixelScanError(RuntimeError):
 def _ocr_unavailable_reason() -> Optional[str]:
     """`None` when OCR can run, otherwise why it cannot.
 
-    "Can run" includes the binary. `HAS_OCR` means only that pytesseract
-    imported, and a machine with pytesseract but no working `tesseract`
-    binary has that and still reads nothing. A binary that fails the
-    version probe, `SystemExit` included, is reported as unusable.
+    "Can run" includes the binary: pytesseract must import and the
+    `tesseract` binary must answer the version probe. A binary that fails
+    the probe, `SystemExit` included, is reported as unusable.
 
-    Reads the module globals at call time, so `patch.object` on this
-    module reaches it; a caller that copied `HAS_OCR` at import would not
-    see the patch, or a later install.
+    Returns:
+        Optional[str]: None, or the reason OCR cannot run.
     """
+    # Reads the module globals at call time, so `patch.object` on this
+    # module reaches it; a caller that copied `HAS_OCR` at import would not
+    # see the patch, or a later install.
     if not HAS_OCR:
         return f"pytesseract could not be imported ({_OCR_IMPORT_ERROR})"
     try:
@@ -115,10 +121,18 @@ def _require_ocr(operation: str) -> None:
     """Raise `OcrUnavailableError` naming `operation` unless OCR can run.
 
     Called first thing by both Session methods that need OCR, before they
-    read the graph: "this method needs OCR" holds whatever the graph
-    contains, and a scaffolded config would otherwise answer "nothing to
-    scan" without OCR and surface the missing extra only later.
+    read the graph.
+
+    Args:
+        operation (str): The method name the message names.
+
+    Raises:
+        OcrUnavailableError: If OCR cannot run; the message says why and
+            how to install it.
     """
+    # Before the graph is read: "this method needs OCR" holds whatever the
+    # graph contains, and a scaffolded config would otherwise answer
+    # "nothing to scan" without OCR and surface the missing extra later.
     reason = _ocr_unavailable_reason()
     if reason is None:
         return
@@ -198,10 +212,17 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
                                   frame_idx: int = 0) -> List[TextRegion]:
     """`detect_text_regions` without its catch: an OCR failure raises.
 
-    The Session path calls this, through `_ocr_instance`, so that a frame
-    whose OCR failed can be told apart from a frame with no text on it.
     Assumes OCR is available; `_ocr_instance` checks first.
+
+    Args:
+        pixel_data (np.ndarray): One 2D frame, scaled to uint8 if needed.
+        frame_idx (int): The frame index recorded on each region.
+
+    Returns:
+        List[TextRegion]: Regions with confidence above 0 and non-empty text.
     """
+    # The Session path calls this, through `_ocr_instance`, so that a frame
+    # whose OCR failed can be told apart from a frame with no text on it.
     # PIL needs uint8. The VOI LUT has set contrast, but the result may
     # still be wider than 8 bits.
     if pixel_data.dtype != np.uint8:
@@ -268,7 +289,15 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
 
 
 def detect_text(pixel_data: np.ndarray) -> str:
-    """The text of every region `detect_text_regions` finds, space-joined."""
+    """The text of every region `detect_text_regions` finds, space-joined.
+
+    Args:
+        pixel_data (np.ndarray): The image data (2D).
+
+    Returns:
+        str: The joined text; empty when OCR is unavailable, failed, or
+            found nothing.
+    """
     regions = detect_text_regions(pixel_data)
     return " ".join([r.text for r in regions])
 
@@ -322,21 +351,25 @@ def _frames_for_ocr(instance: Instance, pixel_array: np.ndarray) -> List[np.ndar
 def _ocr_instance(instance: Instance) -> _InstanceOcr:
     """OCR every frame of one instance, and say what could not be read.
 
-    The one place an instance's pixels are loaded and read for text; the
-    Session worker and the tier-2 `analyze_pixels` both come through
-    here. Two catches, each narrow in scope and broad in type, because
-    what they guard -- a sidecar read, a file decode, a tesseract
-    subprocess -- can fail in any way, and the question each answers is
-    only "was this read":
+    A load failure fails the instance; a frame's OCR failure fails that
+    frame only, and the frames that succeeded keep their findings. An
+    instance nobody could read is reported as a failure, never as a clean
+    result. An instance with no pixel element is neither read nor failed.
+    A frame this call loaded is released before it returns.
 
-    - around the load: the instance failed, and no frame was read;
-    - around each frame's OCR: that frame failed, the loop goes on, and
-      the frames that succeeded keep their findings.
+    Args:
+        instance (Instance): The instance to read.
 
-    An instance nobody could read is therefore reported as a failure,
-    never as a clean result. An instance with no pixel element is neither
-    read nor failed.
+    Returns:
+        _InstanceOcr: The regions found, whether any frame was read, and
+            the failure, if any.
     """
+    # The one place an instance's pixels are loaded and read for text; the
+    # Session worker and the tier-2 `analyze_pixels` both come through
+    # here. Two catches, each narrow in scope and broad in type, because
+    # what they guard -- a sidecar read, a file decode, a tesseract
+    # subprocess -- can fail in any way, and the question each answers is
+    # only "was this read".
     # No pixel element to read is neither read nor failed. Checked from
     # the instance's state, not from `get_pixel_data()`'s messages, which
     # would drift under any rewording there. A hand-built instance with
@@ -421,22 +454,25 @@ def _load_and_ocr(instance: Instance) -> _InstanceOcr:
 
 def analyze_pixels(instance: Instance) -> List[TextRegion]:
     """Analyzes the pixel data of a DICOM Instance for burned-in text.
-    Returns list of TextRegion objects (raw findings, not filtered).
-    Caller is responsible for filtered results.
 
-    Also returns `[]` when OCR is unavailable, which is not "no text": the
-    Session methods that call this check first and refuse instead. A load or
-    OCR failure is logged at ERROR and what was read is returned, so `[]` is
-    not "no text" there either; the Session methods report what this logs.
-    It returns a list rather than raising because it runs per instance
-    inside workers, where raising would turn one precondition into N worker
-    failures.
-
-    A frame this call loaded is released before it returns, with
+    A load or OCR failure is logged at ERROR and what was read is
+    returned. A frame this call loaded is released before it returns, with
     `unload_pixel_data()`; one that was resident before the call is left as
     it was. A caller who wants the frame afterwards calls
     `instance.get_pixel_data()`.
+
+    Args:
+        instance (Instance): The instance to read.
+
+    Returns:
+        List[TextRegion]: Raw findings, not filtered against any zone. Also
+            `[]` when OCR is unavailable or nothing could be read, so `[]`
+            is not "no text"; the Session methods check availability first
+            and report what this only logs.
     """
+    # Returns a list rather than raising: it runs per instance inside
+    # workers, where raising would turn one precondition into N worker
+    # failures.
     if not HAS_OCR:
         return []
     result = _ocr_instance(instance)

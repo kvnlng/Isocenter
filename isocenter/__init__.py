@@ -1,3 +1,8 @@
+"""Isocenter: index, de-identify and export DICOM datasets.
+
+`Session` is the entry point. The package also exports `Builder`,
+`Equipment`, `RedactionError` and `ExportError`.
+"""
 # No warning filter is installed here, deliberately.
 #
 # `warnings.filterwarnings` prepends to the process-wide filter list, so

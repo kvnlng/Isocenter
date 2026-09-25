@@ -1,3 +1,4 @@
+"""A minimal IOD validator for the attributes an export writes."""
 from pydicom.dataset import Dataset
 from pydicom.tag import BaseTag, Tag
 from typing import List
@@ -10,15 +11,15 @@ class IODValidator:
     Checks for the presence of Type 1 and Type 2 attributes based on SOP Class rules.
     Currently implements a subset of "Common" and "CTImage" modules.
 
-    **Validate, and fill.** The export worker asks `absent_type2` before it
-    asks `validate`, and writes each tag it names zero-length: Type 2
-    means present and empty when unknown, so an absent one is a gap the
-    writer can close faithfully rather than a reason to refuse the file.
-    Both read `_modules_for`, so the fill covers exactly what the Type 2 arm
-    of `validate` would report and nothing this table does not know.
-    `validate`'s Type 2 arm stays: it is the guard that reports a gap if
-    the fill ever stops running. Type 1 is never filled.
+    The export worker calls `absent_type2` before `validate`, and writes
+    each tag it names zero-length. Type 1 is never filled.
     """
+    # Validate, and fill: Type 2 means present and empty when unknown, so an
+    # absent one is a gap the writer can close faithfully rather than a
+    # reason to refuse the file. Both read `_modules_for`, so the fill
+    # covers exactly what the Type 2 arm of `validate` would report.
+    # `validate`'s Type 2 arm stays: it is the guard that reports a gap if
+    # the fill ever stops running.
 
     _MODULE_DEFINITIONS = {
         'Common': {
@@ -49,12 +50,18 @@ class IODValidator:
     def _modules_for(ds: Dataset) -> List[str]:
         """The module names this table holds for `ds`'s SOP class, or `[]`.
 
-        The SOP class is the file meta's when the dataset has one -- the
-        export worker's `FileDataset` always does -- and the dataset's own
-        `SOPClassUID` otherwise. One spelling for `validate` and
-        `absent_type2`, so the fill and the refusal cannot read two SOP
-        classes.
+        The SOP class is the file meta's when the dataset has one, and the
+        dataset's own `SOPClassUID` otherwise.
+
+        Args:
+            ds (Dataset): The dataset to classify.
+
+        Returns:
+            List[str]: The module names, or `[]` for an SOP class this
+                table does not know.
         """
+        # One spelling for `validate` and `absent_type2`, so the fill and
+        # the refusal cannot read two SOP classes.
         sop = ds.file_meta.MediaStorageSOPClassUID if hasattr(
             ds, 'file_meta') else ds.get("SOPClassUID")
         return IODValidator._SOP_RULES.get(sop, [])
@@ -66,6 +73,13 @@ class IODValidator:
         Exactly the set `validate` reports as `[Type 2 Error]`: absent, not
         empty, since an empty Type 2 element is conformant. Type 1 tags are
         never named, absent or empty.
+
+        Args:
+            ds (Dataset): The dataset to check.
+
+        Returns:
+            List[BaseTag]: The absent Type 2 tags, in table order; `[]` for
+                an SOP class this table does not know.
         """
         absent = []
         for module in IODValidator._modules_for(ds):

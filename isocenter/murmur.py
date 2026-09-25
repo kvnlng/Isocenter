@@ -4,8 +4,7 @@ Maps Waveform Annotation Sequence (0040,B020) into the
 `<record>.annotations.json` format documented at
 https://kvnlng.github.io/Murmur/annotation-schema
 
-Isocenter transcribes; it does not interpret. Coded concepts are passed
-through scheme-qualified rather than normalized into a clinical
+Coded concepts are passed through scheme-qualified, not normalized into a
 vocabulary of Isocenter's own, so a finding says exactly what the
 originating cart said.
 """
@@ -72,6 +71,10 @@ def _first_int(values) -> Optional[int]:
 def _referenced_channel(referenced_channels):
     """Classify an annotation's channel reference against the kept group.
 
+    Args:
+        referenced_channels: The Referenced Waveform Channels (0040,A0B0)
+            value, or None.
+
     Returns:
         tuple: `(_REF_ABSENT, None)` when the attribute names no usable
         pair -- the annotation applies to the whole waveform;
@@ -83,13 +86,10 @@ def _referenced_channel(referenced_channels):
         lead; `(_REF_OTHER, group_ordinals)` when every pair names a
         group that was not ingested, carrying ALL of those distinct
         ordinals in the order the file wrote them.
-
-    The `_REF_OTHER` list is every ordinal, not the first one: a single
-    annotation may name several groups, and a message that says "groups"
-    while reporting one of them under-reports the loss it exists to
-    disclose. The scan only stops early on `_REF_KEPT`, where the
-    annotation survives and no ordinal is reported at all.
     """
+    # The `_REF_OTHER` list is every ordinal, not the first one: a single
+    # annotation may name several groups, and reporting one of them would
+    # under-report the loss. The scan stops early only on `_REF_KEPT`.
     others = []
     for group, channel in _channel_pairs(referenced_channels):
         if _item_index(group) == KEPT_WAVEFORM_ITEM_INDEX:
@@ -111,14 +111,21 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
     annotation outright rather than emit it leadless (see
     `build_annotations`).
 
-    Sanitized with the same `_sanitize_description` the `.hea` signal
-    line gets (`isocenter.exporters.wfdb`): `wfdb_description()` returns a
-    coded Channel Source value verbatim -- it is not filtered by the
-    lead-name allowlist, which only guards the free-text Channel Label
-    fallback -- so a non-conformant source can still carry an embedded
-    newline. Without this, `annotations.json` could carry a rawer value
-    than the `.hea` file for the identical input.
+    Args:
+        waveform (Waveform): The ingested multiplex group.
+        referenced_channels: The Referenced Waveform Channels value.
+
+    Returns:
+        Optional[str]: The lead name, sanitized as the `.hea` signal line
+            is, or None when the reference names no single channel of the
+            ingested group.
     """
+    # Sanitized with the same `_sanitize_description` the `.hea` signal
+    # line gets: `wfdb_description()` returns a coded Channel Source value
+    # verbatim (the lead-name allowlist guards only the free-text Channel
+    # Label fallback), so a non-conformant source can still carry an
+    # embedded newline, and annotations.json must not carry a rawer value
+    # than the `.hea` file.
     state, channel_number = _referenced_channel(referenced_channels)
     if state != _REF_KEPT:
         return None
@@ -135,13 +142,19 @@ def _sample_positions(item, waveform) -> List[int]:
     Prefers Referenced Sample Positions (1-based in DICOM). Falls back to
     Referenced Time Offsets, converted via the sampling frequency.
 
-    `waveform` is the INGESTED multiplex group, and both branches are
-    expressed on its sample axis: a sample position is an index into it,
-    and `sampling_frequency` is its rate. Callers must therefore have
-    established that the annotation names that group before calling --
-    `build_annotations` does, and drops the ones that do not. On another
-    group the result is wrong: a 1.0 s offset on a 1000 Hz group
-    converted at the kept group's 500 Hz lands at half its true position.
+    Precondition: the annotation names the ingested group. Both branches
+    are expressed on `waveform`'s sample axis, so on another group the
+    result is wrong (a 1.0 s offset on a 1000 Hz group converted at the
+    kept group's 500 Hz lands at half its true position).
+    `build_annotations` checks first and drops the others.
+
+    Args:
+        item (DicomItem): The annotation item.
+        waveform (Waveform): The ingested multiplex group.
+
+    Returns:
+        List[int]: The positions; `[]` when neither attribute yields one or
+            the sampling frequency is zero.
     """
     positions = _as_list(item.attributes.get(TAG_REFERENCED_SAMPLE_POSITIONS))
     resolved = []
@@ -172,11 +185,18 @@ def _concept(item, include_text: bool = False):
     published vocabulary is site-defined, and its Code Meaning is then
     operator-typed free text rather than a term from a scheme -- the same
     property that makes Unformatted Text Value opt-in. Such a concept
-    yields `UNCODED_CATEGORY` and no label.
+    yields `UNCODED_CATEGORY` and no label, unless `include_text`.
 
-    `include_text` is the auditor's override, not a debug switch: it is
-    the same flag that releases `note`, and it already means "this
-    protocol permits free text in this output".
+    Args:
+        item (DicomItem): The annotation item.
+        include_text (bool): Release a site-defined concept's Code Meaning
+            as the label and its Code Value as the category. The same flag
+            releases `note`: it means "this protocol permits free text in
+            this output".
+
+    Returns:
+        tuple: `(category, label)`; `(None, None)` with no concept, and
+            `(None, meaning)` for a concept with no Code Value.
     """
     seq = item.sequences.get(TAG_CONCEPT_NAME_CODE_SEQ)
     if seq is None or not seq.items:
@@ -201,14 +221,18 @@ def _real_note(item) -> str:
     """`item`'s Unformatted Text Value as a note, or `""` when it is the
     dummy a value-less REPLACE writes there.
 
-    The tag is D in PS3.15 Table E.1-1, so `basic` and the floor write
-    the text dummy `ANONYMIZED` over the annotation's text; read as a
-    note, every finding would carry that placeholder. The same reading as
-    `exporters.wfdb._real_timing` gives the DT dummy, and compared with
-    `config_manager._vr_dummy`, the one table, never a literal of its
-    own. Text that really is `ANONYMIZED` is no note either: omitted, not
-    invented.
+    Text that really is the dummy (`ANONYMIZED`) is no note either.
+
+    Args:
+        item (DicomItem): The annotation item.
+
+    Returns:
+        str: The note, or `""`.
     """
+    # The tag is D in PS3.15 Table E.1-1, so `basic` and the floor write the
+    # text dummy over the annotation's text. Compared with
+    # `config_manager._vr_dummy`, the one table, never a literal of its own,
+    # as `exporters.wfdb._real_timing` does for the DT dummy.
     value = str(item.attributes.get(TAG_UNFORMATTED_TEXT, "") or "")
     return "" if value == _vr_dummy(TAG_UNFORMATTED_TEXT) else value
 
@@ -232,26 +256,19 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
         dropped_groups (list, optional): Appended with one list per
             annotation dropped because it names no ingested group,
             holding the distinct multiplex group ordinals that
-            annotation referenced. It nests because the caller needs
-            both numbers and they are not the same: `len()` is how many
-            marks were lost, and the union across the lists is which
-            signals they pointed at -- one annotation may name several
-            groups. It carries ordinals rather than prose, and rides an
-            out-parameter rather than the return value, for three
-            reasons: the return value is the published
-            Murmur document, so a new key there is a schema change; this
-            function has neither a logger nor a store handle, so the
-            warning and the `DATA_LOSS` entry belong to the caller; and
-            the caller aggregates -- one instance with forty marks on a
-            discarded group must file one audit row, not forty. Same
-            channel and same shape as `populate_attrs`'s
-            `dropped_private_binary`, which likewise hands back the tag
-            and lets the caller word the message.
+            annotation referenced: `len()` is how many marks were lost,
+            and the union across the lists is which groups they pointed
+            at. The caller writes the warning and the `DATA_LOSS` row.
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the
         instance carries no annotations.
     """
+    # `dropped_groups` is an out-parameter, not part of the return value:
+    # the return value is the published Murmur document, so a new key there
+    # is a schema change; this function has no logger or store handle; and
+    # the caller aggregates, one audit row per instance, not per mark. Same
+    # shape as `populate_attrs`'s `dropped_private_binary`.
     findings: List[Dict[str, Any]] = []
 
     seq = instance.sequences.get(TAG_ANNOTATION_SEQ)
@@ -325,6 +342,13 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
 
 def write_annotations(path: str, document: Dict[str, Any]) -> Optional[str]:
     """Write an annotations document, skipping empty ones.
+
+    Creates the parent directory if needed. Writes indented JSON with a
+    trailing newline.
+
+    Args:
+        path (str): The file to write.
+        document (Dict[str, Any]): The document `build_annotations` built.
 
     Returns:
         Optional[str]: The path written, or None if there were no findings.

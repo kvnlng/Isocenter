@@ -1,3 +1,4 @@
+"""The append-only binary sidecar that holds pixel and waveform bytes."""
 # Module scope, deliberately. `fcntl` is POSIX-only and `setup.py`
 # says `Operating System :: POSIX` because of it. At module scope a
 # Windows install fails at `import isocenter` -- `sidecar` is imported
@@ -31,7 +32,12 @@ class SidecarManager:
 
     def write_frame(self, data: bytes, compression: str = 'zlib') -> Tuple[int, int]:
         """
-        Appends data to the sidecar file.
+        Appends data to the sidecar file, and fsyncs it.
+
+        Takes an exclusive `flock` on the sidecar for the append only. A
+        caller that must not race `compact_sidecar` holds
+        `SqliteStore._hold_sidecar_gate` across this call; this method never
+        takes the gate itself.
 
         Args:
             data (bytes): The binary data to store.
@@ -39,6 +45,9 @@ class SidecarManager:
 
         Returns:
             Tuple[int, int]: (offset, length) of the written blob.
+
+        Raises:
+            ValueError: If `compression` is neither 'zlib' nor 'raw'.
         """
         if compression == 'zlib':
             blob = zlib.compress(data)
@@ -75,7 +84,7 @@ class SidecarManager:
 
         return offset, length
 
-    def read_frame(self, offset: int, length: int, compression: str = 'zlib') -> bytes:
+    def read_frame(self, offset: int, length: int, compression: str = 'zlib') -> bytes:  # pylint: disable=missing-raises-doc  # `raise e` re-raises zlib.error, documented below
         """
         Reads a frame from the sidecar at the specified offset.
 
@@ -88,8 +97,9 @@ class SidecarManager:
             bytes: The decompressed/raw data.
 
         Raises:
-            IOError: If read is incomplete.
+            OSError: If the read is incomplete.
             ValueError: If compression is unsupported.
+            zlib.error: If a 'zlib' blob does not decompress.
         """
 
         with open(self.filepath, 'rb') as f:

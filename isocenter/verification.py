@@ -1,3 +1,4 @@
+"""Classify burned-in text found by OCR against the configured redaction zones."""
 from typing import List, Dict, Any, Tuple
 from isocenter.entities import Instance
 from isocenter.privacy import PhiFinding
@@ -19,8 +20,15 @@ class RedactionVerifier:
     def get_matching_rule(self, equipment: Any) -> Dict[str, Any]:
         """
         Finds the redaction rule that applies to this equipment.
-        Exact Serial Number match only, first rule wins; None when there is
-        no equipment, no serial, or no rule for it.
+
+        Exact Serial Number match only; the first matching rule wins.
+
+        Args:
+            equipment (Equipment): The instance's equipment, or None.
+
+        Returns:
+            Dict[str, Any]: The rule dictionary, or None when there is no
+                equipment, no serial, or no rule for it.
         """
         if not equipment:
             return None
@@ -40,15 +48,20 @@ class RedactionVerifier:
         """
         Fraction of the text_box's area that zone_box covers (0.0 - 1.0).
 
-        The two boxes deliberately speak different conventions, and the
-        conversion happens here and nowhere else on the read side:
-        text_box is OCR box space (x, y, w, h); zone_box is a config
-        `redaction_zones` entry in zone space (y1, y2, x1, x2) -- the
-        order every consumer that touches pixels reads
-        (`apply_redaction_to_array`, both redact paths, the export
-        worker). Reading the zone as (x, y, w, h) here would make the
-        classifier disagree with redaction about what every zone covers.
+        Args:
+            text_box (Tuple[int, int, int, int]): OCR box space (x, y, w, h).
+            zone_box (Tuple[int, int, int, int]): A config `redaction_zones`
+                entry in zone space (y1, y2, x1, x2).
+
+        Returns:
+            float: The covered fraction; 0.0 for no overlap or an empty box.
         """
+        # The two boxes deliberately speak different conventions, and the
+        # conversion happens here and nowhere else on the read side. Zone
+        # space is the order every consumer that touches pixels reads
+        # (`apply_redaction_to_array`, both redact paths, the export
+        # worker); reading the zone as (x, y, w, h) here would make the
+        # classifier disagree with redaction about what every zone covers.
         tx, ty, tw, th = text_box
         zy1, zy2, zx1, zx2 = zone_box
 
@@ -84,14 +97,24 @@ class RedactionVerifier:
         return self._coverage(text_box, zone_box) >= threshold
 
     def verify_instance(self, instance: Instance, equipment: Any = None) -> List[PhiFinding]:
-        """Runs OCR on the instance.
+        """Runs OCR on the instance and classifies each text region.
+
         - If text is fully matched (>= 80% coverage): considered Safe (Ignored).
         - If text is partially matched (> 0% but < 80%): Reported as PARTIAL_LEAK.
         - If text is not matched (0%): Reported as NEW_LEAK.
 
-        Also returns `[]` when OCR is unavailable, which is not "nothing
-        leaks": `Session.scan_pixel_content()` checks first and refuses
-        instead.
+        Text of two characters or fewer is skipped as noise.
+
+        Args:
+            instance (Instance): The instance to read.
+            equipment (Equipment, optional): Selects the redaction rule by
+                serial number; with none, every region is a NEW_LEAK.
+
+        Returns:
+            List[PhiFinding]: One finding per leaked region. Also `[]` when
+                OCR is unavailable, which is not "nothing leaks":
+                `Session.scan_pixel_content()` checks first and refuses
+                instead.
         """
         return self._findings_for(instance, analyze_pixels(instance), equipment)
 
@@ -99,12 +122,21 @@ class RedactionVerifier:
                       equipment: Any = None) -> List[PhiFinding]:
         """Classify already-read OCR regions against the matching rule.
 
-        Split out of `verify_instance` so the Session worker can read the
-        instance through `pixel_analysis._ocr_instance`, which reports a
-        failed load or frame, and still classify here: `verify_instance`
-        reads through `analyze_pixels`, which can only log one. Text of two
-        characters or fewer is skipped as noise.
+        Text of two characters or fewer is skipped as noise.
+
+        Args:
+            instance (Instance): The instance the regions were read from.
+            text_regions (List[Any]): `TextRegion`s from OCR.
+            equipment (Equipment, optional): Selects the redaction rule.
+
+        Returns:
+            List[PhiFinding]: One finding per region not covered by at least
+                80% by a zone.
         """
+        # Split out of `verify_instance` so the Session worker can read the
+        # instance through `pixel_analysis._ocr_instance`, which reports a
+        # failed load or frame, and still classify here: `verify_instance`
+        # reads through `analyze_pixels`, which can only log one.
         if not text_regions:
             return []
 

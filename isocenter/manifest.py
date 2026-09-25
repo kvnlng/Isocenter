@@ -1,3 +1,4 @@
+"""The export manifest: one entry per instance, rendered as JSON or HTML."""
 from dataclasses import dataclass, asdict
 from typing import List, Protocol
 import json
@@ -78,6 +79,12 @@ class Manifest:
     def to_dict(self):
         """
         Converts the manifest to a dictionary for JSON serialization.
+
+        Returns:
+            dict: `generated_at`, `project_name`, `total_files`,
+                `total_size_bytes` and `items` (each a dict of its
+                `ManifestItem` fields). The two totals are computed from
+                `items`, not read from the fields of the same name.
         """
         return {
             "generated_at": self.generated_at,
@@ -106,6 +113,12 @@ class JSONManifestRenderer:
     """Renders the manifest as a JSON file."""
 
     def render(self, manifest: Manifest, output_path: str) -> None:
+        """Writes `manifest.to_dict()` to `output_path` as indented JSON.
+
+        Args:
+            manifest (Manifest): The manifest data.
+            output_path (str): The destination file path, overwritten.
+        """
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(manifest.to_dict(), f, indent=2)
 
@@ -114,6 +127,14 @@ class HTMLManifestRenderer:
     """Renders the manifest as a standalone HTML file."""
 
     def render(self, manifest: Manifest, output_path: str) -> None:
+        """Writes the manifest to `output_path` as one HTML table.
+
+        One row per item. Values are interpolated without HTML escaping.
+
+        Args:
+            manifest (Manifest): The manifest data.
+            output_path (str): The destination file path, overwritten.
+        """
         # Basic accessible HTML table
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -182,6 +203,13 @@ class HTMLManifestRenderer:
 def get_manifest_renderer(format: str):
     """The renderer for `generate_manifest(format=)`: `'json'` or `'html'`,
     exactly.
+
+    Args:
+        format (str): `'json'` or `'html'`.
+
+    Returns:
+        JSONManifestRenderer | HTMLManifestRenderer: A new renderer for the
+            format.
 
     Raises:
         ValueError: For any other spelling, `None` and case variants

@@ -85,6 +85,12 @@ def register(name: str, exporter_cls) -> None:
 def get_exporter(name: str):
     """Instantiate the exporter registered under `name`.
 
+    Args:
+        name (str): The format name, e.g. `'dicom'` or `'wfdb'`.
+
+    Returns:
+        Exporter: A new instance of the registered class.
+
     Raises:
         ValueError: If no such format is registered.
     """
@@ -97,7 +103,11 @@ def get_exporter(name: str):
 
 
 def available_formats() -> List[str]:
-    """Return the registered format names, sorted."""
+    """Return the registered format names, sorted.
+
+    Returns:
+        List[str]: The names, sorted.
+    """
     return sorted(_REGISTRY)
 
 

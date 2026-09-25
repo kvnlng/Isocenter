@@ -95,26 +95,26 @@ def describe_exception(exc: BaseException) -> str:
     or cannot be rendered at all (its `__str__` raises), and the direct
     cause (`raise ... from`) in the same spelling:
     `RuntimeError: Pixel Loader failed ... (caused by OSError: EIO)`.
+    `__context__` (an exception raised while handling another, without
+    `from`) is not followed.
 
-    **Why the type leads.** `str()` is `''` for `KeyError()`,
-    `StopIteration()`, `OSError()`, `AssertionError()` and most bare
-    raises, so a reason built from the message alone can be empty, and a
-    caller testing it for truth would drop the failure. A message alone
-    also cannot tell `KeyError('x')` from the string `'x'`.
+    Every site that turns an exception into audit text, a summary reason
+    or a report failure calls this. Never raises.
 
-    **Why the cause, and only the direct one.** `get_pixel_data()` wraps
-    a loader's error in `RuntimeError("Pixel Loader failed ...") from e`,
-    so without the cause a sidecar `OSError` would reach
-    `PhiReport.failures` named only as a `RuntimeError`. `__context__` --
-    an exception raised while handling another, without `from` -- is not
-    followed: the raiser did not say the two were one failure.
+    Args:
+        exc (BaseException): The exception to describe.
 
-    **One spelling.** Every site that turns an exception into audit text,
-    a summary reason or a report failure calls this. It lives here
-    because `logger` is a leaf every one of those modules already
-    imports. Never raises: an exception whose `__str__` raises is
-    spelled by its type.
+    Returns:
+        str: The one-line description.
     """
+    # Why the type leads: `str()` is `''` for `KeyError()`, `OSError()` and
+    # most bare raises, so a reason built from the message alone can be
+    # empty, and a caller testing it for truth would drop the failure; a
+    # message alone also cannot tell `KeyError('x')` from the string 'x'.
+    # Why the direct cause: `get_pixel_data()` wraps a loader's error in
+    # `RuntimeError(...) from e`, and without the cause a sidecar `OSError`
+    # would reach `PhiReport.failures` named only as a `RuntimeError`. It
+    # lives here because `logger` is a leaf every caller already imports.
     text = _type_and_message(exc)
     cause = exc.__cause__
     if cause is not None:
@@ -129,21 +129,20 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     its `strerror` alone (`NotADirectoryError: Not a directory`), because
     its `str()` appends `filename` and `filename2`, and an export path is
     built from the graph: `Subject_<Patient ID>/...` for a DICOM file,
-    `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB and
-    DICOM export `ERROR` rows and the DICOM export worker's stderr use
-    this. An `OSError` with no `strerror` -- `OSError("cannot open
-    <path>")` -- is its type alone: its message is whatever the raiser
-    wrote, and the one exception this exists for is the one whose
-    message is built around a path.
+    `<Patient ID>_<series>_<instance>` for a WFDB record. An `OSError`
+    with no `strerror` -- `OSError("cannot open <path>")` -- is its type
+    alone.
 
-    **The limit.** Every other exception keeps its message, exactly as
-    `describe_exception` spells it: those messages are the reasons a
-    report exists to show, and there is no general way to tell a path in
-    one from prose. An exception type that writes a path into its own
-    message is not caught by this, so the fix belongs at the raise:
-    name the instance there, as the export worker's refusals
-    (`io_handlers._export_instance_worker`), `get_pixel_data()`'s load
-    and decompress failures, and `_verify_readback`'s inner exception do.
+    Every other exception keeps its message, exactly as
+    `describe_exception` spells it, so an exception type that writes a
+    path into its own message is not covered: name the instance at the
+    raise instead.
+
+    Args:
+        exc (BaseException): The exception to describe.
+
+    Returns:
+        str: The one-line description, with no `OSError` path in it.
     """
     text = _type_and_reason(exc)
     cause = exc.__cause__

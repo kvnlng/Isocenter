@@ -15,18 +15,24 @@ class ConfigAutomator:
     def suggest_config_updates(report: PhiReport, _current_config: IsocenterConfiguration) -> List[Dict[str, Any]]:
         """Generates a list of suggested configuration changes.
 
-        Returns:
-            List[Dict]: A list of 'suggestion' objects:
-                {
-                    "serial": str,
-                    "action": "ADD_ZONE" | "EXPAND_ZONE",
-                    "zone": [y1, y2, x1, x2],
-                    "reason": str
-                }
+        A `NEW_LEAK` finding suggests its text box as a new zone; a
+        `PARTIAL_LEAK` finding suggests growing its best-matching zone to
+        cover the text. A finding with no `rule_serial` in its metadata
+        gets no suggestion. Zones are in config space, (y1, y2, x1, x2),
+        the order every consumer of ``redaction_zones`` reads; OCR boxes
+        arrive as (x, y, w, h) and are converted.
 
-        Zones are emitted in config space, (y1, y2, x1, x2), the order every
-        consumer of ``redaction_zones`` reads. OCR metadata arrives in box
-        space, (x, y, w, h), and is converted here, as ``discovery.py`` does.
+        Args:
+            report (PhiReport): Findings from a pixel scan, each carrying
+                `leak_type`, `text_box`, `best_zone` and `rule_serial` in
+                its metadata.
+            _current_config (IsocenterConfiguration): Unused.
+
+        Returns:
+            List[Dict[str, Any]]: One dict per suggestion, with `serial`,
+                `action` and `reason`; an `ADD_ZONE` suggestion carries
+                `zone`, an `EXPAND_ZONE` one `original_zone` and
+                `new_zone`, each `[y1, y2, x1, x2]`.
         """
         suggestions = []
 
@@ -100,7 +106,20 @@ class ConfigAutomator:
     def apply_suggestions(session: 'DicomSession', suggestions: List[Dict[str, Any]]) -> int:
         """
         Applies the suggestions to the session's in-memory configuration.
-        Returns: Number of changes applied.
+
+        Edits `session.configuration.rules` in place, without saving. A
+        suggestion whose serial has no rule, an `ADD_ZONE` whose zone the
+        rule already holds, and an `EXPAND_ZONE` whose original zone is no
+        longer in the rule are skipped.
+
+        Args:
+            session (DicomSession): The session whose configuration is
+                changed.
+            suggestions (List[Dict[str, Any]]): As returned by
+                `suggest_config_updates`.
+
+        Returns:
+            int: Number of changes applied.
         """
         count = 0
         rules = session.configuration.rules

@@ -39,10 +39,10 @@ def signal_checksum(channel_samples) -> int:
     """16-bit signed sum of a signal's samples, as `header(5)` defines it.
 
     Args:
-        channel_samples: 1-D array of int16 samples for one channel.
+        channel_samples (np.ndarray): 1-D array of int16 samples for one channel.
 
     Returns:
-        int: Checksum in the range [-32768, 32767].
+        int: Checksum in the range [-32768, 32767]; 0 for no samples.
     """
     arr = np.asarray(channel_samples)
     if arr.size == 0:
@@ -56,16 +56,22 @@ def signal_checksum(channel_samples) -> int:
 def _sanitize(name: str) -> str:
     """Reduce a string to characters safe in a WFDB *record name*.
 
-    This is deliberately stricter than `ConfigLoader.clean_filename`
-    (which permits spaces): a WFDB record name is a bare token, not a
-    filename component, so it must not contain whitespace. It is used
-    only for `record_name_for` below -- the *folder* names this module
-    writes into come from `export_folder_names` in `io_handlers.py`,
-    which uses `ConfigLoader.clean_filename` (the same sanitizer
-    `DicomSession._export_dicom` uses) so the WFDB and DICOM exporters
-    land in character-for-character identical directories. Do not use
-    this function for folder names, or the two trees will diverge.
+    Keeps `[A-Za-z0-9_-]`, collapses every other run to one `_`, and strips
+    leading and trailing underscores. Stricter than
+    `ConfigLoader.clean_filename`: a record name is a bare token and holds no
+    whitespace. For record names only, never folder names.
+
+    Args:
+        name: The value to sanitize; None reads as empty, and `0` as "0".
+
+    Returns:
+        str: The sanitized token, or `"record"` when nothing is left.
     """
+    # The folder names this module writes into come from
+    # `export_folder_names` in `io_handlers.py`, which uses
+    # `ConfigLoader.clean_filename`, the sanitizer `DicomSession._export_dicom`
+    # uses, so the WFDB and DICOM trees land in identical directories. Using
+    # this function for folder names would make the two trees diverge.
     # NOTE: `name or ""` would discard a legitimate falsy-but-meaningful
     # value like the int 0 (InstanceNumber 0 is valid DICOM), collapsing
     # it to the "record" fallback below. Test for None explicitly instead.
@@ -77,14 +83,22 @@ def _sanitize(name: str) -> str:
 def record_name_for(patient, study, series, instance) -> str:
     """Build a record name from already-anonymized identifiers.
 
-    Called after anonymization, so `patient.patient_id` is the pseudonym,
-    not the source MRN. The instance number disambiguates multiple
-    acquisitions within one series -- but InstanceNumber is frequently
-    absent (`io_handlers.py` defaults it to 0), and multiple instances
-    missing it all produce the SAME base name here. This function does
-    not resolve that collision by itself; callers that write more than
-    one instance into the same directory must disambiguate the result
-    (see `WfdbExporter._unique_record_name`).
+    Call after anonymization, so `patient.patient_id` is the pseudonym, not
+    the source MRN. InstanceNumber is often absent (read as 0), so several
+    instances of one series can produce the same name; a caller writing more
+    than one instance into a directory must disambiguate the result (see
+    `WfdbExporter._unique_record_name`).
+
+    Args:
+        patient (Patient): The instance's patient; its exported Patient ID is
+            used, never a synthetic no-Patient-ID key.
+        study (Study): The instance's study (not used in the name).
+        series (Series): The instance's series.
+        instance (Instance): The instance.
+
+    Returns:
+        str: `<patient>_<series number>_<instance number>`, each part
+            sanitized for a record name.
     """
     return "_".join([
         # Never `patient_id` itself: a subject with no Patient ID is keyed
@@ -96,7 +110,15 @@ def record_name_for(patient, study, series, instance) -> str:
 
 
 def _format_number(value) -> str:
-    """Render a float without a trailing '.0', which WFDB readers dislike."""
+    """Render a float without a trailing '.0', which WFDB readers dislike.
+
+    Args:
+        value: A number.
+
+    Returns:
+        str: An integer spelling for a whole number, otherwise the repr
+            rounded to 6 places.
+    """
     as_float = float(value)
     if as_float.is_integer():
         return str(int(as_float))
@@ -113,32 +135,39 @@ _LINE_BREAK_CHARS = re.compile(r"[\r\n\x0b\x0c\x1c-\x1f\x85  ]")
 def _sanitize_description(value: str) -> str:
     """Remove characters that could inject a `.hea` comment line.
 
-    The signal-line description is the LAST field on a `header(5)`
-    signal line and legally runs to end of line, including embedded
-    spaces (PhysioNet's own reader parses `... 0 0 Lead I taken by Jane
-    Doe` as one `sig_name`) -- so this must NOT strip spaces. What it
-    must remove is any character a reader could treat as ending the
-    line: raw DICOM text (e.g. Channel Label, SH) is not guaranteed
-    free of control characters, and an embedded newline followed by a
-    line starting with `#` is read by `wfdb.rdheader` as a real header
-    comment (`comments=[...]`) -- a PHI escape route on a
-    de-identification product. Replacing line-breaking characters with
-    a space guarantees the description can never manufacture a second
-    physical line, so a leading `#` anywhere in the collapsed text stays
-    inert (interior text on a signal line, not a comment line).
+    Every line-breaking character (CR, LF, VT, FF, the file/group/record/unit
+    separators, NEL, LINE and PARAGRAPH SEPARATOR) becomes a space; ordinary
+    spaces are kept, and the result is stripped.
+
+    Args:
+        value (str): The description; any value is converted with `str()`.
+
+    Returns:
+        str: Text that cannot form a second physical line.
     """
+    # The signal-line description is the LAST field on a `header(5)` signal
+    # line and legally runs to end of line, including embedded spaces
+    # (PhysioNet's reader parses `... 0 0 Lead I taken by Jane Doe` as one
+    # `sig_name`), so spaces must not be stripped. An embedded newline
+    # followed by a line starting with `#` is read by `wfdb.rdheader` as a
+    # header comment, a PHI escape route; with line breaks collapsed, a `#` in
+    # the text stays interior to the signal line.
     return _LINE_BREAK_CHARS.sub(" ", str(value)).strip()
 
 
 def _sanitize_units(value: str) -> str:
     """Remove ALL whitespace/control characters from the `units` field.
 
-    Unlike the description, `units` is field 3 of 9 inside
-    `gain(baseline)/units` -- it is NOT the last field on the line, so
-    any whitespace here (not just newlines) shifts every field after it:
-    CodeValue "mV per s" would make `wfdb.rdheader` parse `units=['mV']`
-    and `sig_name=['per s 16 0 0 1225 0 ...']`.
+    Args:
+        value (str): The units; any value is converted with `str()`.
+
+    Returns:
+        str: The units with every whitespace character removed.
     """
+    # Unlike the description, `units` is field 3 of 9 inside
+    # `gain(baseline)/units`, not the last field on the line, so any whitespace
+    # here shifts every field after it: CodeValue "mV per s" would make
+    # `wfdb.rdheader` parse `units=['mV']` and `sig_name=['per s 16 0 0 ...']`.
     return re.sub(r"\s+", "", str(value))
 
 
@@ -150,25 +179,14 @@ def format_header(record_name: str,
                   start_date_note: Optional[str] = None) -> str:
     """Render a WFDB `.hea` file.
 
-    Emits no `#` comment lines, with exactly one deliberate exception:
-    `start_date_note`. MIT-BIH convention puts age, sex, and diagnosis
-    in comments, and readers render comments verbatim, so a comment line
-    is normally a PHI escape route -- this holds even when the channel
-    description (Channel Label/Channel Source, raw DICOM SH text) itself
-    contains an embedded CR/LF: `_sanitize_description` collapses any
-    line-breaking character to a space before it reaches the signal
-    line, so it cannot manufacture a second physical line that a
-    conformant reader would surface as a comment. `start_date_note` is
-    different in kind: it is not operator-typed or attacker-controlled
-    text, it is a string the caller has already computed around a
-    `DD/MM/YYYY` date (the same format used for the record line's own
-    date field), and it goes through the same `_sanitize_description`
-    as the signal lines. Do not add a second, separately sanitized
-    comment path.
+    Emits no `#` comment lines except `start_date_note`. A channel
+    description is sanitized so it cannot manufacture a comment line.
 
     Args:
         record_name (str): Record name (must match the .hea basename).
-        waveform (Waveform): Geometry and per-channel calibration.
+        waveform (Waveform): Geometry and per-channel calibration. A channel
+            missing from its definitions is written uncalibrated (gain 1,
+            baseline 0, "mV").
         samples (np.ndarray): int16, shape (num_samples, num_channels).
         dat_filename (str): Signal file basename referenced by each line.
         start_datetime (datetime, optional): Already date-shifted start
@@ -176,22 +194,23 @@ def format_header(record_name: str,
         start_date_note (str, optional): The complete comment text
             preserving a start date when `start_datetime` is None because
             no real time-of-day is available -- e.g. Acquisition DateTime
-            and Study Time both emptied by the Basic profile. The record
-            line never carries a fabricated `00:00:00` (see
-            `WfdbExporter._start_datetime`); the date goes here instead,
-            where a consumer will not mistake it for a precise timestamp.
-
-            The caller supplies the whole string, not just the date,
-            because the wording is a claim about provenance:
-            `de-identified start date: ...` only when the date really was
-            shifted, `start date: ...` when it is the real one and
-            nothing has de-identified it. This function adds no wording
-            of its own. Omitted (no comment line at all) when None or
-            empty -- never an empty/placeholder comment.
+            and Study Time both emptied by the Basic profile. The caller
+            supplies the whole string, because the wording is a claim about
+            provenance: `de-identified start date: ...` only when the date
+            really was shifted, `start date: ...` otherwise. Sanitized like a
+            description, and written as one `#` line. Omitted (no comment
+            line at all) when None or empty.
 
     Returns:
         str: Complete header text, newline-terminated.
     """
+    # MIT-BIH convention puts age, sex and diagnosis in comments, and readers
+    # render comments verbatim, so a comment line is a PHI escape route.
+    # `start_date_note` is the one exception: a string the caller computed
+    # around a `DD/MM/YYYY` date, not operator-typed text, and it goes through
+    # the same `_sanitize_description` as the signal lines. Do not add a
+    # second, separately sanitized comment path. The record line never
+    # carries a fabricated `00:00:00` (see `WfdbExporter._start_datetime`).
     n_samples = int(samples.shape[0]) if samples.ndim == 2 else 0
     n_channels = int(samples.shape[1]) if samples.ndim == 2 else 0
 
@@ -259,14 +278,17 @@ def format_header(record_name: str,
 def _parse_dicom_tm(value: str):
     """Parse a DICOM TM (`HH`, `HHMM`, `HHMMSS[.FFFFFF]`) to a `time`.
 
-    Keyed by length rather than tried longest-format-first, because
-    `strptime` accepts one- or two-digit fields and therefore *succeeds*
-    on the wrong format instead of raising and falling through:
-    `"1430"` matches `%H%M%S` as 14:03:00, and `"14"` matches `%H%M` as
-    01:04:00.
+    Args:
+        value (str): The TM value; fractional seconds are dropped.
 
-    Returns None for anything not a legal TM length.
+    Returns:
+        datetime.time: The time, or None for anything not a legal TM length
+            or not parseable.
     """
+    # Keyed by length rather than tried longest-format-first: `strptime`
+    # accepts one- or two-digit fields and so *succeeds* on the wrong format
+    # (`"1430"` matches `%H%M%S` as 14:03:00, and `"14"` matches `%H%M` as
+    # 01:04:00).
     from datetime import datetime
 
     stamp = (value or "").split(".")[0].strip()
@@ -282,12 +304,17 @@ def _parse_dicom_tm(value: str):
 def _parse_dicom_dt(value: str):
     """Parse a DICOM DT to a `datetime`, at the precision it carries.
 
-    Same length-keyed reasoning as `_parse_dicom_tm`. The offset suffix
-    (`&ZZXX`) is dropped: this tool reports the timestamp as recorded and
-    does not convert time zones.
+    The offset suffix (`&ZZXX`) and fractional seconds are dropped: the
+    timestamp is reported as recorded, with no time-zone conversion.
 
-    Returns None for anything not a legal DT length.
+    Args:
+        value (str): The DT value.
+
+    Returns:
+        datetime.datetime: The timestamp, or None for anything not a legal DT
+            length or not parseable.
     """
+    # Keyed by length, for the reason `_parse_dicom_tm` gives.
     from datetime import datetime
 
     stamp = (value or "").split("+")[0].split("-")[0].split(".")[0].strip()
@@ -305,14 +332,21 @@ def _real_timing(instance, tag: str) -> str:
     """`tag`'s value on `instance` as timing, or `""` when it is the dummy
     a value-less REPLACE writes on that tag.
 
-    Acquisition DateTime is X/Z/D in PS3.15 Table E.1-1, so `basic`
-    writes the DT dummy `19000101` there, which `_parse_dicom_dt` reads as
-    1900-01-01 00:00: without this the record line would carry an
-    invented `00:00:00`. Compared with `config_manager._vr_dummy`, the one
-    table, rather than relying on the parser rejecting a dummy. A source
-    that really holds `19000101` reads as no timing: omitted, not
-    invented.
+    A source that really holds the dummy (`19000101` for DT) reads as no
+    timing.
+
+    Args:
+        instance (Instance): The instance to read.
+        tag (str): The timing tag, e.g. `"0008,002a"`.
+
+    Returns:
+        str: The value, or `""`.
     """
+    # Acquisition DateTime is X/Z/D in PS3.15 Table E.1-1, so `basic` writes
+    # the DT dummy `19000101` there, which `_parse_dicom_dt` reads as
+    # 1900-01-01 00:00: without this the record line would carry an invented
+    # `00:00:00`. Compared with `config_manager._vr_dummy`, the one table,
+    # rather than relying on the parser rejecting a dummy.
     value = str(instance.attributes.get(tag, "") or "")
     return "" if value == _vr_dummy(tag) else value
 
@@ -577,16 +611,21 @@ class WfdbExporter(Exporter):
     def _unique_record_name(base_name, out_dir, used_names):
         """Disambiguate record names that collide within one output directory.
 
-        `record_name_for` derives its instance component from
-        InstanceNumber, which is frequently absent -- `io_handlers.py`
-        defaults it to 0, which `_sanitize` renders as the digit "0",
-        identical across every instance missing InstanceNumber. Two
-        instances proposing the same record name in the same directory
-        would otherwise overwrite each other's `.hea`/`.dat` files. This
-        appends `_2`, `_3`, ... to give a unique name per directory,
-        deterministically, in write order, and records the name in
-        `used_names[out_dir]`.
+        Appends `_2`, `_3`, ... until the name is unused in `out_dir`,
+        deterministically in write order, and records the name it returns.
+
+        Args:
+            base_name (str): The name `record_name_for` built.
+            out_dir (str): The directory the record is written into.
+            used_names (dict): `{out_dir: set of names}`, updated in place.
+
+        Returns:
+            str: A name unique within `out_dir`.
         """
+        # `record_name_for` derives its instance component from InstanceNumber,
+        # which is often absent and read as 0, so two instances can propose the
+        # same name in one directory and would overwrite each other's `.hea`/`.dat`
+        # files without this.
         seen = used_names.setdefault(out_dir, set())
         candidate = base_name
         suffix = 2
@@ -599,14 +638,33 @@ class WfdbExporter(Exporter):
     def _write_instance(self, folder, patient, study, series, instance, logger,
                         used_names, include_annotation_text=False,
                         store_backend=None):
-        """Write one record. Returns the .hea path, or None if not a waveform.
+        """Write one record: `.hea`, `.dat`, and `annotations.json` when there are
+        findings.
 
-        `used_names` is REQUIRED (not `=None`): it is what
-        `_unique_record_name` deduplicates against, and without it two
-        instances missing InstanceNumber would write the same record name
-        and the second would overwrite the first's `.hea`/`.dat`. Keep it
-        required, so a caller that forgets it gets a `TypeError`.
+        A waveform instance with no samples writes nothing and files one
+        `STANDARD` `DATA_LOSS` row (when `store_backend` is given); dropped
+        annotations file one `WARNING`-level log line and one `DATA_LOSS` row.
+
+        Args:
+            folder (str): The export root.
+            patient (Patient): The instance's patient.
+            study (Study): The instance's study, the source of the start date.
+            series (Series): The instance's series.
+            instance (Instance): The instance to write.
+            logger (logging.Logger): Where warnings go.
+            used_names (dict): Record names already claimed, per directory.
+                Required, never defaulted.
+            include_annotation_text (bool): Passed to `build_annotations`.
+            store_backend: The store audit rows go to, or None to write none.
+
+        Returns:
+            Optional[str]: The `.hea` path, or None if the instance holds no
+                waveform or no samples.
         """
+        # `used_names` is required, not `=None`: it is what `_unique_record_name`
+        # deduplicates against, and without it two instances missing
+        # InstanceNumber would write the same record name and the second would
+        # overwrite the first. A caller that forgets it gets a `TypeError`.
         seq = instance.sequences.get(WAVEFORM_SEQUENCE_TAG)
         if seq is None or not seq.items:
             # An ordinary non-waveform instance -- a CT slice sharing a
@@ -773,12 +831,18 @@ class WfdbExporter(Exporter):
     def _instance_time_of_day(instance):
         """Best-effort time-of-day from the instance's own timestamp tags.
 
-        SHIFT_DATE (see `_start_datetime` below) only ever moves a date,
-        never a time-of-day, so the time component always comes from here
-        regardless of whether the session has been anonymized.
+        Acquisition DateTime (0008,002A) unless it is the dummy, else Study Time
+        (0008,0030).
 
-        Returns a `datetime.time`, or None if no usable value exists.
+        Args:
+            instance (Instance): The instance to read.
+
+        Returns:
+            datetime.time: The time of day, or None if no usable value exists.
         """
+        # SHIFT_DATE (see `_start_datetime`) only ever moves a date, never a
+        # time-of-day, so the time component always comes from here, anonymized or
+        # not.
         acquired = _parse_dicom_dt(
             _real_timing(instance, "0008,002a"))
         if acquired is not None:
@@ -791,13 +855,14 @@ class WfdbExporter(Exporter):
     def _instance_only_datetime(instance):
         """Fallback timing built purely from instance tags.
 
-        Used when no `Study` is available, or the Study has no usable
-        date. This is real (possibly un-shifted) timing, like every other
-        field this tool does not touch before `session.anonymize()` runs.
-        Reads Acquisition DateTime (0008,002A) unless it is the dummy
-        (`_real_timing`), else Study Date (0008,0020) plus Study Time
-        (0008,0030), each parsed on its own. A date with no readable time
-        of day is never given a `00:00:00`.
+        Used when no `Study` is available, or the Study has no usable date. This
+        is real (possibly un-shifted) timing. Reads Acquisition DateTime
+        (0008,002A) unless it is the dummy, else Study Date (0008,0020) plus
+        Study Time (0008,0030), each parsed on its own. A date with no readable
+        time of day is never given a `00:00:00`.
+
+        Args:
+            instance (Instance): The instance to read.
 
         Returns:
             tuple[Optional[datetime], Optional[str]]: the record-line
@@ -839,43 +904,34 @@ class WfdbExporter(Exporter):
     def _start_datetime(instance, study):
         """Record start time, read after de-identification.
 
-        `study` is REQUIRED (not `=None`): without it this would read the
-        instance's own date tags, which SHIFT_DATE never writes, and leak
-        the unshifted date past `session.anonymize()`. Pass `study=None`
-        explicitly for the "no study available" fallback.
+        The date comes from `study.study_date`, the field SHIFT_DATE writes; the
+        time of day from the instance (`_instance_time_of_day`). Falls back to
+        `_instance_only_datetime` when `study` is None or has no usable
+        `study_date`. Never fabricates a time of day: with a usable study date
+        and no real time of day, the record line's time and date fields are both
+        omitted and the date is returned as a note instead.
 
-        The date comes from `study.study_date`, the field SHIFT_DATE
-        writes (setting `study.date_shifted = True`); the instance-level
-        Acquisition DateTime, Study Date and Study Time tags are not
-        remediated by that shift. The time of day always comes from the
-        instance (`_instance_time_of_day`), since SHIFT_DATE never moves a
-        time of day.
-
-        Falls back to `_instance_only_datetime` when `study` is None or
-        has no usable `study_date`; that path carries real timing on an
-        un-anonymized session, like every other un-remediated field.
-
-        Never fabricates a time of day. When `study.study_date` is usable
-        but no real time of day is available (the normal case under the
-        Basic profile, which empties Acquisition DateTime and Study Time;
-        an empty value reads as absent), the record line's time and date
-        fields are both omitted: header(5) cannot carry a date without a
-        time (`wfdb` requires base_time for base_date, and `wfdb.rdheader`
-        misparses a date-only record line). That case never falls through
-        to the instance-only fallback, which would read the unshifted
-        instance date. The study date is handed back instead, for the
-        caller to write as a `#` comment.
+        Args:
+            instance (Instance): The instance to read.
+            study (Study): The instance's study, or None explicitly for the "no
+                study available" fallback. Required, never defaulted.
 
         Returns:
-            tuple[Optional[datetime], Optional[str]]:
-            `(start_datetime, start_date_note)`. `start_datetime` is the
-            record-line value, or None. `start_date_note` is None whenever
-            `start_datetime` is set or no date is known; otherwise it is
-            the complete comment text around a `DD/MM/YYYY` date:
-            `de-identified start date: ...` when `study.date_shifted` is
-            true, `start date: ...` when the study date was not shifted or
-            came from the instance-only fallback.
+            tuple[Optional[datetime], Optional[str]]: `(start_datetime,
+                start_date_note)`. `start_datetime` is the record-line value, or
+                None. `start_date_note` is None whenever `start_datetime` is set
+                or no date is known; otherwise it is the complete comment text
+                around a `DD/MM/YYYY` date: `de-identified start date: ...` when
+                `study.date_shifted` is true, `start date: ...` when the study
+                date was not shifted or came from the instance-only fallback.
         """
+        # `study` is required: without it this would read the instance's own date
+        # tags, which SHIFT_DATE never writes, and leak the unshifted date past
+        # `session.anonymize()`. header(5) cannot carry a date without a time
+        # (`wfdb` requires base_time for base_date, and `wfdb.rdheader` misparses a
+        # date-only record line), so a date with no time goes in the note. That
+        # case never falls through to the instance-only fallback, which would read
+        # the unshifted instance date.
         from datetime import datetime
 
         time_of_day = WfdbExporter._instance_time_of_day(instance)

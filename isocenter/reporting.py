@@ -1,3 +1,4 @@
+"""The compliance report: its data, and its Markdown rendering."""
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Protocol
@@ -26,16 +27,16 @@ GAP_RETAINED = "retained for export"
 GAP_UNRESOLVED = "unresolved"
 
 
+# Not persisted, like `_actions_performed`: a stored copy would be a second
+# answer to "what happened" beside the audit log, and could disagree with it.
 @dataclass(frozen=True)
 class PixelScanSummary:
     """What one `scan_pixel_content()` call did, for section 5.
 
     Recorded by the session on every exit of the call -- the early return
     with nothing configured to read, the normal return, and just before a
-    `PixelScanError` -- and never persisted, for the reason
-    `_actions_performed` is not: a stored copy would be a second answer to
-    "what happened" beside the audit log, and could disagree with it. So
-    section 5 speaks for *this session* and says so.
+    `PixelScanError` -- and never persisted, so section 5 describes the
+    scans of *this session* only, and says so.
 
     Attributes:
         serial_number (str, optional): The serial the call was restricted
@@ -70,11 +71,16 @@ _METHODOLOGY_DISCLAIMER = (
 def _grade_basis_lines(report: "ComplianceReport") -> str:
     """Section 5's account of the grade, from the list the grade came from.
 
-    `generate_report` grades PASS exactly when `review_reasons` is empty,
-    so rendering the list keeps this section from contradicting the
-    grade. A status other than PASS or REVIEW_REQUIRED renders as "not
-    graded".
+    A status other than PASS or REVIEW_REQUIRED renders as "not graded".
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Grade Basis bullet, with one sub-bullet per review reason.
     """
+    # `generate_report` grades PASS exactly when `review_reasons` is empty,
+    # so rendering the list keeps this section from contradicting the grade.
     if report.validation_status == "PASS":
         return ("*   **Grade Basis:** PASS -- nothing recorded in sections 2 "
                 "to 4 costs this run its PASS.\n")
@@ -90,11 +96,16 @@ def _grade_basis_lines(report: "ComplianceReport") -> str:
 def _metadata_line(report: "ComplianceReport") -> str:
     """Whether the audit trail records a metadata remediation.
 
-    Read from the same rows section 2 prints, so the two cannot disagree,
-    and durable where the session's own memory is not: a report over a
-    reopened store still sees the remediation rows an earlier session
-    wrote.
+    Read from the audit rows, so a report over a reopened store still sees
+    the remediation rows an earlier session wrote.
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Metadata Remediation bullet.
     """
+    # The same rows section 2 prints, so the two cannot disagree.
     if report.metadata_remediations:
         return (f"*   **Metadata Remediation:** {report.metadata_remediations} "
                 "`REMEDIATION_*` row(s) in the audit trail (section 2) record "
@@ -107,11 +118,18 @@ def _metadata_line(report: "ComplianceReport") -> str:
 def _phi_scan_line(report: "ComplianceReport") -> str:
     """How many instances no PHI scan has seen at their current revision.
 
-    Not a grade term: an unscanned instance is the absence of a
-    measurement, and grading it would make every ingest -> export
-    conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
-    no scan has read cannot pass for a PASS over data one cleared.
+    Said on every report; never graded.
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The PHI Scan bullet.
     """
+    # Not a grade term: an unscanned instance is the absence of a
+    # measurement, and grading it would make every ingest -> export
+    # conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
+    # no scan has read cannot pass for a PASS over data one cleared.
     line = (f"*   **PHI Scan (`audit()`):** {report.unscanned_instances} of "
             f"{report.total_instances} instance(s) have no PHI scan at their "
             "current revision.")
@@ -125,10 +143,15 @@ def _phi_scan_line(report: "ComplianceReport") -> str:
 def _pixel_scan_line(report: "ComplianceReport") -> str:
     """What `scan_pixel_content()` did in this session, one line.
 
-    Names the method because `discover_redaction_zones()` also runs OCR,
-    and its failures reach section 4 too; a line that said only
-    "pixel scan" would read as contradicting a discovery row there.
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Pixel Scan bullet, one clause per run.
     """
+    # Names the method because `discover_redaction_zones()` also runs OCR,
+    # and its failures reach section 4 too; a line that said only
+    # "pixel scan" would read as contradicting a discovery row there.
     label = "*   **Pixel Scan (`scan_pixel_content()`):** "
     if not report.pixel_scans:
         return (label + "No `scan_pixel_content()` ran in this session, so "
@@ -179,8 +202,7 @@ class ComplianceReport:
         deid_method (str): Factual description of what was configured --
             profile, tag-rule count, pixel-rule count. Never the name of a
             compliance standard: whether the output satisfies one is a
-            determination for the data steward, and this report carries a
-            DPO signature line beneath whatever it claims.
+            determination for the data steward.
         total_patients (int): Total patients processed.
         total_studies (int): Total studies processed.
         total_series (int): Total series processed.
@@ -190,8 +212,7 @@ class ComplianceReport:
             has run here -- which is not the same as zero, so the row is
             omitted rather than rendered as one.
         instances_requested (int, optional): How many that export asked
-            for. The pair is what stops `total_instances` -- a count of
-            the object graph -- from reading as a count of delivered
+            for. `total_instances` counts the object graph, not delivered
             files.
         audit_summary (Dict[str, int]): Aggregated counts of audit actions.
         exceptions (list): List of error tuples (timestamp, action, details).
@@ -199,28 +220,25 @@ class ComplianceReport:
             output, as (timestamp, entity_uid, details, loss_scope).
         declined_remediations (list): Remediations that were proposed
             and did not run, as (timestamp, entity_uid, details). The
-            value each one targeted is still in the object graph, which
-            is why one of these takes the grade to `REVIEW_REQUIRED` --
-            the same argument `open_gaps` makes.
+            value each one targeted is still in the object graph, so any
+            one of these grades the run `REVIEW_REQUIRED`.
         scan_gaps (list): Elements the PHI scan could not open, as
             (timestamp, entity_uid, details, disposition). The
             disposition is one of `GAP_REMOVED`, `GAP_RETAINED` or
             `GAP_UNRESOLVED`, resolved by `generate_report` against the
-            object graph -- the audit row is written at ingest and
-            cannot know it. The opposite claim from `data_losses`, which
-            is why it is not more of them.
+            object graph, since the audit row is written at ingest.
         export_recorded (bool): Whether the audit log held an EXPORT
             row when the report was assembled. False renders the
             boundary note in the Executive Summary; it never moves the
             grade.
         validation_status (str): Overall status -- `PENDING` until a
             report is generated, then `PASS` or `REVIEW_REQUIRED`.
-            Nothing emits `FAIL`: this report describes a run, and a run
-            that fails raises rather than grading itself.
+            Nothing emits `FAIL`: a run that fails raises rather than
+            grading itself.
         review_reasons (List[str]): Why the run is not PASS, one entry
             per term of the grade -- empty exactly when it is PASS, because
             `generate_report` derives the grade from this list. Section 5
-            renders it, so the section cannot contradict the grade.
+            renders it.
         metadata_remediations (int): `REMEDIATION_*` rows in the audit
             trail, the evidence section 5's metadata line reads.
         pixel_scans (List[PixelScanSummary]): Each `scan_pixel_content()`
@@ -346,8 +364,9 @@ class MarkdownRenderer:
         """
         Renders the report as a Markdown file.
 
-        Includes an Executive Summary, Processing Audit table, Exceptions log,
-        and Verification details.
+        Sections: 1. Executive Summary, 2. Processing Audit, 3. Data Loss &
+        Unscanned Content, 4. Exceptions & Errors, 5. Validation &
+        Verification, then a signature line. Overwrites `output_path`.
 
         Args:
             report (ComplianceReport): The data to render.
@@ -517,6 +536,12 @@ __________________________________________________
 
 def get_renderer(format_type: str) -> ReportRenderer:
     """The renderer for `generate_report(format=)`: `'markdown'`, exactly.
+
+    Args:
+        format_type (str): `'markdown'`.
+
+    Returns:
+        ReportRenderer: A new `MarkdownRenderer`.
 
     Raises:
         ValueError: For any other spelling, `'md'` and case variants
