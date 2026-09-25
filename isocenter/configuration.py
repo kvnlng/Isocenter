@@ -200,24 +200,23 @@ class IsocenterConfiguration:
     Attributes:
         rules (List[Dict[str, Any]]): List of machine redaction rules.
         phi_tags (Dict[str, Any]): PHI tag policies (e.g. {tag: action}).
-            With none given, a copy of `profiles.FLOOR_POLICY` -- the
-            policy a session applies before any config is loaded (#495).
-            A copy per instance, so one session's `set_phi_tag` cannot
-            reach another's policy or the module table.
+            With none given, a copy of `profiles.FLOOR_POLICY`, the
+            policy a session applies before any config is loaded. Each
+            instance holds its own copy, so one session's `set_phi_tag`
+            cannot reach another's policy or the module table.
         date_jitter (Dict[str, int]): Date shifting parameters.
         remove_private_tags (bool): Global flag to strip private tags.
         config_path (Optional[str]): The file `save()` writes. Set by
             `load_config()`, or by hand.
         auto_save (bool): Write `config_path` after every `add_rule`,
             `update_rule`, `delete_rule` and `set_phi_tag`. False by
-            default (#715).
+            default.
         privacy_profile (Optional[str]): The pinned name of the built-in
-            profile whose rules were merged into `phi_tags` -- `basic@2026c`,
-            also when the file said `basic` (#714) -- or an external
-            profile's path, or None when no named profile was applied (the
-            floor, or `privacy_profile: none`). Only ever set to a profile
-            that actually resolved, so the compliance report cannot name
-            protection that never ran.
+            profile whose rules were merged into `phi_tags` (`basic@2026c`,
+            also when the file said `basic`), or an external profile's
+            path, or None when no named profile was applied (the floor, or
+            `privacy_profile: none`). Only ever set to a profile that
+            resolved.
     """
     rules: List[Dict[str, Any]] = field(default_factory=list)
     phi_tags: Dict[str, Any] = field(
@@ -265,32 +264,26 @@ class IsocenterConfiguration:
 
     def save(self) -> None:
         """
-        Writes the configuration to `config_path` as YAML (#715).
+        Write the configuration to `config_path` as YAML.
 
         The file names the profile rather than copying it:
         `privacy_profile` is the pinned name (`basic@2026c`), the external
         profile's path, `none`, or no line at all for the floor, and
         `phi_tags` holds only the rules that differ from that base's. Then
         `date_jitter`, `remove_private_tags` and every machine rule, each
-        key kept (`comment:` as data). `version` is always written, as
-        `config_manager.CONFIG_VERSION` (owner ruling Q5): the loader
-        accepts only what this library reads, so what is written is that
-        version's content. A file this writes loads to the configuration it
-        was written from.
+        key kept (`comment:` as data). `version` is always written, as this
+        library's configuration version. A file this writes loads to the
+        configuration it was written from.
 
-        Comments and layout in the file are not kept: this writes a new
-        file. A comment-keeping writer (`ruamel.yaml`) was measured and
-        rejected -- it moved a deleted rule's comment onto the next rule,
-        and it reads YAML 1.2, where `no` and `0123` differ from the
-        loader's readings.
+        Comments and layout in an existing file are not kept: this writes a
+        new file.
 
         Raises:
             ValueError: With no `config_path`; and when `phi_tags` has no
                 rule for a tag its base supplies, because a file naming
                 that base would bring the rule back on reload. Nothing is
                 written.
-            OSError: The write's own error, unchanged. Until 1.0 it was
-                printed as a WARNING and the call returned.
+            OSError: The write's own error, unchanged.
         """
         if not self.config_path:
             raise ValueError(_NO_FILE)
@@ -431,10 +424,10 @@ class IsocenterConfiguration:
                  model_name: str = "Unknown",
                  redaction_zones: List[Any] = None) -> None:
         """
-        Adds a new machine redaction rule.
+        Add a machine redaction rule.
 
-        Overrides any existing rule for the same serial number. Changes
-        memory; writes `config_path` only when `auto_save` is on (#715).
+        Replaces any existing rule for the same serial number. Changes
+        memory; writes `config_path` only when `auto_save` is on.
 
         Args:
             serial_number (str): The device serial number.
@@ -443,17 +436,14 @@ class IsocenterConfiguration:
             redaction_zones (List[Any], optional): List of redaction zones
                 (ROIs).
 
-        The two keywords are spelled as the rule's keys in a `machines:`
-        file. They were `model=` and `zones=` until the 1.0 freeze (#26),
-        and were renamed, not aliased: the old keywords raise `TypeError`.
+        The keywords are spelled as the rule's keys in a `machines:` file.
 
         Raises:
-            ValueError: For a rule `load_config` would refuse
-                (`ConfigLoader._validate_rule`: a serial that is not a
-                non-empty, non-blank string, a metadata field that is not
-                a string, a malformed zone), before any rule or the file
-                changes. Under `auto_save`, with no `config_path`, or when
-                `save()` refuses; the rules are then as they were.
+            ValueError: For a rule `load_config` would refuse (a serial
+                that is not a non-empty, non-blank string, a metadata field
+                that is not a string, a malformed zone), before any rule or
+                the file changes. Under `auto_save`, with no `config_path`,
+                or when `save()` refuses; the rules are then as they were.
             OSError: Under `auto_save`, when the write fails; the rules
                 are then as they were.
         """
@@ -477,23 +467,22 @@ class IsocenterConfiguration:
 
     def update_rule(self, serial_number: str, updates: Dict[str, Any]) -> None:
         """
-        Updates an existing rule identified by `serial_number`.
+        Update the rule for `serial_number`.
 
-        Changes memory; writes `config_path` only when `auto_save` is on
-        (#715).
+        Changes memory; writes `config_path` only when `auto_save` is on.
 
         Args:
             serial_number (str): The target rule's serial number.
             updates (Dict[str, Any]): Dictionary of fields to update.
 
         Raises:
-            ValueError: If rule is not found, if attempting to change the
+            ValueError: If no rule is found, if the update changes the
                 serial number, or if the updated rule is one `load_config`
-                would refuse (`ConfigLoader._validate_rule`: an unknown key
-                such as `redaction_zone`, a value of the wrong type, a
-                malformed zone). Raised before the rule or the file
-                changes. Under `auto_save`, with no `config_path`, or when
-                `save()` refuses; the rule is then as it was.
+                would refuse (an unknown key such as `redaction_zone`, a
+                value of the wrong type, a malformed zone). Raised before
+                the rule or the file changes. Under `auto_save`, with no
+                `config_path`, or when `save()` refuses; the rule is then
+                as it was.
             OSError: Under `auto_save`, when the write fails; the rule is
                 then as it was.
         """
@@ -517,10 +506,10 @@ class IsocenterConfiguration:
 
     def delete_rule(self, serial_number: str) -> bool:
         """
-        Removes a rule by serial number.
+        Remove the rule for a serial number.
 
         Changes memory; writes `config_path` only when `auto_save` is on
-        and a rule was removed (#715).
+        and a rule was removed.
 
         Args:
             serial_number (str): The serial number to remove.
@@ -529,8 +518,8 @@ class IsocenterConfiguration:
             bool: True if a rule was found and removed, False otherwise.
 
         Raises:
-            ValueError: Under `auto_save` with no `config_path` -- even
-                when no rule matches -- and when `save()` refuses.
+            ValueError: Under `auto_save` with no `config_path` (even
+                when no rule matches), and when `save()` refuses.
             OSError: Under `auto_save`, when the write fails; the rules
                 are then as they were.
         """
@@ -541,33 +530,28 @@ class IsocenterConfiguration:
 
     def set_phi_tag(self, tag: str, action: str, value: str = None) -> None:
         """
-        Sets or updates a PHI tag policy.
+        Set or replace the PHI rule for one tag.
+
+        Changes memory; writes `config_path` only when `auto_save` is on.
 
         Args:
-            tag (str): The DICOM tag to target (e.g. "0010,0010").
+            tag (str): The DICOM tag to target (e.g. "0010,0010"), stored
+                lowercase.
             action (str): The remediation action ('KEEP', 'REMOVE', 'REPLACE', 'JITTER', 'EMPTY').
             value (str, optional): The value `REPLACE` writes, stored as
-                the rule's `value` (#538), the key a file spells it with.
-                The keyword was `replacement=` until the 1.0 freeze (#26),
-                renamed, not aliased: `replacement=` raises `TypeError`.
-                Until 0.9.8 it was stored under a `replacement` key nothing
-                read, and `ANONYMIZED` was written.
+                the rule's `value`, the key a file spells it with.
 
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
-                cannot honour (`config_manager.validate_phi_policy`: a
-                Patient ID rule other than KEEP or REPLACE with no value,
-                a `value` under an action other than REPLACE,
-                SHIFT/JITTER on a standard tag that is not DA or DT, or
-                REPLACE on a standard tag whose VR cannot hold the value).
-                Raised before the policy or its file is changed. Under
-                `auto_save`, also with no `config_path` and when `save()`
-                refuses; the policy is then as it was.
+                cannot honour: a Patient ID rule other than KEEP or REPLACE
+                with no value, a `value` under an action other than
+                REPLACE, SHIFT/JITTER on a standard tag that is not DA or
+                DT, or REPLACE on a standard tag whose VR cannot hold the
+                value. Raised before the policy or its file is changed.
+                Under `auto_save`, also with no `config_path` and when
+                `save()` refuses; the policy is then as it was.
             OSError: Under `auto_save`, when the write fails; the policy
                 is then as it was.
-
-        Changes memory; writes `config_path` only when `auto_save` is on
-        (#715).
         """
         # Lowercase, as every other key in the policy is (profiles.py's
         # header comment gives the reason). This was `tag.upper()`, so
@@ -606,11 +590,11 @@ class IsocenterConfiguration:
 
     def get_rule(self, serial_number: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieves a specific rule dictionary (reference).
+        Return the rule for a serial number: the rule dictionary itself,
+        not a copy.
 
         Exact spelling, first match. Redaction does not use this: `redact()`
-        and the export apply every matching rule, `"*"` included, through
-        `rules_matching` in `services.py` (#580).
+        and the export apply every matching rule, `"*"` included.
 
         Args:
             serial_number (str): The serial number to find.

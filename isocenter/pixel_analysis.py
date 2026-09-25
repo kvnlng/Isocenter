@@ -257,8 +257,7 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
 
 
 def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[TextRegion]:
-    """
-    Runs OCR on the provided pixel data and returns text regions with bounding boxes.
+    """Runs OCR on the provided pixel data and returns text regions with bounding boxes.
 
     Args:
         pixel_data (np.ndarray): The image data (should be 2D).
@@ -269,8 +268,7 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
             unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
             here does not mean "no text". `Session.scan_pixel_content()` and
             `discover_redaction_zones()` check availability first and refuse
-            instead (#422), and read `_ocr_instance`, which reports the
-            failures this function only logs (#423).
+            instead, and report the failures this function only logs.
     """
     if not HAS_OCR:
         return []
@@ -436,23 +434,21 @@ def _load_and_ocr(instance: Instance) -> _InstanceOcr:
 
 
 def analyze_pixels(instance: Instance) -> List[TextRegion]:
-    """
-    Analyzes the pixel data of a DICOM Instance for burned-in text.
+    """Analyzes the pixel data of a DICOM Instance for burned-in text.
     Returns list of TextRegion objects (raw findings, not filtered).
     Caller is responsible for filtered results.
 
-    Also returns `[]` when OCR is unavailable, which is not "no text":
-    the Session methods that call this check first and refuse instead
-    (#422). A load or OCR failure is logged at ERROR and what was read is
-    returned, so `[]` is not "no text" there either; the Session path
-    reads `_ocr_instance`, which reports what this logs (#423). This still
-    returns a list rather than raising for #422's reason: it runs per
-    instance inside workers, where raising would turn one precondition
-    into N worker failures.
+    Also returns `[]` when OCR is unavailable, which is not "no text": the
+    Session methods that call this check first and refuse instead. A load or
+    OCR failure is logged at ERROR and what was read is returned, so `[]` is
+    not "no text" there either; the Session methods report what this logs.
+    It returns a list rather than raising because it runs per instance
+    inside workers, where raising would turn one precondition into N worker
+    failures.
 
-    A frame this call loaded is released before it returns (#428), with
-    `unload_pixel_data()`; one that was resident before the call is left
-    as it was. A caller who wants the frame afterwards calls
+    A frame this call loaded is released before it returns, with
+    `unload_pixel_data()`; one that was resident before the call is left as
+    it was. A caller who wants the frame afterwards calls
     `instance.get_pixel_data()`.
     """
     if not HAS_OCR:

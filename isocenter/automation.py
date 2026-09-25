@@ -13,8 +13,7 @@ class ConfigAutomator:
 
     @staticmethod
     def suggest_config_updates(report: PhiReport, _current_config: IsocenterConfiguration) -> List[Dict[str, Any]]:
-        """
-        Generates a list of suggested configuration changes.
+        """Generates a list of suggested configuration changes.
 
         Returns:
             List[Dict]: A list of 'suggestion' objects:
@@ -25,13 +24,9 @@ class ConfigAutomator:
                     "reason": str
                 }
 
-        Zones are emitted in config space -- (y1, y2, x1, x2), the order
-        every consumer of ``redaction_zones`` reads. OCR metadata arrives
-        in box space -- (x, y, w, h) -- and the conversion happens here,
-        mirroring ``discovery.py``: automation used to append raw boxes,
-        so an applied suggestion redacted rows x:y and columns w:h -- the
-        wrong region, or nothing at all -- while the leak it was created
-        for stayed in the image (#258).
+        Zones are emitted in config space, (y1, y2, x1, x2), the order every
+        consumer of ``redaction_zones`` reads. OCR metadata arrives in box
+        space, (x, y, w, h), and is converted here, as ``discovery.py`` does.
         """
         suggestions = []
 

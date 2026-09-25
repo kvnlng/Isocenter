@@ -38,14 +38,13 @@ formats, and some of them change pixels and sequences on the way out.
 exporter other than the two built-in classes, none of the following runs:
 
 - the burned-in re-audit that withholds an instance still carrying an
-  identifier (`check_burned_in`, [#536](https://github.com/kvnlng/Isocenter/issues/536));
+  identifier (`check_burned_in`);
 - the configured redaction zones. The DICOM export looks up each series'
   zones in the configuration in force and applies them to a copy of every
   frame it writes, whether or not `redact()` ran. For a plugin,
   `instance.get_pixel_data()` holds only what `redact()` changed: with
   zones configured and `redact()` not run, the pixels are unredacted;
-- the drop of nested icons ([#183](https://github.com/kvnlng/Isocenter/issues/183),
-  [#542](https://github.com/kvnlng/Isocenter/issues/542)). An Icon Image
+- the drop of nested icons. An Icon Image
   Sequence `(0088,0200)` item is a downsampled copy of a frame, and nothing
   scans or redacts one. The DICOM export drops an instance's own icon when
   its pixels are redacted or have zones configured, and every other nested
@@ -56,26 +55,20 @@ exporter other than the two built-in classes, none of the following runs:
   `lock_identities()`, the graph still carries the encrypted identity token
   at `(0400,0500)`;
 - the de-identification markers `(0012,0062)`, `(0012,0063)` and
-  `(0028,0303)` ([#554](https://github.com/kvnlng/Isocenter/issues/554)),
-  which Isocenter decides per instance at export time and never puts in
-  the graph;
+  `(0028,0303)`, which Isocenter decides per instance at export time and
+  never puts in the graph;
 - the filter on `attributes` keys. The DICOM writer writes only keys shaped
   `gggg,eeee` and drops every `_`-prefixed bookkeeping key. One of those,
   `_ISOCENTER_SOURCE_SOP_UID` (`entities.SOURCE_SOP_UID_ATTR`), holds the
-  source SOP Instance UID that UID replacement removed
-  ([#544](https://github.com/kvnlng/Isocenter/issues/544)). A plugin that
+  source SOP Instance UID that UID replacement removed. A plugin that
   walks `instance.attributes` writes it;
 - the owner stamps: `(0010,0010)`, `(0010,0020)`, `(0008,0020)`,
   `(0020,000D)` and `(0020,000E)` written from the patient, study and
   series rather than from an instance's own copy;
 - the rule for a subject with no Patient ID: `patient.patient_id` can be
-  the synthetic key `"\no-patient-id\<Study Instance UID>"`
-  ([#584](https://github.com/kvnlng/Isocenter/issues/584)), and
+  the synthetic key `"\no-patient-id\<Study Instance UID>"`, and
   `exported_patient_id()` is the only reader for output;
-- the `patient_ids`/`subset` counting and the stale-policy notice
-  ([#686](https://github.com/kvnlng/Isocenter/issues/686),
-  [#725](https://github.com/kvnlng/Isocenter/issues/725),
-  [#555](https://github.com/kvnlng/Isocenter/issues/555)), and the
+- the `patient_ids`/`subset` counting and the stale-policy notice, and the
   `EXPORT` and export-time `DATA_LOSS` audit rows.
 
 ## How the report treats a third-party export
@@ -88,25 +81,21 @@ row is written even when the exporter then raises.
 **So in 1.0, no third-party export grades `PASS`.** A `WARNING` row grades
 the report `REVIEW_REQUIRED` (condition 2 in
 [How the grade is decided](../analytics.md#how-the-grade-is-decided)),
-however well the plugin behaves. That is the honest grade while Isocenter
-cannot check what a plugin wrote. The same report still carries the
-"generated before any export" note, because no `EXPORT` row was written:
-it does not know what the export wrote.
+however the plugin behaves. The same report still carries the "generated
+before any export" note, because no `EXPORT` row was written.
 
 The class is what decides, not the format name or the module: a subclass
 of a built-in, or a different class registered as `dicom`, is third-party.
 `DicomFormatExporter` registered again, under any name, is not.
 
-The 1.1 work that would let a plugin earn a `PASS` is
-[#783](https://github.com/kvnlng/Isocenter/issues/783): run every
-format-independent gate in `export()` before dispatch, so a plugin receives
-what the gates decided.
+Running the format-independent gates in `export()` before dispatch, so a
+plugin can grade `PASS`, is planned for 1.1
+([#783](https://github.com/kvnlng/Isocenter/issues/783)).
 
 ## Rules for an exporter author
 
 1. **Do not change the session's graph or store.** Export is a read.
-   `tests/test_export_worker_graph_purity.py` checks this for the built-in
-   formats only; nothing checks it for yours.
+   Nothing checks this for a third-party exporter.
 2. **Write `exported_patient_id(patient)`, never `patient.patient_id`.**
    Take a patient's, study's or series' identifiers from the owner object,
    not from an instance's copy of them. Write only `gggg,eeee` keys from
@@ -127,18 +116,16 @@ what the gates decided.
    sequence, is never scanned or redacted, so leave it out.
 
 There is no reader or codec plugin point: ingest reads through pydicom and
-Isocenter's own codec dispatch, and a read-side seam is 1.1 or later
-([#527](https://github.com/kvnlng/Isocenter/issues/527)). The transfer
-syntaxes it reads and the two it writes are in the
-[Quick Start](../quickstart.md#5-anonymize-redact-export)
-([#526](https://github.com/kvnlng/Isocenter/issues/526)).
+Isocenter's own codec dispatch. The transfer syntaxes it reads and the two
+it writes are in the
+[Quick Start](../quickstart.md#5-anonymize-redact-export).
 
 ## Writing DICOM without the pipeline
 
 `DicomExporter.write_tree()` is the serializer alone. It writes a graph as
 it stands. It applies the owner stamps and the no-Patient-ID rule (both
-write paths share those, [#570](https://github.com/kvnlng/Isocenter/issues/570)),
-and it drops nested icons by the redaction already recorded on the graph:
+write paths share those), and it drops nested icons by the redaction
+already recorded on the graph:
 an instance's own icon when that instance was redacted, and every other one
 when any instance it writes was. This half of the gate needs no
 configuration. It applies none of the rest: no burned-in
