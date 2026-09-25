@@ -298,8 +298,6 @@ Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CP
 - An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision; measured at BitsStored 12, 13 and 16, it reads `int16 [-1996, 1470]` on both routes, with no row.
 - 12-bit JPEG Extended decodes through `imagecodecs.jpeg_decode` value for value as DCMTK decodes pydicom's `JPEG-lossy.dcm`.
 
-Code comments in `isocenter/imagecodecs_handler.py` and `isocenter/io_handlers.py`, and several test docstrings, still cite `docs/installation.md` for these limits; they now live in `docs/codecs.md`.
-
 ### `DicomExporter.write_tree()` and `session.export()`
 
 The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and a study with no Study Time is written with an empty one. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.

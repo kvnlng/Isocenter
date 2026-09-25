@@ -2658,7 +2658,7 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
         # Every door's refusal, the Instance door included: a recorded
         # limit rather than a conversion ahead of pydicom, which refuses
         # the native form as well ("Invalid ndarray.dtype 'uint16' for
-        # color space conversion"); `docs/installation.md` says so.
+        # color space conversion"); `docs/codecs.md` says so.
         raise refused(
             f"its declared colour space {photometric!r} is {bits}-bit, and "
             f"the conversion to {stored_label} this fallback would make, "
@@ -2948,7 +2948,7 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     A different question from `_precision_mismatch`'s (does a sample fit
     *BitsStored*), on the same syntax families; both rows can fire for one
     file. The row fires where imagecodecs decoded and not where a pydicom
-    plugin did, since a clamped array always fits (`docs/installation.md`).
+    plugin did, since a clamped array always fits (`docs/codecs.md`).
 
     Args:
         ds: The decoded pydicom `Dataset`.

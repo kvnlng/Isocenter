@@ -74,7 +74,7 @@ needs a hook inside the decoder rather than a bound outside it.
 *It is not visible on pydicom's plugin route*, which has already clamped
 the samples, so a clamped array always fits. **That half needs pylibjpeg
 and is not tested here**; `p671-ljp312.jsonl` and `psess-ljp312.txt` are
-the evidence, and `docs/installation.md` records it.
+the evidence, and `docs/codecs.md` records it.
 
 Which is why every ingest below runs under **`pydicom_cannot`**: the row
 is a statement about what the imagecodecs fallback read, so the route has
