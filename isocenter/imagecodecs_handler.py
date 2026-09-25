@@ -1450,7 +1450,7 @@ def _decode_frame(transfer_syntax, bitstream, ds):
         # length, and DCMTK writes `ff d9 ff` (pydicom's `JPEG-lossy.dcm`).
         # A stream closed with EOI after data lost from its middle still
         # decodes with the fill; that is the mid-stream limit
-        # `docs/installation.md` states.
+        # `docs/codecs.md` states.
         if not bytes(bitstream).rstrip(b"\x00\xff").endswith(b"\xff\xd9"):
             raise ValueError(
                 "the JPEG stream ends without an EOI marker, so it was cut "

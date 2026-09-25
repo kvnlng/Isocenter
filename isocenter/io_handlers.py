@@ -2658,7 +2658,7 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
         # Every door's refusal, the Instance door included: a recorded
         # limit rather than a conversion ahead of pydicom, which refuses
         # the native form as well ("Invalid ndarray.dtype 'uint16' for
-        # color space conversion"); `docs/installation.md` says so.
+        # color space conversion"); `docs/codecs.md` says so.
         raise refused(
             f"its declared colour space {photometric!r} is {bits}-bit, and "
             f"the conversion to {stored_label} this fallback would make, "
@@ -2948,7 +2948,7 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     A different question from `_precision_mismatch`'s (does a sample fit
     *BitsStored*), on the same syntax families; both rows can fire for one
     file. The row fires where imagecodecs decoded and not where a pydicom
-    plugin did, since a clamped array always fits (`docs/installation.md`).
+    plugin did, since a clamped array always fits (`docs/codecs.md`).
 
     Args:
         ds: The decoded pydicom `Dataset`.
@@ -4427,20 +4427,21 @@ def ingest_worker(fp: str) -> Tuple:
 
 @dataclass
 class IngestSummary:
-    """What one ingest run did, for the caller that has to know.
+    """What `ingest()` did with each file it found.
 
-    The ingest counterpart of `ExportSummary`.
+    A file takes exactly one of four routes. A declined file is not
+    recorded as imported, so offering it again declines it again.
 
-    A file takes exactly one of four routes, and they are four fields
-    because they answer different questions: `ingested` reached the
-    graph; `failures` were rejected with a reason (and each has an
-    `ERROR` audit row); `declined` were refused because the session
-    already holds their SOP Instance UID -- as the redacted copy's
-    pre-redaction identity, or as the UID of another instance -- each
-    audited as `WARNING` and never read into the store;
-    `skipped` were already in the store and were not read again. A
-    declined file is not recorded as imported, so offering it again
-    declines it again.
+    Attributes:
+        ingested (int): Files read into the graph.
+        failures (List[Tuple[str, str]]): `(path, reason)` per rejected
+            file, the same pair its `ERROR` audit row carries.
+        declined (int): Files refused because the session already holds
+            their SOP Instance UID (as another instance's UID, or as a
+            redacted instance's UID before redaction). Each has a
+            `WARNING` audit row and is not read into the store.
+        skipped (int): Files already in the store, not read again.
+        failed (int): `len(failures)`.
     """
     ingested: int = 0
     #: `(path, reason)` per rejected file -- the same pair the `ERROR`
@@ -5687,11 +5688,17 @@ class ExportOutcome:
 
 @dataclass
 class ExportSummary:
-    """What a batch delivered, for the parent that has to report it.
+    """What `export(format="dicom")` wrote, and what it did not.
 
-    Carries which instances reached disk, by UID, and which did not, with
-    their reasons, so the recoverable-identity disclosure can name the
-    files that went out rather than the export plan.
+    Attributes:
+        written_uids (List[str]): The SOP Instance UID of each instance
+            that reached disk, and nothing else. An instance with no UID
+            is not written and is in `failures`.
+        failures (List[Tuple[str, str]]): `(entity_uid, details)` per
+            instance that did not reach disk, each with an audit row.
+        written (int): Files that reached disk, counted over distinct
+            UIDs: two instances sharing a UID write one file.
+        failed (int): `len(failures)`.
     """
     # UIDs rather than a count: the count is derivable from them and the
     # identities are not, and the disclosure has to say which files went
@@ -5745,8 +5752,8 @@ class ExportError(RuntimeError):
     serializer could not write".
 
     Args:
-        failures: `(entity_uid, details)` per instance that failed; kept
-            as `self.failures`.
+        failures (list): `(entity_uid, details)` per instance that failed;
+            kept as `self.failures`.
         attempted (int): How many instances were planned; kept as
             `self.attempted`.
         folder (str, optional): The output folder, named in the message.

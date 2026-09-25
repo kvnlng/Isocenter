@@ -686,13 +686,13 @@ class PhiRemediation:
     """Proposed action to fix a PHI finding.
 
     Attributes:
-        action_type (str): The remediation logic code (e.g., "REPLACE_TAG", "SHIFT_DATE").
+        action_type (str): `REMOVE_TAG`, `REPLACE_TAG` or `SHIFT_DATE`.
         target_attr (str): The attribute or tag to modify.
         new_value (Any): The proposed new value (if known).
         original_value (Any): The original value for audit/reversion.
         metadata (Dict[str, Any]): Context metadata (e.g. patient linkage for date shifting).
     """
-    action_type: str  # e.g., "REPLACE_TAG", "REDACT_REGION"
+    action_type: str  # "REMOVE_TAG", "REPLACE_TAG" or "SHIFT_DATE"
     target_attr: str  # e.g., "patient_name", "study_date"
     new_value: Any = None
     original_value: Any = None
@@ -705,14 +705,17 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
 
     Attributes:
         entity_uid (str): Unique identifier of the entity (PatientID, SOPInstanceUID).
-        entity_type (str): Type of entity ("Patient", "Instance", etc).
+        entity_type (str): `"Patient"`, `"Study"`, `"Series"` or
+            `"Instance"`.
         field_name (str): The specific field or tag description.
         value (Any): The PHI value found.
         reason (str): Why this was flagged (e.g. "Safe Harbor Rules").
         tag (Optional[str]): The DICOM tag (e.g., "0010,0010").
         patient_id (Optional[str]): Linkage for context.
-        entity (Any): Reference to the Python object for direct remediation.
-        remediation_proposal (Optional[PhiRemediation]): The suggested fix.
+        entity (Any): The live object in `session.store` the finding names,
+            or None when it cannot be found.
+        remediation_proposal (Optional[PhiRemediation]): The suggested fix,
+            which `anonymize()` applies.
         metadata (Dict[str, Any]): Context carried with the finding.
         entity_path (Tuple): Route from the Instance to the item this was
             raised against, as `(sequence_tag, index)` steps. Empty means
@@ -737,15 +740,19 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
 class PhiReport:
     """A container for PHI findings that supports analysis and export.
 
-    Iterates, indexes and measures like the list of findings it wraps,
-    and adds DataFrame export.
+    Iterates, indexes and measures like the list of findings it wraps
+    (`len(report)`, `report[0]`, `for finding in report`), and adds
+    DataFrame export.
 
-    `failures` is a list of `(entity_uid, reason)`, one per instance a
-    pixel scan could not read in full: its pixels could not be loaded, or
-    OCR raised on at least one of its frames. `scan_pixel_content()` fills
-    it; an instance that failed on some frames keeps the findings of the
-    frames that were read. It is always a list, never `None`. `audit()`'s
-    is always empty: a failure in its workers raises instead.
+    Attributes:
+        findings (List[PhiFinding]): The findings, one per report line.
+        failures (List[Tuple[str, str]]): `(entity_uid, reason)`, one per
+            instance a pixel scan could not read in full: its pixels could
+            not be loaded, or OCR raised on at least one of its frames.
+            `scan_pixel_content()` fills it; an instance that failed on
+            some frames keeps the findings of the frames that were read.
+            It is always a list, never `None`. `audit()`'s is always
+            empty: a failure in its workers raises instead.
     """
 
     def __init__(self, findings: List[PhiFinding],
