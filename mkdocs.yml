@@ -134,4 +134,3 @@ nav:
       # copy drifted 97 lines behind and stopped at 0.6.0 (#52); a
       # changelog with two homes only ever has one that is current.
       - 'Changelog': https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md
-      - 'Roadmap': roadmap.md
