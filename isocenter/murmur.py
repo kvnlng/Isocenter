@@ -197,7 +197,9 @@ def _concept(item, include_text: bool = False):
 
     Returns:
         tuple: `(category, label)`, the category `f"{scheme}:{code}"` (the
-            Code Value alone when the scheme is empty); `(None, None)` with
+            Code Value alone when the scheme is empty);
+            `(UNCODED_CATEGORY, None)` for a site-defined concept without
+            `include_text`; `(None, None)` with
             no concept, and `(None, meaning)` for a concept with no Code
             Value.
     """

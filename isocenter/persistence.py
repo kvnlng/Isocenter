@@ -5187,7 +5187,8 @@ class SqliteStore:
         file, swaps it in, deletes the orphaned `instance_blobs` rows and
         rewrites every stored offset. A failure before the database update
         commits restores the original sidecar and leaves the database as it
-        was; one after it (removing the backup) leaves the compacted file
+        was, apart from the legacy back-fill `_read_blob_index` commits
+        first; one after it (removing the backup) leaves the compacted file
         and the committed offsets in place. Takes no lock of its
         own: `Session.compact()` holds the sidecar gate across this call and
         the loader rewire after it, and in-memory loaders still point at the
@@ -5519,7 +5520,6 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
         Args:
             o (Any): The value to encode.
-            _one_shot (bool): Passed through to `json.JSONEncoder`.
 
         Returns:
             Iterator[str]: The encoded chunks.

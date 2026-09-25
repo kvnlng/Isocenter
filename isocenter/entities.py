@@ -1041,9 +1041,9 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
                 f"the {keyword} edit. {way_out}")
     dtype, shape = reading
     samples = _element_count(shape)
-    # `descriptors_of({})` returns the six descriptors with nothing set, in
-    # `_DESCRIBED_TAG_KEYWORDS` order: reorder that dict and the refusal
-    # names the wrong defaults.
+    # `descriptors_of({})` returns the descriptors with nothing set, in
+    # `_DESCRIBED_TAG_KEYWORDS` order (`zip` drops its trailing dtype
+    # carrier): reorder that dict and the refusal names the wrong defaults.
     reads_as = dict(zip(_DESCRIBED_TAG_KEYWORDS, descriptors_of({})))
     subject = keyword
     if value is None or (isinstance(value, (str, bytes)) and not value):

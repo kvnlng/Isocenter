@@ -6363,6 +6363,11 @@ class DicomSession:
                 nothing was attempted.
 
         Raises:
+            TypeError: `patient_ids` or `subset` is of a type the selection
+                does not take, before anything is flushed or written.
+            ValueError: `subset` is a DataFrame carrying none of
+                SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
+                PatientID.
             ExportError: Every planned instance failed (nothing written and
                 at least one failure), raised last, after the audit rows
                 and the `EXPORT` row are written. A partial export and an

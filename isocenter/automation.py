@@ -26,7 +26,6 @@ class ConfigAutomator:
             report (PhiReport): Findings from a pixel scan, each carrying
                 `leak_type`, `text_box`, `best_zone` and `rule_serial` in
                 its metadata.
-            _current_config (IsocenterConfiguration): Unused.
 
         Returns:
             List[Dict[str, Any]]: One dict per suggestion, with `serial`,
