@@ -957,8 +957,9 @@ class PhiInspector:
             List[PhiFinding]: A list of all identified PHI findings.
 
         Raises:
-            RuntimeError: When a keyed Patient ID replacement has to be
-                minted and the inspector has no project secret.
+            RuntimeError: When the inspector has no project secret and
+                a keyed Patient ID replacement has to be minted, or a
+                non-blank UID sits under the keyed UID replacement.
         """
         findings = []
 
@@ -1077,8 +1078,9 @@ class PhiInspector:
             List[PhiFinding]: The findings.
 
         Raises:
-            RuntimeError: When a UID replacement is needed and the
-                inspector has no project secret.
+            RuntimeError: When the inspector has no project secret and
+                a non-blank UID sits under the keyed UID replacement,
+                minted or not.
         """
         findings = []
 
