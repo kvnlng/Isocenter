@@ -88,6 +88,14 @@ A phi rule's `value: null` and `name: null` read as absent, as before:
   `'json'` only; `'md'` and case variants such as `'HTML'` raise
   `ValueError`.
 
+## Configuration and cohort export: what changed at 1.0
+
+**A store anonymized under 0.9.7's profile.** 0.9.7's `basic` profile had 35 rules. Its statuses carry no policy, so an export from such a store writes a `WARNING` row (see [PHI statuses recorded before 1.0](#phi-statuses-recorded-before-10)). Load your configuration, run `audit()` and then `anonymize()` before exporting again. That removes what `basic@2026c` removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source files restores them.
+
+**The Basic Profile's D codes write a dummy.** Before 1.0 a `D` code emptied the attribute and an `X/D` code removed it, so a Type 1 attribute was written zero-length or dropped. From 1.0 every code with a D arm writes a dummy value for the attribute's VR ([What basic@2026c contains](configuration.md#what-basic2026c-contains)). An export of the same data under 1.0 therefore carries attributes a 0.9.x export did not, each holding its dummy.
+
+**`export_to_parquet` is gone.** `session.export_to_parquet(...)` raises `AttributeError`. Use `session.export_dataframe("cohort.parquet")`, which writes Parquet for a `.parquet` path. The columns differ: `export_to_parquet` wrote SQL column names (`patient_id`, `sop_instance_uid`), and `export_dataframe` writes keywords (`PatientID`, `SOPInstanceUID`) for its base columns, so code that reads the old files needs its column names changed as well as its call.
+
 ## PHI statuses recorded before 1.0
 
 A store records what the last scan concluded about each patient, study and instance (`phi_status`). From 1.0 it also records the policy that scan ran under (`phi_status_policy`: a fingerprint of the tag rules, `remove_private_tags` and the configuration schema version, and a readable base such as `basic@2026c`). The schema version is in it because a release that changes what an unchanged configuration detects raises that version's minor: a store's statuses from before such a release then read as recorded under another policy, and the export says so as below.

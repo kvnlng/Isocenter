@@ -303,3 +303,12 @@ Code comments in `isocenter/imagecodecs_handler.py` and `isocenter/io_handlers.p
 ### `DicomExporter.write_tree()` and `session.export()`
 
 The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and a study with no Study Time is written with an empty one. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.
+
+## Configuration and storage internals
+
+The user guides describe behaviour; the names behind it are here.
+
+- **Profiles.** `basic@2026c` is `profiles.BASIC_PROFILE` (646 rules, frozen for 1.x; `tests/test_profile_editions.py` pins its digest). The floor is `profiles.FLOOR_POLICY`, the same table with the three research defaults `create_config()` writes. Resolution of a file's `privacy_profile` lives in `config_manager._resolved_policy`, not in `profiles.py`.
+- **The 65534-byte limit** on held binary values is `io_handlers.BINARY_RETENTION_MAX_BYTES`, the largest value an explicit-VR 16-bit length field can carry.
+- **Why large private values are not stored.** Holding a megabyte vendor blob in `attributes` makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. `session.compact()` rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a `redact()` or `ingest()` pass is open. That is design work, not a flag (#125).
+- **Data-loss rows** are read with `session.store_backend.get_audit_losses()`; the compliance report's section 3.1 is the user-facing view.
