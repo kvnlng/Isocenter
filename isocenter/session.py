@@ -81,7 +81,7 @@ def scan_worker(args):
 
     Raises:
         TypeError: If the first element is not a `Patient`, or
-            `config_source` is not a mapping.
+            `config_source` is not a dict.
     """
     # The project secret travels **by value**, in the tuple. A worker
     # cannot read it back out of the store: a spawned process cannot reach
@@ -1000,7 +1000,8 @@ class LockingResult(list):
         """A one-line summary instead of every instance.
 
         Returns:
-            str: The count of instances locked.
+            str: `<LockingResult: N instances secured>`, where N is the
+                count of instances locked.
         """
         return f"<LockingResult: {len(self)} instances secured>"
 
@@ -1415,7 +1416,9 @@ class DicomSession:
     def close(self):
         """
         Shut the session down: the persistence-manager thread, the audit
-        thread that owns the sqlite connection, and the process pool.
+        thread that owns the sqlite connection, and the process pool. A
+        session that is never closed leaks its worker subprocesses for the
+        life of the process.
 
         All three steps run even if an earlier one raises. If more than
         one fails, the first failure is raised and the later ones are
@@ -1653,7 +1656,7 @@ class DicomSession:
         # Built first, nothing has been mutated when it raises. Retired first,
         # `self._executor` would point at a dead pool and, with the width left
         # stale, every later `ingest()` would fail. The counter moves after the
-        # swap because an exception before the `yield` escapes `__enter__` and
+        # swap because an exception before the `try` escapes `__enter__` and
         # the `finally` never runs; a counter left at 1 is a phantom peer that
         # blocks every later resize. Building first does not double the process
         # count: a `ProcessPoolExecutor` spawns no worker until the first task
@@ -3326,9 +3329,11 @@ class DicomSession:
             open_gaps (list): Unscanned elements not removed before export.
             declined_remediations (list): Declined remediation rows.
             unattested (list): Verbs that ran with no audit row of their own.
-            unacted (dict): Per level, entities that read IDENTIFIED.
-            edited (dict): Per level, entities edited after their status was
-                recorded.
+            unacted (Dict[str, int]): Per level (`patients`, `studies`,
+                `instances`), the count of entities that read IDENTIFIED.
+            edited (Dict[str, int]): Per level (`patients`, `studies`,
+                `instances`), the count of entities edited after their
+                status was recorded.
 
         Returns:
             List[str]: One sentence per condition that keeps the run from PASS.
@@ -3990,7 +3995,8 @@ class DicomSession:
         # of an ID no patient holds creates no key file. The batch calls it
         # after reading its selection and before it plans, found or not,
         # because it cannot plan without the engine; a batch of IDs that match
-        # no patient therefore creates the key.
+        # no patient therefore creates the key, as does a lock then refused
+        # for any other reason.
         try:
             self.key_manager.load_key()
         except FileNotFoundError:
@@ -6355,6 +6361,12 @@ class DicomSession:
         Returns:
             ExportSummary: What reached disk and what did not; empty when
                 nothing was attempted.
+
+        Raises:
+            ExportError: Every planned instance failed (nothing written and
+                at least one failure), raised last, after the audit rows
+                and the `EXPORT` row are written. A partial export and an
+                empty plan return a summary instead.
         """
         # One helper for every door that selects patients, so
         # `patient_ids` means the same thing whichever format was named

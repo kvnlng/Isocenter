@@ -441,7 +441,7 @@ class RemediationService:
                     details = (f"Removed Sequence {proposal.target_attr} "
                                f"from {finding.entity_uid}")
                     action_type = "REMEDIATION_REMOVE"
-            # 2. A Python attribute (`Patient`/`Study` field).
+            # 2. A Python attribute (`Patient`/`Study`/`Series` field).
             elif self._holds_attr_to_remove(entity, proposal.target_attr):
                 setattr(entity, proposal.target_attr, None)
                 if hasattr(entity, "mark_modified"):
@@ -2482,7 +2482,7 @@ def _key_hash(key) -> int:
 def _key_digest(keys) -> int:
     """The 64-bit sum of `_key_hash(key)` over a set of remediation keys.
 
-    The same in every process. Costs about 1.2 us a key.
+    The same in every process.
 
     Args:
         keys: The remediation keys.
@@ -2540,8 +2540,8 @@ class _ScanTally:
 
     A deliberately partial workflow -- a patient-level pass now, the
     instances later -- keeps the handled key set of every uid it left
-    incomplete, about 77 B per handled key, until the uid completes or
-    the next `audit()` replaces the tally. A full pass keeps nothing.
+    incomplete until the uid completes or the next `audit()` replaces
+    the tally. A full pass keeps nothing.
 
     Each tally carries an audit token (`_audit`, a uuid4 hex) naming the
     audit it came from; pickling, `copy.deepcopy` and `copy()` keep it.

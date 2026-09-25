@@ -1132,8 +1132,10 @@ class SqliteStore:
         Take it holding no other lock, for the whole pass: from before the
         first worker can call `regenerate_uid()` until after
         `_apply_redaction_outcomes` has bound every loader. While any pass
-        holds it, `compact()` refuses. Released by the kernel if the
-        process dies.
+        holds it, `compact()` refuses. A pass that starts while a
+        compaction is running waits behind it (its leading save and its
+        rewrite), bounded by `_SIDECAR_GATE_TIMEOUT_S`, then proceeds.
+        Released by the kernel if the process dies.
 
         Yields:
             None: While the lock is held.
@@ -4221,7 +4223,8 @@ class SqliteStore:
     @staticmethod
     def _delete_removed_series(cur, study, study_pk, held) -> int:
         """Deletes this study's series that no object in the save holds, and
-        their instances. See `_delete_removed_instances` for `held`."""
+        their instances. `held` is as in `_delete_removed_instances`, whose
+        body comment gives the reason for comparing against it."""
         stored = {row[1]: row[0] for row in cur.execute(
             "SELECT id, series_instance_uid FROM series WHERE study_id_fk=?",
             (study_pk,)).fetchall()}
@@ -4232,7 +4235,8 @@ class SqliteStore:
     @staticmethod
     def _delete_removed_studies(cur, patient, patient_pk, held) -> int:
         """Deletes this patient's studies that no object in the save holds,
-        and their subtrees. See `_delete_removed_instances` for `held`."""
+        and their subtrees. `held` is as in `_delete_removed_instances`,
+        whose body comment gives the reason for comparing against it."""
         stored = {row[1]: row[0] for row in cur.execute(
             "SELECT id, study_instance_uid FROM studies WHERE patient_id_fk=?",
             (patient_pk,)).fetchall()}
@@ -5181,8 +5185,10 @@ class SqliteStore:
 
         Copies every live blob (one whose instance row exists) into a new
         file, swaps it in, deletes the orphaned `instance_blobs` rows and
-        rewrites every stored offset. On failure the original sidecar is
-        restored and the database is left as it was. Takes no lock of its
+        rewrites every stored offset. A failure before the database update
+        commits restores the original sidecar and leaves the database as it
+        was; one after it (removing the backup) leaves the compacted file
+        and the committed offsets in place. Takes no lock of its
         own: `Session.compact()` holds the sidecar gate across this call and
         the loader rewire after it, and in-memory loaders still point at the
         old offsets until they are rewired.
@@ -5193,9 +5199,14 @@ class SqliteStore:
                 nothing is live (the file is then left as it is).
 
         Raises:
-            Exception: Any failure reading the index, rewriting the file or
-                updating the database, re-raised after the working files are
-                discarded.
+            sqlite3.Error: Propagated from `_read_blob_index()` when the
+                index read fails, before the rewrite starts; the sidecar
+                is untouched and there is nothing to discard.
+            OSError: Propagated from `os.path.getsize` on the sidecar,
+                before the rewrite starts; the sidecar is untouched.
+            Exception: Any failure rewriting the file, swapping it in or
+                updating the database, re-raised after the working files
+                are discarded.
             BaseException: Anything that interrupts the database update,
                 `KeyboardInterrupt` included, re-raised after the original
                 sidecar is swapped back.

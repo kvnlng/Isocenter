@@ -784,10 +784,18 @@ def _decode_from_file(ds):
             only: every case that reaches it raises.
 
     Raises:
-        AttributeError: From pydicom, for a file with no Transfer Syntax
-            UID.
-        NotImplementedError: From pydicom, for a syntax no decoder
-            implements.
+        AttributeError: Propagated from `ds.pixel_array` for a file with
+            no Transfer Syntax UID, or from `_decode_pixels` for a header
+            pydicom's validation refuses for a missing element.
+        NotImplementedError: Propagated from `ds.pixel_array`, for a
+            syntax no decoder implements.
+        RuntimeError: Propagated from `_decode_pixels`: a signed JPEG 2000
+            codestream under PixelRepresentation 0, encapsulated fragments
+            with no frame boundary, or a decode neither pydicom nor the
+            imagecodecs fallback accepts.
+        ValueError: Propagated from `_decode_pixels`: a header pydicom's
+            validation refuses, or a pydicom `ValueError` for a syntax with
+            no fallback.
     """
     # Do not give this a decode path of its own: `_decode_pixels` is the
     # function ingest, the export readback and an icon decode go through.
@@ -946,8 +954,11 @@ class _FileReadCapture:
                 this read was shaped by.
 
         Raises:
-            ValueError: For a descriptor that does not parse.
-            TypeError: For a descriptor that does not parse.
+            ValueError: Propagated from the `descriptors_of` callable this
+                capture was built with, for a descriptor that does not
+                parse as an integer.
+            TypeError: Propagated from the same callable, for a descriptor
+                of a type `int()` does not take.
         """
         return self._of(dict(instance.attributes), overlay=True) == self.descriptors
 
@@ -1030,6 +1041,9 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
                 f"the {keyword} edit. {way_out}")
     dtype, shape = reading
     samples = _element_count(shape)
+    # `descriptors_of({})` returns the six descriptors with nothing set, in
+    # `_DESCRIBED_TAG_KEYWORDS` order: reorder that dict and the refusal
+    # names the wrong defaults.
     reads_as = dict(zip(_DESCRIBED_TAG_KEYWORDS, descriptors_of({})))
     subject = keyword
     if value is None or (isinstance(value, (str, bytes)) and not value):
@@ -1105,7 +1119,7 @@ class Instance(DicomItem):
     # `Session._apply_redaction_outcomes` clears (its loader reads the
     # worker's frame, which the *current* descriptors describe); and the
     # three persistence sites that make the resident array the stored
-    # frame clear it beside the flag. `get_pixel_data()`'s three read
+    # frame clear it beside the flag. `get_pixel_data()`'s two read
     # arms publish only into an empty slot, under the leaf, so a set that
     # landed during the load keeps its array, its flag and this record
     # together.
@@ -1674,8 +1688,9 @@ class Instance(DicomItem):
             elif tag in self.attributes:
                 del self.attributes[tag]
 
-    # Every inner raise is caught and re-raised as RuntimeError, which is
-    # what Raises documents.
+    # Disabled because pylint cannot see which exceptions escape the
+    # rewrap: the inner raises are caught and re-raised as RuntimeError,
+    # and FileNotFoundError is raised directly. Raises documents both.
     def get_pixel_data(self) -> Optional[np.ndarray]:  # pylint: disable=missing-raises-doc
         """
         Returns pixel_array, loading it if it is not in memory.
@@ -2152,12 +2167,13 @@ class Instance(DicomItem):
         return True
 
     def _relabel_to_decoded_colour(self, label: str) -> None:
-        """`get_pixel_data()`'s decode converted: say so.
+        """Relabel the instance after `get_pixel_data()`'s decode converted.
 
-        Sets PhotometricInterpretation to `label`, advancing the revision,
-        so RGB bytes are never returned or exported under a YBR label. Only
-        when the instance already carries a PhotometricInterpretation: a
-        bare `Instance(file_path=...)` gets none added. Call only from
+        Only when the instance already carries a PhotometricInterpretation:
+        sets it to `label`, advancing the revision if the value changes, so
+        converted bytes are not returned or exported under the label they
+        were converted from. A bare `Instance(file_path=...)` gets no label
+        added. Call only from
         `_publish_loaded_frame`, under `PIXEL_STATE_LOCK`, on its publishing
         branch.
 

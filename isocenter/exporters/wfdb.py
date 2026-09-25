@@ -32,6 +32,10 @@ WFDB_ADC_ZERO = 0
 # This constant is the **only** place in this module the two names are
 # spelled as a pair: spelling the allow-list inline in the check would
 # leave two lists to keep in step.
+#
+# The AST pin on the keys the body reads cannot see a name added to this
+# frozenset, so `tests/test_wfdb_option_strictness.py` pins the set
+# against that page: one pin on what is read, one on what is admitted.
 _WFDB_OPTIONS = frozenset({"patient_ids", "include_annotation_text"})
 
 
@@ -184,8 +188,10 @@ def format_header(record_name: str,
 
     Args:
         record_name (str): Record name (must match the .hea basename).
-        waveform (Waveform): Geometry and per-channel calibration. A channel
-            missing from its definitions is written uncalibrated (gain 1,
+        waveform (Waveform): Geometry and per-channel calibration. A
+            channel past the defined ones takes the last defined channel's
+            calibration. When the Channel Definition Sequence is absent or
+            empty, every channel is written uncalibrated (gain 1,
             baseline 0, "mV").
         samples (np.ndarray): int16, shape (num_samples, num_channels).
         dat_filename (str): Signal file basename referenced by each line.
@@ -641,9 +647,10 @@ class WfdbExporter(Exporter):
         """Write one record: `.hea`, `.dat`, and `annotations.json` when there are
         findings.
 
-        A waveform instance with no samples writes nothing and files one
-        `STANDARD` `DATA_LOSS` row (when `store_backend` is given); dropped
-        annotations file one `WARNING`-level log line and one `DATA_LOSS` row.
+        A waveform instance with no samples writes nothing, logs one
+        WARNING and files one `STANDARD` `DATA_LOSS` row; dropped
+        annotations log one WARNING and file one `DATA_LOSS` row. Each row
+        is written only when `store_backend` is given.
 
         Args:
             folder (str): The export root.
@@ -870,6 +877,10 @@ class WfdbExporter(Exporter):
                 the caller to write as a comment when a date is known but
                 no time of day is.
         """
+        # Real, possibly un-shifted timing on purpose, not a leak: it
+        # behaves like every other field this tool has not remediated.
+        # Suppressing timing on an un-anonymized session would be a design
+        # change, not a fix.
         from datetime import datetime
 
         acquired = _parse_dicom_dt(
@@ -897,7 +908,8 @@ class WfdbExporter(Exporter):
         # A date, and no time of day we can read. Never append `000000`:
         # a record line carrying `00:00:00` is timing this tool invented,
         # indistinguishable to a reader from an acquisition that really
-        # happened at midnight.
+        # happened at midnight. The date is kept as a note rather than
+        # dropped because it is useful for research.
         return None, f"start date: {only_date.strftime('%d/%m/%Y')}"
 
     @staticmethod
@@ -931,7 +943,9 @@ class WfdbExporter(Exporter):
         # (`wfdb` requires base_time for base_date, and `wfdb.rdheader` misparses a
         # date-only record line), so a date with no time goes in the note. That
         # case never falls through to the instance-only fallback, which would read
-        # the unshifted instance date.
+        # the unshifted instance date. The fallback's real timing on an
+        # un-anonymized session is deliberate (see the comment at the top of
+        # `_instance_only_datetime`).
         from datetime import datetime
 
         time_of_day = WfdbExporter._instance_time_of_day(instance)
@@ -950,10 +964,9 @@ class WfdbExporter(Exporter):
                     # do not fall through to the instance-only fallback
                     # below -- that would read the instance's real,
                     # un-shifted date and reopen the Safe Harbor leak
-                    # this function's docstring above exists to close.
-                    # The date is real information, so hand it back for
-                    # the caller to preserve as a comment rather than
-                    # dropping it outright.
+                    # the comment at the top of this function describes.
+                    # The date is kept as a note rather than dropped
+                    # because it is useful for research.
                     #
                     # Labelled by whether a shift actually happened: a real
                     # study date exported without `anonymize()` must not be

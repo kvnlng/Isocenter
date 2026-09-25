@@ -70,8 +70,10 @@ class RedactionOutcome:
     """What one worker has to tell the parent about one instance.
 
     Attributes:
-        ok (bool): False when a zone could not be applied, which leaves
-            burned-in PHI in the instance and must be reported.
+        ok (bool): False when the worker raised anywhere (a zone that
+            could not be applied, a failed pixel load, a failed persist),
+            which leaves burned-in PHI in the instance and must be
+            reported.
         sop_instance_uid (str): The instance's **pre-redaction** UID,
             which the parent's map is keyed on.
         mutation (Optional[dict]): What to apply to the parent's instance,
@@ -522,9 +524,10 @@ def zone_rois(zones, on_invalid=None) -> List[tuple]:
 
     Args:
         zones (Optional[list]): The rule's `redaction_zones`, or None.
-        on_invalid (Callable, optional): Called with the ROI of each zone
-            that is not one of the two shapes or has not exactly four
-            values; such a zone is dropped either way.
+        on_invalid (Callable, optional): Called once per rejected zone:
+            with the zone's ROI when it does not hold exactly four values,
+            or with None when the zone is not one of the two shapes or is
+            a dict with no `roi`. A rejected zone is dropped either way.
 
     Returns:
         List[tuple]: Each valid ROI as a tuple of its values as given,
@@ -789,8 +792,9 @@ class RedactionService:
                 applied, `ok=True` with `mutation=None` for a legitimate
                 skip (already redacted under this configuration, no pixel
                 data, or **no configured zone landed inside the image**),
-                and `ok=False` with an `error` string when a zone could not
-                be applied.
+                and `ok=False` with an `error` string on any exception
+                (a zone that could not be applied, a failed pixel load, a
+                failed persist).
 
         The mutation dict exists only when a zone landed. On success the
         instance carries the redaction flags, the new SOP Instance UID and
@@ -1311,6 +1315,12 @@ class RedactionService:
         """
         Applies a list of ROIs to the pixel array in place.
 
+        A zone starting past the image edge is skipped; one extending
+        past it is clipped. The array must be writeable; callers copy a
+        read-only one first. A zone that cannot be applied is logged at
+        ERROR and its exception re-raised, with the zones before it
+        already zeroed.
+
         Args:
             arr (np.ndarray): The pixel array to modify.
             rois (List[tuple]): List of (y1, y2, x1, x2) regions.
@@ -1318,12 +1328,6 @@ class RedactionService:
                 from `isocenter.pixel_geometry`. **It must have been
                 resolved from the shape of *this* array**; nothing here
                 can check it.
-
-        A zone starting past the image edge is skipped; one extending
-        past it is clipped. The array must be writeable; callers copy a
-        read-only one first. A zone that cannot be applied is logged at
-        ERROR and its exception re-raised, with the zones before it
-        already zeroed.
 
         Returns:
             bool: True if any modification was applied.
@@ -1501,10 +1505,8 @@ class RedactionService:
             inst (Instance): The instance to flag.
         """
 
-        # 1. Image Type (0008,0008)
-        # We need to preserve existing values but ensure 'DERIVED' is first.
-        # Note: In a robust implementation, we'd read the old value first.
-        # Here we force a standard Derived type.
+        # 1. Image Type (0008,0008): the existing values are read and kept,
+        # with DERIVED first and ORIGINAL dropped (`_derived_image_type`).
         # Every value here is a module constant the status-carry guard reads:
         # `_flags_are_redactions` accepts these tags only at the value
         # captured before the pass or at exactly what is written here,

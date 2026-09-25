@@ -300,8 +300,10 @@ def decode_samples(data: bytes,
         np.ndarray: int16, shape (num_samples, num_channels).
 
     Raises:
-        UnsupportedInterpretation: For mu-law/A-law companded audio.
-        ValueError: If the payload length does not match the geometry.
+        UnsupportedInterpretation: For mu-law/A-law companded audio, or an
+            interpretation this module has no dtype for.
+        ValueError: If the payload is not a whole number of samples or
+            its length does not match the geometry.
     """
     interp = (interpretation or "SS").strip().upper()
 
@@ -490,8 +492,12 @@ class Waveform:
             np.ndarray: int16, shape (num_samples, num_channels).
 
         Raises:
-            UnsupportedInterpretation: For mu-law/A-law companded audio.
-            ValueError: If the payload length does not match the geometry.
+            UnsupportedInterpretation: Propagated from `decode_samples`,
+                for mu-law/A-law companded audio or an interpretation it
+                has no dtype for.
+            ValueError: Propagated from `decode_samples`, if the payload
+                is not a whole number of samples or its length does not
+                match the geometry.
         """
         self.samples = decode_samples(
             data, self.sample_interpretation, self.num_samples, self.num_channels)

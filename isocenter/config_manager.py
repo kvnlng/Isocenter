@@ -1126,7 +1126,13 @@ def _resolved_policy(config: Dict[str, Any], path: str):
 
     Raises:
         ValueError: For refused `phi_tags`, an unshipped `@` name, or a
-            profile that is neither built in, `none`, nor a file.
+            profile that is neither built in, `none`, nor a file. Also
+            propagated from `_external_profile_tags` for an external
+            profile file it refuses (invalid YAML, a root that is not a
+            mapping, no `phi_tags`, a refused version, another key, or
+            refused `phi_tags`).
+        FileNotFoundError: Propagated from `_external_profile_tags` when
+            the external profile file is gone by the time it is read.
     """
     # Validated, and lowercased, before anything is merged. The profiles'
     # keys are lowercase (profiles.py's header comment), so a user's

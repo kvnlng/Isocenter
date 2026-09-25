@@ -35,9 +35,10 @@ limit-inference-results = 100
 
 # List of plugins (as comma separated values of python module names) to load,
 # usually to register additional checkers.
-# docparams checks every public docstring (and every private one that exists)
-# for an entry per parameter, a Returns/Yields entry and a Raises entry per
-# exception raised. A docstring documents the code: summary, Args, Returns,
+# docparams checks the docstrings of public modules, classes, functions and
+# methods for an entry per parameter, a Returns/Yields entry and a Raises
+# entry per exception raised; names matching `no-docstring-rgx` (private
+# names, dunders, `__init__`) are skipped. A docstring documents the code: summary, Args, Returns,
 # Raises and usage. History and maintainer reasoning go elsewhere (CHANGELOG,
 # `#` comments at the line they explain).
 load-plugins = ["pylint.extensions.docparams"]

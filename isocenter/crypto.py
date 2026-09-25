@@ -64,6 +64,10 @@ class KeyManager:
             # quoted: whatever the file holds, it was meant to be a secret.
             Fernet(key)
             self.key = key
+            # Never chmod a file this code did not create: its mode may be
+            # deliberate (a group sharing the key). The warning names the
+            # mode, not the path, which can carry whatever the caller
+            # named a directory.
             if mode & 0o077:
                 get_logger().warning(
                     "The key file given to enable_reversible_anonymization() "

@@ -397,6 +397,10 @@ class PersistenceManager:
         saying what it is waiting for and re-attempts recovery, so a worker
         that dies after this flush began is recovered too.
         """
+        # No timeout, ever: a bounded wait that gave up would turn a
+        # visible hang into a silently dropped save, and callers flush so
+        # they can read or shut down afterwards. Only the silence is
+        # bounded, by the periodic WARNING below.
         self._recover_orphaned_item()
 
         # `queue.join()` on a short-lived daemon so the wait can be

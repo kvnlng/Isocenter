@@ -16,8 +16,10 @@ class CTPParser:
 
         Each `{ condition }` block followed by `(x,y,w,h)` coordinates gives
         one rule when its condition names a Manufacturer or a
-        ManufacturerModelName (`containsIgnoreCase`); other blocks are
-        skipped. Coordinates are converted to zone space `[y, y+h, x, x+w]`.
+        ManufacturerModelName (`containsIgnoreCase`) and at least one
+        `(x,y,w,h)` group is read; other blocks, including one with no
+        coordinates, are skipped. Coordinates are converted to zone space
+        `[y, y+h, x, x+w]`.
 
         Args:
             content (str): The script's text.

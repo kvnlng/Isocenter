@@ -218,7 +218,8 @@ def _deid_method_value(policy: ScanPolicy, version: str) -> str:
         version (str): The library version.
 
     Returns:
-        str: The value, at most 64 characters (LO).
+        str: The value, untruncated: `isocenter/<version>; <label>;
+            <scheme>:<first 8 hex of the digest>`.
     """
     # `isocenter/<version>` is the exact spelling the output fingerprint's
     # N2 substitution normalises (`scripts/output_fingerprint.py`), so a

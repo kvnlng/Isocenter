@@ -1384,7 +1384,8 @@ def signed_codestream_refusal(ds) -> Optional[str]:
             if layout is not None and layout[0]:
                 return signed_codestream_words(layout[1])
     except Exception:  # pylint: disable=broad-except
-        # Not this gate's refusal to make: see the docstring.
+        # Not this gate's refusal to make: see the comment at the top of
+        # this function (the decoder that runs next refuses it).
         return None
     return None
 

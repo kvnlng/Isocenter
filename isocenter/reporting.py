@@ -547,6 +547,8 @@ def get_renderer(format_type: str) -> ReportRenderer:
         ValueError: For any other spelling, `'md'` and case variants
             included.
     """
+    # One spelling per behaviour: a second spelling accepted in 1.0 could
+    # never be removed in 1.x, so 'md' and case variants are refused.
     if format_type == "markdown":
         return MarkdownRenderer()
     raise ValueError(

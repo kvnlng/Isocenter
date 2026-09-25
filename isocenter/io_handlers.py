@@ -217,9 +217,9 @@ _NESTED_PIXEL_DATA_TAG = Tag(0x7fe0, 0x0010)
 #: applies to the dtype carrier: allow-list, never interpret. Add a syntax
 #: only once a nested decode under it has been measured.
 #:
-#: The lossy syntaxes here are safe because a lossy icon can decode to a
-#: different colour space than it declares (RGB from `YBR_FULL_422` under
-#: JPEG Baseline, from `YBR_ICT`/`YBR_RCT` under JPEG 2000), and
+#: The lossy syntaxes here are safe even though a lossy icon can decode to
+#: a different colour space than it declares (RGB from `YBR_FULL_422` under
+#: JPEG Baseline, from `YBR_ICT`/`YBR_RCT` under JPEG 2000):
 #: `_decode_nested_pixels` takes the colour space from the decoder's meta
 #: through the same `_decode_pixels` the top level uses, rewriting the
 #: item's label to match. Admission only stops the gate refusing what a
@@ -401,8 +401,9 @@ class _PhotometricRefusal(RuntimeError):
     (`_pixel_less_label_warning`). Judged on what the file would carry,
     not on the declaration. A `RuntimeError` subclass, handled exactly as
     `_J2kFrameRefusal` is: the instance is not written and counts as a
-    failure. A pixel-less file with several labels is written with a
-    warning instead.
+    failure. A distinct type so a caller can tell "this library will not
+    write that label" apart from a failed write. A pixel-less file with
+    several labels is written with a warning instead.
     """
     # The one refusal on this path. A format this library can read and
     # cannot write is otherwise warned about and written as the best
@@ -778,7 +779,8 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
 
     Returns:
         Optional[str]: The WARNING sentence, or None when there is no
-        label or the label is admitted.
+        label, the syntax has no row in `_ADMISSIBLE_PHOTOMETRICS`, or the
+        label is admitted.
 
     Raises:
         _PhotometricRefusal: When a pixel element built into `attributes`
@@ -1445,21 +1447,20 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
         return None
 
     fp = DicomBytesIO(raw)
-    # Symmetry and insurance, not requirement; read this before deleting
-    # either line. `read_sequence` takes implicitness and endianness as positional
-    # arguments and threads them down itself; it consults NEITHER
-    # attribute on the stream. The one place implicitness could be
-    # re-derived, `_is_implicit_vr` (pydicom `filereader.py:336`),
-    # short-circuits at `:368-369` on `is_sequence` before reading a
-    # byte, and `read_sequence` always passes `is_sequence=True` from
-    # here. Set them wrong, or not at all, and this parse is identical --
-    # unless a pydicom release starts reading them, which would silently
-    # refuse every vendor block if they were wrong.
+    # Set for symmetry and insurance, not because this parse needs them;
+    # read this before deleting either line. `read_sequence` takes
+    # implicitness and endianness as positional arguments and threads them
+    # down itself; it consults NEITHER attribute on the stream. The one
+    # place implicitness could be re-derived, `_is_implicit_vr` (pydicom
+    # `filereader.py:336`), short-circuits at `:368-369` on `is_sequence`
+    # before reading a byte, and `read_sequence` always passes
+    # `is_sequence=True` from here. Set them wrong, or not at all, and this
+    # parse is identical -- unless a pydicom release starts reading them,
+    # which would silently refuse every vendor block if they were wrong.
     #
-    # A `_tag_packer` AttributeError is possible, but it belongs to the
-    # WRITE stream below and to
-    # `is_little_endian`, whose setter builds the packers
-    # (`filebase.py:121-133`); the `is_implicit_VR` setter only
+    # The `_tag_packer` AttributeError concerns the WRITE stream below,
+    # not this read: the `is_little_endian` setter builds the packers
+    # (`filebase.py:121-133`), and the `is_implicit_VR` setter only
     # type-checks and stores (`filebase.py:147-152`).
     fp.is_little_endian = True
     fp.is_implicit_VR = True
@@ -3274,8 +3275,10 @@ def _byte_order_words(kind, path, tag, vr, length, word) -> str:
         tag (str): The element's `"gggg,eeee"` tag.
         vr (str): Its VR.
         length (int): The value's length in bytes.
-        word: What the kind's row needs: a word size, the bits a waveform
-            declared, or `(sibling name, width)`.
+        word: What the kind's row needs: the declared bits for `"ob"`;
+            `(sibling name, width)` for `"ob-value"` and `"bad-width"`; the
+            sibling's name for `"no-width"`; the word size for a ragged
+            value; unused (None) for `"un"` and `"no-bits"`.
 
     Returns:
         str: One sentence for the row.
@@ -4485,8 +4488,8 @@ class DicomImporter:
 
         Returns:
             IngestSummary: what reached the graph and what did not. A
-                per-file failure is in `failures` (with an `ERROR` audit
-                row), not only on the console.
+                per-file failure is in `failures`, not only on the console,
+                with an `ERROR` audit row when `store_backend` is given.
         """
         all_files = []
         for path in file_paths:
@@ -5776,7 +5779,8 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     there is more than one frame or a frame count was declared) and, at
     three or more samples, `PlanarConfiguration` 0, from `geom`, and
     `PhotometricInterpretation` resolved from the declaration and the
-    sample count, over whatever `_merge` already put on `ds`. Both pixel branches of the worker call this.
+    sample count, over whatever `_merge` already put on `ds`. Both pixel
+    branches of the worker call this.
     `BitsAllocated` is not written here; each branch writes its own.
 
     Args:
@@ -6314,7 +6318,9 @@ def _verify_readback(path: str, ds, written_pixels=None,
     Raises:
         RuntimeError: The file cannot be read back or decoded, or any
             comparison fails. The message starts "Readback verification
-            failed:" and names the exception's type as well as its text.
+            failed:". When it wraps a read or decode failure, it names that
+            exception's type as well as its text; a comparison failure
+            names only what differed.
     """
     # Two contracts: best effort by default (a de-identified copy the
     # caller can fix beats no copy), conformance on request. Step 2 is the
@@ -6901,7 +6907,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     The file is written under a temporary name in the destination
     directory and renamed into place only once the write (and, with
     `ctx.verify_readback`, the readback) has succeeded, so a failed write
-    leaves no file under the real name. Never raises for a failed instance: the failure is returned.
+    leaves no file under the real name. Never raises for a failed
+    instance: the failure is returned.
 
     Args:
         ctx (ExportContext): The context/request for export.
@@ -8167,6 +8174,7 @@ class SidecarPixelLoader:
 
     Picklable, so it crosses into spawned worker processes: it holds a
     snapshot of the instance's descriptors, never the `Instance` itself.
+    It must stay a module-level class, or it cannot pickle.
 
     Args:
         sidecar_path (str): The sidecar file holding the frame.
@@ -8568,7 +8576,8 @@ class SidecarWaveformLoader:
     the integrity-checked bytes `read_raw` returns.
 
     Picklable, so it crosses process boundaries: it stores primitive
-    geometry rather than an `Instance` reference.
+    geometry rather than an `Instance` reference. It must stay a
+    module-level class, or it cannot pickle.
 
     Args:
         sidecar_path (str): The sidecar file holding the samples.
@@ -9353,7 +9362,7 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
             continue
         try:
             _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows)
-        except Exception as exc:  # noqa: BLE001 -- see the docstring
+        except Exception as exc:  # noqa: BLE001 -- see "Never raising" above
             del ds[tag]
             losses.append((
                 loss_scope_for_tag(f"{tag.group:04x},{tag.element:04x}"),
@@ -9552,8 +9561,8 @@ def _numeric_arm(vr, value):
     # Keyed on the dictionary VR string, not on a tag: a tag-keyed branch
     # would be a second ambiguity table that drifts from pydicom's. All
     # four ambiguous strings reach the gate -- 34 tags and 4 repeater
-    # patterns -- and only LUT Data (0028,3006) and Gray LUT Data
-    # (0028,1200) have both an `OW` arm and a numeric one.
+    # patterns -- and only LUT Data (0028,3006) and the retired Gray LUT
+    # Data (0028,1200) have both an `OW` arm and a numeric one.
     #
     # Any ambiguous VR is refused here ("this value fits no arm at all" is
     # one behaviour in one place); only the `OW` family is *chosen* here.
@@ -10501,7 +10510,8 @@ class DicomExporter:
             Optional[Tuple[str, Any]]: `(vr, value)`; None, which the
             caller reports as data loss of the whole element, when any
             value has no text encoding (an `object`, `bytes`, a nested
-            list) or contains a backslash.
+            list that does not collapse to one string) or contains a
+            backslash.
         """
         # Two shapes arrive here and both must work. In memory pydicom
         # hands back a `MultiValue`, which is a `MutableSequence` and *not*

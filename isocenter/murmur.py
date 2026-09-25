@@ -190,13 +190,16 @@ def _concept(item, include_text: bool = False):
     Args:
         item (DicomItem): The annotation item.
         include_text (bool): Release a site-defined concept's Code Meaning
-            as the label and its Code Value as the category. The same flag
+            as the label and `<scheme>:<code>` (its Code Value alone when
+            the scheme is empty) as the category. The same flag
             releases `note`: it means "this protocol permits free text in
             this output".
 
     Returns:
-        tuple: `(category, label)`; `(None, None)` with no concept, and
-            `(None, meaning)` for a concept with no Code Value.
+        tuple: `(category, label)`, the category `f"{scheme}:{code}"` (the
+            Code Value alone when the scheme is empty); `(None, None)` with
+            no concept, and `(None, meaning)` for a concept with no Code
+            Value.
     """
     seq = item.sequences.get(TAG_CONCEPT_NAME_CODE_SEQ)
     if seq is None or not seq.items:
