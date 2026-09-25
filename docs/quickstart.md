@@ -15,11 +15,11 @@ session = Session("my_project.db")
 The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocenter.db`) plus a sidecar beside it. `Session("my_project.db")` creates:
 
 - `my_project.db`, the SQLite index, with its `-wal` and `-shm` files;
-- `my_project_pixels.bin`, the pixel and waveform data, with two `.lock` files beside it;
+- `my_project_pixels.bin`, the pixel and waveform data (two `.lock` files appear beside it at the first `ingest()`);
 - `isocenter.log` in the current directory.
 
 !!! warning "The session store holds PHI"
-    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels, and nothing else is written until `export()`. Keep the store where PHI may live, and do not hand it out with the export.
+    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you name (a configuration, a key). Keep the store where PHI may live, and do not hand it out with the export.
 
 !!! tip "Context manager"
     `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.
@@ -31,7 +31,7 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 
 ## 2. Ingest & Examine
 
-Ingest reads your folders recursively and indexes every DICOM file into the store. It never moves or modifies the source files, and it skips non-DICOM clutter.
+Ingest reads your folders recursively and indexes every DICOM file into the store. It never moves or modifies the source files. It tries every file it finds except hidden ones (names starting with `.`): a file that is not DICOM is rejected, not skipped (see below).
 
 ```python
 summary = session.ingest("/path/to/dicom/data")
@@ -61,7 +61,7 @@ print(f"{len(report)} findings")
 
 With no configuration loaded, a **floor policy** of 646 tag rules still applies: the PS3.15 Annex E Basic Profile table (2026c), with Study Date jittered and Patient's Sex and Age kept, and private tags removed. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
 
-The scaffold lists each machine in the cohort with empty `redaction_zones`. `redact()` changes nothing until you fill them in: see [Pixel Redaction (Machines)](configuration.md#pixel-redaction-machines), and [Burned-in text (OCR)](ocr.md) to find where a machine writes text.
+The scaffold lists each machine in the cohort that has a Device Serial Number, with empty `redaction_zones`. `redact()` changes nothing until you fill them in: see [Pixel Redaction (Machines)](configuration.md#pixel-redaction-machines), and [Burned-in text (OCR)](ocr.md) to find where a machine writes text.
 
 ## 4. Backup Identity (Optional)
 
@@ -79,7 +79,7 @@ print(locked)   # <LockingResult: N instances secured>
 session.save()
 ```
 
-`lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
+The lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, unless that sequence holds an Isocenter identity token whose values the new one would change: then the lock refuses with `RuntimeError`. `lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token, unless the new token would lose a value the existing one holds: then it raises `RuntimeError` and writes nothing. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
 
 Locking after `anonymize()` secures nothing. Given the report, `lock_identities()` finds none of its Patient IDs (they have been replaced), logs one `ERROR`, returns an empty result and still creates the key file. Given a patient's new ID, it raises `RuntimeError`. Check the count it returns.
 

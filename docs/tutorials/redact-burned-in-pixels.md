@@ -185,7 +185,7 @@ session.close()
 of each image is free of text: nothing on this page read the pixels for
 text. `scan_pixel_content()` does, with OCR, over the images of every
 machine your configuration names by serial with zones, and reports text
-no zone covers ([Intelligent Verification](../ocr.md#checking-zones-verification)).
+no zone covers ([Checking Zones](../ocr.md#checking-zones-verification)).
 A series with no Device Serial Number is reached by neither a zone nor
 that scan, so check such a series yourself.
 

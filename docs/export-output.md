@@ -1,6 +1,6 @@
 # What the export writes
 
-`session.export(folder)` writes de-identified copies of the session's instances to a new directory. Nothing outside the session store is written before it. This page describes the files: where they land, how they are encoded, what the export changes on the way out, and what the two checking options add.
+`session.export(folder)` writes de-identified copies of the session's instances to a new directory. Until `export()`, the session writes only the store, `isocenter.log` and files you name (a configuration, a key). This page describes the files: where they land, how they are encoded, what the export changes on the way out, and what the two checking options add.
 
 ## Where files land
 

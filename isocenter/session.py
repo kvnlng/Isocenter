@@ -1224,9 +1224,9 @@ class DicomSession:
 
         The store is the SQLite file and a pixel file beside it
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
-        original identifiers and pixels** of everything ingested, and
-        nothing else is written until `export()`. Keep it where you keep
-        the source data.
+        original identifiers and pixels** of everything ingested; keep it where
+        you keep the source data. Until `export()`, the session writes only the
+        store, `isocenter.log` and files you name (a configuration, a key).
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`
@@ -4872,10 +4872,6 @@ class DicomSession:
           Patient ID, such an instance keeps a non-blank Patient ID of its
           own rather than take the token's blank one, and a second WARNING
           counts those.
-        - A token written before 0.9.8 and shared across studies is restored
-          in full on the first study carrying it and as group 0010
-          elsewhere, with a WARNING giving the count; see Upgrading from
-          0.9.x.
         - Where tokens disagree on Patient's Name or Patient ID, each
           instance keeps its own and the `Patient` takes the speaking
           token's, with a WARNING. A token whose Patient ID is blank does
@@ -4898,9 +4894,7 @@ class DicomSession:
                 the same mapping, taken before `restore=True` writes
                 anything, and it is **what the tokens hold, not what the
                 restore wrote**: a tokenless instance a restore gives group
-                0010 of the first token is absent, and a pre-0.9.8 shared
-                token is returned whole on every holder though a restore
-                writes only its group 0010 outside the first study. The
+                0010 of the first token is absent. The
                 patient-level answer (the token whose name and ID a restore
                 stamps on the `Patient`) is `next(iter(result.values()))`.
                 Two instances sharing one SOP Instance UID, which only a
@@ -5331,7 +5325,8 @@ class DicomSession:
         Device Serial Number a rule matches has each of the rule's zones
         set to zero. This changes pixel data in memory (and the sidecar,
         for persistence); call `save()` afterwards to persist it. A
-        redacted instance takes a new SOP Instance UID.
+        redacted instance takes a new SOP Instance UID, derived from its
+        source SOP Instance UID and the zones applied.
 
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this
@@ -5343,10 +5338,13 @@ class DicomSession:
             show_progress (bool): If True, displays a progress bar.
             force (bool): Redact again the instances already redacted under
                 this configuration, instead of skipping them. Every
-                instance the rules match is redacted again and takes a
-                **new SOP Instance UID**, a new exported filename and
-                `file_path = None`. To repair a store redacted by 0.9.0 or
-                earlier, see Upgrading from 0.9.x.
+                instance the rules match is redacted again, and its SOP
+                Instance UID is derived again from its source SOP Instance
+                UID and the rule's zones: unchanged zones give the UID and
+                exported filename it already has, and other zones give
+                another. `file_path` becomes None either way. To repair a
+                store redacted by 0.9.0 or earlier, see Upgrading from
+                0.9.x.
 
         Returns:
             int: How many instances had at least one configured zone

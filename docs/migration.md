@@ -4,13 +4,17 @@ The code in a new release is fixed; the data an old release wrote is not.
 This page lists what changes when a configuration, a store or an export
 written by an earlier release meets 1.0, in the order you are likely to meet
 it: the configuration first (`load_config()`), then the store (opening it,
-`audit()`, `export()`), then identity tokens.
+`audit()`, `export()`), then identity tokens, the project secret and files
+with no Patient ID. Last come stores written by releases before 0.9.7,
+newest first.
 
 Each change is handled the way its information allows: healed where the
 store itself proves what is wrong, reported where it cannot be repaired, and
 left to an explicit call where only your site knows the answer. Several of
 them write a `WARNING` audit row on every open, so every compliance report
-over that store grades `REVIEW_REQUIRED` until you act. Where the fix is
+over that store grades `REVIEW_REQUIRED`. A row once written stays in the
+store's audit log: acting stops further rows but does not bring that
+store's reports back to `PASS`; only a new store does. Where the fix is
 "re-ingest the source files into a new store", that is the only way to give
 the data 1.0's guarantees.
 
@@ -59,8 +63,10 @@ Three more readings changed in 1.0:
 | a blank `serial_number: "  "` (matched no machine) | give the machine's serial |
 | a bare `privacy_profile:` line | nothing to do unless you meant `none`: it now means the floor, as leaving the line out does, where 0.9.x read it as `none` and applied no base; write `privacy_profile: none` to keep that |
 
-A phi rule's `value: null` and `name: null` read as absent, as before:
-`REPLACE` writes `ANONYMIZED`, and the finding is named `Unknown Tag`.
+A phi rule's `value: null` and `name: null` read as absent, as before.
+`REPLACE` with `value: null` is `REPLACE` with no value, which writes the
+VR's dummy (see [PHI Tags](configuration.md#phi-tags)), and the finding is
+named `Unknown Tag`.
 
 ### Configuration calls
 
@@ -88,29 +94,33 @@ A phi rule's `value: null` and `name: null` read as absent, as before:
   `'json'` only; `'md'` and case variants such as `'HTML'` raise
   `ValueError`.
 
-## Configuration and cohort export: what changed at 1.0
+## A store anonymized under 0.9.7's profile
 
-**A store anonymized under 0.9.7's profile.** 0.9.7's `basic` profile had 35 rules. Its statuses carry no policy, so an export from such a store writes a `WARNING` row (see [PHI statuses recorded before 1.0](#phi-statuses-recorded-before-10)). Load your configuration, run `audit()` and then `anonymize()` before exporting again. That removes what `basic@2026c` removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source files restores them.
+0.9.7's `basic` profile had 35 rules. Its statuses carry no policy, so an export from such a store writes a `WARNING` row (see [PHI statuses recorded before 1.0](#phi-statuses-recorded-before-10)). Load your configuration, run `audit()` and then `anonymize()` before exporting again. That removes what `basic@2026c` removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source files restores them.
 
-**The Basic Profile's D codes write a dummy.** Before 1.0 a `D` code emptied the attribute and an `X/D` code removed it, so a Type 1 attribute was written zero-length or dropped. From 1.0 every code with a D arm writes a dummy value for the attribute's VR ([What basic@2026c contains](configuration.md#what-basic2026c-contains)). An export of the same data under 1.0 therefore carries attributes a 0.9.x export did not, each holding its dummy.
+## The Basic Profile's D codes write a dummy
 
-**`export_to_parquet` is gone.** `session.export_to_parquet(...)` raises `AttributeError`. Use `session.export_dataframe("cohort.parquet")`, which writes Parquet for a `.parquet` path. The columns differ: `export_to_parquet` wrote SQL column names (`patient_id`, `sop_instance_uid`), and `export_dataframe` writes keywords (`PatientID`, `SOPInstanceUID`) for its base columns, so code that reads the old files needs its column names changed as well as its call.
+Before 1.0 a `D` code emptied the attribute and an `X/D` code removed it, so a Type 1 attribute was written zero-length or dropped. From 1.0 every code with a D arm writes a dummy value for the attribute's VR ([What basic@2026c contains](configuration.md#what-basic2026c-contains)). An export of the same data under 1.0 therefore carries attributes a 0.9.x export did not, each holding its dummy.
+
+## `export_to_parquet` is gone
+
+`session.export_to_parquet(...)` raises `AttributeError`. Use `session.export_dataframe("cohort.parquet")`, which writes Parquet for a `.parquet` path. The columns differ: `export_to_parquet` wrote SQL column names (`patient_id`, `sop_instance_uid`), and `export_dataframe` writes keywords (`PatientID`, `SOPInstanceUID`) for its base columns, so code that reads the old files needs its column names changed as well as its call.
 
 ## PHI statuses recorded before 1.0
 
 A store records what the last scan concluded about each patient, study and instance (`phi_status`). From 1.0 it also records the policy that scan ran under (`phi_status_policy`: a fingerprint of the tag rules, `remove_private_tags` and the configuration schema version, and a readable base such as `basic@2026c`). The schema version is in it because a release that changes what an unchanged configuration detects raises that version's minor: a store's statuses from before such a release then read as recorded under another policy, and the export says so as below.
 
-A store written by 0.9.x never recorded which configuration ran, so opening one adds the two columns empty and fills nothing in: each status keeps its value (`REMEDIATED` stays `REMEDIATED`) with no policy, and each open logs one warning counting them. The first `export()` that writes such instances writes one `WARNING` audit row saying so, and its report grades `REVIEW_REQUIRED`. Run `audit()` (and `anonymize()`, if it finds anything) under the configuration you mean, then `save()`: the statuses then carry that policy and the row stops.
+A store written by 0.9.x never recorded which configuration ran, so opening one adds the two columns empty and fills nothing in: each status keeps its value (`REMEDIATED` stays `REMEDIATED`) with no policy, and each open logs one warning counting them. The first `export()` that writes such instances writes one `WARNING` audit row saying so, and its report grades `REVIEW_REQUIRED`. Run `audit()` (and `anonymize()`, if it finds anything) under the configuration you mean, then `save()`: the statuses then carry that policy and no further row is written. The row already written stays, so later reports of this store still grade `REVIEW_REQUIRED`.
 
 **Never save into a 1.0 store from 0.9.x.** A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute, and cannot export it (it reads the stored DS/IS values as dicts). 0.9.x does not know the policy columns either, so a status it records is left beside the policy of the last 1.0 scan -- a pairing no scan concluded, which the export cannot tell from a true one. If that has happened, run `audit()` under your configuration before trusting any status. Keep a copy of the 0.9.x store if you may need to go back, and go back to that copy, not into the 1.0 store.
 
 ## UIDs in stores and exports from before 1.0
 
-Before 1.0 Isocenter exported Study, Series, SOP Instance and every other UID as it was ingested, except that redaction gave a redacted instance a random SOP Instance UID under pydicom's root. From 1.0 the floor and `basic@2026c` replace each UID the PS3.15 table codes `U` with one derived from the store's project secret (see [Configuration](configuration.md#privacy-profile)).
+Before 1.0 Isocenter exported Study, Series, SOP Instance and every other UID as it was ingested, except that redaction gave a redacted instance a random SOP Instance UID under pydicom's root. From 1.0 the floor and `basic@2026c` replace each UID the PS3.15 table codes `U` with one derived from the store's project secret (see [What basic@2026c contains](configuration.md#what-basic2026c-contains)).
 
 Opening an older store changes nothing by itself. Its instances still hold their source UIDs, so the next `audit()` raises a finding on each, and `anonymize()` replaces them. A redacted instance's random UID is replaced like any other, and is stable from then on.
 
-Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data carry replacements, so the two do not link by UID. That is inherent: it is what replacing them means. A study exported in part before 1.0 and in part after is two studies to anything that groups by Study Instance UID. To keep a project's exports linkable across the upgrade, keep the UIDs: `KEEP` on the `U` rows ([Keeping UIDs](configuration.md#privacy-profile)).
+Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data carry replacements, so the two do not link by UID. That is inherent: it is what replacing them means. A study exported in part before 1.0 and in part after is two studies to anything that groups by Study Instance UID. To keep a project's exports linkable across the upgrade, keep the UIDs: `KEEP` on the `U` rows ([Keeping UIDs](configuration.md#keeping-uids)).
 
 A configuration that gave a UI attribute `REPLACE` with no value failed to load before 1.0 and now means UID replacement. `REPLACE` with a `value:` on a UI attribute writes that value, as before.
 
@@ -276,14 +286,4 @@ session.redact(force=True)
 session.save()
 ```
 
-No source file is needed: the identifier is still in the store's own pixels. Every instance the rules match is redacted again, and each takes a **new SOP Instance UID**, so its exported filename changes and it stops matching the source file it was ingested from.
-
-## Repairs on a 0.9.x store
-
-Two `Session` methods have entries that point here.
-
-**`redact(force=True)`** repairs a store redacted on 0.9.0 or earlier with a multi-zone rule: see [Redacted on 0.9.0 or earlier with a multi-zone rule](#redacted-on-090-or-earlier-with-a-multi-zone-rule).
-
-**`reconcile_private_tags()`** repairs a store de-identified before 0.9.1, whose stripped private tags come back when it is opened. [Resurrected private tags](#resurrected-private-tags) says when to call it and what it deletes.
-
-`recover_patient_identity()` and `lock_identities()` refuse every token written before 1.0, whichever release wrote it: see [Identity tokens locked before 1.0](#identity-tokens-locked-before-10).
+No source file is needed: the identifier is still in the store's own pixels. Every instance the rules match is redacted again, and each takes a new SOP Instance UID, derived under the store's secret from the UID it was read under and the zones, in place of the random one the earlier release gave it. Its exported filename changes, and it stops matching the source file it was ingested from.

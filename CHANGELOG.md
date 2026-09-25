@@ -14,7 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **False or blocking statements corrected:**
     - The install pages now name `pip install --pre isocenter` for a release candidate and show a version check.
     - README's subset-export example and analytics.md's query example read a column named `SliceThickness` and raised; the columns `expand_metadata=True` adds are named by tag key (`"0018,0050"`), and both pages say so.
-    - "Nothing touches disk until export" now says that the session store (`<name>.db`, `<name>_pixels.bin`) holds the original identifiers and pixels.
+    - "Nothing touches disk until export" now says what is written before `export()`: the session store (`<name>.db`, `<name>_pixels.bin`), which holds the original identifiers and pixels, `isocenter.log`, and files you name (a configuration, a key). `Session()`'s docstring and the frozen behaviour on `stability.md` say the same.
+    - The Quick Start said ingest skips non-DICOM files; it rejects each one into `IngestSummary.failures` with an `ERROR` row, and skips only hidden files.
+    - The upgrade page and `stability.md` said a pre-1.0 store's `WARNING` row stops once you re-audit; later rows stop, and the row already written stays. The page also said `value: null` under `REPLACE` writes `ANONYMIZED`; it writes the VR's dummy.
+    - waveforms.md said the only `.hea` comment is the de-identified start date; an unshifted date is written as `# start date:`. It said record names never use a source identifier; they use the exported Patient ID, which is the source ID before `anonymize()` or under `KEEP`. It said waveform sources must be little-endian; ingest converts a big-endian source.
+    - `redact(force=True)`'s docstring said every re-redacted instance takes a new SOP Instance UID; the UID is derived from the source UID and the zones, so unchanged zones keep it.
+    - `recover_patient_identity()`'s docstring described restoring a pre-0.9.8 shared token, which 1.x refuses with every pre-1.0 token; the bullet and its Returns clause are gone. `get_audit_summary()`'s example named an action type that is never written, and `add_rule()` said every zone that selects no pixels fails its instance; only a zone with no area does, and one past the image's edge is skipped.
+    - ocr.md states that the scan reads only list-form zones (#814), and only the first rule for a serial.
     - The Quick Start said a lock after `anonymize()` raises; it logs an error, secures nothing and still creates the key, and the page says to check the count.
     - configuration.md and tutorial 1 said an `audit()` restores `PASS` after an export under the wrong policy; the `WARNING` row that export wrote stays in the store.
     - configuration.md's complete example set `date_jitter` under `basic@2026c`, which shifts no tag; the example now jitters Study Date, and the page states every default.
@@ -28,14 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Documented surface (`docs/api/stability.md`), tier 2 only; tier 1 is unchanged:**
     - The Audit trail page (was "Persistence") renders `SqliteStore`'s `get_audit_*` readers and `get_flattened_instances`. The rest of `persistence.py` (`persist_pixel_data`, `save_all`, `compact_sidecar`, `stop`, the JSON helpers) is private.
     - `PhiRemediation`, `DiscoveryCandidate` and `pixel_analysis.TextRegion`, which the frozen methods return, are tier 2.
-    - Tier 2 is defined as the names listed on that page, and rendered or named by a guide where a reader needs them. The dated spec that quoted the old rule carries a superseded-in-part line.
+    - Tier 2 is defined as the names listed on that page, and rendered or named by a guide where a reader needs them. The dated spec that quoted the old rule carries a superseded-in-part line naming the four clauses this falsifies, each struck in place.
   - **Docstrings:**
     - The rendered docstrings drop their remaining release history, which now lives on the upgrade page.
     - `set_phi_tag`'s action list includes `SHIFT`.
     - `Instance`, `PhiStatus`, `ScanPolicy` and the summaries carry `Attributes:` tables.
-    - `get_pixel_data`'s message templates no longer render as HTML tags. `tests/test_api_docstrings_render_cleanly.py` now fails on a raw HTML tag in a rendered docstring.
-  - **Code defects** the reviews found are filed, not fixed here: #806–#813.
-  - **No code changed:** with docstrings removed, every module's AST is identical to before. Code comments and test docstrings that cited `docs/installation.md` for the decode limits now cite `docs/codecs.md`.
+    - `get_pixel_data`'s message templates no longer render as HTML tags. `tests/test_api_docstrings_render_cleanly.py` now fails on a raw HTML tag in a rendered docstring; an autolink is exempt only as Python-Markdown's own patterns read one, so `<tag: value>` is flagged.
+  - **Code defects** the reviews found are filed, not fixed here: #806–#814.
+  - **No package code changed:** with docstrings removed, every module's AST is identical to before. Code comments, test docstrings and the assert messages in `tests/test_mid_stream_corruption_is_a_documented_limit.py` that cited `docs/installation.md` for the decode limits now cite `docs/codecs.md`. Test code changed in one place: rule 4 of `tests/test_api_docstrings_render_cleanly.py` and its two fixtures.
 
 ### Added
 

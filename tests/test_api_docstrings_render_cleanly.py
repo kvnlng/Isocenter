@@ -39,7 +39,8 @@ opens a real element. `Instance.get_pixel_data`'s Raises section spelled
 its message templates that way and the entities page read "Lazy load
 failed for instance : RuntimeError: names N frames". Put a placeholder in
 backticks. A `<...>` inside a backtick span or a fenced block is code and
-is not graded, and neither is an autolink (`<https://...>`) nor a
+is not graded, and neither is an autolink (`<https://...>`,
+`<user@host>`, as Python-Markdown's own patterns read them) nor a
 comparison (`a < b`).
 
 The scope is the `:::` lines of `docs/api/*.md`, read at test time, so
@@ -65,6 +66,8 @@ import inspect
 import pathlib
 import re
 import time
+
+from markdown.inlinepatterns import AUTOLINK_RE, AUTOMAIL_RE
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
@@ -288,7 +291,9 @@ def _parameters(node):
 # Rule 4. A tag as Markdown passes it through: `<` then a letter, an
 # optional `/`, and on to the next `>` on the same line. An autolink
 # (`<https://...>`, `<user@host>`) is Markdown's own syntax and renders as
-# a link, so a `:` or `@` before the `>` makes it one. Fenced blocks and
+# a link; which ones count is Python-Markdown's own two patterns, not a
+# `:` or `@` anywhere, because `<tag: value>` and `<urn:uid>` pass through
+# as tags. Fenced blocks and
 # code spans are blanked first, keeping their newlines so a tag after
 # them is reported on its own line. A code span may wrap across lines
 # within a paragraph, as Python-Markdown reads it, but not across a blank
@@ -296,6 +301,8 @@ def _parameters(node):
 _RAW_TAG = re.compile(r"</?[A-Za-z][^<>\n]*>")
 _FENCE = re.compile(r"^[ \t]*```.*?^[ \t]*```[^\n]*$", re.MULTILINE | re.DOTALL)
 _CODE_SPAN = re.compile(r"(`+)(?:(?!\1)(?!\n[ \t]*\n).)+?\1", re.DOTALL)
+_AUTOLINK = re.compile(AUTOLINK_RE)
+_AUTOMAIL = re.compile(AUTOMAIL_RE)
 
 
 def _blank_keeping_lines(match):
@@ -308,7 +315,8 @@ def _raw_html_tags(doc):
     text = _CODE_SPAN.sub(_blank_keeping_lines, text)
     return [(text.count("\n", 0, match.start()), match.group())
             for match in _RAW_TAG.finditer(text)
-            if not re.search(r"[:@]", match.group())]
+            if not (_AUTOLINK.fullmatch(match.group())
+                    or _AUTOMAIL.fullmatch(match.group()))]
 
 
 def _node_offenders(node, where):
@@ -568,6 +576,15 @@ def test_a_raw_html_tag_outside_a_code_span_is_flagged():
                      "    Then <uid> and a closing ` there.\n"
                      '    """\n')
     assert len(offenders) == 1 and "fixture.py:4:" in offenders[0], offenders
+    # A colon does not make an autolink: Python-Markdown links only
+    # http(s)/ftp URLs and email addresses, and passes these through.
+    offenders = _one("def f():\n"
+                     '    """Summary.\n\n'
+                     "    Writes <tag: value> and <urn:uid> as they are.\n"
+                     '    """\n')
+    assert len(offenders) == 2, offenders
+    assert "raw HTML tag '<tag: value>'" in offenders[0], offenders
+    assert "raw HTML tag '<urn:uid>'" in offenders[1], offenders
 
 
 def test_code_spans_fences_autolinks_and_comparisons_are_not_tags():

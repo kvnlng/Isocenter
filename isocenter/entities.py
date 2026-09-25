@@ -363,7 +363,7 @@ class DicomItem(TrackedEntity):
         attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.
         sequences (Dict[str, DicomSequence]): A dictionary mapping tags to nested DicomSequences.
         attribute_vrs (Dict[str, str]): The source Value Representation of
-            private tags, where one was known. See `record_attr_vr`.
+            private tags, where one was known.
     """
     # init=False to avoid constructor conflicts during inheritance
     attributes: Dict[str, Any] = field(init=False)

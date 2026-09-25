@@ -96,6 +96,7 @@ plugin can grade `PASS`, is planned for 1.1
 1. **Do not change the session's graph or store.** Export is a read.
    Nothing checks this for a third-party exporter.
 2. **Write `exported_patient_id(patient)`, never `patient.patient_id`.**
+   Import it with `from isocenter.entities import exported_patient_id`.
    Take a patient's, study's or series' identifiers from the owner object,
    not from an instance's copy of them. Write only `gggg,eeee` keys from
    `attributes`, never a `_`-prefixed one: those are Isocenter's

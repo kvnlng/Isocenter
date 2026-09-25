@@ -14,7 +14,7 @@ You have a cohort of studies and a protocol an IRB approved. You need to hand a 
 
 ## What it refuses to do
 
-- **Modify a source file.** Ingest reads; anonymize and redact change an in-memory graph. Nothing is written outside the session store until `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were. The store (`<name>.db` and `<name>_pixels.bin`) holds the original identifiers and pixels, so keep it where PHI may live.
+- **Modify a source file.** Ingest reads; anonymize and redact change an in-memory graph. Until `export()`, the session writes only the store, `isocenter.log` and files you name (a configuration, a key). `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were. The store (`<name>.db` and `<name>_pixels.bin`) holds the original identifiers and pixels, so keep it where PHI may live.
 - **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the compliance report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError`; a partial export returns what it wrote, with an `ERROR` row for each failure.
 - **Pass through pixels it could not decode.** If a compressed frame cannot be decompressed, because of a missing codec or a stream the decoder rejects, the export fails on that instance rather than copying bytes it never inspected.
 - **Advertise a Python version it does not test.** The suite runs on all four supported versions, including the free-threaded 3.14t build, at every release, and 3.12 and 3.14t must pass before anything is uploaded. The PyPI classifiers list only those.
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         session.generate_report("compliance_report.md")
 ```
 
-With no configuration loaded, the default policy is the Basic Profile table (646 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient, and the Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
+With no configuration loaded, the default policy is the Basic Profile table (646 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient written. An image the default lossless JPEG 2000 cannot hold (32-bit samples, for example) is not written: its `ERROR` row says so and names `use_compression=False`. The Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
 
 ## Burned-in text
 

@@ -23,7 +23,8 @@ not make every method rendered under it tier 1: the frozen ones are
 `Instance.get_pixel_data()`, `set_pixel_data()`, `unload_pixel_data()`,
 `discard_pixel_data()`, `get_waveform_data()` and `set_attr()`. The other
 methods shown, such as `Instance.regenerate_uid()` and the sequence
-methods, are tier 2.
+methods, are tier 2, and so are `pixel_array` and `waveform_array` in
+`Instance`'s attribute table.
 
 ::: isocenter.entities
     handler: python

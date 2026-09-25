@@ -62,7 +62,7 @@ generated for each store. That file carries two multiplex groups, so ingest
 also warns that it kept group 0 and discarded 1 (see
 [Limitations](#limitations)).
 
-`export(format="wfdb")` returns the list of record paths it wrote. Each
+`export(format="wfdb")` returns the path of each record's `.hea` file. Each
 record that fails is logged, written to the audit log as an `ERROR` row
 naming the instance, and counted in that export's `EXPORT` row, so the
 compliance report lists it and grades the run `REVIEW_REQUIRED`. A partial
@@ -85,10 +85,8 @@ its own `DATA_LOSS` row), attempted nothing and returns `[]`.
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
 so no sample transcoding happens. The gain field is written in
-spec-conformant `header(5)` form, `gain(baseline)/units`; if you see a
-downstream tool mis-parse that field, check the tool's parser first --
-this is a known issue already filed against Murmur, not an Isocenter
-nonconformance.
+spec-conformant `header(5)` form, `gain(baseline)/units`. If a
+downstream tool mis-parses that field, check the tool's parser first.
 
 When present, Waveform Annotation Sequence `(0040,B020)` items --
 cart-generated findings such as rhythm calls -- are exported as
@@ -128,8 +126,8 @@ Study Description. That matters for waveform export because the series
 description becomes a **directory name**: every `.hea`, `.dat` and
 `.annotations.json` file lives inside it.
 
-**The three free-text surfaces specific to waveform export are now
-remediated in the exporter itself, not by profile membership** -- the
+**The exporter itself handles the three free-text surfaces specific to
+waveform export, whatever the profile says.** The
 PHI scan is tag-gated (see above), so a profile entry alone protects
 only a session whose policy carries it, and `privacy_profile: none`
 applies nothing. All three are handled whichever configuration you run:
@@ -197,10 +195,7 @@ shifted by `anonymize()` (the same per-patient date shift applied to
 every date tag under a `SHIFT` or `JITTER` rule). The *time-of-day* comes from the
 instance's own timestamp tags -- Acquisition DateTime `(0008,002A)`
 when present, else Study Time `(0008,0030)` -- and the date shift
-never touches it, whether or not `anonymize()` ran: `SHIFT_DATE` is a
-Study-level remediation that writes `study.study_date`, and time-of-day
-is sourced from the instance, so it is genuinely not shifted by that
-mechanism. This is deliberate, not a gap: time-of-day alone is not a
+never changes it. This is deliberate: time-of-day alone is not a
 Safe Harbor identifier. If you export without running `anonymize()` at
 all, the date is real too -- exactly like every other un-remediated
 field in Isocenter.
@@ -217,32 +212,31 @@ reference reader/writer, both treat `base_date` as depending on
 `base_time` being present), so the record line's choice is between
 omitting both fields and fabricating a time; Isocenter omits both.
 
-That real, de-identified date is not simply lost, though: `SHIFT_DATE`
-produces genuinely useful information (e.g. for ordering records within
-a cohort), so it is kept. When this happens, the shifted
-date is written instead as a single `# de-identified start date:
-DD/MM/YYYY` comment line -- the one deliberate exception to "no comment
-lines" below -- using the same `DD/MM/YYYY` format the record line's
-own date field would have used, so the two can never disagree. A
-consumer reading the record line alone sees no timing at all, which is
-correct (there is none to report); a consumer that also reads comments
-gets the real de-identified date, clearly labeled and nowhere near a
-field a parser would mistake for a precise timestamp.
+The date is not lost, though, because it is useful for ordering records
+within a cohort. It is written instead as a single comment line, in the
+same `DD/MM/YYYY` format the record line's own date field would have
+used: `# de-identified start date: DD/MM/YYYY` when `anonymize()` shifted
+the study date, or `# start date: DD/MM/YYYY` when it was not shifted
+(an export without `anonymize()`, or a date the policy keeps). That
+second form is the real date. A consumer reading the record line alone
+sees no timing at all; a consumer that also reads comments gets the
+date, labelled by whether it was shifted.
 
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
 
-- **No `#` comment lines are ever written, with one deliberate
-  exception.** WFDB readers render header comments verbatim, and
-  MIT-BIH convention places age, sex, and diagnosis there -- Isocenter
-  never emits one for content. The sole exception is the de-identified
-  start date described above, which is not operator-typed or
-  attacker-controlled text: it is a computed `DD/MM/YYYY` string
-  written through the same sanitizer every other field on the line
-  gets.
-- **Record names derive from anonymized identifiers only** (the
-  patient pseudonym, series number, instance number) -- never from
-  raw patient identifiers, and lead identity in the header prefers the
+- **No `#` comment lines are written, except the start date.** WFDB
+  readers render header comments verbatim, and MIT-BIH convention
+  places age, sex, and diagnosis there; Isocenter never writes one for
+  content. The one exception is the start-date line described above
+  (`# de-identified start date:` or `# start date:`), a computed
+  `DD/MM/YYYY` string written through the same sanitizer as every
+  other field, never operator-typed text.
+- **Record names are built from the exported Patient ID, series number
+  and instance number**: the pseudonym once `anonymize()` has run (the
+  source Patient ID before it, or under a `KEEP` rule on Patient ID),
+  and never the patient's name or other free text. Lead identity in
+  the header prefers the
   coded channel source over the free-text label wherever a coded
   source exists. That preference is a likelihood argument, not a
   filter: a conformant coded source is far less likely to carry
@@ -275,10 +269,12 @@ exported dataset as usual.
 Because no decode happens on this path, companded audio (`MB`/`AB`)
 round-trips through DICOM export even though WFDB export refuses it.
 
-**Sources must be little-endian.** Ingest does not record the source
-transfer syntax and `decode_samples` reads `<i2`/`<u2`, so the pipeline
-has always assumed this; the DICOM writeback inherits the assumption
-rather than adding one.
+**Byte order.** Ingest converts a big-endian source's samples to
+little-endian, by the Waveform Bits Allocated it declares, and both exports
+write them under a little-endian transfer syntax. So the round trip is
+exact against the samples as stored, not against the source file's bytes. A
+value whose byte order ingest could not settle whole is kept as read, with a
+`WARNING` row naming the tag.
 
 If an instance carries a Waveform Sequence but no samples reached the
 sidecar, the export logs a warning rather than writing a

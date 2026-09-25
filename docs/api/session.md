@@ -3,7 +3,8 @@
 `Session` is the entry point: `from isocenter import Session`. It is the
 class `isocenter.session.DicomSession`, rendered below. Its constructor
 and every method on this page are **frozen at 1.0**
-([API stability](stability.md)). The methods are listed in pipeline
+([API stability](stability.md)), and so are the attributes in its table
+except `store_backend`, which is tier 2. The methods are listed in pipeline
 order, ingest → examine → config → audit → anonymize → redact → verify →
 export → report, with `compact`, `release_memory` and `close` last. What
 the methods return and raise is on [Results and errors](results.md).

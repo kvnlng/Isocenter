@@ -8,7 +8,7 @@ Everything on this page is *documented but internal* (see
 ## Zone discovery
 
 `session.discover_redaction_zones()` returns a `DiscoveryResult`, which
-holds one `DiscoveryCandidate` per text region read.
+holds one `DiscoveryCandidate` per text region read at or above `min_confidence`.
 
 ::: isocenter.discovery.DiscoveryResult
     handler: python

@@ -1755,7 +1755,7 @@ class SqliteStore:
         before the call is counted.
 
         Returns:
-            Dict[str, int]: e.g., {'ANONYMIZE': 500, 'EXPORT': 500}
+            Dict[str, int]: e.g., {'REMEDIATION_REPLACE': 1200, 'EXPORT': 1}
         """
         # Above the connection, never inside it: the lock order is
         # `_audit_write_lock` -> `_memory_lock`, and flushing from
@@ -1891,7 +1891,7 @@ class SqliteStore:
     def get_audit_drops(self) -> int:
         """How many audit rows were dropped by a failed batch write.
 
-        The rows themselves are unrecoverable (see `log_audit_batch`). A
+        The rows themselves are unrecoverable: a failed batch write loses them. A
         non-zero count means the audit table under-states what happened, and
         `generate_report` grades it like an exception.
 

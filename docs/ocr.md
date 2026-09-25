@@ -49,8 +49,11 @@ so the store's reports still grade `REVIEW_REQUIRED`. If either call could read
 none of the instances it tried, it raises `PixelScanError`, also a
 `RuntimeError`, after the pass and the audit rows.
 
-Both calls start worker processes. Run them from a script whose top level is
-guarded by `if __name__ == "__main__":`, as the examples below are.
+`scan_pixel_content()` runs in worker processes (threads on a free-threaded
+build). `discover_redaction_zones()` runs in threads, but in processes when
+`ISOCENTER_MAX_TASKS_PER_CHILD` is set.
+Run either from a script whose top level is guarded by
+`if __name__ == "__main__":`, as the examples below are.
 
 ## Setting Up New Machines (Zone Discovery)
 
@@ -97,8 +100,9 @@ is 0.1, so text seen in fewer than 10% of the sampled images is dropped**: a nam
 that appears in one frame out of fifty is treated as noise. To see everything
 that was found, pass `min_occurrence=0` or read `to_dataframe()`. Each zone's
 `zone` is `[y1, y2, x1, x2]`, the form a rule stores, and its `type` is
-`LIKELY_NAME` if any member matched the name pattern, `PROPER_NOUN` if any was
-classified as one, and `TEXT` otherwise.
+`LIKELY_NAME` if any member matched the name pattern (text with a `^`),
+`PROPER_NOUN` if any was a named person or organisation (with the `nlp` extra)
+or holds a word that starts with a capital letter, and `TEXT` otherwise.
 
 `filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
 `get_density_matrix()`, `visualize_heatmap()`, `analyze_temporal_stability()`
@@ -175,7 +179,7 @@ not from a candidate's `box`, which is `[x, y, w, h]`.
 machines:
   - serial_number: "SN-NEW"
     redaction_zones:
-      # Found: PROPER_NOUN ['Smith^John'] (candidate box [20, 50, 200, 30])
+      # Found: LIKELY_NAME ['Smith^John'] (candidate box [20, 50, 200, 30])
       - [50, 80, 20, 220]
 ```
 
@@ -193,6 +197,15 @@ Or in code, with `session.configuration.add_rule()` or `update_rule()` (see [Pro
     * **Covered**: at least 80% of the region lies in one zone. Not reported.
     * **`PARTIAL_LEAK`**: more than 0% and less than 80% covered. Reported.
     * **`NEW_LEAK`**: not covered at all. Reported.
+
+Text of two characters or fewer is skipped as noise.
+
+**Zones the scan reads.** The scan reads only zones written as a list,
+`[y1, y2, x1, x2]`. A zone written as `{roi: [...]}`, the other form a rule
+accepts, counts as no zone: text inside it is reported as a leak
+([#814](https://github.com/kvnlng/Isocenter/issues/814)). And when two rules
+share a serial, the scan reads only the first rule's zones, while `redact()`
+applies the zones of every matching rule.
 
 **What is scanned.** Only instances whose Device Serial Number equals a rule's `serial_number` exactly, and only when that rule has at least one zone. So:
 

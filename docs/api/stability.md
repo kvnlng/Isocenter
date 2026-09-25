@@ -204,7 +204,8 @@ other from `store.patients`; `audit()` runs inside
 `export(check_burned_in=True)`, so that merges too.
 
 **Shapes the frozen methods return** (attribute names; each is
-rendered on [Results and errors](results.md)).
+rendered on [Results and errors](results.md), except `DiscoveryResult`,
+on [OCR API](ocr.md)).
 `IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
 `ExportSummary(written_uids, failures)` plus `written`, `failed`;
 `written_uids` holds the SOP Instance UID of each written instance and
@@ -476,7 +477,8 @@ default.
   each PHI status records, so a store scanned under an older minor is
   asked to re-audit. Its next `export()` writes a `WARNING` row saying
   the statuses were recorded under another policy, and the report
-  grades `REVIEW_REQUIRED` until `audit()` runs under the new release.
+  grades `REVIEW_REQUIRED`. An `audit()` under the new release stops
+  further rows; the row already written stays in the store's audit log.
 
 **Output vocabularies.** Five separate vocabularies, not one list.
 
@@ -518,7 +520,8 @@ the access path is not.
 consequences (a report generated before any export carries a boundary
 note; export-time `DATA_LOSS` rows are in a report generated after it);
 `audit()` and `redact()` drain the persistence manager on entry;
-nothing reaches disk before `export()`; source files are never
+until `export()`, the session writes only the store, `isocenter.log`
+and files you name (a configuration, a key); source files are never
 modified; `redact()` on a `:memory:` store runs in threads on every
 interpreter; and the two below.
 

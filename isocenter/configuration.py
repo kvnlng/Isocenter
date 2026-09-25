@@ -249,7 +249,7 @@ class IsocenterConfiguration:
             instance holds its own copy, so one session's `set_phi_tag`
             cannot reach another's policy or the module table.
         date_jitter (Dict[str, int]): The range the per-patient date
-            offset is drawn from, in days, both ends included:
+            offset is derived within, in days, both ends included:
             `{"min_days": -365, "max_days": -1}` by default.
         remove_private_tags (bool): Global flag to strip private tags.
         config_path (Optional[str]): The file `save()` writes. Set by
@@ -533,8 +533,9 @@ class IsocenterConfiguration:
             model_name (str, optional): Metadata for reference.
             redaction_zones (List[Any], optional): The zones to set to zero,
                 each `[y1, y2, x1, x2]` in pixels: rows `y1` up to `y2` and
-                columns `x1` up to `x2`, the end excluded. A zone that
-                selects no pixels makes `redact()` fail that instance.
+                columns `x1` up to `x2`, the end excluded. A zone with no
+                area (`y2 <= y1` or `x2 <= x1`) makes `redact()` fail that
+                instance; one that starts past the image's edge is skipped.
 
         Raises:
             ValueError: For a rule `load_config` would refuse (a serial

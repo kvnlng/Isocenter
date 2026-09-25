@@ -4,7 +4,7 @@ This page carries the one benchmark that has a recorded run behind it, the machi
 
 ## The recorded run
 
-**January 2026, Google Cloud `n2-highmem-16`, Ubuntu 22.04, 1 TB `pd-ssd` boot disk.** The stress harness in the repository (`tests/benchmarks/run_stress_test.py`) generated multi-frame instances with frame counts from 1 to 100, in three phases of one order of magnitude each, and ran the full pipeline on each phase: ingest, examine, audit, backup (locking identities), anonymize, redact, export with JPEG 2000 compression.
+**January 2026, Google Cloud `n2-highmem-16`, Ubuntu 22.04, 1 TB `pd-ssd` boot disk.** The dataset generator in the repository (`tests/benchmarks/generate_dataset.py`) generated multi-frame instances with frame counts from 1 to 100, in three phases of one order of magnitude each, and the stress harness (`tests/benchmarks/run_stress_test.py`) ran the full pipeline on each phase: ingest, examine, audit, backup (locking identities), anonymize, redact, export with JPEG 2000 compression.
 
 ### Peak memory
 
@@ -63,7 +63,8 @@ Standard tags are stored as one JSON document per instance and read back whole; 
 The harness is not part of the installed package. From a clone of the repository, with the development dependencies installed (see [Contributing](developer_guide.md)):
 
 ```bash
-python -m tests.benchmarks.run_stress_test --input <dicom-dir> --output <out-dir>
+python -m tests.benchmarks.generate_dataset --output <dicom-dir> --frames 1-100
+python -m tests.benchmarks.run_stress_test --input <dicom-dir> --output <out-dir> --compress
 ```
 
-It runs the pipeline against the directory you name. If you run it, open an issue with the machine, the date, and the table; this page is where it belongs.
+`generate_dataset` writes a synthetic cohort (see `--help` for the count, patients and frames), and `run_stress_test` runs the pipeline against the directory you name. `--compress` exports JPEG 2000, as the recorded run did; without it the export timings are not comparable. If you run it, open an issue with the machine, the date, and the table; this page is where it belongs.

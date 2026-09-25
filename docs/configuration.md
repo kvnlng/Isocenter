@@ -168,7 +168,7 @@ A session that has loaded no configuration applies the **floor policy**: `basic@
 
 #### none
 
-No base. The file's `phi_tags` are the whole policy. Patient's Name, Patient ID and Study Date are still replaced unless a rule says otherwise (see [below](#patients-name-patient-id-and-study-date)); any other tag the file does not name is exported as ingested.
+No base. The file's `phi_tags` are the whole policy. Patient's Name, Patient ID and Study Date are still replaced unless a rule says otherwise (see [below](#patients-name-patient-id-and-study-date)); any other standard tag the file does not name is exported as ingested. Private tags still follow `remove_private_tags`, which defaults to `true`.
 
 #### External profile file
 
@@ -528,7 +528,7 @@ To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-n
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` from the session's inventory. It names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. It names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file
@@ -609,11 +609,11 @@ session.configuration.update_rule(
 Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
-# Force removal of PatientWeight
-session.configuration.set_phi_tag("0010,1030", "REMOVE")
+# Remove Manufacturer's Model Name, which basic@2026c keeps
+session.configuration.set_phi_tag("0008,1090", "REMOVE")
 
-# Blank StudyDescription
-session.configuration.set_phi_tag("0008,1030", "EMPTY")
+# Keep Study Description, which basic@2026c empties
+session.configuration.set_phi_tag("0008,1030", "KEEP")
 ```
 
 ## What to keep
@@ -632,7 +632,7 @@ A de-identification run depends on three things, and the configuration file is o
 
 **A copy of the store is the same store, secret included.** The store is both files: copy `my_project.db` and `my_project_pixels.bin` together, and keep them under the same basename, because the session finds its sidecar by the `.db` file's name. A copy of the `.db` alone keeps the pseudonyms and offsets; for the instances ingested before the copy, their pixels are not in the copy, and export fails for them. Isocenter does not detect copies or refuse them. Treat every copy as the project itself: back it up as you back up `isocenter.key`, and never send it, or any copy of it, with an export. Whoever holds the store can recover every shifted date, and its audit log records each offset.
 
-**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()` and `redact()`, because a new secret would not recognise them and would replace them a second time.
+**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`, because a new secret would not recognise them and would replace them a second time.
 
 ## Auto-Discovery of Redaction Zones
 

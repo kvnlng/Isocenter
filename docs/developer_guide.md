@@ -49,7 +49,7 @@ pylint tests
 
 ### Formatting
 
-(Optional) We recommend using `black` for formatting, though it is not currently enforced by CI.
+(Optional) We recommend using `black` for formatting, though it is not enforced.
 
 ## 3. Testing
 
@@ -278,7 +278,7 @@ Coverage is not run in CI and has no threshold.
 
 `ISOCENTER_WORKER_FAULTHANDLER=1` makes every worker process dump its threads' tracebacks to stderr if it is still alive after 240 s. The test workflow (`.github/workflows/tests.yml`) sets it, so a stall inside a pool child shows up as a stack trace rather than a silent hang.
 
-## Notes moved from the user pages
+## Dependency and codec notes
 
 ### Dependencies
 
@@ -311,7 +311,7 @@ The user guides describe behaviour; the names behind it are here.
 - **Why large private values are not stored.** Holding a megabyte vendor blob in `attributes` makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. `session.compact()` rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a `redact()` or `ingest()` pass is open. That is design work, not a flag (#125).
 - **Data-loss rows** are read with `session.store_backend.get_audit_losses()`; the compliance report's section 3.1 is the user-facing view.
 
-## Notes moved from the API docstrings
+## Mechanisms behind the API
 
 The API reference describes what a caller sees. The mechanisms behind
 four of those descriptions are here.
