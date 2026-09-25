@@ -117,6 +117,7 @@ machines:
 - [Tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/): de-identify and read the grade, select part of a cohort, reversible anonymization, redaction, a custom export format
 - [Configuration](https://kvnlng.github.io/Isocenter/configuration/), [Analytics & Reporting](https://kvnlng.github.io/Isocenter/analytics/) and [how the grade is decided](https://kvnlng.github.io/Isocenter/analytics/#how-the-grade-is-decided)
 - [What the export writes](https://kvnlng.github.io/Isocenter/export-output/) and [Codec support](https://kvnlng.github.io/Isocenter/codecs/)
+- [Import CTP rules](https://kvnlng.github.io/Isocenter/ctp-import/), for a CTP `DicomPixelAnonymizer.script`
 - [Upgrading from 0.9.x](https://kvnlng.github.io/Isocenter/migration/)
 - [API reference](https://kvnlng.github.io/Isocenter/api/session/) and [API stability](https://kvnlng.github.io/Isocenter/api/stability/)
 - [Architecture](https://kvnlng.github.io/Isocenter/architecture/) and [Performance](https://kvnlng.github.io/Isocenter/performance/)
