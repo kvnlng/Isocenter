@@ -1,18 +1,18 @@
 # Architecture
 
-Isocenter acts as a smart indexing layer over your raw DICOM files. It does *not* modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.
+Isocenter is an indexing layer over your DICOM files. It never modifies them. It reads them into a session store (a SQLite index plus a pixel sidecar), changes an in-memory object graph, and writes de-identified copies to a new directory when you call `export()`.
 
-## 1. The Session Facade
+## 1. The Session facade
 
 The `Session` object is your single entry point. It manages:
 
-- **Persistence**: Auto-saving state to `isocenter.db`.
-- **Inventory**: Tracking Patients, Studies, and Series.
-- **Transactions**: Atomic persistence of changes.
+- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and a DICOM `export()` saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
+- **Inventory**: the patients, studies, series and instances the store holds.
+- **Workers**: a process pool and two background threads. Use `with Session(...) as session:` or call `close()`, or the worker processes outlive your script.
 
-## 2. Object Model
+## 2. Object model
 
-Isocenter abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.
+Isocenter presents DICOM as a hierarchy, so you do not iterate over tags by hand.
 
 ```mermaid
 graph LR
@@ -22,138 +22,59 @@ graph LR
     Instance --> Pixels((Pixel Data))
 ```
 
-- **Patient**: Root entity (Name, ID).
-- **Study**: A distinct visit/exam.
-- **Series**: A scan or reconstruction (e.g., "ct_soft_kernel").
-- **Instance**: A single DICOM slice. **Pixel data is extracted upfront**; the heavyweight pixel array is sequestered in a binary sidecar immediately upon ingestion and loaded into memory only when needed.
+- **Patient**: the root entity (Patient ID, name).
+- **Study**: one visit or exam.
+- **Series**: one acquisition or reconstruction (for example "ct_soft_kernel").
+- **Instance**: one DICOM file: a single image, a multi-frame image, or a waveform. Pixel and waveform data are moved to the sidecar at ingest and loaded into memory only when needed.
 
-## 3. Safety Pipeline (The 10 Checkpoints)
+## 3. The pipeline
 
-Ten steps, in the order the code expects them. Nothing touches disk until step 9, and the report comes last because export is where the final data-loss rows are written; a report generated before any export says so in its own text.
+Ten steps, in the order the code expects them. Your source files are never written to. The session store is written from step 1 and holds the original identifiers and pixels, so treat `<name>.db` and `<name>_pixels.bin` as PHI; the de-identified copies reach disk only at step 9. The report comes last because export is where the final data-loss rows are written; a report generated before any export says so in its own text.
 
-1. **Ingest**: Load raw data into the managed session index.
-2. **Examine**: Inventory the cohort and equipment.
-3. **Configure**: Define privacy tags and redaction rules.
-4. **Audit**: Measure PHI risks against the configuration.
-5. **Backup**: (Optional) Lock original identities under a key for reversibility.
-6. **Anonymize**: Apply remediation to metadata (in-memory).
-7. **Redact**: Scrub pixel data for specific machines (in-memory).
-8. **Verify**: Re-audit the session to confirm a clean state.
-9. **Export**: Write clean DICOM files to disk.
-10. **Report**: Generate the compliance report (cohort summary, audit trail, exceptions, grade basis, and a signature block for the reviewer) from the audit log, including what export recorded.
+1. **Ingest**: read the source files into the session store.
+2. **Examine**: inventory the cohort and its equipment.
+3. **Configure**: write and load a configuration (`create_config()`, `load_config()`).
+4. **Audit**: find PHI against the configuration.
+5. **Lock identities** (optional): encrypt each patient's original identifiers under a key, so they can be recovered later.
+6. **Anonymize**: apply the configuration to the metadata, in memory.
+7. **Redact**: remove burned-in text from pixel data for the machines you configured, in memory.
+8. **Check**: call `audit()` again to confirm nothing is left.
+9. **Export**: write de-identified files to a new directory.
+10. **Report**: generate the compliance report (cohort summary, audit trail, exceptions, grade basis, and a signature block for the reviewer) from the audit log, including what export recorded.
 
-## 4. Persistence Architecture (Hybrid Storage)
+## 4. Storage
 
-Isocenter uses `sqlite3` for metadata management, employing a **Hybrid Storage Model** to balance query performance with schema flexibility.
+The store is a SQLite index plus an append-only sidecar file. Keep `<name>.db` and `<name>_pixels.bin` together: a copy of both, under the same base name, is the same project, and either alone is incomplete.
 
-### The Problem
+- **Standard tags** (even groups), and every binary value small enough to keep, are stored as one JSON document per instance and read back whole. Reopening a session loads the cohort's metadata in one pass, not one file at a time.
+- **Private tags** (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.
+- **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more.
 
-DICOM data effectively comes in two shapes:
+Binary values other than pixel and waveform data are kept only up to 65534 bytes; larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
 
-1. **Standard Tags**: Always present, well-defined (e.g., `Modality`, `StudyDate`).
-2. **Private Tags**: Manufacturer-specific, sparse, and extremely numerous.
+The table layout is described for contributors in [Contributing](developer_guide.md#storage-schema). It is not part of the frozen API.
 
-Storing everything in a single table with 3000 columns is impossible. Storing everything in a vertical Entity-Attribute-Value (EAV) table is too slow for bulk loading.
+## 5. When a worker process dies
 
-### The Solution: Core JSON + Vertical Split
+`ingest()` reads files in worker processes. A file that ends the worker reading it (the out-of-memory killer, a decoder crash, `SIGKILL`) does not end the call, and a crashing file is retried alone and rejected only if it also crashes a fresh worker:
 
-Values are automatically split during persistence based on their Group ID:
+- Results already returned are kept. The files not yet returned are read again one at a time on a fresh one-worker process pool.
+- A file is rejected only when a fresh worker ends on it as the first file it was given. Its `ERROR` audit row gives the reason "An ingest worker process ended before this file was returned, and a fresh worker process given this file alone, as its first file, ended while reading it".
+- A worker that ends on a later file had read others first, so that file is not blamed: reading starts again from it on another fresh worker.
+- Once the fatal file is found, the rest are read at full width (`ISOCENTER_MAX_WORKERS`), the call saves as usual, and the session's pool is replaced.
+- A death that does not recur costs no file and writes no audit row; a `WARNING` log line records it.
+- If two fresh workers in a row cannot run a trivial task, every file left is rejected as "Not read", with a reason naming the causes that do this (a script without the `if __name__ == "__main__":` guard among them), and the call returns.
+- Any other failure of the worker pool raises.
 
-| Storage Location | Table | Column | Content | Rationale |
-| :--- | :--- | :--- | :--- | :--- |
-| **Core Attributes** | `instances` | `attributes_json` | All Standard Tags (Even Groups) + Binary Placeholders | **Speed**. SQLite's JSONB operators allow us to load 10,000 instances in sub-second time without performing 10,000+ joins. |
-| **Vertical Attributes** | `instance_attributes` | `tag_group`, `tag_elem`, `value` | Private Tags (Odd Groups) | **Flexibility**. Private tags are sparse. This EAV storage prevents the Core JSON from becoming bloated with garbage data while keeping private tags queryable. |
-| **Pixel Data** | `[name]_pixels.bin` | Comparison to DB via Offset/Length | Raw Byte Stream | **Offloading**. Gigabytes of pixel data are kept out of the DB to prevent bloating and ensure the index remains lightweight. |
+Each worker death costs a fresh pool, a few tenths of a second, so a run whose deaths do not recur can pay for several. A fatal file costs two or three pools, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a time. The retry rounds send one file per task whatever `ISOCENTER_CHUNKSIZE` says.
 
-There is no fourth row for large binary values, and its absence is a design
-decision rather than an omission. Only `PixelData` and `WaveformData` are
-routed to the sidecar. Every *other* binary value (`OB`, `OW`, `OF`, `OD`,
-`OL`, or a `UN` blob) is weighed rather than typed
-([#151](https://github.com/kvnlng/Isocenter/issues/151)): at or below 65534
-bytes it is kept, and above that it is dropped at ingest with a `DATA_LOSS`
-row and stored nowhere. The reason for the cap is the one behind
-sequestering the pixel array in section 2: an unbounded value would be held
-resident for the lifetime of the session, and memory scaling on 100GB+
-datasets rests on heavy arrays never being resident unless they are asked
-for. Because the rule weighs the value, explicit-VR and implicit-VR copies
-of one study give the same answer.
+## 6. Compaction and concurrent passes
 
-A kept binary value is persisted base64-encoded into `attributes_json`, the
-*first* row of the table, even when it is private: the second row's
-"Private Tags (Odd Groups)" describes where *text* private tags go, and the
-real split is whether a value serializes to text.
+`compact()` rewrites the sidecar and points every instance at the new offsets. It starts with `save(sync=True)`, so it waits for a background save that is running. Two behaviours are contract, observable from any thread of the session:
 
-The rest of the trade-off -- including why the sidecar row was not simply
-widened to take large values -- is documented with the flag it bears on:
-see [Private Tags](configuration.md#private-tags).
+1. It **raises `RuntimeError`** while a `redact()` or `ingest()` pass is open on the same store. The check comes before the leading save, so a refused call has done nothing.
+2. A `redact()` or `ingest()` that starts while it is saving or rewriting **waits**, up to 180 s, and then proceeds.
 
-### Database Schema Reference
+Every frame write, and `compact()` for the whole rewrite, holds a cross-process file lock beside the sidecar, so a frame written while compaction runs lands in the compacted file. A writer that cannot take the lock within 180 s raises `RuntimeError` naming the lock file. A background save that times out this way is logged as `Background save failed`, and its instances stay unsaved for the next save. During `ingest()`, a result whose frame write times out is rejected like any other failed file, with an `ERROR` audit row.
 
-| Table | Purpose | Key Columns |
-| :--- | :--- | :--- |
-| `patients` | Root entity. | `patient_id` (PK), `patient_name` |
-| `studies` | Represents a patient visit. | `study_instance_uid` (PK), `study_date`, `patient_id_fk` |
-| `series` | Represents a scan/sequence. | `series_instance_uid` (PK), `modality`, `manufacturer`, `model_name`, `device_serial_number`, `study_id_fk` |
-| `instances` | Represents a single DICOM file. | `sop_instance_uid` (PK), `attributes_json`, `pixel_hash`, `file_path`, `series_id_fk` |
-| `instance_attributes` | Storage for Private/Odd Group tags. | `instance_uid` (FK), `group_id`, `element_id`, `value` |
-| `audit_log` | Logs all modification actions. | `timestamp`, `action_type`, `entity_uid`, `details` |
-| `phi_findings` | Stores potential PHI detected during audit. | `entity_uid`, `field_name`, `value`, `remediation_action` |
-
-### Schema Visualization
-
-```mermaid
-erDiagram
-    PATIENTS ||--|{ STUDIES : contains
-    STUDIES ||--|{ SERIES : contains
-    SERIES ||--|{ INSTANCES : contains
-
-    PATIENTS {
-        string patient_id PK
-        string patient_name
-    }
-    
-    STUDIES {
-        string study_instance_uid PK
-        date study_date
-    }
-    
-    SERIES {
-        string series_instance_uid PK
-        string modality
-        string manufacturer
-        string model_name
-    }
-
-    INSTANCES {
-        string sop_instance_uid PK
-        json attributes_json "Core Metadata"
-        string pixel_hash "Integrity Check"
-    }
-
-    INSTANCES ||--o{ INSTANCE_ATTRIBUTES : "owns private tags"
-    INSTANCE_ATTRIBUTES {
-        string instance_uid FK
-        hex group_id
-        hex element_id
-        string value
-    }
-
-    INSTANCES ||--|| SIDECAR_FILE : "references pixels"
-    SIDECAR_FILE {
-        binary pixel_bytes
-    }
-    
-    INSTANCES ||--o{ PHI_FINDINGS : "triggers"
-    PHI_FINDINGS {
-        string field_name
-        string value
-        string remediation
-    }
-    
-    INSTANCES ||--o{ AUDIT_LOG : "generates"
-    AUDIT_LOG {
-        timestamp time
-        string action
-        string details
-    }
-```
+The rewrite holds the lock for its whole length, about 0.2 s per GB on a local SSD. A `close()` whose persistence worker is queued behind a compaction longer than 30 s reports that worker as wedged.
