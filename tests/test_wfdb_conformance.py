@@ -203,7 +203,7 @@ def test_coded_channel_source_newline_cannot_manufacture_a_hea_comment(tmp_path)
 
     The lead-name allowlist (#39) only filters the free-text Channel
     Label fallback: `wfdb_description()` returns a coded `source_code`
-    verbatim and unconditionally, on the assumption that "a coded value
+    outside its CID 3001 lead table verbatim, on the assumption that "a coded value
     cannot contain an operator-typed patient name." That assumption holds
     for the DICOM standard's own SH VR, which forbids embedded control
     characters -- but pydicom does not enforce that on read or write.
@@ -407,3 +407,58 @@ def test_deidentified_date_survives_as_a_comment_when_no_time_of_day_remains(tmp
     assert record.comments == [f"de-identified start date: {expected_date_token}"], (
         f"expected the shifted study date preserved as a comment; got "
         f"comments={record.comments!r}")
+
+
+# --- Coded lead names and SCP-ECG annotations (#828) ----------------------
+
+TWELVE_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF",
+                "V1", "V2", "V3", "V4", "V5", "V6"]
+
+
+@pytest.fixture
+def bundled_ecg(tmp_path):
+    """Export pydicom's bundled `waveform_ecg.dcm`, whose 12 leads are coded
+    Channel Sources in scheme SCPECG (`5.6.3-9-1` ...) and whose findings
+    are SCPECG-coded Concept Names. Returns the .hea path."""
+    import shutil
+    from pydicom.data import get_testdata_file
+
+    src = tmp_path / "src"
+    src.mkdir()
+    shutil.copy(get_testdata_file("waveform_ecg.dcm"), src / "ecg.dcm")
+    session = DicomSession(persistence_file=str(tmp_path / "bundled.db"))
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+    assert len(paths) == 1, paths
+    return paths[0]
+
+
+def test_the_bundled_ecgs_leads_are_named_in_the_header(bundled_ecg):
+    """PhysioNet's reader, not ours: the Moody Challenge's helper code finds
+    leads by these names, and did not find `5.6.3-9-1`."""
+    header = wfdb.rdheader(os.path.splitext(bundled_ecg)[0])
+    assert header.sig_name == TWELVE_LEADS
+
+
+def test_the_bundled_ecgs_scpecg_findings_carry_their_names(bundled_ecg):
+    """SCP-ECG is a published vocabulary, so its findings keep their label
+    and a scheme-qualified category rather than collapsing to `uncoded`.
+
+    The file's findings all reference channel 0 of the group (the whole
+    group), so none carries a `lead`; the lead field is covered in
+    `tests/test_murmur_annotations.py`."""
+    import json
+
+    with open(os.path.splitext(bundled_ecg)[0] + ".annotations.json",
+              encoding="utf-8") as f:
+        findings = json.load(f)["findings"]
+    coded = [f for f in findings if "category" in f]
+    assert coded, "no finding carries a category"
+    assert all(f["category"].startswith("SCPECG:") and f.get("label")
+               for f in coded), coded
+    by_category = {f["category"]: f["label"] for f in coded}
+    assert by_category["SCPECG:5.10.3-1"] == "P Onset"
+    assert by_category["SCPECG:5.10.3-3"] == "QRS Onset"

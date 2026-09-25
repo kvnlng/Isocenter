@@ -92,6 +92,12 @@ KNOWN_CODING_SCHEMES = frozenset({
     "NCIT",     # NCI Thesaurus
     "RADLEX",
     "ACR",
+    # SCP-ECG (EN 1064 / ISO 11073-91064), "Standard Communications
+    # Protocol for Computer-Assisted Electrocardiography" in PS3.16 2026d
+    # Table 8-1, the only spelling that table gives it. CID 3001 drew its
+    # lead codes from it before MDC, and ECG carts still code their
+    # measurements (QT Interval, QRS Onset) in it.
+    "SCPECG",
 })
 
 
@@ -104,10 +110,84 @@ def _is_known_coding_scheme(designator: str) -> bool:
     # Case-insensitive although designators are case-sensitive by
     # specification: real datasets write "sct" and "Sct", and treating those
     # as site-defined would suppress genuinely coded concepts.
-    normalized = str(designator or "").strip().upper()
+    normalized = _normalized_scheme(designator)
     if normalized.startswith("99"):
         return False
     return normalized in KNOWN_CODING_SCHEMES
+
+
+def _normalized_scheme(designator: str) -> str:
+    """`designator` stripped and upper-cased, the one way both the
+    vocabulary check and the lead-name table compare a scheme."""
+    return str(designator or "").strip().upper()
+
+
+# The WFDB name of each coded ECG lead, keyed (scheme, Code Value), for the
+# Channel Source (003A,0208) of a lead. Every row is a row of DICOM PS3.16
+# CID 3001 "ECG Lead(s)":
+#   - MDC: PS3.16 2026d, CID 3001 "ECG Lead", version 20130613
+#     (ISO/IEEE 11073-10101). Not an earlier edition: 2011's table listed
+#     `2:3` for both Lead III and Lead V1; 2026d gives III as `2:61`.
+#   - SCPECG: PS3.16 2007, CID 3001 "ECG Leads", version 20020904, scheme
+#     version 1.3 -- the "prior version of this Context Group [that] used
+#     codes from the SCP-ECG vocabulary", in 2026d's note. Carts still write
+#     it (pydicom's bundled `waveform_ecg.dcm` does).
+# Only a lead whose name is in `KNOWN_LEAD_NAMES` is named, spelled as
+# PhysioNet records spell it. The rest of the context group stays the
+# verbatim Code Value, deliberately: the Frank "Lead I" (`2:24`,
+# `5.6.3-9-24`) and "Derived Lead I" (`2:31`) are not Einthoven's I, and
+# neither is a `-cal` row; -aVR, V2R and V6R-V9R have no name in that set.
+# A code in neither scheme, and any Channel Source that is not a lead
+# (pressure, respiration), is unchanged.
+_CID_3001_LEAD_NAMES = {
+    ("MDC", "2:1"): "I",          # Lead I
+    ("MDC", "2:2"): "II",         # Lead II
+    ("MDC", "2:61"): "III",       # Lead III
+    ("MDC", "2:62"): "aVR",       # aVR, augmented voltage, right
+    ("MDC", "2:63"): "aVL",       # aVL, augmented voltage, left
+    ("MDC", "2:64"): "aVF",       # aVF, augmented voltage, foot
+    ("MDC", "2:3"): "V1",         # Lead V1
+    ("MDC", "2:4"): "V2",         # Lead V2
+    ("MDC", "2:5"): "V3",         # Lead V3
+    ("MDC", "2:6"): "V4",         # Lead V4
+    ("MDC", "2:7"): "V5",         # Lead V5
+    ("MDC", "2:8"): "V6",         # Lead V6
+    ("MDC", "2:9"): "V7",         # Lead V7
+    ("MDC", "2:66"): "V8",        # Lead V8
+    ("MDC", "2:67"): "V9",        # Lead V9
+    ("MDC", "2:11"): "V3R",       # Lead V3R
+    ("MDC", "2:12"): "V4R",       # Lead V4R
+    ("MDC", "2:13"): "V5R",       # Lead V5R
+    ("MDC", "2:16"): "X",         # Lead X
+    ("MDC", "2:17"): "Y",         # Lead Y
+    ("MDC", "2:18"): "Z",         # Lead Z
+    ("MDC", "2:92"): "MCL1",      # Modified chest lead per V1 placement
+    ("MDC", "2:97"): "MCL6",      # Modified chest lead per V6 placement
+    ("MDC", "2:131"): "ES",       # EASI Lead ES
+    ("MDC", "2:132"): "AS",       # EASI Lead AS
+    ("MDC", "2:133"): "AI",       # EASI Lead AI
+    ("SCPECG", "5.6.3-9-1"): "I",     # Lead I (Einthoven)
+    ("SCPECG", "5.6.3-9-2"): "II",    # Lead II
+    ("SCPECG", "5.6.3-9-61"): "III",  # Lead III
+    ("SCPECG", "5.6.3-9-62"): "aVR",  # Lead aVR
+    ("SCPECG", "5.6.3-9-63"): "aVL",  # Lead aVL
+    ("SCPECG", "5.6.3-9-64"): "aVF",  # Lead aVF
+    ("SCPECG", "5.6.3-9-3"): "V1",    # Lead V1
+    ("SCPECG", "5.6.3-9-4"): "V2",    # Lead V2
+    ("SCPECG", "5.6.3-9-5"): "V3",    # Lead V3
+    ("SCPECG", "5.6.3-9-6"): "V4",    # Lead V4
+    ("SCPECG", "5.6.3-9-7"): "V5",    # Lead V5
+    ("SCPECG", "5.6.3-9-8"): "V6",    # Lead V6
+    ("SCPECG", "5.6.3-9-9"): "V7",    # Lead V7
+    ("SCPECG", "5.6.3-9-66"): "V8",   # Lead V8
+    ("SCPECG", "5.6.3-9-67"): "V9",   # Lead V9
+    ("SCPECG", "5.6.3-9-11"): "V3R",  # Lead V3R
+    ("SCPECG", "5.6.3-9-12"): "V4R",  # Lead V4R
+    ("SCPECG", "5.6.3-9-13"): "V5R",  # Lead V5R
+    ("SCPECG", "5.6.3-9-16"): "X",    # Lead X
+    ("SCPECG", "5.6.3-9-17"): "Y",    # Lead Y
+    ("SCPECG", "5.6.3-9-18"): "Z",    # Lead Z
+}
 
 
 def _is_known_lead_name(label: str) -> bool:
@@ -412,10 +492,13 @@ class WaveformChannel:
     def wfdb_description(self, index: Optional[int] = None) -> str:
         """Signal description for the .hea signal line and annotations `lead`.
 
-        The coded channel source when there is one, returned verbatim: it
-        is not filtered, so a non-conformant source can put anything here,
-        an embedded newline included; callers writing it into a line-based
-        format must sanitize it. Otherwise the Channel Label (003A,0203),
+        The coded channel source when there is one: the lead's name
+        (`I`, `aVR`, `V1` ...) when the source is an ECG lead of DICOM CID
+        3001 in scheme MDC or SCPECG, and otherwise its Code Value
+        verbatim. A verbatim value is not filtered, so a non-conformant
+        source can put anything here, an embedded newline included;
+        callers writing it into a line-based format must sanitize it.
+        Otherwise the Channel Label (003A,0203),
         only when it is a recognisable lead name, since the label is
         operator-typed text. Otherwise a positional token. This applies
         whatever the privacy policy does with Channel Label.
@@ -425,15 +508,22 @@ class WaveformChannel:
                 positional token. Callers without one get "signal".
 
         Returns:
-            str: The coded source, the stripped lead name, `ch<index>`, or
-                `"signal"`.
+            str: The coded lead's name, the coded source, the stripped lead
+                name, `ch<index>`, or `"signal"`.
         """
         # The label check lives here rather than in the privacy profile: the
         # PHI scan is tag-gated, so a profile entry protects only a session
         # whose policy carries it, and `privacy_profile: none` or a `KEEP`
         # on Channel Label leaves the label to this check alone.
         if self.source_code:
-            return self.source_code
+            # The scheme is compared as `_is_known_coding_scheme` compares
+            # it, case-insensitively, since carts write `sct` for `SCT`;
+            # the two must not disagree about which scheme a code is in.
+            # The Code Value is compared exactly: it is case-sensitive, and
+            # every key is digits and punctuation. A `99...` scheme matches
+            # no key, so a local code is never named.
+            key = (_normalized_scheme(self.source_scheme), self.source_code)
+            return _CID_3001_LEAD_NAMES.get(key, self.source_code)
         if self.label and _is_known_lead_name(self.label):
             return self.label.strip()
         return f"ch{index}" if index is not None else "signal"

@@ -28,6 +28,10 @@ if __name__ == "__main__":
         session.save(sync=True)
 ```
 
+[Prepare your own ECGs for a PhysioNet Challenge](tutorials/physionet-challenge-ecgs.md)
+walks this path end to end, and then shapes each header the way the
+Challenge's code reads it.
+
 Run it as a script: the `if __name__ == "__main__":` guard is required,
 because ingest starts worker processes that re-import the script. A WFDB
 export does not save the session (a DICOM export does), so call
@@ -80,13 +84,28 @@ its own `DATA_LOSS` row), attempted nothing and returns `[]`.
 | `fs` | Sampling Frequency `(003A,001A)` |
 | `gain` | Derived from Channel Sensitivity `(003A,0210)` and its correction factor |
 | `units` | Channel Sensitivity Units Sequence `(003A,0211)` |
-| signal description | Channel Source Sequence `(003A,0208)`, falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
+| signal description | Channel Source Sequence `(003A,0208)`: the lead's name (`I`, `II`, `III`, `aVR`, `aVL`, `aVF`, `V1`...`V6`; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
 
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
 so no sample transcoding happens. The gain field is written in
 spec-conformant `header(5)` form, `gain(baseline)/units`. If a
 downstream tool mis-parses that field, check the tool's parser first.
+
+### Lead names
+
+A lead whose Channel Source is coded in DICOM's ECG lead context group,
+CID 3001, is named as PhysioNet records name it: `I`, `II`, `III`, `aVR`,
+`aVL`, `aVF`, `V1` to `V9`, `V3R`, `V4R`, `V5R`, `X`, `Y`, `Z`, and, in
+MDC only, `MCL1`, `MCL6`, `ES`, `AS` and `AI`. Both schemes the context
+group has used are read: IEEE 11073 `MDC` (`2:1` is lead I) and the
+SCP-ECG codes it used before, `SCPECG` (`5.6.3-9-1` is lead I), which
+carts still write. The Coding Scheme Designator is compared ignoring
+case. Any other code, in any scheme, is written as its Code Value: a
+derived or Frank lead, a calibration lead, a lead with no conventional
+short name (`-aVR`, `V2R`, `V6R` to `V9R`), a code under a local `99`
+scheme, and a source that is not a lead (a pressure or respiration
+waveform).
 
 When present, Waveform Annotation Sequence `(0040,B020)` items --
 cart-generated findings such as rhythm calls -- are exported as
@@ -158,7 +177,9 @@ applies nothing. All three are handled whichever configuration you run:
 - **Concept Name `(0040,A043)`** -- the annotation's Code Meaning
   reaches `annotations.json` as `label`, and its scheme-qualified Code
   Value as `category`, **only when the Coding Scheme Designator
-  `(0008,0102)` names a published vocabulary** such as SNOMED CT. A
+  `(0008,0102)` names a published vocabulary** such as SNOMED CT, LOINC,
+  DICOM's own `DCM`, IEEE 11073 `MDC` or SCP-ECG (`SCPECG`, which ECG
+  carts use for measurements such as QRS Onset). A
   coded finding is
   unaffected: `SCT:164889003` still arrives with its label
   `"Atrial fibrillation"`, because SNOMED defined that term, not an
@@ -218,7 +239,10 @@ same `DD/MM/YYYY` format the record line's own date field would have
 used: `# de-identified start date: DD/MM/YYYY` when `anonymize()` shifted
 the study date, or `# start date: DD/MM/YYYY` when it was not shifted
 (an export without `anonymize()`, or a date the policy keeps). That
-second form is the real date. A consumer reading the record line alone
+second form is the real date. The comment follows the signal lines, where
+`wfdb`'s own writer puts comments, so a reader that takes lines
+`1..n_sig` as the signal lines (the Moody Challenge's helper code does)
+reads the signals and nothing else. A consumer reading the record line alone
 sees no timing at all; a consumer that also reads comments gets the
 date, labelled by whether it was shifted.
 
@@ -240,8 +264,9 @@ paths a WFDB writer could otherwise open:
   coded channel source over the free-text label wherever a coded
   source exists. That preference is a likelihood argument, not a
   filter: a conformant coded source is far less likely to carry
-  operator-typed text than a free-text label, but the coded value is
-  **not** run through the lead-name allowlist or any content check --
+  operator-typed text than a free-text label, but a coded value other
+  than a CID 3001 lead code is written as it stands, **not** run
+  through the lead-name allowlist or any content check --
   a non-conformant source can still put arbitrary text there. Both the
   `.hea` writer and the Murmur `annotations.json` bridge strip
   line-break characters out of it regardless, so it can't forge a
