@@ -13,8 +13,9 @@ That raises three questions. **How do you turn a folder of DICOM ECGs
 into de-identified WFDB records**, **how do you make each header read the
 way the Challenge's code expects**, and **how do you look at the records
 before you train on them**? This tutorial answers them over the one
-12-lead ECG bundled with pydicom. Your folder will hold many; every step
-here works on a folder of any size.
+12-lead ECG bundled with pydicom. Your folder will hold many. Every step
+loops over every record, and the notes after each step say what changes
+when your files differ from this one.
 
 The Challenge changes its question every year. The header lines below are
 the 2025 Challenge's (detecting Chagas disease), taken from its
@@ -53,8 +54,8 @@ shutil.copy(pydicom.data.get_testdata_file("waveform_ecg.dcm"), "input")
 ```
 
 Your labels live outside the DICOM files, in whatever your study keeps
-them in. Here they are a small table keyed by source file name. Save it
-as `labels.csv`:
+them in. Here they are a small table keyed by each file's path under
+`input/`. Save it as `labels.csv`:
 
 <!-- tutorial: file=labels.csv -->
 ```csv
@@ -121,7 +122,7 @@ header = wfdb.rdheader(record_name)
 ['de-identified start date: ...']
 ```
 
-Twelve leads, ten seconds at 1000 Hz. Three things differ from a
+Twelve leads, ten seconds at 1000 Hz. Four things differ from a
 Challenge header:
 
 - **The lead names are codes.** This file names each lead by a coded
@@ -138,6 +139,11 @@ Challenge header:
   comments verbatim and MIT-BIH convention puts age, sex and diagnosis
   there ([what is and isn't de-identified](../waveforms.md#what-is-and-isnt-de-identified)).
   The label is yours to add.
+- **The start-date comment comes before the signal lines.** WFDB readers
+  accept that, but the Challenge's `get_signal_names()` and
+  `get_signal_files()` read lines 1 to 12 as the signal lines. `wrheader()`
+  in the next step writes every comment after the signal lines, so rewrite
+  the header even if your leads and units already match.
 
 The sampling rate differs too: the Challenge's records are 400 Hz or
 500 Hz. That is a question for your model's preprocessing, not for the
@@ -178,9 +184,17 @@ with open("labels.csv", encoding="utf-8") as labels_file:
     label_of_file = {row["file"]: row["chagas"]
                      for row in csv.DictReader(labels_file)}
 
-label_of_patient = {item["patient_id"]: label_of_file[Path(item["file_path"]).name]
-                    for item in manifest}
+label_of_patient = {}
+for item in manifest:
+    label = label_of_file[Path(item["file_path"]).relative_to("input").as_posix()]
+    if label_of_patient.setdefault(item["patient_id"], label) != label:
+        raise ValueError(f"{item['patient_id']}: files disagree on the label")
 ```
+
+The table is keyed by the path under `input/` rather than the bare file
+name, because archives often reuse a file name in different folders. The
+loop refuses a patient whose files disagree on the label, rather than
+keeping whichever came last.
 
 The manifest pairs each source file with its pseudonym, so it is a
 crosswalk back to your source data. Keep it with the store, never with
@@ -189,6 +203,14 @@ the records you share ([Manifests](../analytics.md#manifests)).
 The Chagas label belongs to the patient, so this page labels every record
 of a patient the same. Each record sits in a folder named
 `Subject_<pseudonym>`, which says whose record it is.
+
+Two cases this join does not reach
+([#830](https://github.com/kvnlng/Isocenter/issues/830)). If your labels
+belong to each recording rather than each patient, the manifest cannot
+join them yet: a record's name is the pseudonym, the Series Number and the
+Instance Number, and the manifest carries neither number. And a file with
+no Patient ID exports under `Subject_UnknownPatient`, while the manifest
+lists it under a key of its own, so the lookup below fails for it.
 
 **The rewrite.** For each record: rename the leads, restate the gain in
 millivolts (the gain is ADC units per physical unit, so a thousandfold
@@ -200,16 +222,31 @@ for hea in records:
     patient_id = Path(hea).parents[2].name.removeprefix("Subject_")
     header = wfdb.rdheader(name)
     header.sig_name = [SCP_ECG_LEADS.get(lead, lead) for lead in header.sig_name]
-    header.adc_gain = [gain * 1000 for gain in header.adc_gain]
-    header.units = ["mV"] * header.n_sig
+    header.adc_gain = [gain * 1000 if unit == "uV" else gain
+                       for gain, unit in zip(header.adc_gain, header.units)]
+    header.units = ["mV" if unit == "uV" else unit for unit in header.units]
     header.comments += [f"Chagas label: {label_of_patient[patient_id]}",
                         "Source: Local ECG archive"]
     header.wrheader(write_dir=str(Path(hea).parent))
 ```
 
+A record whose signals are already in millivolts keeps its gain; only
+microvolt signals are restated.
+
 A lead name the map does not know passes through unchanged, so a file
-that named its leads another way shows up in the next step rather than
-being renamed wrongly.
+that named its leads another way shows up rather than being renamed
+wrongly. Two cases the map does not cover: a cart that codes its leads in
+MDC (IEEE 11073) exports those code values, which need their own entries;
+and a lead with no coded source is written `ch0`, `ch1` and so on, because
+the Basic Profile removes Channel Label `(003A,0203)` (give it
+`action: KEEP` to keep lead names). Check every record's names, not just
+the first:
+
+```python
+>>> {lead for hea in records
+...  for lead in wfdb.rdheader(hea.removesuffix(".hea")).sig_name} - set(SCP_ECG_LEADS.values())
+set()
+```
 
 ## 4. Read it back the way the Challenge does
 
@@ -238,7 +275,7 @@ with open(records[0], encoding="utf-8") as hea_file:
 
 The largest deflection is just under 2 mV, an ordinary ECG amplitude,
 which says the gain was restated correctly. Before the rewrite `rdsamp`
-reported the same deflection as 1962, in microvolts.
+reported the same deflection as 1962.5, in microvolts.
 
 The Challenge's headers also carry `# Age:` and `# Sex:`. The Basic
 Profile removes both from the DICOM, and this page does not add them
@@ -264,10 +301,11 @@ def grade_line(path):
 ```
 
 This file is why. A DICOM waveform can hold several multiplex groups,
-each with its own sampling rate; this one holds two. Isocenter keeps the
-first group, which holds the twelve leads, and discards the rest at
+each with its own channels and sampling rate. This one holds two at the
+same rate: the ten-second rhythm and a median beat the cart derived from
+it. Isocenter keeps the first group, the rhythm, and discards the rest at
 ingest, with a warning and a `DATA_LOSS` row
-([Limitations](../waveforms.md#limitations)). Acquired signal that was in
+([Limitations](../waveforms.md#limitations)). Signal that was in
 the source and is not in the export is a loss a person should look at,
 so the report asks for review rather than grading `PASS`. Your own files
 may hold one group and grade `PASS`. Either way, read the report before
@@ -276,11 +314,23 @@ you train on the records.
 ## 6. Look at the records in Murmur Studio
 
 [Murmur Studio](https://kvnlng.github.io/Murmur/) is a macOS viewer for
-WFDB recordings. Open the `challenge` folder in it, and its sidebar lists
-every record in the folder with its signal count, sample rate and
-duration. It is a quick way to see that each record holds twelve leads
-and that none is flat or clipped, before a model sees them. For a folder of many records, see Murmur's
-guide to reviewing a PhysioNet corpus on the same site.
+WFDB recordings. A folder with no `RECORDS` index is scanned flat, and the
+export puts each record three folders down, so first write the index
+PhysioNet corpora carry: one record path per line, relative to the folder.
+
+```python
+Path("challenge", "RECORDS").write_text(
+    "".join(Path(hea).relative_to("challenge").with_suffix("").as_posix() + "\n"
+            for hea in records))
+```
+
+Then open the `challenge` folder with **File ▸ Open Record…**. Murmur
+follows the `RECORDS` index down the tree and lists each record by its
+path, with its signal count, sample rate and duration. It is a quick way
+to see that each record holds twelve leads and, opening each, that none
+looks flat or clipped, before a model sees them. Murmur's guide to
+[reviewing a PhysioNet corpus](https://kvnlng.github.io/Murmur/reviewing-a-corpus)
+covers folders of many thousands of records.
 
 Beside each record, the export writes the cart's own findings as
 `<record>.annotations.json`, the file Murmur reads as an annotation
@@ -298,15 +348,17 @@ with open(record_name + ".annotations.json", encoding="utf-8") as notes_file:
 ['uncoded']
 ```
 
-The cart marked fiducial points and intervals; each finding keeps its
-kind and sample position, so Murmur draws it where the cart put it. The
+The cart marked six fiducial points on each of eleven beats; each finding
+keeps its kind and sample position, so Murmur draws it where the cart put
+it. The
 names are withheld: the exporter writes a finding's name only when its
 code comes from a vocabulary it recognises, and 1.0 does not recognise
 SCP-ECG, the vocabulary this cart used
 ([#828](https://github.com/kvnlng/Isocenter/issues/828)). Passing
-`include_annotation_text=True` to `export()` writes the names, and the
-cart's free-text statements as well, so pass it only when your protocol
-allows that text out
+`include_annotation_text=True` to `export()` writes the names. It would
+also write an annotation's free text, but the Basic Profile has already
+replaced that text with a dummy, so none comes out here. Pass it only when
+your protocol allows the cart's text out
 ([what is and isn't de-identified](../waveforms.md#what-is-and-isnt-de-identified)).
 
 ```python
