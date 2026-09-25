@@ -555,11 +555,13 @@ def test_the_worker_writes_the_same_markers_under_both_executors(
 
 #: The WFDB files the ECG cohort member exports under the floor and
 #: `FIXED_A`, with `isocenter/<version>` read as `isocenter/<V>`: (bytes,
-#: sha256), measured at f54deaa1, before this change.
+#: sha256), measured at f54deaa1, before this change. `.hea` re-measured
+#: for #828, which moved its start-date comment below the signal lines
+#: (same bytes, reordered; the length is unchanged).
 WFDB_AT_BASE = {
     ".annotations.json": (445, "beb221a1f838d8412861b49a5bf8ee94439f23374b1e769f55aa61d8f1de7551"),
     ".dat": (16000, "d645e12558109f881b09380b5284a9736a30179a7ceb7e074f873350882f9017"),
-    ".hea": (745, "08e3e2bfa58897e057e7587cee58a2465af1308aef5f71ec5132d837d00e2182"),
+    ".hea": (745, "3a62bf21747e56db54c7ec316a4a0e078adade160dc09ffe936464188290467f"),
 }
 
 
