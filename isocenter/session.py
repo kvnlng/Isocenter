@@ -2117,9 +2117,9 @@ class DicomSession:
         fresh workers in a row cannot run a trivial task, every file left is
         rejected as "Not read", with a reason naming the causes that do this
         (a script without the main guard among them), and the call returns.
-        A worker that ends on a later file had read others first, so those
-        files are not blamed: reading starts again from that file on another
-        fresh worker. Any other failure of the worker pool raises.
+        A worker that ends on a later file had read others first, so that
+        file is not blamed: reading starts again from it on another fresh
+        worker. Any other failure of the worker pool raises.
 
         Each worker death costs a fresh pool, a few tenths of a second, so
         a run whose deaths do not recur can pay for several. A fatal file

@@ -1740,8 +1740,9 @@ class SqliteStore:
 
         Separate from `get_audit_errors` because the scopes grade differently:
         a loss scoped `PRIVATE` or `SIGNAL` takes `validation_status` to
-        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`, and is not
-        listed under "Exceptions & Errors".
+        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`. Every
+        loss is reported under "3.1 Data Loss", never under "Exceptions &
+        Errors".
 
         A row whose `loss_scope` is NULL predates the column and cannot be
         graded; it is reported and left at `PASS`.

@@ -600,7 +600,8 @@ class Equipment:
         A series has equipment if and only if it has a manufacturer or a model
         name; the serial number is the optional field. A serial number alone is
         not equipment: the store keeps `device_serial_number` for such a series,
-        and a reload discards it.
+        and a reload discards it, so after a reload no machine rule matches
+        that series by serial.
 
         Positional, in field order, all three required. **No normalisation:**
         `None` stays `None`, so `from_parts("ACME", None, None)` equals
