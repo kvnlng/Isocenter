@@ -439,8 +439,8 @@ cut this way (#818, #821, #822).
    - On a work branch off `release/X.Y`, run `git cherry-pick -x` on each
      commit that remains:
      - A conflict in `CHANGELOG.md` (the branch has no `[Unreleased]`
-       section, or at a first release only the cut's), or in a file a record-back changed (`RELEASING.md` at
-       rc2), is resolved with `git checkout --ours <file>` (ours is the
+       section, or at a first release only the cut's), or in a file a
+       record-back changed (`RELEASING.md` at rc2), is resolved with `git checkout --ours <file>` (ours is the
        branch), `git add <file>`, then `git cherry-pick --continue`. The
        last commit deals with both.
      - **Never resolve `fingerprint/output.json` by hand.** Keep the
@@ -458,20 +458,21 @@ cut this way (#818, #821, #822).
        apart from the version files (`RELEASING.md` at rc2);
      - **if the line's left-out list is not empty and any pick touched
        `fingerprint/output.json`,** or any commit on the list or any
-     branch-only fix did, retake
-       it on 3.12
+       branch-only fix did, retake it on 3.12
        (`python -m scripts.output_fingerprint take --out fingerprint/output.json --jobs 4`),
        then `check` on 3.14t, which must report no difference. Add an
        `**Output:**` line to `[Unreleased]` only for a difference the
        picked entries do not already name.
    - **When the line's left-out list is empty and it has no branch-only
-     fixes,** the PR head's tree must equal the chosen commit's (`git diff --stat <chosen sha> HEAD` prints
-     nothing), and `[Unreleased]` is `main`'s whole. Any file that still
+     fixes,** the PR head's tree must equal the chosen commit's (`git diff
+     --stat <chosen sha> HEAD` prints nothing), and `[Unreleased]` is `main`'s whole. Any file that still
      differs means a pick is missing. Pick it; never copy it into the last
      commit. **Otherwise** `git diff HEAD <chosen sha> -- .
      ':!CHANGELOG.md' ':!fingerprint/output.json'` is the combined change
-     of every commit on the list, plus the reverse of every branch-only
-     fix, apart from any hand-resolved conflict.
+     of every commit on the list, plus the difference each branch-only fix
+     leaves between the branch and `main` (the whole fix reversed for one
+     `main` does not need; `main`'s adapted form against the branch's for
+     one forward-ported adapted), apart from any hand-resolved conflict.
    - **Tests.** A PR whose picks all applied cleanly, or whose conflicts
      touched only the files above, runs no tests of its own: the picks
      were each tested on `main`, and step 3's integration run covers the
@@ -520,14 +521,16 @@ cut this way (#818, #821, #822).
      (the code has moved on for a later minor), the fix is made on the
      branch by the patch procedure, and its PR says why `main` does not
      need it. Where `main` needs it in another form, it is forward-ported,
-     adapted. Both kinds go on the line's branch-only fixes. Either way, make the release commit again on top, and
-     repeat the integration run in full.
+     adapted. Both kinds go on the line's branch-only fixes. Either way,
+     make the release commit again on top, and repeat the integration run
+     in full.
    - **A failure after the release-commit PR has merged** (a red step 4
      rehearsal, say) is handled as step 3 already says: fixed on the
      branch and forward-ported to `main`, with its entry in the existing
      section. The forward-port is then one of the commits the next
-     release's range leaves out, and a forward-port adapted puts the fix
-     on the line's branch-only fixes.
+     release's range leaves out. A fix `main` does not need at all
+     ("Patch releases" step 3), or one forward-ported adapted, goes on the
+     line's branch-only fixes.
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
