@@ -166,3 +166,4 @@ Each tutorial follows one question end to end over files bundled with pydicom, a
 - [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md)
 - [Redact burned-in text for one machine](tutorials/redact-burned-in-pixels.md)
 - [Write your own export format](tutorials/write-an-exporter.md)
+- [Prepare your own ECGs for a PhysioNet Challenge](tutorials/physionet-challenge-ecgs.md)

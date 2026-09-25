@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A tutorial for teams bringing their own DICOM ECGs to a George B. Moody PhysioNet Challenge** (`docs/tutorials/physionet-challenge-ecgs.md`). It runs as a test, like every tutorial. It de-identifies the ECG bundled with pydicom and exports it as WFDB. It then rewrites each header the way the Challenge's code reads it: SCP-ECG lead codes renamed to lead names, the gain restated in millivolts, the label and source lines added from the team's own label table (joined through the manifest), and the start-date comment moved below the signal lines, where the Challenge's parsers look for them. It writes a `RECORDS` index so that Murmur Studio lists the nested records. It reads the `REVIEW_REQUIRED` grade that the discarded multiplex group causes, and points to Murmur Studio for looking at the records. Writing it found that the WFDB export writes SCP-ECG lead codes rather than lead names, and treats SCP-ECG annotation codes as uncoded (#828), and that the manifest cannot join a label to one WFDB record (#830).
+
 ### Changed
 
 - **A release's changelog section, which is its GitHub Release notes, says what changed since the previous release, and a final's is never empty (#826).** A final that followed candidates has its entries in the candidates' sections, so `RELEASING.md` had it rename an `[Unreleased]` the branch may not have. That would leave 1.0.0 with an empty section and empty release notes. Such a final now opens its section with a summary of the changes since the highest final version below it, candidates included. A major release's final (`X.0.0`, with or without candidates) opens with highlights of all its changes and capabilities in place of that summary, for a reader upgrading from the previous major line. A final with nothing new since its last candidate is still cut by "Later releases on an existing line", which skips the pick step and has the release commit add the heading. Owner ruling on #826.
