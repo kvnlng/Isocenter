@@ -57,16 +57,11 @@ from concurrent.futures.process import BrokenProcessPool
 
 import pydicom
 import numpy as np
-# Unguarded, and at module scope, beside the other declared dependencies.
-# `imagecodecs>=2024.6.1` is in `install_requires` and already drives the
-# *decode* side in `imagecodecs_handler.py`, so the project already trusts
-# it with pixel fidelity in the other direction; it now drives the JPEG
-# 2000 encode as well (#404). Deliberately not a `try/except ImportError`
-# like the `from PIL import Image` it replaces: a guarded import whose
-# absence turns into `Compression failed` is the same shape as a loader
-# returning `[]` for a missing shipped resource, and this release removes
-# that shape rather than adding one. `python-dotenv` is the precedent --
-# a declared dependency imported plainly.
+# Unguarded, at module scope: `imagecodecs>=2024.6.1` is a declared
+# dependency (`install_requires`) and drives both the decode side in
+# `imagecodecs_handler.py` and the JPEG 2000 encode here. Do not wrap it
+# in `try/except ImportError`: a guarded import whose absence turns into
+# `Compression failed` hides a missing dependency behind a failed write.
 #
 # The encoder is bound as a module-level name rather than reached as
 # `imagecodecs.jpeg2k_encode` at each call, and that is not style.
@@ -148,12 +143,8 @@ from .config_manager import ConfigLoader
 #: Binary elements that `populate_attrs` skips but that are *not* lost --
 #: each is extracted and written to the sidecar elsewhere. They must stay
 #: out of the DATA_LOSS report or every ingest files a loss that did not
-#: happen (#137).
-#:
-#: This was decorative for (7fe0,0010) until #169: the whole-group skip
-#: above the VR check meant the frozenset was never consulted for it.
-#: It is load-bearing now, and so is the depth it is consulted at --
-#: `_is_routed` below, not `tag in _ROUTED_BINARY_TAGS`.
+#: happen. Consult it through `_is_routed`, not `tag in
+#: _ROUTED_BINARY_TAGS`: for (7fe0,0010) the depth matters too.
 _ROUTED_BINARY_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
     Tag(0x5400, 0x1010),   # Waveform Data
@@ -161,74 +152,61 @@ _ROUTED_BINARY_TAGS = frozenset({
 
 #: The Item tag (FFFE,E000) as it appears on the wire, little endian.
 #: A private element that pydicom resolved to `UN` and whose value
-#: starts with these four bytes is a sequence whose VR the transfer
-#: syntax did not carry (#167). Four bytes is a weak signal on its own
+#: starts with these four bytes may be a sequence whose VR the transfer
+#: syntax did not carry. Four bytes is a weak signal on its own
 #: -- any vendor blob may begin with them by chance -- so it only
 #: selects candidates for `_sequence_from_un_bytes`, which proves or
 #: refuses each one.
 _ITEM_TAG_LE = b"\xfe\xff\x00\xe0"
 
-#: Tags whose routing depends on where in the instance they sit, and the
-#: depth at which they are routed. `ingest_worker` finds Pixel Data with
+#: Tags whose routing depends on where in the instance they sit: routed
+#: at the top level only. `ingest_worker` finds Pixel Data with
 #: `if "PixelData" in ds` -- a top-level lookup -- so the copy inside an
-#: Icon Image Sequence item is routed nowhere. Nothing puts it in the
-#: blob store either: `instance_blobs` is UNIQUE(instance_uid, kind),
-#: one pixel blob per instance, so a second one needs a `kind` that
-#: names the sequence item. That is not a schema change -- `kind` is
-#: unconstrained TEXT and only `persist_blob`'s literal tuple gates it
-#: -- but it is a re-merge path on the export side and a decision about
-#: what `kind` means, which #150 also has an interest in. Filed as #183,
-#: whose first half (the top-level float pair) has landed and whose
-#: second half -- this one -- has not.
+#: Icon Image Sequence item is not routed by this rule; it is carried
+#: through `populate_attrs`' `nested` list and a blob kind that names the
+#: item (`serialize_blob_kind`), or reported as lost.
 #:
 #: (5400,1010) is deliberately absent. Waveform Data is *never* at the
 #: top level -- it lives inside Waveform Sequence items -- so a depth
 #: rule would report the one group that is routed. Which of several
 #: multiplex groups was kept is an index question, not a depth question,
-#: and #160 already reports the discarded ones from the group count.
+#: and the discarded ones are reported from the group count.
 _ROOT_ONLY_ROUTED_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
 })
 
-#: The float pixel elements. Routed the same way Pixel Data is, since
-#: #183's first half: `ingest_worker` extracts the array and writes it
-#: to the sidecar, and `_export_instance_worker` writes it back under
-#: its own tag (#170, #193). Reporting them at ingest would file a
-#: `DATA_LOSS` row reading "not in the exported data" about an element
-#: that is in the exported data -- the defect #194 opened against the
-#: first cut of this fix, pointed at a second tag.
+#: The float pixel elements. Routed the same way Pixel Data is:
+#: `ingest_worker` extracts the array and writes it to the sidecar, and
+#: `_export_instance_worker` writes it back under its own tag. Reporting
+#: them at ingest would file a `DATA_LOSS` row reading "not in the
+#: exported data" about an element that is in the exported data.
 #:
-#: Two conditions, both applied in `_is_routed`, and both still exactly
-#: as load-bearing as they were. Top level only, because the extraction
-#: reads the top level. And only when the instance has no Pixel Data of
-#: its own: `ingest_worker`'s arms are `if "PixelData" ... elif` the
-#: float pair, so on a file carrying both -- which PS3.5 Section 8.2
-#: forbids, but malformed input exists -- Pixel Data is what reaches the
-#: sidecar and the float half is genuinely lost. One question, one
-#: answer, and it is the same answer `has_pixel_data` gave before the
-#: bytes moved.
+#: Two conditions, both applied in `_is_routed`. Top level only, because
+#: the extraction reads the top level. And only when the instance has no
+#: Pixel Data of its own: `ingest_worker`'s arms are `if "PixelData" ...
+#: elif` the float pair, so on a file carrying both -- which PS3.5
+#: Section 8.2 forbids, but malformed input exists -- Pixel Data is what
+#: reaches the sidecar and the float half is genuinely lost.
 #:
-#: #183's second half now carries nested (7fe0,0010) -- see
-#: `_NESTED_PIXEL_DATA_TAG` and `serialize_blob_kind`. The nested *float*
-#: pair is deliberately still not carried: the grammar spells it
-#: (`pixels:0040,0555/0/7fe0,0008`) and the shape is unreachable from a
-#: conformant file, the float elements being top-level Image Pixel Module
-#: members with no macro that nests them. So `_is_routed` keeps its answer
-#: for them and `test_float_pixel_data_inside_a_sequence_item_is_reported`
-#: keeps its row. Do not widen the carriage by depth alone; the carriage is
-#: keyed on the tag.
+#: A nested (7fe0,0010) is carried (`_NESTED_PIXEL_DATA_TAG`,
+#: `serialize_blob_kind`); the nested *float* pair deliberately is not:
+#: the grammar spells it (`pixels:0040,0555/0/7fe0,0008`) but the shape is
+#: unreachable from a conformant file, the float elements being top-level
+#: Image Pixel Module members with no macro that nests them. So
+#: `_is_routed` reports a nested float element as lost. Do not widen the
+#: carriage by depth alone; the carriage is keyed on the tag.
 _FLOAT_PIXEL_TAGS = frozenset({
     Tag(0x7fe0, 0x0008),   # Float Pixel Data
     Tag(0x7fe0, 0x0009),   # Double Float Pixel Data
 })
 
-#: The one nested element whose bytes are carried (#183). Named rather than
+#: The one nested element whose bytes are carried. Named rather than
 #: written inline because three places have to agree about it: the
 #: collector in `populate_attrs`, the decode in `ingest_worker`, and the
 #: terminal tag of the blob kind those two produce.
 _NESTED_PIXEL_DATA_TAG = Tag(0x7fe0, 0x0010)
 
-#: The transfer syntaxes a nested icon may be decoded from (#183 Q6).
+#: The transfer syntaxes a nested icon may be decoded from.
 #:
 #: **An allow-list, not a list of the lossy ones, and that direction is the
 #: whole point.** A deny-list has to be complete to be safe, and it is
@@ -236,70 +214,46 @@ _NESTED_PIXEL_DATA_TAG = Tag(0x7fe0, 0x0010)
 #: direction that ships pixels. This list is wrong in the direction that
 #: files a `DATA_LOSS` row, which is a reported non-carriage rather than a
 #: mis-declared image. It is the same discipline `SIDECAR_DTYPE_NAMES`
-#: applies to the dtype carrier: allow-list, never interpret.
+#: applies to the dtype carrier: allow-list, never interpret. Add a syntax
+#: only once a nested decode under it has been measured.
 #:
-#: Why the lossy syntaxes were excluded, and why two of them are now in:
-#: a lossy-JPEG icon decodes to RGB from a declared `YBR_FULL_422`, so the
-#: exported item's Photometric Interpretation has to be rewritten to
-#: match the bytes. When #183 wrote this list that was "a correctness
-#: claim with no measurement behind it"; #372 measured it (a `YBR_FULL_422`
-#: item under JPEG Baseline, and `YBR_ICT`/`YBR_RCT` under JPEG 2000, each
-#: decoded through the borrowed `file_meta` -- RGB bytes, decoder meta
-#: `RGB`, identical with Pillow alone and with the pylibjpeg plugins), and
-#: `_decode_nested_pixels` now takes the colour space from the decoder's
-#: meta through the same `_decode_pixels` the top level uses. The top
-#: level had the same problem for every 8-bit YBR source, native ones
-#: included; it is fixed in the same change. So JPEG Baseline (`.4.50`)
-#: and JPEG 2000 (`.4.91`) are in.
-#:
-#: JPEG Extended (`.4.51`) and JPEG-LS Near-Lossless (`.4.81`) joined them
-#: in #387, measured the same way through a sequence item. Under `.4.51`,
-#: pydicom's Pillow plugin decodes an 8-bit baseline stream and labels it
-#: RGB exactly as under `.4.50`; a true 12-bit SOF1 icon still fails to
-#: decode here and keeps its loss row, because admission only stops the
-#: gate refusing what the decoder can read -- it claims no decode. `.4.81`
-#: decodes through the imagecodecs fallback (#416), within the stream's
-#: NEAR bound, under the labels `_FALLBACK_PHOTOMETRICS` gives it.
-#:
-#: HTJ2K (`.4.203`) joined `.4.201` and `.4.202` in #459, measured (N6 in
-#: `tests/test_nested_pixel_carriage.py`). Until then nothing here decoded
-#: HTJ2K -- pydicom has no plugin for it without pylibjpeg-openjpeg -- so
-#: `.4.203` stayed out, and `.4.201` and `.4.202` were listed and no better
-#: off: every such icon dropped from the decode's `except` arm with the
-#: generic row. The imagecodecs fallback now decodes all three through
-#: `jpeg2k_decode`, a 4x4 icon exactly. An allow-list's whole point is that
-#: its unmeasured side is the refusing side; this one was measured.
+#: The lossy syntaxes here are safe because a lossy icon can decode to a
+#: different colour space than it declares (RGB from `YBR_FULL_422` under
+#: JPEG Baseline, from `YBR_ICT`/`YBR_RCT` under JPEG 2000), and
+#: `_decode_nested_pixels` takes the colour space from the decoder's meta
+#: through the same `_decode_pixels` the top level uses, rewriting the
+#: item's label to match. Admission only stops the gate refusing what a
+#: decoder can read; it claims no decode -- a 12-bit SOF1 icon under
+#: `.4.51` still fails to decode and keeps its loss row. `.4.81` and HTJ2K
+#: decode through the imagecodecs fallback, under the labels
+#: `_FALLBACK_PHOTOMETRICS` gives them.
 #:
 #: Written as UID strings rather than `pydicom.uid` names on purpose: the
-#: names are not stable across pydicom versions, and a draft of #183's spec
-#: cited `JPEGLossyCompressedPixelTransferSyntaxes`, which does not exist.
-#: `tests/test_nested_pixel_carriage.py` checks each string against
-#: pydicom's own constant where a name for it exists.
+#: names are not stable across pydicom versions.
 _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
     "1.2.840.10008.1.2",        # Implicit VR Little Endian (native)
     "1.2.840.10008.1.2.1",      # Explicit VR Little Endian (native)
     "1.2.840.10008.1.2.1.99",   # Deflated Explicit VR Little Endian
     "1.2.840.10008.1.2.2",      # Explicit VR Big Endian (native)
     "1.2.840.10008.1.2.5",      # RLE Lossless
-    "1.2.840.10008.1.2.4.50",   # JPEG Baseline (Process 1), measured (#372)
-    "1.2.840.10008.1.2.4.51",   # JPEG Extended (Process 2 & 4), measured (#387)
+    "1.2.840.10008.1.2.4.50",   # JPEG Baseline (Process 1), measured
+    "1.2.840.10008.1.2.4.51",   # JPEG Extended (Process 2 & 4), measured
     "1.2.840.10008.1.2.4.57",   # JPEG Lossless, Non-Hierarchical
     "1.2.840.10008.1.2.4.70",   # JPEG Lossless, First-Order Prediction
     "1.2.840.10008.1.2.4.80",   # JPEG-LS Lossless
-    "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless, measured (#387)
+    "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless, measured
     "1.2.840.10008.1.2.4.90",   # JPEG 2000 Image Compression (Lossless Only)
-    "1.2.840.10008.1.2.4.91",   # JPEG 2000 Image Compression, measured (#372)
-    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless, measured (#459)
-    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL, measured (#459)
-    "1.2.840.10008.1.2.4.203",  # HTJ2K, measured (#459)
+    "1.2.840.10008.1.2.4.91",   # JPEG 2000 Image Compression, measured
+    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless, measured
+    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL, measured
+    "1.2.840.10008.1.2.4.203",  # HTJ2K, measured
 })
 
 #: The transfer syntaxes `_decode_pixels` decodes through `imagecodecs`
-#: when pydicom cannot (#416), so that `ingest()` accepts what
+#: when pydicom cannot, so that `ingest()` accepts what
 #: `Instance.get_pixel_data()` reads. **This is the one place to narrow
-#: that**, and it is wider than the 16-bit colour JPEG 2000 cell #416 was
-#: filed for. Measured with pydicom 3.0.2, Pillow 12.3.0 and imagecodecs
-#: 2026.8.16 (`get_decoder(ts).available_plugins`):
+#: that.** pydicom's plugins with pydicom 3.0.2, Pillow 12.3.0 and
+#: imagecodecs 2026.8.16 (`get_decoder(ts).available_plugins`):
 #:
 #: | Transfer syntax | pydicom plugins here | in this set |
 #: | --- | --- | --- |
@@ -310,28 +264,25 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
 #: | .90 / .91 JPEG 2000 | `pillow`, 16-bit multi-sample refused | yes |
 #: | .201 / .202 / .203 HTJ2K | none | yes |
 #:
-#: HTJ2K since #459 (owner ruling Q6): pydicom decodes it only with
-#: pylibjpeg-openjpeg, not a dependency, and `jpeg2k_decode` reads it
-#: exactly, so it takes every JPEG 2000 row below
-#: (`imagecodecs_handler.J2K_SYNTAXES` says why not `htj2k_decode`).
+#: HTJ2K: pydicom decodes it only with pylibjpeg-openjpeg, not a
+#: dependency, and `jpeg2k_decode` reads it exactly, so it takes every
+#: JPEG 2000 row below (`imagecodecs_handler.J2K_SYNTAXES` says why not
+#: `htj2k_decode`).
 #:
-#: So every JPEG Lossless and JPEG-LS file was refused at ingest, and now
-#: ingests when its decode matches its header under a colour space
-#: `_FALLBACK_PHOTOMETRICS` labels for it. RLE is out because pydicom's RLE
-#: decoder needs no dependency, and the handler has no RLE arm (#447):
-#: pydicom's is the one that decodes.
+#: A JPEG Lossless or JPEG-LS file ingests when its decode matches its
+#: header under a colour space `_FALLBACK_PHOTOMETRICS` labels for it. RLE
+#: is out because pydicom's RLE decoder needs no dependency, and the
+#: handler has no RLE arm: pydicom's is the one that decodes.
 #:
-#: **JPEG Baseline and Extended joined for #604**, monochrome only. Pillow
-#: refuses 12-bit JPEG Extended, and pydicom's own `JPEG-lossy.dcm` was
-#: refused at ingest while the Instance door read it through the handler
-#: #453 then deleted. `imagecodecs.jpeg_decode` returns that file and
-#: `JPGExtended.dcm` value for value as DCMTK's `dcmdjpeg` does, at
-#: imagecodecs 2024.6.1 and 2026.8.16 (review of #606, M2). Colour stays
+#: **JPEG Baseline and Extended, monochrome only.** Pillow refuses 12-bit
+#: JPEG Extended; `imagecodecs.jpeg_decode` returns pydicom's own
+#: `JPEG-lossy.dcm` and `JPGExtended.dcm` value for value as DCMTK's
+#: `dcmdjpeg` does, at imagecodecs 2024.6.1 and 2026.8.16. Colour stays
 #: out (`_FALLBACK_JPEG`). UID strings, for the reason
 #: `_CARRIABLE_TRANSFER_SYNTAXES` gives.
 _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
-    "1.2.840.10008.1.2.4.50",   # JPEG Baseline, monochrome (#604)
-    "1.2.840.10008.1.2.4.51",   # JPEG Extended, monochrome (#604)
+    "1.2.840.10008.1.2.4.50",   # JPEG Baseline, monochrome
+    "1.2.840.10008.1.2.4.51",   # JPEG Extended, monochrome
     "1.2.840.10008.1.2.4.57",   # JPEG Lossless, Non-Hierarchical
     "1.2.840.10008.1.2.4.70",   # JPEG Lossless, First-Order Prediction
     "1.2.840.10008.1.2.4.80",   # JPEG-LS Lossless
@@ -345,7 +296,7 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
 
 #: The colour space the fallback stores for each declared one, per transfer
 #: syntax: ``{syntax: {declared label: stored label}}``. pydicom's decoder
-#: *states* what colour space it returned (#372). `imagecodecs` does not,
+#: *states* what colour space it returned. `imagecodecs` does not,
 #: and does not read PlanarConfiguration either, so the stored label is
 #: what a decode under that syntax has been *measured* to return for that
 #: declaration, and a declaration with no entry is refused. Keyed on
@@ -359,31 +310,26 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
 #:   decode is measured exact and interleaved, 8- and 16-bit. A
 #:   planar/interleaved swap holds the same samples in the same shape, so
 #:   no check after the decode would see one; only a measurement can.
-#:   **JPEG Lossless joined in #387.** #416 left it out believing no
-#:   colour JPEG Lossless stream could be built here: `ljpeg_encode`
-#:   refuses three components. `jpeg8_encode(lossless=True)` does not, and
-#:   its 3-component streams decode exactly, predictors 1 and 5, at
-#:   imagecodecs 2024.6.1 and 2026.8.16, with every channel distinct so a
-#:   plane swap would show. Measure with that encoder, not `ljpeg_encode`,
-#:   before concluding a colour row is unmeasured. YBR stays out under
-#:   JPEG Lossless: no YBR stream was measured.
-#: - **`YBR_RCT` and `YBR_ICT` map to RGB under JPEG 2000** (#448).
+#:   Under JPEG Lossless the RGB row is measured with
+#:   `jpeg8_encode(lossless=True)`, whose 3-component streams decode
+#:   exactly (predictors 1 and 5, every channel distinct so a plane swap
+#:   would show); `ljpeg_encode` refuses three components, so measure with
+#:   `jpeg8_encode` before concluding a colour row is unmeasured. YBR
+#:   stays out under JPEG Lossless: no YBR stream was measured.
+#: - **`YBR_RCT` and `YBR_ICT` map to RGB under JPEG 2000.**
 #:   `jpeg2k_decode` undoes the codestream's colour transform and returns
-#:   RGB, whatever the multiple-component-transform flag says (measured
-#:   under both, 8- and 16-bit), and pydicom's own plugins label that
-#:   output RGB too. Repeating the declared label over RGB samples is
-#:   #372's defect; refusing it, as this table did first, turned away a
-#:   file both doors can read.
-#: - **8-bit `YBR_FULL` maps to RGB under JPEG-LS** (#448, confirmed by
-#:   the owner with #464). A JPEG-LS stream has no colour transform, and
-#:   `jpegls_decode` returns the YBR samples as stored, so the *handler*
-#:   converts, with pydicom's `convert_color_space`. That is the function
-#:   pydicom's door applies (#372), and what pydicom with pyjpegls stores
-#:   for the same file. The conversion is `imagecodecs_handler.CONVERTS_TO`
-#:   and not this module's since #464, so the read doors make it too. 16-bit is refused
-#:   here before the decode: `convert_color_space` refuses `uint16`. Every
-#:   door refuses it, since the Instance door decodes through
-#:   `_decode_pixels` (#453); #461 recorded that as a limit (Q5).
+#:   RGB, whatever the multiple-component-transform flag says (8- and
+#:   16-bit), and pydicom's own plugins label that output RGB too.
+#:   Repeating the declared label over RGB samples would mislabel them;
+#:   refusing would turn away a file both doors can read.
+#: - **8-bit `YBR_FULL` maps to RGB under JPEG-LS.** A JPEG-LS stream has
+#:   no colour transform, and `jpegls_decode` returns the YBR samples as
+#:   stored, so the *handler* converts, with pydicom's
+#:   `convert_color_space` -- the function pydicom's door applies, and
+#:   what pydicom with pyjpegls stores for the same file. The conversion
+#:   is `imagecodecs_handler.CONVERTS_TO`, so the read doors make it too.
+#:   16-bit is refused here before the decode, by every door:
+#:   `convert_color_space` refuses `uint16`. That is a documented limit.
 #:
 #: Which relabels the decoder has already done is data, not a branch on
 #: syntax: `_FALLBACK_DECODER_CONVERTS`. A relabel under any other syntax
@@ -394,12 +340,12 @@ _FALLBACK_J2K = {**_FALLBACK_GREY, "RGB": "RGB",
                  "YBR_RCT": "RGB", "YBR_ICT": "RGB"}
 _FALLBACK_JPEGLS = {**_FALLBACK_GREY, "RGB": "RGB", "YBR_FULL": "RGB"}
 _FALLBACK_LJPEG = {**_FALLBACK_GREY, "RGB": "RGB"}
-#: JPEG Baseline and Extended (#604): monochrome, and no palette, colour
-#: or YBR row. `jpeg_decode` applies a colour transform to a 3-component
-#: stream with no Adobe marker that pydicom and DCMTK do not (measured on
+#: JPEG Baseline and Extended: monochrome, and no palette, colour or YBR
+#: row. `jpeg_decode` applies a colour transform to a 3-component stream
+#: with no Adobe marker that pydicom and DCMTK do not (on
 #: `SC_jpeg_no_color_transform.dcm`, 137 apart), so a colour label here
-#: would be a guess; and every 8-bit colour stream met so far is one
-#: Pillow decodes before the fallback is asked.
+#: would be a guess; and 8-bit colour streams are ones Pillow decodes
+#: before the fallback is asked.
 _FALLBACK_JPEG = {label: label for label in ("MONOCHROME1", "MONOCHROME2")}
 _FALLBACK_PHOTOMETRICS = {
     "1.2.840.10008.1.2.4.50": _FALLBACK_JPEG,
@@ -411,18 +357,17 @@ _FALLBACK_PHOTOMETRICS = {
     "1.2.840.10008.1.2.4.90": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.91": _FALLBACK_J2K,
     # HTJ2K: `jpeg2k_decode` undoes a reversible colour transform to the
-    # exact RGB source, at 8 and 16 bits (#459, measured). An irreversible
-    # `YBR_ICT` stream under .201 and .203 is stored as RGB within the
-    # lossy transform's error, 1 at 8 bits and 2 at 16 (measured by the
-    # review of #606); the row is JPEG 2000's, whose decoder it is.
+    # exact RGB source, at 8 and 16 bits. An irreversible `YBR_ICT` stream
+    # under .201 and .203 is stored as RGB within the lossy transform's
+    # error, 1 at 8 bits and 2 at 16; the row is JPEG 2000's, whose
+    # decoder it is.
     "1.2.840.10008.1.2.4.201": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.202": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.203": _FALLBACK_J2K,
 }
 #: The syntaxes whose decoder returns the stored label's colour space
 #: itself, so a relabel there is a label change only (see above). Every
-#: door reads this one table since #453, which deleted the handler's own
-#: copy (`DECODER_RELABELS`).
+#: door reads this one table; do not give the handler a copy of its own.
 _FALLBACK_DECODER_CONVERTS = frozenset({
     "1.2.840.10008.1.2.4.90",
     "1.2.840.10008.1.2.4.91",
@@ -474,7 +419,7 @@ class _PhotometricRefusal(RuntimeError):
 
 
 #: The Photometric Interpretations this library holds against the
-#: transfer syntax a file is written under (#502, #507). Two callers,
+#: transfer syntax a file is written under. Two callers,
 #: two independent inputs: the export writer judges the label it just
 #: put on `ds` against the syntax it is about to write, and
 #: `_verify_readback` judges the label in the *delivered file* against
@@ -484,34 +429,27 @@ class _PhotometricRefusal(RuntimeError):
 #:
 #: A **positive** rule, per PS3.3 C.7.6.3.1.2, and a label with no cell
 #: here is judged inadmissible: a label a syntax does not define is
-#: exactly what this is about, and today such a file already fails the
-#: readback at the decode (`ValueError: Unknown (0028,0004) ...
-#: 'NONSENSE'`) while the default export writes it in silence.
+#: exactly what this is about.
 #:
-#: **One deliberate widening, with its reason, because a strict table
-#: would fail this library's own output:**
+#: **One deliberate widening, because a strict table would fail this
+#: library's own output:** `YBR_ICT` is admitted under JPEG 2000
+#: *lossless* alongside `YBR_RCT`, though `level=0` is the reversible
+#: transform. A source already labelled `YBR_ICT`/`YBR_RCT` is encoded
+#: with the transform and keeps its label, so a table admitting only
+#: `YBR_RCT` would warn about, and refuse, files this exporter writes on
+#: purpose.
 #:
-#: - `YBR_ICT` is admitted under JPEG 2000 *lossless* alongside
-#:   `YBR_RCT`, though `level=0` is the reversible transform. The owner's
-#:   ruling on #490 is that a source already labelled `YBR_ICT`/`YBR_RCT`
-#:   is encoded with the transform and **keeps its label**, and #516
-#:   ships that, so a table admitting only `YBR_RCT` would warn about,
-#:   and refuse, files this exporter writes on purpose.
-#:
-#: **And one that is gone (#525).** `YBR_PARTIAL_422`/`YBR_PARTIAL_420`
-#: stood on the J2K row while only the native half had been ruled on, so
-#: the same instance warned natively and passed compressed. They are not
-#: admitted under JPEG 2000: the codestream holds full-sample components
-#: and PS3.5 A.4.4 gives no subsampled label to a J2K codestream. Such a
-#: label is written as declared with a WARNING, because `YBR_FULL` would
-#: misstate the value range (PS3.3 C.7.6.3.1.2) and there is no bare
-#: `YBR_PARTIAL`. `_compress_j2k` still encodes it `mct=False` (its case
-#: 3): the judgement moved, the encoder did not. The writer and the
-#: readback tightened at once, which is why one table serves both.
+#: `YBR_PARTIAL_422`/`YBR_PARTIAL_420` are not admitted under JPEG 2000:
+#: the codestream holds full-sample components and PS3.5 A.4.4 gives no
+#: subsampled label to a J2K codestream. Such a label is written as
+#: declared with a WARNING, because `YBR_FULL` would misstate the value
+#: range (PS3.3 C.7.6.3.1.2) and there is no bare `YBR_PARTIAL`.
+#: `_compress_j2k` still encodes it `mct=False` (its case 3). One table
+#: serves the writer and the readback so the two cannot disagree.
 #:
 #: Retired labels (`HSV`, `ARGB`, `CMYK`) are admitted everywhere. The
 #: question here is what a *syntax* can carry, not whether a label is
-#: current, and this exporter writes them as declared today.
+#: current, and this exporter writes them as declared.
 _PHOTOMETRIC_ANY_SYNTAX = frozenset({
     "MONOCHROME1", "MONOCHROME2", "PALETTE COLOR", "RGB",
     "YBR_FULL", "YBR_FULL_422", "HSV", "ARGB", "CMYK",
@@ -563,7 +501,7 @@ _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
 
 #: The labels pydicom converts to RGB on a default decode -- pydicom 3.0.2
 #: `_process_color_space`'s own set -- which is the decode `ingest()`
-#: makes and the readback's stored-sample decode does not (#596). Its
+#: makes and the readback's stored-sample decode does not. Its
 #: conversion refuses any samples but unsigned 8-bit
 #: (`convert_color_space`: `arr.dtype != np.dtype("u1")`), so a file
 #: carrying one of these over 16-bit or int8 samples is conformant and
@@ -596,7 +534,7 @@ def _pydicom_converts_samples_of(dtype) -> bool:
 #: file carries none of them -- the remedies in
 #: `_PHOTOMETRIC_INADMISSIBLE` all talk about the pixels, and "export
 #: with use_compression=True" is no help to an instance with nothing to
-#: compress (#507 review).
+#: compress.
 _PIXEL_ELEMENTS = ("PixelData", "FloatPixelData", "DoubleFloatPixelData")
 
 #: The remedy for a label on an instance that has no pixel element at
@@ -610,8 +548,8 @@ _PHOTOMETRIC_NO_PIXELS = (
     "should carry no (0028,0004); the value reaching the file is the one "
     "the graph declared.")
 
-#: The remedy for an inadmissible label on an Icon Image Sequence item
-#: (#602). A property of the door, as `_PHOTOMETRIC_NO_PIXELS` is of the
+#: The remedy for an inadmissible label on an Icon Image Sequence item.
+#: A property of the door, as `_PHOTOMETRIC_NO_PIXELS` is of the
 #: file: the table's ICT/RCT remedy says "export with
 #: use_compression=True", which is false for an icon, since
 #: `_write_back_nested_pixels` writes every icon raw.
@@ -867,8 +805,7 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
     # and no pixel arm runs. Such a file is judged here -- nothing else
     # judges it -- but with the sentences true of a file that has pixels,
     # and a multi-valued label on it gets the pixel arms' refusal, whose
-    # reason holds for it. Measured on the review of #609: the warning
-    # said "which has no pixel element" over a file carrying `PixelData`.
+    # reason holds for it. Do not assume "no pixel element" on this arm.
     has_pixels = any(kw in ds for kw in _PIXEL_ELEMENTS)
     if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
         if has_pixels:
@@ -910,7 +847,7 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
         f"set_attr(\"0028,0004\", ...).")
 
 
-#: The uncompressed syntax an icon's label is judged against (#602). Any
+#: The uncompressed syntax an icon's label is judged against. Any
 #: of the three native rows would do -- they are one set -- and this is the
 #: one `_create_ds` writes.
 _ICON_WRITTEN_SYNTAX = "1.2.840.10008.1.2"
@@ -973,7 +910,7 @@ def _icon_label_arity_warning(label, at) -> str:
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
-#: one place that has to name a declared value in prose (#499). A value
+#: one place that has to name a declared value in prose. A value
 #: outside the two the standard defines is named as such rather than
 #: guessed at: `declared_int` will have read it as an integer, and a
 #: correction note saying "PixelRepresentation 2 (unsigned)" would be a
@@ -983,23 +920,18 @@ _UNDEFINED_SIGNEDNESS = "neither 0 nor 1, the only values defined"
 
 
 #: The numpy dtype an integer frame decodes to, keyed on BitsAllocated
-#: and indexed by PixelRepresentation: `(unsigned, signed)`.
+#: and indexed by PixelRepresentation: `(unsigned, signed)`. A bare
+#: `uint16 if bits > 8 else uint8` decodes a 32-bit frame two times too
+#: wide and a 64-bit one four times too wide.
 #:
-#: It replaces `uint16 if bits > 8 else uint8`, which decoded a 32-bit
-#: frame two times too wide and a 64-bit one four times too wide -- so
-#: `SidecarPixelLoader` raised `Integrity Error: ... holds 32 samples;
-#: geometry (4, 4) needs 16` on an RTDOSE-shaped uint32 instance that had
-#: ingested cleanly (#386). #373's bound was right; the dtype it was
-#: checking against was not.
-#:
-#: **Callers must keep the legacy rule as a fallback rather than
-#: subscripting this table directly.** The keys are the four widths a
-#: numpy integer array can actually have, and DICOM declares widths that
-#: are not among them: `BitsAllocated 1` is a real ingested population --
-#: a binary Segmentation, whose packed bits pydicom unpacks to one uint8
-#: per pixel -- and `BitsAllocated 12` arrives as uint16. A dict-only
-#: rewrite turns both into a `KeyError` on the load path, which is a
-#: regression, not a tidy-up.
+#: **Callers must keep the `bits > 8` rule as a fallback rather than
+#: subscripting this table directly** (`_integer_dtype` does). The keys
+#: are the four widths a numpy integer array can actually have, and DICOM
+#: declares widths that are not among them: `BitsAllocated 1` is a real
+#: ingested population -- a binary Segmentation, whose packed bits
+#: pydicom unpacks to one uint8 per pixel -- and `BitsAllocated 12`
+#: arrives as uint16. A dict-only lookup turns both into a `KeyError` on
+#: the load path.
 _INTEGER_DTYPE_BY_BITS = {
     8:  (np.uint8,  np.int8),
     16: (np.uint16, np.int16),
@@ -1099,19 +1031,14 @@ class NestedPixelRef:
 #: uncompressed, so the fragment layout these describe does not exist in
 #: the exported file: they cannot be carried, and their absence loses
 #: nothing recoverable. The pixels themselves round-trip exactly.
-#:
-#: Reporting them put two `DATA_LOSS` rows and two warnings on every
-#: encapsulated instance carrying an EOT -- which is the mechanism DICOM
-#: added for large multi-frame objects, so the noise landed where it was
-#: least welcome (#194). It is also the failure the comment inside
-#: `populate_attrs` warns about, arrived at from the other side.
+#: Reporting them would put two `DATA_LOSS` rows on every encapsulated
+#: instance carrying an Extended Offset Table.
 #:
 #: These three are the group's non-binary members (`OV`, `OV`, `UV`),
 #: and `import_files`' reason clause says "binary-VR elements are not
-#: held in the object graph". Exempting them makes that prose true
-#: again. A future non-binary member of this group has to be added here
-#: *or* given a reason clause of its own -- do not let it inherit this
-#: one.
+#: held in the object graph", which exempting them keeps true. A future
+#: non-binary member of this group has to be added here *or* given a
+#: reason clause of its own -- do not let it inherit this one.
 _DERIVED_PIXEL_INDEX_TAGS = frozenset({
     Tag(0x7fe0, 0x0001),   # Extended Offset Table
     Tag(0x7fe0, 0x0002),   # Extended Offset Table Lengths
@@ -1121,15 +1048,13 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 #: The retention boundary for unrouted binary values, in bytes: a value
 #: at or below it is held in the object graph whatever its wire VR
 #: (`OB`/`OW`/`OF`/`OD`/`OL` and `UN` alike); a value above it is
-#: dropped with a `DATA_LOSS` row, whatever its wire VR (#151).
+#: dropped with a `DATA_LOSS` row, whatever its wire VR.
 #:
-#: One rule for both populations, because VR was never the property
-#: anyone meant. The old gate skipped `BINARY_VRS` and kept `UN` ("for
-#: safety, usually small private tags"), and under Implicit VR every
-#: private element *is* `UN` -- so the identical bytes were dropped
-#: from an explicit-VR source and silently retained, megabyte blobs
-#: included, from an implicit-VR one. De-identification outcome and
-#: memory footprint both tracked the wire format rather than the data.
+#: One rule for both populations, because VR is not the property that
+#: matters: under Implicit VR every private element *is* `UN`, so a
+#: VR-keyed gate would treat the identical bytes differently by transfer
+#: syntax, and de-identification outcome and memory footprint would track
+#: the wire format rather than the data.
 #:
 #: 65534 is not a round number pulled from the air; it is PS3.5's own
 #: boundary. It is the largest value length a 16-bit explicit-VR length
@@ -1160,16 +1085,15 @@ BINARY_RETENTION_MAX_BYTES = 65534
 #: `UserWarning` -- and then raises `struct.error: required argument is
 #: not an integer` from `filewriter.write_numbers` when the dataset is
 #: written, which fails the whole export rather than the offending
-#: element. Measured on pydicom 3.0.2 for `US`, `UL` and `FL`; the
-#: siblings are here by the same encoding rule (all binary-encoded).
-#: And being an `int` is not enough either: `add_new` accepts any Python
-#: integer without complaint, so a private `US` holding `70000` writes
-#: an element `_merge` reports no loss for and then raises `OSError:
-#: 'H' format requires 0 <= number <= 65535` out of the export -- past
-#: `_merge`'s `try`, so again the file rather than the element. A source
-#: element is always in range; this is the value a later `set_attr` or a
-#: remediation rule put there, and the whole point of the gate is that
-#: such a value takes the fallback (#154).
+#: element (pydicom 3.0.2, for `US`, `UL` and `FL`; the siblings by the
+#: same encoding rule). And being an `int` is not enough either:
+#: `add_new` accepts any Python integer without complaint, so a private
+#: `US` holding `70000` writes an element `_merge` reports no loss for
+#: and then raises `OSError: 'H' format requires 0 <= number <= 65535`
+#: out of the export -- past `_merge`'s `try`, so again the file rather
+#: than the element. A source element is always in range; this is the
+#: value a later `set_attr` or a remediation rule put there, and such a
+#: value must take the fallback.
 _INTEGER_VR_RANGE = {
     'US': (0, 0xFFFF),
     'SS': (-0x8000, 0x7FFF),
@@ -1193,17 +1117,15 @@ _FLOAT_VR_PACK = {'FL': '<f', 'FD': '<d'}
 #: `OB` bytes, `OW` 16-bit words, `OL`/`OF` 32-bit, `OD`/`OV` 64-bit.
 #: The width is the gate, and not a formality: pydicom 3.0.2 pads an odd
 #: `OW` to even but writes an `OL` of 6 bytes or an `OD` of 12 as they
-#: are, unpadded and without a word (measured) -- a non-conformant element
-#: that says it is `OL`. Such a value does not fit, and is written `UN`
-#: with the re-VR sentence naming it (#676). `UN` is not here: it is never
+#: are, unpadded and without a word -- a non-conformant element that says
+#: it is `OL`. Such a value does not fit, and is written `UN` with the
+#: re-VR sentence naming it. `UN` is not here: it is never
 #: recorded (`_record_private_vr`), and bytes under `UN` are what the
 #: fallback writes anyway.
 _BINARY_VR_WORD = {'OB': 1, 'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
 
-#: The VR names alone, derived rather than restated. Two spellings of
-#: "which VRs are binary integers" is exactly the drift
-#: `test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store`
-#: exists to catch one table further out.
+#: The VR names alone, derived rather than restated, so there is one
+#: spelling of "which VRs are binary integers".
 _INTEGER_VRS = frozenset(_INTEGER_VR_RANGE)
 _FLOAT_VRS = frozenset(_FLOAT_VR_PACK)
 
@@ -1221,16 +1143,13 @@ _TEXT_VR_MAX = {
 #: from absence in `_TEXT_VR_MAX`: "no cap recorded" is also what an
 #: unknown VR and every binary VR look like, so reading absence as
 #: "unbounded text" would accept a recorded VR this module knows nothing
-#: about. An earlier comment claimed these three were handled by that
-#: absence, and `UC` -- the only one not also in `_VM_ONE_TEXT_VRS` --
-#: was in fact rejected on every path, so a private `UC` element
-#: recorded its VR at ingest and still exported as `UT`.
+#: about -- or, read the other way, reject `UC`.
 _TEXT_VR_UNCAPPED = frozenset({'UT', 'UR', 'UC'})
 
 #: The text VRs whose value multiplicity is fixed at 1, so a backslash
 #: in the value is ordinary text rather than the value delimiter
 #: (PS3.5 6.2). Every other text VR here is 1-n, where a backslash
-#: re-splits the value on read -- #195, from the other side. `UC` is the
+#: re-splits the value on read. `UC` is the
 #: one uncapped VR that is 1-n, which is why the two sets are not one.
 _VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
 
@@ -1238,9 +1157,9 @@ _VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
 #: time, a datetime, a UID, an age. For these a value inside the cap can
 #: still be no value of the VR -- `ANONYMIZED` is 10 characters, inside
 #: TM's 16, and is no time -- and `_value_fits_vr` asks pydicom's own
-#: `validate_value` about it (#571). Without that, a TM, DT or UI a REPLACE
-#: had emptied of meaning kept its recorded VR with an invalid value and a
-#: pydicom `UserWarning`, while a DA (cap 8) happened to fall back.
+#: `validate_value` about it. Without that, a TM, DT or UI a REPLACE had
+#: emptied of meaning would keep its recorded VR with an invalid value,
+#: while a DA (cap 8) happened to fall back.
 _FORMAT_CHECKED_VRS = frozenset({'DA', 'DT', 'TM', 'UI', 'AS'})
 
 
@@ -1304,7 +1223,7 @@ def _value_fits_vr(value, vr: str) -> bool:
         # it makes `_value_fits_vr([None, 'B'], 'LO')` true through the
         # list arm below, `add_new` accepts the list, and `filewriter`
         # raises past `_merge`'s try -- the whole file rather than the
-        # element (#344).
+        # element.
         #
         # Deleting this line, or flipping it to `True`, leaves every
         # test green, because the `None` branch in `_merge` runs first
@@ -1319,8 +1238,7 @@ def _value_fits_vr(value, vr: str) -> bool:
         # not an integer". Nothing in the pipeline produces one --
         # pydicom hands back `MultiValue`, the store hands back `list`
         # -- so this is a hand-`set_attr` shape, and `_fallback_multivalue`
-        # has always accepted it. Declining here leaves it exporting
-        # exactly as it did before #154.
+        # accepts it. Declining here sends it there.
         return False
 
     if isinstance(value, (list, MultiValue)):
@@ -1333,8 +1251,8 @@ def _value_fits_vr(value, vr: str) -> bool:
         return bool(value) and all(_value_fits_vr(a, vr) for a in value)
 
     if isinstance(value, (bytes, bytearray, memoryview)):
-        # Bytes fit a binary VR whose words they are a whole number of
-        # (#676): the VR the source file read them with, recorded at
+        # Bytes fit a binary VR whose words they are a whole number of:
+        # the VR the source file read them with, recorded at
         # ingest. Everything else -- `UN`, any text or numeric VR, and a
         # ragged length pydicom would write under the binary VR without
         # a word -- takes the fallback, which writes `UN`.
@@ -1383,12 +1301,12 @@ def _value_fits_vr(value, vr: str) -> bool:
             # them on the way in and raises for text that names no
             # number -- `ValueError: could not convert string to float`
             # -- which `_merge` catches and reports as data loss for an
-            # element that exported as `LO` before #154. The empty
-            # string is exempt: it is a conformant empty value and
+            # element that would export as `LO` through the fallback. The
+            # empty string is exempt: it is a conformant empty value and
             # pydicom writes it. `IS` goes one step further than `DS`,
             # because it takes the integer of what it parsed: `DS` of
             # `"nan"` writes, `IS` of `"nan"` raises `cannot convert
-            # float NaN to integer`. All measured on pydicom 3.0.2.
+            # float NaN to integer` (pydicom 3.0.2).
             try:
                 if vr == 'IS':
                     int(float(value))
@@ -1431,28 +1349,26 @@ def _is_routed(tag, is_root: bool, has_pixel_data: bool) -> bool:
 
 #: Modalities that must not export without pixel data. Two places
 #: refuse to write a pixel-less file for one of these -- the missing
-#: source-file guard and the float refusal below it -- and #193 was
-#: opened because they disagreed: the float guard set `arr = None`
-#: *after* the modality check had already passed, producing exactly the
-#: file that check exists to prevent. One constant, consulted twice, is
-#: what makes them agree by construction rather than by review.
+#: source-file guard and the float refusal below it -- and they must
+#: agree: a float guard that set `arr = None` *after* the modality check
+#: had passed would produce exactly the file that check exists to
+#: prevent. One constant, consulted twice, makes them agree by
+#: construction.
 _IMAGE_MODALITIES = frozenset({"CT", "MR", "US", "DX", "CR",
                                "MG", "NM", "PT", "XA", "RF", "SC", "OT"})
 
 #: How a `DATA_LOSS` audit entry is graded: PRIVATE and SIGNAL take
 #: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
-#: the emitter and stored on the audit row rather than re-derived, and
-#: why they differ, are argued once each -- CHANGELOG.md, #146 and #150.
+#: the emitter and stored on the audit row rather than re-derived.
 #:
 #: SIGNAL is acquired content that was in the source and is not in the
-#: export: a discarded waveform multiplex group (#150), or an icon dropped
-#: because pixel data is redacted (#542). It exists because group parity
-#: was a proxy for "how much should the reader care" and those emitters
-#: broke it -- both live under standard tags, and neither is an annotation
-#: layer with a defined home elsewhere, which is what makes an overlay
-#: routine. The discriminator is what the loss *was*: STANDARD stays the
-#: scope for routine standard-group drops (widening the grading test to
-#: STANDARD would take every overlay with it).
+#: export: a discarded waveform multiplex group, or an icon dropped
+#: because pixel data is redacted. Group parity cannot say that: both
+#: live under standard tags, and neither is an annotation layer with a
+#: defined home elsewhere, which is what makes an overlay routine. The
+#: discriminator is what the loss *was*: STANDARD stays the scope for
+#: routine standard-group drops (widening the grading test to STANDARD
+#: would take every overlay with it).
 LOSS_SCOPE_PRIVATE = "PRIVATE"
 LOSS_SCOPE_STANDARD = "STANDARD"
 LOSS_SCOPE_SIGNAL = "SIGNAL"
@@ -1461,7 +1377,7 @@ LOSS_SCOPE_SIGNAL = "SIGNAL"
 #: membership here rather than naming scopes itself, so the
 #: classification stays emitter-side: adding a scope means deciding, at
 #: the emitter, whether it grades -- never teaching the report to
-#: re-derive the answer from prose (#146, #150).
+#: re-derive the answer from prose.
 GRADED_LOSS_SCOPES = frozenset({LOSS_SCOPE_PRIVATE, LOSS_SCOPE_SIGNAL})
 
 
@@ -1529,21 +1445,19 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
         return None
 
     fp = DicomBytesIO(raw)
-    # Symmetry and insurance, not requirement -- and 0.9.0 said the
-    # opposite here, so read this before deleting either line.
-    # `read_sequence` takes implicitness and endianness as positional
+    # Symmetry and insurance, not requirement; read this before deleting
+    # either line. `read_sequence` takes implicitness and endianness as positional
     # arguments and threads them down itself; it consults NEITHER
     # attribute on the stream. The one place implicitness could be
     # re-derived, `_is_implicit_vr` (pydicom `filereader.py:336`),
     # short-circuits at `:368-369` on `is_sequence` before reading a
     # byte, and `read_sequence` always passes `is_sequence=True` from
-    # here. Set them wrong, or not at all, and this parse is identical;
-    # `tests/test_pydicom_deprecations.py` pins that, so a pydicom
-    # release that STARTS reading them turns red here instead of
-    # silently refusing every vendor block.
+    # here. Set them wrong, or not at all, and this parse is identical --
+    # unless a pydicom release starts reading them, which would silently
+    # refuse every vendor block if they were wrong.
     #
-    # The `_tag_packer` AttributeError the old comment cited is real,
-    # but it belongs to the WRITE stream below and to
+    # A `_tag_packer` AttributeError is possible, but it belongs to the
+    # WRITE stream below and to
     # `is_little_endian`, whose setter builds the packers
     # (`filebase.py:121-133`); the `is_implicit_VR` setter only
     # type-checks and stores (`filebase.py:147-152`).
@@ -1571,14 +1485,13 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
     # happen to carry. It matters because a WRONG value is not an
     # error: explicit VR is a valid encoding, `write_sequence` succeeds,
     # the bytes differ from `raw`, the equality gate below returns None
-    # for every sequence, and #167 comes back reported to users as
-    # "unparseable" with no exception raised anywhere. `is_little_endian`
-    # is the flag that raises outright, because `write_tag` needs the
-    # `_tag_packer` its setter builds.
+    # for every sequence, and every private sequence is reported to users
+    # as "unparseable" with no exception raised anywhere.
+    # `is_little_endian` is the flag that raises outright, because
+    # `write_tag` needs the `_tag_packer` its setter builds.
     #
     # Both names are public setters that emit no deprecation warning
-    # under pydicom 3.0.2 and both are watched by `REMOVED_IN_V4` in
-    # `tests/test_pydicom_deprecations.py`, because a
+    # under pydicom 3.0.2. Watch them on every pydicom bump: a
     # deprecated-to-removed setter here fails the same silent way.
     out.is_little_endian = True
     out.is_implicit_VR = True
@@ -1591,7 +1504,7 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
 
 #: Bytes per word of the wire VRs whose values are words wider than a byte
 #: (PS3.5 6.2). `OB` is absent because it has no byte order; `UN` because
-#: its word size is the one thing nobody knows (#657).
+#: its word size is the one thing nobody knows.
 _WORD_BYTES = {'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
 
 #: The elements whose word is one waveform sample, so whose width is
@@ -1601,7 +1514,7 @@ _WORD_BYTES = {'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
 #: (PS3.3 C.10.9.1). All four are `OB or OW` -- pydicom's own
 #: `_AMBIGUOUS_OB_OW_TAGS` is this set -- and `OW` holds 32- and 64-bit
 #: samples too, so a VR-keyed conversion reverses a 32-bit sample as two
-#: 2-byte words and stores it wrong (#657).
+#: 2-byte words and stores it wrong.
 _SAMPLE_TAGS = frozenset({"5400,1010", "5400,0110", "5400,0112",
                           "5400,100a"})
 
@@ -1615,9 +1528,8 @@ _SAMPLE_BYTES = {8: 1, 16: 2, 32: 4, 64: 8}
 
 #: The other `OB or OW` containers whose word a sibling declares, keyed on
 #: the element number inside the repeating groups 5000-501E: `(sibling
-#: element, its name, bytes per declared value)`. Both are retired and both
-#: were read as 2-byte words before this, which is right at one enumerated
-#: value each (#657, review finding 1):
+#: element, its name, bytes per declared value)`. Both are retired, and a
+#: fixed 2-byte word is right for only one enumerated value each:
 #:
 #: * Curve Data (50xx,3000) takes its width from Data Value Representation
 #:   (50xx,0103), whose Enumerated Values PS3.3-2004 C.10.2.1.2 gives as
@@ -1752,6 +1664,7 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
     # All three bytes-like types are converted so that which one a
     # refactor of `_process_safe` hands over cannot turn the conversion
     # off.
+    #
     # The type test before the emptiness test: this sees every value the
     # walk retains, and the truth of an array-like is an exception.
     if not big_endian or not isinstance(
@@ -1762,7 +1675,7 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
         # Keyed on the tag before the VR: a sample is as wide as the
         # waveform says, whatever word its wire VR implies -- except `OB`,
         # which PS3.5 6.2 gives no byte order at all, so nothing the
-        # waveform declares can establish one (owner ruling, 2026-09-15).
+        # waveform declares can establish one.
         # An 8-bit sample is a byte either way, and converts to itself.
         word = (_SAMPLE_BYTES.get(waveform_bits)
                 if isinstance(waveform_bits, int) else None)
@@ -1891,18 +1804,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # The retention rule keys on size, not VR, so the outcome does not
     # depend on the source's transfer syntax.
 
-    # The wire VRs whose values are bulk bytes. Since #151 membership
-    # routes an element to the size gate below rather than deciding its
-    # fate: an unrouted value at or below BINARY_RETENTION_MAX_BYTES is
-    # retained whatever its VR, and one above it is dropped with a
-    # DATA_LOSS row whatever its VR. `UN` is deliberately not a member
-    # -- a `UN` value may be a disguised implicit-VR sequence (#167)
-    # and must get the recovery attempt first; its blob fallback takes
-    # the same size gate further down. (The old comment here read "UN
-    # left out for safety, usually small private tags", and "usually
-    # small" was the unmeasured assumption #151 is about: under
-    # Implicit VR every private element is UN, megabyte blobs
-    # included.)
+    # The wire VRs whose values are bulk bytes. Membership routes an
+    # element to the size gate below rather than deciding its fate: an
+    # unrouted value at or below BINARY_RETENTION_MAX_BYTES is retained
+    # whatever its VR, and one above it is dropped with a DATA_LOSS row
+    # whatever its VR. `UN` is deliberately not a member -- a `UN` value
+    # may be a disguised implicit-VR sequence and must get the recovery
+    # attempt first; its blob fallback takes the same size gate further
+    # down. Do not assume `UN` values are small: under Implicit VR every
+    # private element is `UN`, megabyte blobs included.
     BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
 
     # Read once, not per element: the float pair's exemption depends on
@@ -1927,13 +1837,13 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
 
     # Per dataset, not per file: pydicom stamps `original_encoding` on
     # every item it reads, and a sequence rebuilt from `UN` bytes is
-    # little-endian whatever the file was (#657). A bare `Dataset` says
+    # little-endian whatever the file was. A bare `Dataset` says
     # (None, None) and is left as it is -- which is why this is `is False`
     # and not `is not True`: the waveform and Murmur tests hand this a
     # hand-built item whose bytes are already little-endian.
     big_endian = getattr(ds, "original_encoding", (None, None))[1] is False
     # And whether it was read under Implicit VR, where no element's VR was
-    # on the wire (#676, review of #739). pydicom's default
+    # on the wire. pydicom's default
     # `replace_un_with_known_vr` still hands back a dictionary VR for a
     # private element whose creator it knows -- `SIEMENS CSA HEADER`
     # (0029,xx10) reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF` -- which
@@ -1944,13 +1854,13 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
 
     # A Waveform Sequence item is where the sample width lives; its
     # Channel Definition items, one level down, hold samples in that width
-    # and no width of their own (#657). Everything below it inherits.
+    # and no width of their own. Everything below it inherits.
     if path and path[-1][0] == "5400,0100":
         waveform_bits = getattr(ds, "WaveformBitsAllocated", None)
 
     # Over the tags, not `for elem in ds`: `Dataset.__iter__` is a
     # generator over `self[tag]`, so an element whose read raises ends the
-    # walk and refuses the whole file (#691, `_read_element`). `sorted`
+    # walk and refuses the whole file (see `_read_element`). `sorted`
     # because that is exactly what `__iter__` does -- `item.attributes`
     # keeps its insertion order for a hand-built dataset too, by
     # construction rather than by the accident of a file read's `_dict`
@@ -1958,17 +1868,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     for tag_key in sorted(ds.keys()):
         elem = _read_element(ds, tag_key, not big_endian)
         if elem.tag.group == 0x7fe0:
-            # Still skipped -- the group check stays because it is not
-            # only about binary VRs. (7fe0,0001) and (7fe0,0002), the
-            # Extended Offset Table pair, are `OV` and would otherwise
-            # start landing in `attributes` as a side effect of a change
-            # about reporting. What moves is that the skip is now
-            # recorded unless the bytes are carried elsewhere, or are an
-            # index into bytes that are (#169, #194).
+            # The whole group is skipped, not only its binary VRs:
+            # (7fe0,0001) and (7fe0,0002), the Extended Offset Table pair,
+            # are `OV` and would otherwise land in `attributes`. The skip
+            # is recorded as a loss unless the bytes are carried
+            # elsewhere, or are an index into bytes that are.
             if (nested is not None and not is_root
                     and elem.tag == _NESTED_PIXEL_DATA_TAG):
                 # Carried, or reported by the caller -- never both, and
-                # never neither (#183). The enclosing `ds` travels rather
+                # never neither. The enclosing `ds` travels rather
                 # than the element because pydicom cannot decode a sequence
                 # item's pixel data without the file's Transfer Syntax UID:
                 # `icon.pixel_array` raises `AttributeError: Unable to
@@ -1996,20 +1904,19 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             # group check above takes it. Reporting either would put a
             # DATA_LOSS entry in the record of every image and every
             # waveform ever ingested, which is how a compliance trail
-            # becomes noise -- #194 is what that looks like.
+            # becomes noise.
             if _is_routed(elem.tag, is_root, has_pixel_data):
                 continue
 
-            # Unrouted binary keys on SIZE, not on VR (#151): at or
-            # below the threshold the value is retained on the graph --
-            # so `remove_private_tags=False` can finally keep a small
-            # explicit-VR vendor blob, and the outcome stops depending
-            # on the transfer syntax, because the implicit-VR spelling
-            # of the same element (`UN`, gated below) takes the same
-            # rule. Above it, the existing DATA_LOSS treatment: Overlay
-            # Data and the palette LUTs (`OW`, standard, routed
-            # nowhere) and the megabyte private blocks all vanish
-            # loudly, whatever their group (#125, #137).
+            # Unrouted binary keys on SIZE, not on VR: at or below the
+            # threshold the value is retained on the graph -- so
+            # `remove_private_tags=False` can keep a small explicit-VR
+            # vendor blob, and the outcome does not depend on the
+            # transfer syntax, because the implicit-VR spelling of the
+            # same element (`UN`, gated below) takes the same rule.
+            # Above it, DATA_LOSS: Overlay Data and the palette LUTs
+            # (`OW`, standard, routed nowhere) and the megabyte private
+            # blocks all vanish loudly, whatever their group.
             value = elem.value
             if value is None:
                 # A zero-length element. Nothing to lose and nothing to
@@ -2023,7 +1930,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     unconverted, waveform_bits,
                     _declared_width(ds, b_tag) if big_endian else None))
                 # A retained private value keeps the VR it was read with,
-                # so the export can write it under that VR (#676). Only
+                # so the export can write it under that VR. Only
                 # here, where the value is kept: a dropped one records
                 # nothing. `OV` is not in `BINARY_VRS` and records
                 # through the generic arm below.
@@ -2038,7 +1945,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
 
         # A private sequence under Implicit VR arrives here as `UN`
         # bytes, because the transfer syntax carries no VR and the
-        # standard dictionary has no entry (#167). Restore the
+        # standard dictionary has no entry. Restore the
         # structure so the PHI scan can walk it -- and only when the
         # parse is proven byte-exact; see `_sequence_from_un_bytes`.
         #
@@ -2058,7 +1965,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         # `_sequence_from_un_bytes`, and folding the two together
         # silently widens the report: this one separates "not a
         # candidate" -- every ordinary vendor blob, which falls through
-        # exactly as before -- from "candidate that failed
+        # to the generic arm -- from "candidate that failed
         # verification", which is the only thing that earns a row.
         if (elem.VR == 'UN' and elem.tag.group % 2 == 1
                 and isinstance(elem.value, (bytes, bytearray, memoryview))):
@@ -2072,7 +1979,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     # `read_sequence` does not. Without it an item's
                     # `US or SS` element never sees a root's 1: a signed
                     # -5 read as 65531, and `_read_element`'s `[ds]` would
-                    # not be the whole chain on this route (#691). Every
+                    # not be the whole chain on this route. Every
                     # item is stamped, because pydicom reads an item's own
                     # Pixel Representation before `_pixel_rep` wherever it
                     # reads either, so a declared one still wins; and
@@ -2081,9 +1988,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     # and this branch does from each `ds`'s. The value is
                     # copied unconverted, as pydicom copies it: its arm
                     # compares the raw value, so a malformed `[1, 0]` reads
-                    # signed in a standard sequence, and `int()` on it --
-                    # `_pixel_representation` -- raised `TypeError` and
-                    # refused a file that ingested before this stamp.
+                    # signed in a standard sequence; do not convert it here:
+                    # `int()` on it -- `_pixel_representation` -- raises
+                    # `TypeError` and refuses the file.
                     rep = getattr(ds, "PixelRepresentation", None)
                     if rep is None:
                         rep = getattr(ds, "_pixel_rep", None)
@@ -2102,22 +2009,20 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     # could not open it", and a candidate the size gate
                     # below is about to drop gets a DATA_LOSS row
                     # instead -- one row per element, each telling the
-                    # truth (#151).
+                    # truth.
                     unscanned.append((tag, len(raw)))
                 # Falls through: the bytes stay in `attributes` and are
-                # exported exactly as before.
+                # exported as they are.
 
-        # The `UN` half of the size rule (#151). A proven sequence was
+        # The `UN` half of the size rule. A proven sequence was
         # taken structurally above and is exempt -- structure is
         # resolved, not weighed, and a sequence's encoded length is the
         # one place the two transfer syntaxes genuinely differ. What
         # reaches here as `UN` bytes is a blob, and it takes exactly the
         # gate the `BINARY_VRS` arm applies: retained at or below
         # `BINARY_RETENTION_MAX_BYTES`, dropped with a DATA_LOSS row
-        # above it. Before this, `UN` was retained unconditionally
-        # ("usually small"), so the implicit-VR spelling of a megabyte
-        # private blob sat resident in the graph while its explicit-VR
-        # twin was dropped and reported.
+        # above it, so the implicit-VR spelling of a megabyte private
+        # blob is treated exactly as its explicit-VR twin.
         if (elem.VR == 'UN'
                 and isinstance(elem.value, (bytes, bytearray, memoryview))
                 and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
@@ -2749,10 +2654,8 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
                and str(ts) not in _FALLBACK_DECODER_CONVERTS)
     bits = int(ds.BitsAllocated)
     if convert and bits != 8:
-        # Every door's refusal, since #453 sent the Instance door through
-        # this function too: until then it returned a 16-bit YBR_FULL
-        # frame as stored, under its own label. #461 ruled (Q5) to record
-        # it as a limit rather than convert ahead of pydicom, which refuses
+        # Every door's refusal, the Instance door included: a recorded
+        # limit rather than a conversion ahead of pydicom, which refuses
         # the native form as well ("Invalid ndarray.dtype 'uint16' for
         # color space conversion"); `docs/installation.md` says so.
         raise refused(
@@ -2761,12 +2664,10 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
             f"pydicom's `convert_color_space`, takes 8-bit samples only") \
             from pydicom_error
     # The conversion itself, and the refusal of a signed 8-bit frame, are
-    # the handler's (#464), so ingest and both read doors make them by one
-    # rule. When this module converted for itself, ingest stored RGB and
-    # the read doors returned the YBR samples. `convert` above and the
-    # handler's `CONVERTS_TO` must name the same rows;
-    # `test_the_handler_converts_exactly_the_relabels_ingest_leaves_to_it`
-    # holds them together.
+    # the handler's, so ingest and both read doors make them by one rule;
+    # converting here instead would let ingest store RGB while the read
+    # doors return the YBR samples. `convert` above and the handler's
+    # `CONVERTS_TO` must name the same rows.
     try:
         conversion = colour_conversion(ds)
     except RuntimeError as exc:
@@ -2881,8 +2782,8 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
                          or ts in T81_SYNTAXES):
         stream, precision = _stream_precision(ts, _first_frame(ds))
         # A T.81 stream is read by its precision only where that is wider
-        # than BitsStored (#622); otherwise by BitsStored, as #446 reads
-        # it, and the row says BitsStored.
+        # than BitsStored; otherwise by BitsStored, and the row says
+        # BitsStored.
         if (ts in T81_SYNTAXES and precision is not None
                 and precision <= bits_stored):
             stream = precision = None
@@ -3081,16 +2982,13 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # against a precision it was not written at. `_precision_mismatch`
     # names the widest for the same reason.
     #
-    # The limit that buys (rev-098j9 P4): one precision per instance, so a
-    # *narrow* frame's own over-precision samples go unreported behind a
-    # wider sibling. Measured -- frame 0 at precision 8 holding 300 and
-    # frame 1 at precision 12 holding 3000 gives `max` 12, 3000 fits it,
-    # and no row; frame 0 alone reports `sample 300, limit 255`. Reporting
-    # it would mean a per-frame comparison, which needs the frame axis
-    # this function is not given (it takes the whole array), and the row
-    # would then have to name a frame. Filed rather than guessed at;
-    # `test_a_narrow_frames_excess_is_not_reported_behind_a_wider_one`
-    # pins the behaviour so the limit is visible rather than latent.
+    # The known limit: one precision per instance, so a *narrow* frame's
+    # own over-precision samples go unreported behind a wider sibling
+    # (frame 0 at precision 8 holding 300 beside frame 1 at precision 12
+    # gives `max` 12, and 300 fits it). Reporting it would need a
+    # per-frame comparison, and so the frame axis this function is not
+    # given, and a row that names a frame. The behaviour is pinned by a
+    # test so the limit stays visible.
     stream, precision = max(readings, key=lambda reading: reading[1])
     if precision < 1:
         return None
@@ -3184,9 +3082,9 @@ def _beyond_precision_words(facts) -> str:
             f"different values.")
 
 
-#: The two transfer syntaxes whose frames are read for a DCT frame header
-#: (#601). The syntax names the frame's process and does not prove it: a
-#: lossless SOF3 frame under either decodes bit-exact (review J2 M1).
+#: The two transfer syntaxes whose frames are read for a DCT frame header.
+#: The syntax names the frame's process and does not prove it: a lossless
+#: SOF3 frame under either decodes bit-exact.
 _DCT_SYNTAXES = frozenset({"1.2.840.10008.1.2.4.50",
                            "1.2.840.10008.1.2.4.51"})
 
@@ -3313,9 +3211,9 @@ def _high_bit_words(facts) -> str:
             f"and BitsAllocated {facts['bits_allocated']}: PS3.5 8.1.1 "
             f"requires HighBit to be BitsStored - 1. ")
     if not facts["encapsulated"]:
-        # Q3: pydicom's mask stays. Samples genuinely stored in bits
-        # 4..15 come back wrapped; they cannot be told apart from a
-        # right-aligned frame with overlay bits above BitsStored.
+        # pydicom's mask stays. Samples genuinely stored in bits 4..15
+        # come back wrapped; they cannot be told apart from a right-aligned
+        # frame with overlay bits above BitsStored.
         read = f"Read as pydicom reads it: the low {bits_stored} bits of each sample"
         if facts["pixel_representation"] == 1:
             read += ", sign-extended"
@@ -3531,24 +3429,24 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # -- `icon.pixel_array` raises `AttributeError: Unable to decode
             # the pixel data as the dataset's 'file_meta' has no (0002,0010)
             # 'Transfer Syntax UID'`. So the item is given one: the file's,
-            # when the item is encoded as the file is, and measured to
-            # decode correctly through RLE encapsulation; otherwise a
-            # native one (`_nested_item_syntax`, #645). An icon does NOT
-            # share the file's transfer syntax by construction -- PS3.5
-            # A.4 lets it be native inside a compressed file, and this
-            # library's own compressed export writes exactly that.
+            # when the item is encoded as the file is (which decodes
+            # correctly through RLE encapsulation); otherwise a native one
+            # (`_nested_item_syntax`). An icon does NOT share the file's
+            # transfer syntax by construction -- PS3.5 A.4 lets it be
+            # native inside a compressed file, and this library's own
+            # compressed export writes exactly that.
             if item_syntax == transfer_syntax:
                 item_ds.file_meta = ds.file_meta
             else:
                 item_ds.file_meta = FileMetaDataset()
                 item_ds.file_meta.TransferSyntaxUID = item_syntax
-            # The top level's #418 check, at this depth (#433). After the
+            # The top level's offset-table check, at this depth. After the
             # borrow, because it reads the transfer syntax off
             # `file_meta`. An excess is truncated to the declared frames,
-            # as at the top level; without it pydicom returned every frame
-            # the table names, and the icon was carried whole under a
-            # header declaring fewer -- no row at ingest, and an export
-            # that then dropped it blaming an Integrity Error. Fewer than
+            # as at the top level; otherwise pydicom returns every frame
+            # the table names, and the icon would be carried whole under a
+            # header declaring fewer, with no row at ingest and an export
+            # that then drops it blaming an Integrity Error. Fewer than
             # declared is not carried: there is no frame for the ones the
             # table does not name. Neither refuses the file -- an icon is
             # not a reason to lose the instance.
@@ -3560,18 +3458,18 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                                           "fewer"))
                     continue
                 decode_kwargs["allow_excess_frames"] = False
-                # The top level's #664 keyword, at this depth: without it
-                # an icon with an empty table and excess RLE fragments
-                # gets the row and then still joins its fragments.
+                # The top level's RLE frame-count keyword, at this depth:
+                # without it an icon with an empty table and excess RLE
+                # fragments gets the row and then still joins its fragments.
                 if counted[3] == RLE_FRAGMENTS:
                     decode_kwargs["number_of_frames"] = counted[0]
-            # The top level's #455 header rule, at this depth (#598).
+            # The top level's HighBit header rule, at this depth.
             # After the borrow, because it reads the transfer syntax off
             # `file_meta`; asked before the decode, as at the top level,
             # and kept below only once the decode has succeeded.
             facts = _high_bit_mismatch(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
-            # Asked of the decoded samples (#622), so after the decode;
+            # Asked of the decoded samples, so after the decode;
             # inside the borrow, because it walks the frames by the
             # borrowed transfer syntax.
             precision = _precision_mismatch(item_ds, arr)
@@ -3579,14 +3477,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
         except Exception:  # pylint: disable=broad-except
-            # Every reason a decode can fail takes the same route, and it is
-            # the route this element already took: a loss row. Not the
-            # `return ... "Decompression Failed"` the top-level arm takes --
-            # an icon that will not decode is not a reason to refuse the
-            # file, and the instance behaves in every respect as it did
-            # before #183. `test_an_undecodable_nested_icon_still_files_its
-            # _loss_row` is the tripwire; its fixture declares no
-            # BitsAllocated, so pydicom raises `Missing required element`.
+            # Every reason a decode can fail takes the same route: a loss
+            # row. Not the `return ... "Decompression Failed"` the
+            # top-level arm takes -- an icon that will not decode is not a
+            # reason to refuse the file, and the instance is otherwise
+            # ingested as if the icon were not carried.
             dropped.append((tag_str, vr))
             continue
         finally:
@@ -3606,19 +3501,19 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         if beyond is not None:
             beyond_precisions.append((path, tag_str, vr, beyond))
 
-        # The same correction the top-level arm makes just below, for the
-        # same reason: pydicom de-planarises on read, so the bytes are
-        # interleaved whatever the source declared. Leaving a nested
+        # The same correction the top-level arm makes, for the same reason:
+        # pydicom de-planarises on read, so the bytes are interleaved
+        # whatever the source declared. Leaving a nested
         # PlanarConfiguration of 1 in place would export interleaved bytes
         # under a planar declaration -- a colour icon read as garbage by a
-        # conformant reader, which is a worse outcome than the drop this
-        # change replaces. Isocenter holds and stores pixels interleaved,
-        # always; see `SidecarPixelLoader.__call__`.
+        # conformant reader, which is worse than dropping it. Isocenter
+        # holds and stores pixels interleaved, always; see
+        # `SidecarPixelLoader.__call__`.
         target = resolve_item_path(instance, path)
         if target is not None and target.attributes.get("0028,0006") == 1:
             target.set_attr("0028,0006", 0)
         # And the colour space, for the same reason the top-level arm
-        # corrects it (#372): the bytes above are whatever pydicom
+        # corrects it: the bytes above are whatever pydicom
         # decoded to, and the item's declared label is not consulted by
         # that decode. Only on difference, so a monochrome or RGB icon
         # bumps no revision.
@@ -3629,15 +3524,15 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
 
 
 #: The reason a file is failed with when its parsed result could not be
-#: pickled back to the parent (#651). A constant because tests match its
-#: prefix and the CHANGELOG quotes it.
+#: pickled back to the parent. A constant because tests match its prefix
+#: and the CHANGELOG quotes it.
 _UNCROSSABLE_RESULT = ("Its parsed result could not be returned from the "
                        "ingest worker")
 
 #: The reason a file is failed with when a worker process ended with it not
 #: yet returned, and then a fresh one-worker pool, which had run a trivial
-#: task and nothing else, ended on this file as the first it was given
-#: (#654). Every clause is what happened, and nothing more: the first death
+#: task and nothing else, ended on this file as the first it was given.
+#: Every clause is what happened, and nothing more: the first death
 #: is not claimed to have been on this file, because at full width it
 #: cannot be known. The exception is appended in parentheses. A constant
 #: because tests match its prefix and the CHANGELOG quotes it.
@@ -3647,11 +3542,11 @@ _WORKER_ENDED_READING = (
     "while reading it")
 
 #: The reason for every file left when a fresh worker process could not
-#: run even a trivial task, so no file is to blame and none is retried
-#: (#654). The pool does not say why a worker ended, so this names the
-#: causes that end one this early rather than choosing among them; the
-#: first is the one measured, a script with no main guard whose
-#: re-imported copy raises in the child (README).
+#: run even a trivial task, so no file is to blame and none is retried.
+#: The pool does not say why a worker ended, so this names the causes
+#: that end one this early rather than choosing among them; the first is
+#: a script with no main guard whose re-imported copy raises in the child
+#: (README).
 _NO_INGEST_WORKER_STARTS = (
     "Not read: a fresh ingest worker process ended before it could read "
     "any file, so the failure is not this file's. A script that opens a "
@@ -3727,7 +3622,8 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     # consumes its whole batch. So between two files consumed there are at
     # most three rounds. No retry count and no variable.
     logger = get_logger()
-    # Rounds after the first draw no progress bar and repeat no #185 line:
+    # Rounds after the first draw no progress bar and repeat no
+    # recycling-override line:
     # `run_parallel` reads both fields on every call even when `executor=`
     # is given, so each round would otherwise draw a new "Ingesting" bar
     # (a death reads as a bar stopping short, then one per round) and
@@ -3740,7 +3636,7 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     # chunk to a worker as one task: a death anywhere in the chunk loses
     # every result in it, so "the first file not returned" is the chunk's
     # first file, not the one the worker died on, and a good file beside a
-    # fatal one was rejected (review of #672). Round 0 keeps the caller's
+    # fatal one would be rejected. Round 0 keeps the caller's
     # chunk size; a chunked death there can put the fatal file past the
     # 2W+1 files below, which costs a round, never a file.
     retry_strategy = dataclasses.replace(
@@ -3765,8 +3661,8 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 # 3.14t, where a file that ends its process ends the
                 # parent with it, and `multiprocessing.Pool` under
                 # `ISOCENTER_MAX_TASKS_PER_CHILD`, which waits forever on
-                # a killed worker. The spawn pin is the shared pool's
-                # (#220), and so is the initializer (#250) -- resolved
+                # a killed worker. The spawn pin is the shared pool's,
+                # and so is the initializer -- resolved
                 # through this module's binding, deliberately, and not
                 # `strategy.worker_initializer`, which is the same
                 # function read through `parallel`'s.
@@ -3812,8 +3708,8 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
         if cannot_start is not None and not canary_deaths:
             # Once is not "no worker can start": a worker killed as it
             # started for a reason of the moment would otherwise cost every
-            # file left, good ones included (review of #672). One more
-            # fresh pool; a second death in a row is the answer.
+            # file left, good ones included. One more fresh pool; a second
+            # death in a row is the answer.
             canary_deaths = 1
             logger.warning(
                 "A fresh ingest worker process ended before it could run "
@@ -3843,10 +3739,10 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
             # round, so it had read other files first: the death may be
             # theirs, or its own -- a leak that ends it on its Nth read, a
             # thread that ends it after a result -- and not the held
-            # file's. Blaming it wrote "given this file alone, as its first
-            # file" for a file that was neither, and left a good file out
-            # of the store (review of #672). Start a new one-at-a-time
-            # round at that file instead, on a fresh pool, with no row.
+            # file's. Blaming it would write "given this file alone, as its
+            # first file" for a file that was neither, and leave a good file
+            # out of the store. Start a new one-at-a-time round at that file
+            # instead, on a fresh pool, with no row.
             # `alone` stays >= 1, because a failure means the batch did not
             # all come back; this round consumed `delivered` >= 1 files,
             # which is what keeps the bound.
@@ -4182,11 +4078,9 @@ def ingest_worker(fp: str) -> Tuple:
         # Extract Linking Metadata
         meta = {
             'pname': str(ds.get("PatientName", "Unknown")),
-            # Absent stays absent. This used to default to "19000101",
-            # and nothing downstream could tell that from a real date --
-            # SHIFT_DATE jittered it and the result was exported as
-            # genuine study timing, so a study that never had a date
-            # acquired one near 1900 (#60).
+            # Absent stays absent. A placeholder date cannot be told from a
+            # real one downstream: SHIFT_DATE would jitter it and export
+            # it as genuine study timing.
             'sdate': str(ds.StudyDate) if "StudyDate" in ds else None,
             'modality': ds.get("Modality", "OT"),
             'sop': ds.get("SOPInstanceUID", None),
@@ -4204,11 +4098,10 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Construct Instance (Metadata Only)
         inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
-        # Rides `meta` rather than a ninth tuple slot, which is the
-        # channel #36's multiplex-group loss already uses. This worker
-        # may be in a subprocess with no store handle, so the loss
-        # travels and the parent records it (#125, and #126 for the
-        # export side of the same constraint).
+        # Losses ride `meta` rather than a ninth tuple slot, as the
+        # multiplex-group loss does. This worker may be in a subprocess
+        # with no store handle, so the loss travels and the parent
+        # records it.
         dropped = []
         unscanned = []
         nested = []
@@ -4219,7 +4112,7 @@ def ingest_worker(fp: str) -> Tuple:
         # Between the walk and `meta['dropped_private_binary']`, so the
         # candidates that failed to decode land in `dropped` before it is
         # handed over. `_decode_nested_pixels` appends them itself: it is
-        # the code that knows (#183, #194).
+        # the code that knows.
         nested_offset_tables = []
         nested_high_bits = []
         nested_precisions = []
@@ -4230,7 +4123,7 @@ def ingest_worker(fp: str) -> Tuple:
             beyond_precisions=nested_beyond)
         meta['nested_offset_table'] = nested_offset_tables
         # Ints, bools, strs and None only, so it pickles from a spawned
-        # worker like the rest of `meta` (#598).
+        # worker like the rest of `meta`.
         meta['nested_high_bit'] = nested_high_bits
         meta['nested_precision'] = nested_precisions
         meta['nested_beyond_precision'] = nested_beyond
@@ -4251,15 +4144,14 @@ def ingest_worker(fp: str) -> Tuple:
         p_alg = None
 
         if "PixelData" in ds:
-            # The offset table against NumberOfFrames, before the decode
-            # (#418). Asked here, not left to the decoder: pydicom returns
-            # every frame the table names -- and, with no table it walks
-            # by, every frame its walk of the fragments finds, or every
-            # whole frame a native element's length holds (#620) -- so an
-            # excess used to be stored whole under a header that declared
-            # fewer, and the instance was accepted with no row and could
-            # never be read back -- the loader refused it later with an
-            # Integrity Error, against the wrong cause.
+            # The offset table against NumberOfFrames, before the decode.
+            # Asked here, not left to the decoder: pydicom returns every
+            # frame the table names -- and, with no table, every frame its
+            # walk of the fragments finds, or every whole frame a native
+            # element's length holds -- so an excess would be stored whole
+            # under a header that declares fewer, accepted with no row, and
+            # refused later by the loader with an Integrity Error against
+            # the wrong cause.
             #
             # Excess: keep the declared frames. NumberOfFrames is the
             # dataset's declared shape, and frames beyond it are not
@@ -4271,7 +4163,7 @@ def ingest_worker(fp: str) -> Tuple:
             #
             # Fewer frames than declared: refused, with a reason naming
             # both counts. There is no frame to keep for the ones the
-            # table does not name, and the decoder's own refusal was
+            # table does not name, and the decoder's own refusal would be
             # pydicom's message-less StopIteration -- an ERROR row reading
             # `Decompression Failed: ` and nothing else.
             decode_kwargs = {}
@@ -4284,16 +4176,16 @@ def ingest_worker(fp: str) -> Tuple:
                 # An RLE buffer counted fragment by fragment has to be
                 # decoded by that count too, or pydicom joins the
                 # fragments again and `allow_excess_frames` truncates
-                # nothing (#664). One counter feeds both, so the frames
+                # nothing. One counter feeds both, so the frames
                 # decoded and the frames this row names are one number.
                 if counted[3] == RLE_FRAGMENTS:
                     decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
             # Asked of the header before the decode, so both decoders'
-            # files get it; attached only once the decode succeeds (#455).
+            # files get it; attached only once the decode succeeds.
             high_bit_mismatch = _high_bit_mismatch(ds)
-            # The same shape for #601: asked of the header and frame 0
-            # before the decode, recorded only once the decode succeeds.
+            # LossyImageCompression the same way: asked of the header and
+            # frame 0 before the decode, recorded only once it succeeds.
             # Top level only -- 0028,2110 is the General Image Module's,
             # and an icon is not the image.
             lossy = _lossy_compression_evidence(ds)
@@ -4308,19 +4200,18 @@ def ingest_worker(fp: str) -> Tuple:
                 # family that is RGB, under any transfer syntax, native
                 # included; `pixel_array` converts and never touches
                 # `PhotometricInterpretation`. `populate_attrs` copied the
-                # declared label above, so without this a YBR source
-                # exported `YBR_FULL` over RGB bytes and a conformant
-                # reader showed `(169, 255, 65)` for `(220, 40, 90)`, or
-                # refused a `YBR_FULL_422` file outright (#372). AFTER the
-                # decode, unlike the PlanarConfiguration write above,
-                # which reads nothing from the array and must stay
-                # before it. Written only on difference, the same shape
-                # as `_write_str_if_changed`: an RGB, monochrome or
-                # palette source has meta equal to its label and bumps
-                # no revision. Not derived from the array's shape -- a
-                # 3-sample array is equally RGB or YBR_FULL, which is why
-                # #186 removed the `samples >= 3` relabel; the decoder's
-                # meta is the one place the colour space is stated.
+                # declared label above, so without this a YBR source would
+                # export `YBR_FULL` over RGB bytes, which a conformant
+                # reader shows in the wrong colours, or refuses outright
+                # for `YBR_FULL_422`. AFTER the decode, unlike the
+                # PlanarConfiguration write above, which reads nothing
+                # from the array and must stay before it. Written only on
+                # difference, the same shape as `_write_str_if_changed`:
+                # an RGB, monochrome or palette source has meta equal to
+                # its label and bumps no revision. Not derived from the
+                # array's shape -- a 3-sample array is equally RGB or
+                # YBR_FULL; the decoder's meta is the one place the colour
+                # space is stated.
                 if inst.attributes.get("0028,0004") != decoded_pi:
                     inst.set_attr("0028,0004", decoded_pi)
                 if high_bit_mismatch is not None:
@@ -4329,12 +4220,12 @@ def ingest_worker(fp: str) -> Tuple:
                     # writes the row.
                     meta['high_bit_mismatch'] = high_bit_mismatch
                 # A sample BitsStored cannot hold, from a stream wider
-                # than it (#622): asked of the decoded array, so here.
+                # than it: asked of the decoded array, so here.
                 precision_mismatch = _precision_mismatch(ds, arr)
                 if precision_mismatch is not None:
                     meta['precision_mismatch'] = precision_mismatch
-                # And a sample the *stream's own* precision cannot hold
-                # (#671): the other question about the same array, asked
+                # And a sample the *stream's own* precision cannot hold:
+                # the other question about the same array, asked
                 # here for the same reason -- it is the decode that
                 # answers it. Plain types, so it rides `meta` out of a
                 # spawned worker.
@@ -4349,21 +4240,15 @@ def ingest_worker(fp: str) -> Tuple:
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
-                # below, so the parent's ERROR row can name the file (#211).
+                # below, so the parent's ERROR row can name the file.
                 return ({'path': fp}, None, None, None, None, None, None,
                         f"Decompression Failed: {describe_exception(e)}")
 
         elif any(kw in ds for kw in ("FloatPixelData", "DoubleFloatPixelData")):
-            # The float pair rides the sidecar too, and until #183 it did
-            # not. `populate_attrs` skips group 7fe0 and `_is_routed`
-            # called these "routed" because `get_pixel_data()` re-read
-            # them out of the *source file* -- so the pixels survived
-            # only as long as that file stayed where it was. Move it,
-            # delete it, or export from a session reopened on another
-            # machine, and a float instance produced `FileNotFoundError:
-            # Pixels missing and file not found` on an image modality,
-            # and on a non-image modality a file with no pixel element
-            # and no loss row at all.
+            # The float pair rides the sidecar too, which is what makes
+            # `_is_routed` true of it: re-reading it from the *source file*
+            # would lose the pixels as soon as that file moved, or the
+            # session was reopened on another machine.
             #
             # `elif`: PS3.5 Section 8.2 forbids an instance carrying both, and
             # the export prefers the sidecar array whenever there is a
@@ -4374,9 +4259,9 @@ def ingest_worker(fp: str) -> Tuple:
             try:
                 arr = np.ascontiguousarray(ds.pixel_array)
                 # This arm does not pass through `_decode_pixels`, so it
-                # normalises byte order itself (#648): a big-endian
+                # normalises byte order itself: a big-endian
                 # FloatPixelData decodes to `>f4`, and its `tobytes()`
-                # stored `[0.5, -1.25, 1000, 3]` as values near 1e-41.
+                # would store byte-swapped values the loader misreads.
                 if arr.dtype.byteorder not in ('=', '|'):
                     arr = arr.astype(arr.dtype.newbyteorder('='))
                 p_bytes = arr.tobytes()
@@ -4387,30 +4272,24 @@ def ingest_worker(fp: str) -> Tuple:
                 # Kept as an underscore key so it rides
                 # `attributes_json` untouched -- `_merge` skips
                 # `t.startswith("_")`, the same channel
-                # `_ISOCENTER_REDACTION_HASH` already uses -- rather
-                # than as a schema change, which #183 also weighs and
-                # which this does not need.
+                # `_ISOCENTER_REDACTION_HASH` uses -- with no schema change.
                 inst.attributes[PIXEL_DTYPE_ATTR] = FLOAT_DTYPE_BY_ELEMENT[
                     TAG_FLOAT_PIXEL_DATA if "FloatPixelData" in ds
                     else TAG_DOUBLE_FLOAT_PIXEL_DATA]
             except Exception:  # pylint: disable=broad-except
                 # NOT the `return ... "Decompression Failed"` the Pixel
-                # Data arm above takes, and the asymmetry is deliberate.
-                # This change is meant to be additive: an undecodable
-                # float source ingested before #183 and failed loudly at
-                # export -- `RuntimeError: Lazy load failed ...` from
+                # Data arm above takes, and the asymmetry is deliberate:
+                # an undecodable float source is ingested and fails loudly
+                # at export -- `RuntimeError: Lazy load failed ...` from
                 # `get_pixel_data()`, one ERROR audit row naming
                 # pydicom's own words, `0 of 1` written and a
-                # REVIEW_REQUIRED grade (#226). Rejecting it here
-                # instead would move that failure to the door and leave
-                # the report saying `0 of 0 requested`, which is a
-                # weaker claim about a file that was handed to us.
+                # REVIEW_REQUIRED grade. Rejecting it here instead would
+                # move that failure to the door and leave the report
+                # saying `0 of 0 requested`, a weaker claim about a file
+                # that was handed to us.
                 #
-                # `p_bytes` stays None, so nothing reaches the sidecar,
-                # no provenance is recorded, and the instance behaves in
-                # every respect as it did before. The float sources that
-                # *can* be decoded gain the sidecar; the ones that
-                # cannot lose nothing.
+                # `p_bytes` stays None, so nothing reaches the sidecar and
+                # no provenance is recorded.
                 p_bytes = None
                 p_alg = None
 
@@ -4419,10 +4298,9 @@ def ingest_worker(fp: str) -> Tuple:
             p_hash = hashlib.sha256(p_bytes).hexdigest()
 
         # Extract Waveform Data
-        # populate_attrs treats (5400,1010) as routed (#151 changed the
-        # binary rule to a size gate, but routed elements stay out of the
-        # graph regardless), so it never reaches the
-        # object graph on its own. Pull it out explicitly, exactly as PixelData
+        # populate_attrs treats (5400,1010) as routed, and routed
+        # elements stay out of the graph whatever their size, so it never
+        # reaches the object graph on its own. Pull it out explicitly, exactly as PixelData
         # is handled above, and offload the bytes to the sidecar.
         # Only the first Waveform Sequence item is handled; multi-item
         # sequences (e.g. multiplexed rhythm + median) keep item 0 only.
@@ -4442,7 +4320,7 @@ def ingest_worker(fp: str) -> Tuple:
             raw = getattr(wf_item, "WaveformData", None)
             if raw:
                 w_bytes = bytes(raw)
-                # Little-endian in the sidecar, whatever the source (#657):
+                # Little-endian in the sidecar, whatever the source:
                 # `decode_samples` reads `<` and both exporters write these
                 # bytes back verbatim. The word is the sample, and
                 # (5400,1004) is what says how wide a sample is -- `OW`
@@ -4460,13 +4338,12 @@ def ingest_worker(fp: str) -> Tuple:
 
         # The samples of groups 1..n are discarded just above; their
         # sequence items go with them. `populate_attrs` walks the whole
-        # sequence, so the graph used to hold one item per group while
-        # the sidecar held one group's bytes -- and the export wrote
-        # every item, producing a file that declared a multiplex group
-        # and carried no Waveform Data for it. (5400,1010) is Type 1
-        # (PS3.3 C.10.9): a conformant reader may reject such a file, and
-        # a trusting one reads `NumberOfWaveformSamples` with nothing
-        # behind it (#160).
+        # sequence, so without this the graph would hold one item per
+        # group while the sidecar holds one group's bytes, and the export
+        # would declare a multiplex group with no Waveform Data for it.
+        # (5400,1010) is Type 1 (PS3.3 C.10.9): a conformant reader may
+        # reject such a file, and a trusting one reads
+        # `NumberOfWaveformSamples` with nothing behind it.
         #
         # Dropped at ingest rather than at export because the graph is
         # what every consumer reads -- the DICOM writer, the WFDB record,
@@ -4475,17 +4352,14 @@ def ingest_worker(fp: str) -> Tuple:
         # this pipeline does not have. Nothing is hidden by dropping
         # them: `import_files` warns and files the DATA_LOSS entry from
         # `meta['waveform_groups']`, which still carries the source's
-        # original group count.
-        #
-        # This is not a position on #150. It is correct under every
-        # answer there, and if multi-rate support ever lands the block
-        # stops firing on its own -- the items are dropped because the
-        # samples are, and then they would not be.
+        # original group count. The items are dropped because the samples
+        # are; if the samples of other groups are ever kept, this must
+        # stop dropping their items.
         wf_seq = inst.sequences.get("5400,0100")
         if wf_seq is not None and len(wf_seq.items) > 1:
             del wf_seq.items[1:]
 
-            # And what ingest had to say about their byte order (#657):
+            # And what ingest had to say about their byte order:
             # a row about an element of a discarded group would say its
             # bytes were kept, and the group's own DATA_LOSS row is the
             # true account of them. The Waveform Sequence here is the
@@ -4495,7 +4369,7 @@ def ingest_worker(fp: str) -> Tuple:
                 if not (u[1] and u[1][0][0] == "5400,0100"
                         and u[1][0][1] >= 1)]
 
-            # And the references to what the del removed (#177).
+            # And the references to what the del removed.
             # Waveform Annotation Sequence (0040,B020) sits at instance
             # level and names a multiplex group by the ordinal of its
             # Waveform Sequence item (PS3.3 C.10.10.1.1), so the del
@@ -4515,14 +4389,14 @@ def ingest_worker(fp: str) -> Tuple:
             meta['dropped_annotation_groups'] = ann_groups
 
         # The result has to cross the process boundary, and the pool pickles
-        # it in its own hand-back, outside this `try` (#651). A result that
-        # cannot be pickled raised there, and the parent cannot catch it
-        # per file: `executor.map` re-raises at the point of iteration and
+        # it in its own hand-back, outside this `try`. A result that cannot
+        # be pickled would raise there, and the parent cannot catch it per
+        # file: `executor.map` re-raises at the point of iteration and
         # cancels every future queued behind it, and `run_parallel` is
-        # called without a per-item arm -- so one such file lost the whole
-        # pass, with no row. Asked here, it is one failed file on the
-        # channel every other failure uses. `_process_safe` is the fix for
-        # the value that was found; this is the guarantee for the next one.
+        # called without a per-item arm -- so one such file would lose the
+        # whole pass, with no row. Asked here, it is one failed file on the
+        # channel every other failure uses. `_process_safe` handles the
+        # known unpicklable value; this is the guarantee for the next one.
         #
         # `(meta, inst)` and not `inst` alone: `meta` carries live objects
         # too (the nested pixel candidates, among others). The other five
@@ -4542,9 +4416,8 @@ def ingest_worker(fp: str) -> Tuple:
     except Exception as e:
         # `{'path': fp}` rather than None in the meta slot, so the
         # parent can name the file in its ERROR row without parsing the
-        # prose. The reason travels as the error string it always was;
-        # the arity -- unpacked at every call site -- does not change
-        # (#211).
+        # prose. The reason travels as the error string; the arity --
+        # unpacked at every call site -- does not change.
         return ({'path': fp}, None, None, None, None, None, None,
                 describe_exception(e))
 
@@ -4625,11 +4498,11 @@ class DicomImporter:
                         if filename.startswith('.'):
                             continue
                         all_files.append(os.path.join(root, filename))
-        # `os.walk` order is the filesystem's -- measured: APFS lists
-        # neither sorted nor in creation order, HFS+ lists sorted -- and
-        # #431 keeps the first file linked for a duplicated SOP Instance
-        # UID, so without this the same folder kept a different file on a
-        # different volume (#450). The key is the path string as built
+        # `os.walk` order is the filesystem's -- APFS lists neither sorted
+        # nor in creation order, HFS+ lists sorted -- and ingest keeps the
+        # first file linked for a duplicated SOP Instance UID, so without
+        # this the same folder would keep a different file on a different
+        # volume. The key is the path string as built
         # above, the one the declined row prints: not `abspath` or
         # `realpath`, which would reorder a symlinked tree, and not
         # locale-aware, which would differ by machine.
@@ -4653,14 +4526,14 @@ class DicomImporter:
         patient_map = {p.patient_id: p for p in store.patients}
         study_map = {}  # Key: study_uid -> Study
         series_map = {}  # Key: series_uid -> Series
-        # Which patient holds each study (#584): a file with no Patient ID
+        # Which patient holds each study: a file with no Patient ID
         # belongs to the patient of its study, so the study is looked up
         # before any patient is created.
         study_owner = {}  # Key: study_uid -> Patient
         id_less_files = 0
 
         # Every SOP Instance UID the session already holds, and the
-        # instance holding it (#431). Seeded from the graph, which equals
+        # instance holding it. Seeded from the graph, which equals
         # the store at open (`Session.__init__` loads it all), so a file
         # duplicating a *stored* instance is caught exactly like one
         # duplicating an instance ingested a moment ago in this loop.
@@ -4687,23 +4560,23 @@ class DicomImporter:
         # resolution keywords -- so `chunksize`, `desc` and the progress
         # bar live in this call and nowhere else. Resolved here because
         # this is the one frame that can say what the strategy is worth
-        # to ingest: see the warning below (#393).
+        # to ingest: see the warning below.
         strategy = _resolve_strategy(None, 1, None, False, False, True,
                                      "Ingesting", None)
         # `ingest()` hands in the session's `ProcessPoolExecutor`, which
         # `_run_on_shared_executor` uses as given, so a threads lever the
-        # strategy granted reaches nothing (#390). Say so, once per call
-        # that dispatches, where the operator who set the variable will
-        # look for its effect (#393, in #400's shape: it names only the
-        # knob that was set, says the result is correct, and bounds
-        # itself). The conditions are each load-bearing:
+        # strategy granted reaches nothing. Say so, once per call that
+        # dispatches, where the operator who set the variable will look
+        # for its effect: it names only the knob that was set, says the
+        # result is correct, and bounds itself. The conditions are each
+        # load-bearing:
         #   - `threads_requested_by`, not `use_threads`: a free-threaded
         #     build resolves to threads with nothing set, and warning
         #     there would be a line on every 3.14t ingest about a
         #     variable nobody touched;
         #   - `use_threads` as well: when recycling beat the request,
-        #     #185's warning -- emitted inside `run_parallel`, and
-        #     already naming `ingest()` -- is the one line;
+        #     the warning emitted inside `run_parallel`, which already
+        #     names `ingest()`, is the one line;
         #   - an executor that is not a thread pool: with none,
         #     `run_parallel` builds its own pool and honours the lever,
         #     and a `ThreadPoolExecutor` is already threads.
@@ -4725,43 +4598,34 @@ class DicomImporter:
                 "audit(), scan_pixel_content() and redact() in this "
                 "process; ingest() has no threads mode.",
                 strategy.threads_requested_by)
-        # The recycling lever has the same shape one rank up (#471,
-        # #393's twin). `_resolve_strategy` read
-        # `ISOCENTER_MAX_TASKS_PER_CHILD` into the strategy, and the
-        # session's `ProcessPoolExecutor` -- built once at `Session()`
-        # with no `max_tasks_per_child`, and used as given -- never
-        # recycles a worker: 24 tasks under the variable set to 2 ran on
-        # no more distinct worker PIDs than the pool has workers, on
-        # both gate builds.
+        # The recycling lever has the same shape one rank up.
+        # `_resolve_strategy` read `ISOCENTER_MAX_TASKS_PER_CHILD` into
+        # the strategy, and the session's `ProcessPoolExecutor` -- built
+        # once at `Session()` with no `max_tasks_per_child`, and used as
+        # given -- never recycles a worker.
         #
-        # Honouring it here was weighed and not taken, for two reasons,
-        # and the first is the trap for anyone tempted to "just pass
-        # the kwarg". `ProcessPoolExecutor(max_tasks_per_child=)`
-        # DEADLOCKS `map` on 3.12, the floor, the first time a worker
-        # actually has to be replaced. Measured on 3.12.14, macOS spawn,
-        # 2 workers x 2 tasks per child: 4 tasks complete and 12 hang,
-        # 3 runs of 3; at the session's own shape 30 complete and 400
-        # hang. 3.14 and 3.14t are fine (12 tasks on 6 PIDs, in order),
-        # and Ubuntu was not measured. So on the one interpreter the
-        # package promises as its floor, honouring the lever would have
-        # hung `ingest()` rather than recycled it, and "only
-        # `multiprocessing.Pool` recycles" is operationally true there
-        # (#501). Second, the pool is built once at `Session()`: a
-        # variable read there would be the one construction-time read of
-        # a precedence lever in the package, and set after the session
-        # opened it would be ignored in the same silence one step later.
+        # Do not "just pass the kwarg" to honour it.
+        # `ProcessPoolExecutor(max_tasks_per_child=)` DEADLOCKS `map` on
+        # 3.12, the floor, the first time a worker actually has to be
+        # replaced (macOS spawn; 3.14 and 3.14t are fine), so it would
+        # hang `ingest()` rather than recycle it; on 3.12 only
+        # `multiprocessing.Pool` recycles. And the pool is built once at
+        # `Session()`: a variable read there would be the one
+        # construction-time read of a precedence lever in the package,
+        # and set after the session opened it would be ignored in the
+        # same silence one step later.
         # The conditions:
         #   - `maxtasksperchild`, which this call never passes as an
         #     argument, so any value in the strategy is the variable's;
         #     the name comes from `processes_requested_by`, the
-        #     attribution field, rather than being spelled here (#400);
+        #     attribution field, rather than being spelled here;
         #   - `threads_request_overridden_by is None`: with
-        #     `ISOCENTER_FORCE_THREADS` also set, #185's warning --
-        #     emitted inside `run_parallel`, and already saying that
-        #     `ingest()` takes no lever -- is the one line;
+        #     `ISOCENTER_FORCE_THREADS` also set, the warning emitted
+        #     inside `run_parallel`, which already says that `ingest()`
+        #     takes no lever, is the one line;
         #   - any caller-supplied executor. Unlike the threads case, no
-        #     pool type is exempted, and that was a choice rather than a
-        #     limit: `ProcessPoolExecutor._max_tasks_per_child` and
+        #     pool type is exempted, deliberately:
+        #     `ProcessPoolExecutor._max_tasks_per_child` and
         #     `Pool._maxtasksperchild` could be read to tell a recycling
         #     pool from one that is not, but both are private, no caller
         #     hands one in, and a pool recycling at some other interval
@@ -4784,11 +4648,11 @@ class DicomImporter:
         # the one path that would otherwise yield by arrival: the
         # recycling pool, which a direct `import_files(executor=None)`
         # reaches under `ISOCENTER_MAX_TASKS_PER_CHILD`. The session's
-        # shared executor is ordered already (#450).
+        # shared executor is ordered already.
         #
         # `_ingest_results` makes that dispatch through `run_parallel`,
         # still this module's binding, and survives a worker process that
-        # ends (#654): the file it ended on comes back in its own slot as
+        # ends: the file it ended on comes back in its own slot as
         # a failed result, which the `err is not None` arm below records
         # like any other rejected file, and the rest come back in order.
         results = _ingest_results(new_files, executor, strategy,
@@ -4802,7 +4666,7 @@ class DicomImporter:
         # it, and re-querying per result would walk the whole graph once
         # per file.
         superseded = store.get_superseded_uids()
-        # The project secret, only if the store already holds one (#544):
+        # The project secret, only if the store already holds one:
         # a study or series this store replaced is found again under the
         # replacement of the UID a new file carries. Read-only, so ingest
         # still never creates a secret; a store without one has replaced
@@ -4811,12 +4675,12 @@ class DicomImporter:
                       if hasattr(store_backend, "_project_secret_if_present")
                       else None)
 
-        # The sidecar gate for sites 1-3 below (#368). Every frame this
-        # loop appends is written under it, per result, so no append
-        # can land in a file `compact_sidecar` is replacing. Callers that
-        # pass a bare `DicomStore` and no backend (two test callers, and
-        # the fixture generators) have no store to gate on and no
-        # compaction to race, so they get a no-op.
+        # The sidecar gate for sites 1-3 below. Every frame this loop
+        # appends is written under it, per result, so no append can land
+        # in a file `compact_sidecar` is replacing. Callers that pass a
+        # bare `DicomStore` and no backend (the fixture generators, say)
+        # have no store to gate on and no compaction to race, so they get
+        # a no-op.
         gate = (store_backend._hold_sidecar_gate
                 if hasattr(store_backend, "_hold_sidecar_gate")
                 else contextlib.nullcontext)
@@ -4948,18 +4812,12 @@ class DicomImporter:
                     action_type="WARNING", entity_uid=uid, details=detail)
 
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
-            # Clear result components from scope as soon as possible after use to help GC
-            # But the loop variable holds them. Next iteration clears them.
             # `is not None`, not truthiness. An empty reason is still a
-            # failure: `str(KeyError())` is `''`, so a worker whose
-            # reason was built from a message-less exception returned
-            # `''` here, this test was falsy, `inst` was None too, and
-            # the file was counted nowhere -- no failure, no audit row,
-            # not declined, not skipped (#435). Every failing return in
+            # failure: `str(KeyError())` is `''`, and with `inst` None too
+            # a falsy test would count the file nowhere -- no failure, no
+            # audit row, not declined, not skipped. Every failing return in
             # `ingest_worker` carries a non-None reason and the success
-            # return carries None; `describe_exception` makes today's
-            # reasons non-empty, and this makes an empty one impossible
-            # to lose.
+            # return carries None.
             if err is not None:
                 _record_failure((meta or {}).get('path', '<unknown>'), err)
                 continue
@@ -4969,19 +4827,19 @@ class DicomImporter:
                     # the un-redacted original of an image the store
                     # already holds in redacted form -- it kept its SOP
                     # Instance UID while the redacted copy took a
-                    # generated one (#228), so nothing else in the graph
-                    # can tell they are the same image. Linking it back
-                    # in puts the burned-in identifier into the store,
-                    # the sidecar and the export (#238), and
-                    # `persist_pixel_data` does not de-duplicate, so a
-                    # write here would also strand the frame (#235).
+                    # generated one, so nothing else in the graph can tell
+                    # they are the same image. Linking it back in puts the
+                    # burned-in identifier into the store, the sidecar and
+                    # the export, and `persist_pixel_data` does not
+                    # de-duplicate, so a write here would also strand the
+                    # frame.
                     supersedes = superseded.get(inst.sop_instance_uid)
                     if supersedes:
-                        # Since #544 UID replacement moves the identity
-                        # too, so the file is not always an un-redacted
-                        # original: it may be the source of an instance
-                        # `anonymize()` renamed. Either way the store
-                        # already holds this image.
+                        # UID replacement moves the identity too, so the
+                        # file is not always an un-redacted original: it
+                        # may be the source of an instance `anonymize()`
+                        # renamed. Either way the store already holds this
+                        # image.
                         detail = (
                             f"Not importing {inst.file_path}: SOP Instance "
                             f"UID {inst.sop_instance_uid} is the identity "
@@ -4997,16 +4855,16 @@ class DicomImporter:
                         # line per file. The audit row is per file
                         # regardless -- it is the compliance trail, and
                         # DATA_LOSS rows are per instance for the same
-                        # reason.
+                        # reason. The log lines are a rendering of those
+                        # rows, so tests do not pin their wording.
                         if declined_superseded <= 5:
                             logger.warning(detail)
                         elif declined_superseded == 6:
                             logger.warning(
                                 "... (suppressing further per-file messages "
                                 "for superseded sources) ...")
-                        # Written in the parent: `import_files` runs here,
-                        # so this is not the worker-audit hazard of #126.
-                        # Guarded because two test callers pass a bare
+                        # Written in the parent, where the store handle is.
+                        # Guarded because some callers pass a bare
                         # `DicomStore` and no backend at all.
                         if store_backend is not None:
                             store_backend.log_audit(
@@ -5016,27 +4874,26 @@ class DicomImporter:
                         continue
 
                     # A second instance with an SOP Instance UID the
-                    # session already holds (#431). The store is keyed on
-                    # that UID and its upsert is `ON CONFLICT DO UPDATE`,
-                    # so linking this one let the next `save()` overwrite
-                    # the holder's row -- series, pixels and all -- with
-                    # whichever was linked last, and a reload held one
-                    # instance where `ingested` had counted two. Keep the
+                    # session already holds. The store is keyed on that
+                    # UID and its upsert is `ON CONFLICT DO UPDATE`, so
+                    # linking this one would let the next `save()`
+                    # overwrite the holder's row -- series, pixels and
+                    # all -- with whichever was linked last. Keep the
                     # first, decline the rest, and say so.
                     #
-                    # Above the sidecar write, for #238's reason: nothing
-                    # de-duplicates a frame, so writing and then declining
-                    # would strand it. And a `WARNING`, not `DATA_LOSS`:
-                    # this file never entered the store, so no element of
-                    # data that was ingested is smaller than it claims
-                    # (#211's scoping). `WARNING` rows are exceptions in
-                    # the report and bar PASS.
+                    # Above the sidecar write, for the reason above:
+                    # nothing de-duplicates a frame, so writing and then
+                    # declining would strand it. And a `WARNING`, not
+                    # `DATA_LOSS`: this file never entered the store, so no
+                    # element of data that was ingested is smaller than it
+                    # claims. `WARNING` rows are exceptions in the report
+                    # and bar PASS.
                     #
                     # "First" is first in path order among the files new
                     # to this call -- `all_files` is sorted and results
                     # are consumed in submission order -- and an instance
                     # the session already held beats every new file,
-                    # because `held` is seeded from the graph (#450).
+                    # because `held` is seeded from the graph.
                     holder = held.get(inst.sop_instance_uid)
                     if holder is not None:
                         holder_path = holder.source_path or holder.file_path
@@ -5069,7 +4926,7 @@ class DicomImporter:
 
                     # Persist Pixels to Sidecar (Main Thread Sequential Write)
                     #
-                    # Site 1 of six (#368). The gate is taken per result
+                    # Site 1 of six. The gate is taken per result
                     # around the append, not around the whole loop: a
                     # 10k-file ingest must not hold it for its duration,
                     # or a background save queued behind it expires at
@@ -5085,38 +4942,35 @@ class DicomImporter:
                     if p_bytes and sidecar_manager:
                         with gate():
                             off, leng = sidecar_manager.write_frame(p_bytes, p_alg)
-                        # `pixel_hash=p_hash`, explicitly. Left out, the
-                        # loader's integrity check never ran on this path:
-                        # `inst._pixel_hash` was set on the next line, but a
-                        # loader built with no hash has nothing to compare,
-                        # and `save()` keeps this loader object -- so
-                        # another frame's bytes at this offset read back as
-                        # this instance's pixels (#436). `p_hash` is
-                        # `sha256(p_bytes)`, the stored bytes the check
-                        # reads. Passed rather than left to the loader's
-                        # fallback to `inst._pixel_hash`, which would make
-                        # it depend on the order of these two lines (#212).
+                        # `pixel_hash=p_hash`, explicitly. A loader built
+                        # with no hash has nothing to compare, and `save()`
+                        # keeps this loader object -- so another frame's
+                        # bytes at this offset would read back as this
+                        # instance's pixels. `p_hash` is `sha256(p_bytes)`,
+                        # the stored bytes the check reads. Passed rather
+                        # than left to the loader's fallback to
+                        # `inst._pixel_hash`, which would make it depend on
+                        # the order of these two lines.
                         inst._pixel_loader = SidecarPixelLoader(
                             sidecar_manager.filepath, off, leng, p_alg,
                             instance=inst, pixel_hash=p_hash)
                         inst._pixel_hash = p_hash
 
-                    # HighBit other than BitsStored - 1 (#455, #523). A
-                    # `WARNING`, the frozen action type (#411): the file's
-                    # own header is non-conformant (PS3.5 8.1.1), which is
-                    # a fact about the user's data, so it bars PASS
-                    # (#479). One row per instance, as the declined rows
-                    # above are; the log is capped the same way, so a
-                    # 2,000-instance legacy cohort prints five lines and a
-                    # suppression line rather than 2,000. After both
+                    # HighBit other than BitsStored - 1. A `WARNING`, from
+                    # the frozen action types: the file's own header is
+                    # non-conformant (PS3.5 8.1.1), which is a fact about
+                    # the user's data, so it bars PASS. One row per
+                    # instance, as the declined rows above are; the log is
+                    # capped the same way, so a large legacy cohort prints
+                    # five lines and a suppression line. After both
                     # declined `continue`s: a file not linked gets no row.
                     high_bit = meta.get('high_bit_mismatch')
                     if high_bit:
                         _record_high_bit(inst.sop_instance_uid,
                                          _high_bit_words(high_bit))
 
-                    # A stream wider than BitsStored, read by the stream
-                    # (#622, owner ruling Q2). A `WARNING` for HighBit's
+                    # A stream wider than BitsStored, read by the stream.
+                    # A `WARNING` for HighBit's
                     # reason: a fact about the file's own header, which
                     # bars PASS. Beside it, on its own log cap.
                     wider = meta.get('precision_mismatch')
@@ -5125,7 +4979,7 @@ class DicomImporter:
                                           _precision_words(wider))
 
                     # A sample the stream's own declared precision cannot
-                    # hold (#671). A `WARNING` on the same terms as the
+                    # hold. A `WARNING` on the same terms as the
                     # row above and for the same reason: a value that
                     # cannot be trusted across readers is a review, not a
                     # loss. Both can fire for one file -- they are
@@ -5137,8 +4991,8 @@ class DicomImporter:
                             inst.sop_instance_uid,
                             _beyond_precision_words(beyond))
 
-                    # LossyImageCompression recorded from the pixel data
-                    # (#601, owner ruling Q1). A `WARNING`: the stamp is a
+                    # LossyImageCompression recorded from the pixel data.
+                    # A `WARNING`: the stamp is a
                     # permanent claim this library derived, and the row is
                     # what makes it reviewable; it bars PASS. After both
                     # declined `continue`s, like the HighBit row.
@@ -5149,13 +5003,12 @@ class DicomImporter:
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames
-                    # declares (#418). Scoped SIGNAL, as the multiplex
-                    # groups below are: what was discarded is acquired
-                    # image data, so the run is reported AND graded, and
-                    # an instance that silently lost frames does not
-                    # PASS. SIGNAL rather than a new scope word, because
-                    # the scope vocabulary is frozen
-                    # (tests/test_frozen_surface.py).
+                    # declares. Scoped SIGNAL, as the multiplex groups
+                    # below are: what was discarded is acquired image
+                    # data, so the run is reported AND graded, and an
+                    # instance that lost frames does not PASS. SIGNAL
+                    # rather than a new scope word, because the scope
+                    # vocabulary is frozen.
                     excess = meta.get('offset_table_excess')
                     if excess:
                         table_frames, declared, _declared_raw, _table = excess
@@ -5170,11 +5023,11 @@ class DicomImporter:
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_SIGNAL)
 
-                    # Silent truncation is the defect here, not the
-                    # missing multi-rate support -- that is deferred on
-                    # purpose. A record whose groups were dropped without
-                    # a word is indistinguishable from one that only ever
-                    # had a single group (#36).
+                    # Multi-rate records are not supported, so the groups
+                    # are dropped; the drop must never be silent. A record
+                    # whose groups were dropped without a word is
+                    # indistinguishable from one that only ever had a
+                    # single group.
                     groups = meta.get('waveform_groups', 0)
                     if groups > 1:
                         dropped = groups - 1
@@ -5188,12 +5041,12 @@ class DicomImporter:
                         # entry is what puts this in the record.
                         #
                         # Scoped SIGNAL, so it is reported AND graded:
-                        # the run does not PASS (#150). The tag is
-                        # standard -- Waveform Sequence (5400,0100), an
-                        # even group -- but what was discarded is
-                        # acquired signal, and a 12-lead ECG that came
-                        # out holding group 0 under a PASS grade is the
-                        # case parity was wrong for. Still not PRIVATE:
+                        # the run does not PASS. The tag is standard --
+                        # Waveform Sequence (5400,0100), an even group --
+                        # but what was discarded is acquired signal, and a
+                        # 12-lead ECG must not come out holding group 0
+                        # under a PASS grade, as parity would grade it.
+                        # Still not PRIVATE:
                         # the scope states what the element was, and
                         # this one was neither private nor routine.
                         if store_backend is not None:
@@ -5204,11 +5057,10 @@ class DicomImporter:
                                 loss_scope=LOSS_SCOPE_SIGNAL)
 
                     # Annotations whose references the group discard
-                    # left dangling (#177). Dropping them without a row
-                    # would re-create the silent truncation #36 closed,
-                    # one element over; the WFDB bridge already reports
-                    # its equivalent drop (#159), and the two paths must
-                    # not differ in whether the user is told.
+                    # left dangling. Dropping them without a row would be
+                    # the silent truncation above, one element over; the
+                    # WFDB bridge reports its equivalent drop, and the two
+                    # paths must not differ in whether the user is told.
                     #
                     # Scoped STANDARD, not SIGNAL: an annotation is a
                     # mark *about* the signal, and the acquired-samples
@@ -5259,7 +5111,7 @@ class DicomImporter:
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_STANDARD)
 
-                    # Persist nested pixel payloads to the sidecar (#183).
+                    # Persist nested pixel payloads to the sidecar.
                     #
                     # Same shape as the waveform block below, and its
                     # comment about calling `record_blob_ref` without
@@ -5304,7 +5156,7 @@ class DicomImporter:
                             continue
                         # The frames `_decode_nested_pixels` dropped because
                         # the item's offset table named more than it
-                        # declares (#433). Here, below the no-sidecar
+                        # declares. Here, below the no-sidecar
                         # branch, so only an icon that is actually carried
                         # claims "kept the first N". STANDARD, not the
                         # top level's SIGNAL: an icon is a derived
@@ -5326,8 +5178,8 @@ class DicomImporter:
                                     entity_uid=inst.sop_instance_uid,
                                     details=detail,
                                     loss_scope=LOSS_SCOPE_STANDARD)
-                        # The top level's HighBit row, for a carried icon
-                        # (#598). Below the no-sidecar branch for the
+                        # The top level's HighBit row, for a carried icon.
+                        # Below the no-sidecar branch for the
                         # offset-table row's reason: only an icon that is
                         # carried has a decode to describe. The words are
                         # the top level's, tail included, and it is true
@@ -5340,7 +5192,7 @@ class DicomImporter:
                                 inst.sop_instance_uid,
                                 f"{_nested_row_prefix(n_tag, h_vr, n_path)}"
                                 f"{_high_bit_words(h_facts)}")
-                        # And the precision row (#622), on the same terms:
+                        # And the precision row, on the same terms:
                         # true here because `_write_back_nested_pixels`
                         # writes an icon's BitsStored from its samples.
                         n_wider = nested_precision.get((n_path, n_tag))
@@ -5350,7 +5202,7 @@ class DicomImporter:
                                 inst.sop_instance_uid,
                                 f"{_nested_row_prefix(n_tag, w_vr, n_path)}"
                                 f"{_precision_words(w_facts)}")
-                        # And the over-precision row (#671), on the same
+                        # And the over-precision row, on the same
                         # terms: the icon is read as decoded and written
                         # back as read, so the sentence is true here too.
                         n_beyond = nested_beyond.get((n_path, n_tag))
@@ -5361,7 +5213,7 @@ class DicomImporter:
                                 f"{_nested_row_prefix(n_tag, b_vr, n_path)}"
                                 f"{_beyond_precision_words(b_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
-                        # Site 2 of six (#368): append and row commit under
+                        # Site 2 of six: append and row commit under
                         # one hold, per icon, for the reason at site 1.
                         with gate():
                             n_off, n_len = sidecar_manager.write_frame(
@@ -5387,16 +5239,15 @@ class DicomImporter:
                     # `remove_private_tags=False` could not have kept
                     # them. Same reasoning as the block above: a loss the
                     # caller cannot see is indistinguishable from a file
-                    # that never carried the tag (#125).
+                    # that never carried the tag.
                     #
-                    # The key still says `private` because #125 found it
-                    # there; since #137 the list also carries standard
-                    # elements, which is why the message is chosen per
-                    # tag. Saying "Private tag 6000,3000" on a row the
+                    # The key says `private`, but the list also carries
+                    # standard elements, which is why the message is chosen
+                    # per tag. Saying "Private tag 6000,3000" on a row the
                     # report scopes STANDARD invites the reader to
                     # distrust whichever half they check second.
                     # A nested item whose offset table names fewer frames
-                    # than it declares (#433): not carried, and not in
+                    # than it declares: not carried, and not in
                     # `dropped_private_binary` either, so it gets this
                     # row and only this one -- the generic one below
                     # would call it "unrouted", which is not why.
@@ -5421,15 +5272,13 @@ class DicomImporter:
 
                     for tag, vr in meta.get('dropped_private_binary', ()):
                         scope = loss_scope_for_tag(tag)
-                        # Two reason clauses, because two rules drop
-                        # (#151): group 7fe0 is excluded wholesale
-                        # (unrouted pixel elements -- an icon's nested
-                        # Pixel Data, a float element beside real Pixel
-                        # Data), while everything else is dropped only
-                        # for exceeding the retention threshold. One
-                        # sentence covering both would be false for one
-                        # of them, which is how #194's wrong-reason row
-                        # happened.
+                        # Two reason clauses, because two rules drop:
+                        # group 7fe0 is excluded wholesale (unrouted pixel
+                        # elements -- an icon's nested Pixel Data, a float
+                        # element beside real Pixel Data), while everything
+                        # else is dropped only for exceeding the retention
+                        # threshold. One sentence covering both would be
+                        # false for one of them.
                         if tag.startswith("7fe0"):
                             reason = ("unrouted pixel elements are not "
                                       "held in the object graph")
@@ -5461,17 +5310,15 @@ class DicomImporter:
                     # about what is inside them. Section 3.1 of the
                     # compliance report is headed "present in the source
                     # and not in the exported data", so filing this
-                    # there would make that header false (#167).
+                    # there would make that header false.
                     #
-                    # This row says what ingest knows and stops there.
-                    # It used to end "was retained verbatim and
-                    # exported", which ingest cannot know: the default
-                    # `remove_private_tags=True` deletes the element
-                    # during `anonymize()`, and the report then carried
-                    # a REMEDIATION_REMOVE row in section 2 and the
-                    # claim that the same bytes shipped in section 3.2.
-                    # `generate_report` resolves that against the graph;
-                    # `element_tag` is what it resolves (#167).
+                    # This row says what ingest knows and stops there. Do
+                    # not say the bytes were exported, which ingest cannot
+                    # know: the default `remove_private_tags=True` deletes
+                    # the element during `anonymize()`. `generate_report`
+                    # resolves that against the graph; `element_tag` is
+                    # what it resolves. The log line is a rendering of
+                    # this row, which is what carries the fact.
                     #
                     # No `loss_scope`: the column grades losses, and
                     # this is not one.
@@ -5492,8 +5339,8 @@ class DicomImporter:
                                 element_tag=tag)
 
                     # A binary value read from a big-endian source that
-                    # the graph could not bring to little-endian whole
-                    # (#657): the words were converted and this says what
+                    # the graph could not bring to little-endian whole:
+                    # the words were converted and this says what
                     # was not. WARNING, not DATA_LOSS -- every byte is
                     # carried; what is uncertain is their order.
                     for entry in meta.get('big_endian_unconverted', ()):
@@ -5502,7 +5349,7 @@ class DicomImporter:
 
                     # Persist Waveform Samples to Sidecar
                     #
-                    # Site 3 of six (#368): append and row commit under one
+                    # Site 3 of six: append and row commit under one
                     # hold, for the reason at site 1.
                     if w_bytes and sidecar_manager:
                         with gate():
@@ -5533,7 +5380,7 @@ class DicomImporter:
                     sid = _held_under(study_map, meta['sid'], uid_secret)
                     ser_id = _held_under(series_map, meta['ser_id'], uid_secret)
 
-                    # Patient, after the study is looked up (#584): a file
+                    # Patient, after the study is looked up: a file
                     # with no Patient ID joins the patient holding its
                     # study, and a file with one never creates an empty
                     # patient beside a study someone else already holds
@@ -5549,7 +5396,7 @@ class DicomImporter:
                     if not study:
                         # A date we cannot read is a date we do not have.
                         # Substituting one here is indistinguishable
-                        # downstream from a date that was recorded (#60).
+                        # downstream from a date that was recorded.
                         sdate = None
                         if meta['sdate']:
                             try:
@@ -5572,7 +5419,7 @@ class DicomImporter:
                         series = Series(ser_id, meta['modality'], meta['series_num'])
                         # The "is this equipment?" rule lives on
                         # `Equipment.from_parts`, shared with both store
-                        # hydration routes and the builder (#290, #282).
+                        # hydration routes and the builder.
                         series.equipment = Equipment.from_parts(
                             meta['man'], meta['model'], meta['dev_sn'])
                         study.series.append(series)
@@ -5591,14 +5438,14 @@ class DicomImporter:
                 except Exception as e:
                     # A parent-side failure is the same failure to the
                     # caller as a worker-side one: the file is not in the
-                    # store. It takes the same route (#211).
+                    # store. It takes the same route.
                     _record_failure(inst.file_path or '<unknown>',
                                     f"Linkage Failed: {describe_exception(e)}")
 
         logger.info(f"Successfully ingested {count} instances.")
         if id_less_files:
             # A count, never an audit row: Patient ID is Type 2 and empty
-            # is legal, so an ID-less file is not a failure (#584).
+            # is legal, so an ID-less file is not a failure.
             logger.info(
                 f"{id_less_files} file(s) carried no Patient ID; each of "
                 "their studies was made its own patient.")
@@ -5623,8 +5470,8 @@ class DicomImporter:
             skipped=skipped_count)
 
 
-#: The refusal every door raises for a `compression` it cannot write
-#: (#605). One constant because the CHANGELOG quotes it.
+#: The refusal every door raises for a `compression` it cannot write.
+#: One constant because the CHANGELOG quotes it.
 _COMPRESSION_REFUSAL = (
     "compression must be None (Implicit VR Little Endian) or 'j2k' "
     "(JPEG 2000 Lossless); got {!r}")
@@ -5709,7 +5556,7 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
     if markers is None:
         return
     # YES is held back from a file that says Burned In Annotation
-    # `(0028,0301) YES` (owner ruling on the review of L12): PS3.3
+    # `(0028,0301) YES`: PS3.3
     # C.7.1.1's YES covers the Pixel Data too, Isocenter does not read the
     # pixels, and this file declares text drawn into them. Held back means
     # not written, so a source's own `(0012,0062)` stays as it was. Read
@@ -5758,9 +5605,9 @@ class ExportContext:
     pixel_alg: Optional[str] = None
     redaction_zones: List[Tuple] = field(default_factory=list)
     #: Drop every nested icon that is **not** the carrier's own depth-1
-    #: Icon Image Sequence item (#183, #542). Store-wide, because such an
+    #: Icon Image Sequence item. Store-wide, because such an
     #: icon may thumbnail a different, redacted SOP instance whose UID
-    #: redaction regenerated (#183): computed ONCE per export run by the
+    #: redaction regenerated: computed ONCE per export run by the
     #: context builder -- see `redaction_in_effect` for why a per-instance
     #: condition fails open for it. The carrier's own icon is gated per
     #: instance in the worker instead (`_is_own_icon_path`). Both context
@@ -5768,12 +5615,12 @@ class ExportContext:
     #: redacted frames.
     drop_foreign_icons: bool = False
     #: Re-read the written file, compare its descriptors and decode and
-    #: compare every sample before delivering it (#209, #449). Off by
-    #: default: it costs a second parse and a full decode per instance
-    #: (#449). Carried here because the check runs in the worker -- the
+    #: compare every sample before delivering it. Off by
+    #: default: it costs a second parse and a full decode per instance.
+    #: Carried here because the check runs in the worker -- the
     #: file is local to it and the cost parallelizes.
     verify_readback: bool = False
-    #: The de-identification markers to stamp (#554), decided by
+    #: The de-identification markers to stamp, decided by
     #: `session.export()`'s plan. None writes none: `write_tree()`'s
     #: builder never sets it, and neither does the plan for an instance
     #: whose policy was not applied in full.
@@ -5805,30 +5652,29 @@ class ExportOutcome:
     #: `LOSS_SCOPE_PRIVATE` / `LOSS_SCOPE_STANDARD`. The scope travels
     #: with the message rather than being worked out by the parent
     #: because only the worker still has the tag; by the time
-    #: `_report_export_losses` sees this, the tag is prose (#146).
+    #: `_report_export_losses` sees this, the tag is prose.
     losses: List[Tuple[str, str]] = field(default_factory=list)
     #: One sentence per descriptor the worker corrected on the way out,
-    #: for the parent to log at INFO (#468): today, a declared BitsStored
+    #: for the parent to log at INFO: for example, a declared BitsStored
     #: the values do not fit. Carried here rather than logged by the
     #: worker, because the worker is usually a spawned process whose
     #: `isocenter` logger has no handler -- `session.export()` always
     #: spawns them, and `write_tree()` does by default on a GIL build --
-    #: so a line logged there reached no one (0 of 3, measured in the
-    #: review of #506). Not a loss: nothing was dropped and the file is
-    #: correct, so it takes no audit row and does not move the grade.
+    #: so a line logged there reaches no one. Not a loss: nothing was
+    #: dropped and the file is correct, so it takes no audit row and
+    #: does not move the grade.
     corrections: List[str] = field(default_factory=list)
     #: One sentence per claim in the source's own header that the file
     #: just written could not honour, for the parent to log at WARNING
-    #: *and audit* (#502). Two sources today: a Photometric Interpretation
-    #: the written transfer syntax does not admit, and an ambiguous value
+    #: *and audit*. Two sources: a Photometric Interpretation the written
+    #: transfer syntax does not admit, and an ambiguous value
     #: representation whose decider the source omits or contradicts
-    #: (#674, #681, `_ambiguous_vr_warning`). The other half of the
-    #: write-path ruling's pair, and the distinction is not cosmetic --
-    #: `corrections` is a fact about this library (an exact, value-
-    #: preserving rewrite of our own making: INFO, no row, grade
-    #: unchanged), and a warning is a fact about the user's data (a
+    #: (`_ambiguous_vr_warning`). The distinction from `corrections` is
+    #: not cosmetic -- `corrections` is a fact about this library (an
+    #: exact, value-preserving rewrite of our own making: INFO, no row,
+    #: grade unchanged), and a warning is a fact about the user's data (a
     #: `WARNING` row, which reaches the compliance report's Exceptions &
-    #: Errors section and grades the run REVIEW_REQUIRED, #411/#479).
+    #: Errors section and grades the run REVIEW_REQUIRED).
     #: Collapsing them would make a gap in what this library can write
     #: read as a defect in the user's dataset, and a malformed source
     #: read as a shortcoming of ours.
@@ -5849,7 +5695,7 @@ class ExportSummary:
     # out.
     #: SOP Instance UID of each instance that reached disk, and nothing else: a write
     #: needs the UID for its file meta, so one without it fails and is in `failures`,
-    #: keyed UNKNOWN (#613). Never an output path, which names the Patient ID (D10).
+    #: keyed UNKNOWN. Never an output path, which names the Patient ID.
     written_uids: List[str] = field(default_factory=list)
     #: `(entity_uid, details)` per instance that did not reach disk,
     #: already audited by `_report_export_failures`.
@@ -5996,17 +5842,13 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # YBR_ICT and MONOCHROME1 survive a round trip.
     photometric = resolve_photometric_interpretation(attributes, geom.samples)
 
-    # No float-only branch here any more, and that absence is
-    # load-bearing. A `float_element` call arrives only from the worker
-    # arm that just refused `geom.samples > 1` (#222), so on the float
-    # path the resolver runs at `samples == 1` and can only answer None
-    # or MONOCHROME2 -- both conformant under C.7.6.24/C.7.6.25. The
-    # RGB pass-through guard that stood here (#224's narrow fix) is
-    # unreachable in that world and came out with the refusal; do not
-    # reintroduce a float correction here without re-reading #222's
-    # closing decision, and note that a third call site passing
-    # `float_element=True` without the worker's refusal upstream would
-    # be back to writing `RGB` onto a float element.
+    # No float-only branch here, and that absence is load-bearing. A
+    # `float_element` call arrives only from the worker arm that has just
+    # refused `geom.samples > 1`, so on the float path the resolver runs
+    # at `samples == 1` and can only answer None or MONOCHROME2 -- both
+    # conformant under C.7.6.24/C.7.6.25. A new call site passing
+    # `float_element=True` without that refusal upstream would write
+    # `RGB` onto a float element.
     if photometric is None:
         photometric = attributes.get("0028,0004")
     # `YBR_FULL_422` names a layout -- two chroma samples per two
@@ -6015,12 +5857,12 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # pixel, and `tobytes()` of that is a third longer than the label
     # promises. pydicom refuses the native file outright (`a third
     # larger than expected (192 vs 128 bytes)`) and decodes the JPEG 2000
-    # one beneath a label the codestream contradicts (#470). So the
+    # one beneath a label the codestream contradicts. So the
     # sampling half of the label is corrected, to `YBR_FULL`, which
     # names exactly these bytes; the colour-space half, YBR, is the
     # declaration's and is kept, because three samples are equally RGB
-    # or YBR and a relabel to RGB would be a label without its bytes
-    # (#372, #448, #482). Here and not in
+    # or YBR and a relabel to RGB would be a label without its bytes.
+    # Here and not in
     # `resolve_photometric_interpretation`, for the reason
     # `PlanarConfiguration` is written 0 here and not there: that
     # function answers what the graph should carry and is shared with
@@ -6034,7 +5876,7 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if photometric:
         ds.PhotometricInterpretation = photometric
 
-    # **The label is held against the syntax being written (#502), and
+    # **The label is held against the syntax being written, and
     # this is the only place a label reaches a file *that has a pixel
     # element*** -- both pixel-writing worker arms, integer and float,
     # come through here, so neither can bypass a check placed here the
@@ -6042,17 +5884,15 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # path.
     #
     # **The third arm does not come through here, and is judged
-    # elsewhere (#534).** An instance with no pixel element never calls
-    # this function, and `_merge` has already put whatever `0028,0004`
-    # the graph declared onto `ds`. Until #534 that file carried the label
-    # unexamined -- measured, an SR-shaped instance declaring `YBR_ICT`
-    # exported `ok=True` with no warning. The worker now judges that arm
-    # itself, after `_finalize_dataset`, with `_pixel_less_label_warning`:
-    # the same table, a remedy true of a file with no pixels, and the
-    # syntax read from `file_meta` because a pixel-less file stays native
-    # under compression. Do not move that judgement in here: this
-    # function is the pixel arms' contract, and its refusal of a
-    # multi-valued label is true only of a file with pixels.
+    # elsewhere.** An instance with no pixel element never calls this
+    # function, and `_merge` has already put whatever `0028,0004` the
+    # graph declared onto `ds`. The worker judges that arm itself, after
+    # `_finalize_dataset`, with `_pixel_less_label_warning`: the same
+    # table, a remedy true of a file with no pixels, and the syntax read
+    # from `file_meta` because a pixel-less file stays native under
+    # compression. Do not move that judgement in here: this function is
+    # the pixel arms' contract, and its refusal of a multi-valued label
+    # is true only of a file with pixels.
     #
     # It runs *after* the corrections above rather than on
     # `attributes`, so it judges what the file will carry: a declared
@@ -6062,16 +5902,15 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     #
     # One relabel is still ahead of this point and cannot be pulled
     # behind it: under JPEG 2000, `_compress_j2k` turns an `RGB` source
-    # into `YBR_RCT` (#516 case 1), and it runs after the whole
+    # into `YBR_RCT`, and it runs after the whole
     # geometry write. That is harmless *because both labels are on the
     # J2K row* -- the judgement does not change -- and it is why the
     # readback, not this function, is the reader that sees a compressed
-    # file's final label (#507). A future encoder relabel to something
+    # file's final label. A future encoder relabel to something
     # off that row would make this check answer about a label the file
     # no longer carries.
     #
-    # Two outcomes, and which one applies is the whole of the
-    # write-path ruling. A label the syntax does not admit is
+    # Two outcomes. A label the syntax does not admit is
     # **written as declared** and handed back on `warnings`: there are
     # formats this library can read and cannot write, and a
     # de-identified copy plus a row saying what could not be honoured
@@ -6087,13 +5926,13 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # answered `MONOCHROME2`, so an instance whose *declaration* is
     # multi-valued still writes a single-valued, re-ingestible file.
     # Refusing it on the declaration would deny the caller an output
-    # this library can read back, which is the one thing the ruling's
-    # exception is not for.
+    # this library can read back, which is the one thing the refusal is
+    # not for.
     # `(list, tuple, MultiValue)` is this file's spelling and all three
     # arrive: pydicom hands back a `MultiValue` for an element it holds,
     # the store hands back a `list`, and `MultiValue` is a
-    # `MutableSequence` and *not* a `list` (measured), so the two-name
-    # form silently never fires. See `_fallback_multivalue`.
+    # `MutableSequence` and *not* a `list`, so the two-name form silently
+    # never fires. See `_fallback_multivalue`.
     written = ds.get("PhotometricInterpretation")
     if isinstance(written, (list, tuple, MultiValue)) and len(written) > 1:
         raise _multi_valued_refusal(written)
@@ -6106,24 +5945,22 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
 
     # Planar Configuration describes the pixel element *just written*,
     # and that element is interleaved -- isocenter holds and stores
-    # pixels interleaved, always (see `SidecarPixelLoader.__call__` for
-    # the measurement). So this is not "write a default when none was
-    # declared": a declared 1 is a claim about the source file, `_merge`
-    # has already stamped it onto `ds` by the time this runs, and
-    # leaving it there labelled interleaved bytes as planar. That is a
-    # corrupt exported DICOM file with no error, no warning and no
-    # DATA_LOSS row, and `_READBACK_DESCRIPTORS` does not include this
-    # element, so before #449 `verify_readback=True` did not see it
-    # either (#210); the pixel decode now does (a PC 1 label over
-    # interleaved bytes decodes to different samples).
+    # pixels interleaved, always (see `SidecarPixelLoader.__call__`).
+    # So this is not "write a default when none was declared": a
+    # declared 1 is a claim about the source file, `_merge` has already
+    # stamped it onto `ds` by the time this runs, and leaving it there
+    # labels interleaved bytes as planar -- a corrupt exported file with
+    # no error, no warning and no DATA_LOSS row. `_READBACK_DESCRIPTORS`
+    # does not include this element; only `verify_readback=True`'s pixel
+    # decode would see it (a PC 1 label over interleaved bytes decodes to
+    # different samples).
     #
     # The `samples < 3` half of `planar_configuration_default` is kept
     # deliberately, spelled out here: an unconditional write would add
     # (0028,0006) to every monochrome export, an element those files
-    # must not carry. `planar_configuration_default` itself is
-    # unchanged and still has its other caller, `set_pixel_data()`,
-    # where #217's reasoning -- do not overwrite a declared value --
-    # still holds, because that path writes no file.
+    # must not carry. `planar_configuration_default` itself has its other
+    # caller, `set_pixel_data()`, where a declared value is not
+    # overwritten, because that path writes no file.
     if geom.samples >= 3:
         ds.PlanarConfiguration = 0
 
@@ -6237,21 +6074,18 @@ def _width_notes(widened, declared_high_bit, bits_stored, high_bit) -> list:
 
 
 #: The descriptors the readback compares first, by pydicom keyword. The
-#: four geometry descriptors are the ones #186/#205 showed can describe
-#: a different image than the pixels beside them; BitsAllocated is the
-#: width #170/#216 showed being silently rewritten from the tag side.
-#: This is the descriptor half; the pixels are decoded and compared
-#: after it (#449), so a descriptor failure keeps its own message.
+#: four geometry descriptors can describe a different image than the
+#: pixels beside them, and BitsAllocated can be rewritten from the tag
+#: side. This is the descriptor half; the pixels are decoded and compared
+#: after it, so a descriptor failure keeps its own message.
 #:
-#: **`PhotometricInterpretation` is deliberately not a sixth row, and
-#: never was one (#507).** Every keyword here is compared against the
-#: dataset the *worker serialized*, and the worker writes that label
-#: onto that dataset itself -- so both sides would come from the same
-#: assignment and agree by construction, whatever the writer got wrong.
-#: A row here would be coverage that cannot fail, which reads in a diff
-#: like a check and is worse than none. The label is judged instead
-#: against the transfer syntax the file carries, which is not on `ds` at
-#: all: see `_readback_label_mismatch`.
+#: **`PhotometricInterpretation` is deliberately not a sixth row.** Every
+#: keyword here is compared against the dataset the *worker serialized*,
+#: and the worker writes that label onto that dataset itself -- so both
+#: sides would come from the same assignment and agree by construction,
+#: whatever the writer got wrong: a check that cannot fail. The label is
+#: judged instead against the transfer syntax the file carries, which is
+#: not on `ds` at all: see `_readback_label_mismatch`.
 _READBACK_DESCRIPTORS = ("Rows", "Columns", "SamplesPerPixel",
                          "NumberOfFrames", "BitsAllocated")
 
@@ -6373,12 +6207,11 @@ def _readback_label_mismatch(readback) -> Optional[str]:
     # syntax, so the file would fail anyway, with a reason naming a
     # label no element carries.
     if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
-        # Not "this library cannot re-ingest it": measured, that is true
-        # only of a file with pixel data, where `ingest()` refuses the
-        # `MultiValue` while decompressing. A *pixel-less* file with two
-        # labels re-ingests cleanly (`IngestSummary(ingested=1,
-        # failures=[])`) and the graph comes back carrying both -- so the
-        # fault named here is the arity itself, which is true of either.
+        # Not "this library cannot re-ingest it": that is true only of a
+        # file with pixel data, where `ingest()` refuses the `MultiValue`
+        # while decompressing. A *pixel-less* file with two labels
+        # re-ingests cleanly and the graph comes back carrying both -- so
+        # the fault named here is the arity itself, which is true of either.
         return (f"PhotometricInterpretation (0028,0004) is VM 1; the "
                 f"written file reads back as {len(label)} values "
                 f"({', '.join(repr(str(v)) for v in label)})")
@@ -6495,7 +6328,7 @@ def _verify_readback(path: str, ds, written_pixels=None,
     except Exception as exc:
         # Without paths: `path` is `<output path>.<pid>.tmp`, under
         # `Subject_<Patient ID>/`, and this message becomes the export's
-        # `ERROR` row, where the outer spelling cannot strip it (bunch E).
+        # `ERROR` row, where the outer spelling cannot strip it.
         raise RuntimeError(
             f"Readback verification failed: the written file could not be "
             f"read back ({describe_exception_without_paths(exc)})") from exc
@@ -6520,13 +6353,11 @@ def _verify_readback(path: str, ds, written_pixels=None,
     # which sends the reader of a compliance report to the pixels for a
     # fault that is in one element of the header. The same is true of
     # any label pydicom does not recognise, a non-upper-case spelling
-    # included. Measured, and worth knowing before this is "simplified":
-    # the four labels #502 is about decode *cleanly* at
-    # (rows, cols, 3) -- `pixel_array` returns `uint8 (8, 8, 3)` for
-    # every one of `YBR_ICT`, `YBR_RCT` and both `YBR_PARTIAL_*`, since
-    # pydicom special-cases the byte count only for `YBR_FULL_422`. So
-    # for them the order changes nothing, and the undefined label is
-    # the whole of the reason this check goes first.
+    # included. Do not "simplify" the order on the evidence of the
+    # inadmissible labels: `YBR_ICT`, `YBR_RCT` and both `YBR_PARTIAL_*`
+    # decode cleanly at (rows, cols, 3), since pydicom special-cases the
+    # byte count only for `YBR_FULL_422`, so for them the order changes
+    # nothing; the undefined label is the whole of the reason.
     reason = _readback_label_mismatch(readback)
     if reason is not None:
         raise RuntimeError(f"Readback verification failed: {reason}")
@@ -6553,24 +6384,22 @@ def _verify_readback(path: str, ds, written_pixels=None,
         if reason is not None:
             raise RuntimeError(f"Readback verification failed: {reason}")
 
-        # **And the decode `ingest()` makes, where it differs (#596).**
-        # The decode above asks for the stored samples, because those are
+        # **And the decode `ingest()` makes, where it differs.** The
+        # decode above asks for the stored samples, because those are
         # what was written; `ingest()` asks pydicom's default, which
         # converts a YBR_FULL family to RGB and refuses anything but
-        # unsigned 8-bit samples doing it. Measured before this: a native
-        # 16-bit `YBR_FULL` file passed here while `ingest()` and
-        # `pixel_array` both refused it, and the JPEG 2000 one failed --
-        # two answers from one contract, which is "this library can read
-        # it back". After the exact compare, so a sample mismatch keeps
-        # its more specific reason.
+        # unsigned 8-bit samples doing it. Without this, a native 16-bit
+        # `YBR_FULL` file would pass here while `ingest()` and
+        # `pixel_array` both refuse it -- the contract is "this library can
+        # read it back". After the exact compare, so a sample mismatch
+        # keeps its more specific reason.
         #
-        # Gated on the label **and** the decoded dtype (Q6, the review of
-        # #609). Unsigned 8-bit is exactly what the conversion accepts, so
-        # the second decode cannot change that verdict -- pinned against
-        # pydicom by `test_unsigned_8_bit_ybr_full_converts_whenever_it_
-        # decodes` -- and it cost a 100-frame JPEG 2000 file 20 s more and
-        # a float32 copy of the array. **Not** on BitsAllocated: int8 is
-        # BitsAllocated 8 and the conversion refuses it.
+        # Gated on the label **and** the decoded dtype. Unsigned 8-bit is
+        # exactly what the conversion accepts, so the second decode cannot
+        # change that verdict, and it costs a large multi-frame JPEG 2000
+        # file a second full decode and a float32 copy of the array. **Not**
+        # on BitsAllocated: int8 is BitsAllocated 8 and the conversion
+        # refuses it.
         if _written_photometric(getattr(
                 readback, "PhotometricInterpretation", None)) \
                 in _PYDICOM_CONVERTS \
@@ -6838,10 +6667,10 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         item, parent, seq_tag = resolved
 
         # SIGNAL: acquired content that was in the source and is not in
-        # the export, which grades (#542, Q8). #183 wrote STANDARD, so a
-        # redaction that stripped every thumbnail graded PASS. The three
-        # other icon losses in this loop stay STANDARD: an item gone or
-        # reordered, or a failed restore, are not losses redaction caused.
+        # the export, which grades; under STANDARD a redaction that
+        # stripped every thumbnail would grade PASS. The three other icon
+        # losses in this loop stay STANDARD: an item gone or reordered, or
+        # a failed restore, are not losses redaction caused.
         redacted = _redaction_icon_loss(path, terminal_tag, seq_tag, inst, ctx)
         if redacted is not None:
             removals.append((parent, seq_tag, item))
@@ -6902,27 +6731,28 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # descriptor beside it.
         vr = 'OW' if bits > 8 else 'OB'
         # Unconditionally raw, and it does not consult `ctx.compression`.
-        # `use_compression=True` J2K-compresses the top-level frame only;
-        # "the icon wasn't compressed too" will read as an oversight, so:
-        # it is deliberate. An icon is a thumbnail, the saving is nil, and
-        # a second encoder call per instance is not.
+        # `use_compression=True` J2K-compresses the top-level frame only,
+        # deliberately: an icon is a thumbnail, the saving is nil, and a
+        # second encoder call per instance is not.
         item.add_new(Tag(group, element), vr, decoded.tobytes())
-        # A 1-bit icon is written as the top level writes a 1-bit image
-        # (#649): BitsAllocated from the array, which the loader returns
-        # one byte per sample, so BitsAllocated 8 with BitsStored 1 below.
-        # Left at the declared 1, the file held 15 unpacked bytes where a
-        # reader unpacks 2, and pydicom's `pixel_array` raised `TypeError`.
+        # A 1-bit icon is written as the top level writes a 1-bit image:
+        # BitsAllocated from the array, which the loader returns one byte
+        # per sample, so BitsAllocated 8 with BitsStored 1 below. Left at
+        # the declared 1, the file would hold unpacked bytes where a reader
+        # unpacks bits, and pydicom's `pixel_array` raises `TypeError`.
         # PS3.3 C.7.6.1.1.6 permits 1 or 8. Re-packing to keep the declared
         # 1 would be a second rule at a second depth. The graph keeps the
         # declared value; only the file changes.
         if bits == 1:
             item.BitsAllocated = decoded.itemsize * 8
-        # BitsStored and HighBit, by the top level's rule (#598). Only
-        # where the item declares a BitsStored: a hand-built item with
-        # none is not given one. PixelRepresentation, and BitsAllocated
-        # other than 1, are left as declared -- the loader's dtype was
-        # built from them (`_nested_loader_metadata`), so the array
-        # already agrees.
+        # BitsStored and HighBit, by the top level's rule, so an icon's
+        # HighBit is BitsStored - 1 as ingest's HighBit row says, and a
+        # JPEG-LS icon whose samples overflow its declared BitsStored is
+        # not masked by conformant readers. Only where the item declares a
+        # BitsStored: a hand-built item with none is not given one.
+        # PixelRepresentation, and BitsAllocated other than 1, are left as
+        # declared -- the loader's dtype was built from them
+        # (`_nested_loader_metadata`), so the array already agrees.
         if declared_int(graph_item.attributes, "0028,0101") is not None:
             item.BitsStored, widened = _stored_width(
                 decoded, graph_item.attributes)
@@ -6932,7 +6762,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
                 for note in _width_notes(
                     widened, declared_int(graph_item.attributes, "0028,0102"),
                     item.BitsStored, item.HighBit))
-        # The label, judged where the pixel element is written (#602).
+        # The label, judged where the pixel element is written: this is the
+        # icon's pixel door, as `_write_pixel_geometry` is the top level's.
+        # The pydicom item carries `_merge_sequences`' respelling.
         label = item.get("PhotometricInterpretation")
         at = _item_path_words(path)
         if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
@@ -6990,7 +6822,7 @@ def _nested_loader_metadata(geometry, ref, inst) -> dict:
 #: How every export line and row names an instance that carries no SOP
 #: Instance UID. Never its output path: that is
 #: `<folder>/Subject_<Patient ID>/...`, and these lines reach the log, the
-#: audit table and the compliance report (bunch E). One spelling, because
+#: audit table and the compliance report. One spelling, because
 #: the worker's failure line and the parent's three report helpers name the
 #: same outcome.
 _NO_SOP_UID = "an instance with no SOP Instance UID"
@@ -7087,18 +6919,17 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
     try:
         # Whether the pixels are encoded, asked once and of the one
-        # predicate every other reader of `compression` asks (#605).
+        # predicate every other reader of `compression` asks; asking it
+        # any other way lets an unknown value skip both the raw write and
+        # the encoder and deliver an image with no Pixel Data as `ok`.
         # Inside the `try`: `ExportContext` refuses an unknown value on
         # construction, but a dataclass can be edited afterwards, and
         # that context must fail as its own instance, not take the batch
-        # down. The worker used to ask three ways -- `== "j2k"` here and
-        # in `_finalize_dataset`, truthiness in the integer arm -- so
-        # `compression="rle"` skipped both the raw write and the encoder
-        # and delivered an image with no Pixel Data as `ok`.
+        # down.
         compressed = _compresses(ctx.compression)
         # The syntax the file will be written under, decided here so the
-        # label check judges what is actually being written (#502) rather
-        # than re-deriving it beside each call. `_create_ds` starts every
+        # label check judges what is actually being written rather than
+        # re-deriving it beside each call. `_create_ds` starts every
         # file at Implicit VR Little Endian and only the compressed path
         # moves it.
         written_syntax = (str(JPEG2000Lossless) if compressed
@@ -7107,7 +6938,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
 
-        # What `verify_readback` holds the written file against (#449):
+        # What `verify_readback` holds the written file against:
         # the array each pixel element is written from, and the waveform
         # bytes. Each is set where its element is written, so an instance
         # that writes none leaves it None and is not decoded.
@@ -7117,7 +6948,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # 0. Base Attributes
         #
         # `attributes` is `inst.attributes` with (0028,0004) spelled as a
-        # Code String is defined (#532), and it is a copy whenever that
+        # Code String is defined, and it is a copy whenever that
         # changed anything. It is what `_merge` and both
         # `_write_pixel_geometry` calls read, and nothing else: every
         # other reader below stays on `inst.attributes`, the graph.
@@ -7127,7 +6958,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         #
         # `revrs` gathers every private element written under a VR other
         # than its recorded one, here and in every sequence item, for one
-        # sentence per instance after the merges (#571). The three stamp
+        # sentence per instance after the merges. The three stamp
         # merges below are standard tags and pass none.
         revrs: List[_ReVr] = []
         DicomExporter._merge(ds, attributes, losses,
@@ -7140,7 +6971,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             warnings.append(re_vr)
 
         # 0b. Nested sidecar payloads, back into the items they came out
-        # of (#183). After the merge, because it needs the sequence items
+        # of. After the merge, because it needs the sequence items
         # the merge just built; here rather than inside `_merge_sequences`
         # so it cannot be reached by an `export_batch` caller separately,
         # and so both export paths get it from the one worker they share.
@@ -7156,25 +6987,24 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
 
-        # 4. The de-identification markers (#554), after every merge and
+        # 4. The de-identification markers, after every merge and
         # the owner stamps, so they are what the file says last and a
         # source's values are in `ds` to be kept.
         _write_deid_markers(ds, ctx.deid_markers)
 
         # Study Time is Type 2 (PS3.3 C.7.2.1): present, and empty when
         # unknown. `IODValidator` refuses it **absent**, so a study with
-        # no time and an instance with none failed `session.export()`
-        # outright, and `write_tree` hid the same gap by writing the
-        # literal `120000` -- a fabricated clinical time (#570). Filled
+        # no time and an instance with none would fail the export, and a
+        # literal would be a fabricated clinical time. Filled
         # here, after every merge, and not in `export_stamp_attributes`:
         # only here is it known whether the instance or the study
         # supplied one, and a stamp of `""` would overwrite a real value.
         if "StudyTime" not in ds:
             ds.StudyTime = ""
 
-        # Every other Type 2 element the IOD table knows, the same way
-        # (#600). Type 2 means present, and empty when unknown; an absent
-        # KVP or Slice Thickness failed a CT's export with `[Type 2 Error]`
+        # Every other Type 2 element the IOD table knows, the same way.
+        # Type 2 means present, and empty when unknown; an absent KVP or
+        # Slice Thickness would fail a CT's export with `[Type 2 Error]`
         # for a file that is conformant the moment the element is written
         # zero-length. The conditions, each of which is the trap:
         #   - after every merge, like Study Time above, so a value the
@@ -7185,9 +7015,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         #     validator does not know -- an OT image gains no KVP;
         #   - never Type 1: an empty Type 1 element is still a refusal,
         #     and a fabricated value would be a lie;
-        #   - no row and no note, per #570's Study Time (owner ruling Q10):
-        #     the written file is conformant, and absent and empty say the
-        #     same thing for Type 2.
+        #   - no row and no note, as for Study Time: the written file is
+        #     conformant, and absent and empty say the same thing for
+        #     Type 2.
         # Study Time keeps its own fill above: it is unconditional on SOP
         # class, and the table is CT-only, so folding it in would stop
         # filling it on OT and SC files. `dictionary_VR` answers one VR for
@@ -7196,25 +7026,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         for tag in IODValidator.absent_type2(ds):
             ds.add_new(tag, dictionary_VR(tag), None)
 
-        # There is deliberately no `populate_attrs(ds, inst)` here, and
-        # there must never be again (#184). It was the ingest reader
-        # pointed at the dataset this worker just built, writing the
+        # There is deliberately no `populate_attrs(ds, inst)` here. That
+        # is the ingest reader, and pointed at this dataset it writes the
         # merged result back onto the live instance: `add_sequence_item`
-        # appends, so every sequence item duplicated per export
-        # (1 -> 2 -> 3), every patient/study/series tag landed in
-        # `inst.attributes`, and both writes bump `_revision`, so the
-        # next save() persisted the damage. Harmless-looking under
-        # `session.export()` only because `maxtasksperchild=25` pins
-        # these workers to subprocesses (#185); real through the public
-        # `export_batch()`/`write_tree()` under threads, which is the
-        # path a free-threaded build takes by default. Measured before
-        # deletion: the exported file is byte-identical without the
-        # call, across hand-built and ingested instances, pixel and
-        # waveform alike -- it contributed nothing to `ds`, because it
-        # only ever wrote in the wrong direction. Its one side effect
-        # that mattered -- the modality checks below seeing the
-        # *merged* value -- is now had by asking `ds` directly, which
-        # is where the merged view already lives.
+        # appends, so every sequence item duplicates per export, every
+        # patient/study/series tag lands in `inst.attributes`, and both
+        # writes bump `_revision`, so the next save() persists the damage.
+        # Under threads (`export_batch()`/`write_tree()`, a free-threaded
+        # build's default) the worker holds the live graph. It adds
+        # nothing to `ds`. The modality checks below read the *merged*
+        # value by asking `ds` directly.
 
         # Handle Pixel Data
         # If we have modified pixels in memory (redaction), we MUST use them.
@@ -7231,9 +7052,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 #
                 # From `ds`, not `inst.attributes`: the modality may
                 # live only at series level (hand-built graphs,
-                # write_tree()), and `ds` holds the merged view. The
-                # instance's own dict only appeared to hold it because
-                # the deleted writeback above copied it there (#184).
+                # write_tree()), and `ds` holds the merged view.
                 mod = str(ds.get("Modality", "OT"))
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
@@ -7248,65 +7067,58 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # happen before the redaction block: getting the axes wrong applies
         # a zone to the wrong region, so the burned-in identifier stays in
         # the exported pixels while the pipeline reports a successful
-        # redaction -- the most severe of the four sites this heuristic
-        # reached, and the one neither #186 nor #205 names.
+        # redaction.
         #
         # A ValueError here (the instance declares a SamplesPerPixel no
         # axis of the array can carry) propagates to the except below and
         # becomes ExportOutcome(ok=False): audited, counted in
-        # ExportSummary.failed and surfaced by the compliance report
-        # (#181), which is where a contradiction belongs.
+        # ExportSummary.failed and surfaced by the compliance report,
+        # which is where a contradiction belongs.
         geom = resolve_pixel_geometry(arr.shape, inst.attributes) \
             if arr is not None else None
 
         if arr is not None:
-            # APPLY REDACTION (Fix for Export Compression Bug)
+            # Apply redaction zones before any pixel element is written.
             if ctx.redaction_zones:
                 # Local import to avoid circular dependency
                 from .services import RedactionService
 
-                # Always a copy, whatever the array's writeability (#469).
-                # This copied only a read-only array, so a writeable one --
-                # the caller's own resident array whenever the worker runs
-                # in the caller's process: `export_batch()` under threads,
-                # 3.14t's default -- was zeroed in place, and the export
-                # redacted the live graph. A saved array then lost the
-                # zones at the next `unload_pixel_data()` and an unsaved
-                # one carried them into the next save, while under
-                # processes the child's array was a copy and nothing
-                # changed. Copied on every path, processes included (the
-                # owner's ruling): which executor ran must not decide what
-                # the caller's array holds afterwards. The cost is one
-                # frame-set, transient, and only for an instance with
-                # zones, beside the `tobytes()` copy the write already
-                # makes. Readback compares against this copy.
+                # Always a copy, whatever the array's writeability. When the
+                # worker runs in the caller's process (`export_batch()`
+                # under threads, 3.14t's default), `arr` is the caller's own
+                # resident array, and zeroing it in place would redact the
+                # live graph: a saved array loses the zones at the next
+                # `unload_pixel_data()` and an unsaved one carries them into
+                # the next save. Copied on every path, processes included:
+                # which executor ran must not decide what the caller's array
+                # holds afterwards. The cost is one frame-set, transient,
+                # and only for an instance with zones. Readback compares
+                # against this copy.
                 arr = arr.copy()
 
                 # Apply zones
                 RedactionService.apply_redaction_to_array(
                     arr, ctx.redaction_zones, geometry=geom)
 
-        # This refusal used to live inside the integer branch below, which
-        # meant the float branch -- which sits above it and ends with
-        # `arr = None` -- never reached it. A float array whose geometry
-        # was a guess exported a file with no Rows, no Columns and no
-        # SamplesPerPixel, all three Type 1 in the Floating Point Image
-        # Pixel Module (PS3.3 C.7.6.24), while the identical uint8 graph
-        # was correctly refused (#216). Which pixel element carries the
-        # bytes has nothing to do with whether the geometry is known, so
-        # the check belongs to neither branch.
+        # Outside both pixel branches: the float branch sits above the
+        # integer one and ends with `arr = None`, so a refusal inside the
+        # integer branch would let a float array with a guessed geometry
+        # export with no Rows, Columns or SamplesPerPixel, all Type 1 in
+        # the Floating Point Image Pixel Module (PS3.3 C.7.6.24). Which
+        # pixel element carries the bytes has nothing to do with whether
+        # the geometry is known.
         #
         # It sits *below* the redaction block rather than above it, which
         # costs one redaction pass on an instance that is about to be
         # refused and buys a source order that still reads
         # resolve -> redact -> write. Nothing between the resolution and
-        # here can change `geom`: the redaction block copies the array
-        # (always, since #469), which does not change its shape.
+        # here can change `geom`: the redaction block copies the array,
+        # which does not change its shape.
         if arr is not None and geom.evidence is GeometryEvidence.GUESSED:
             # The instance, never `ctx.output_path`: this message is the
             # export's `ERROR` row, the report and `ExportError` whole,
-            # and the output path is `Subject_<Patient ID>/...` (review
-            # of #589). The same for the float refusal below.
+            # and the output path is `Subject_<Patient ID>/...`. The same
+            # for the float refusal below.
             raise RuntimeError(
                 f"Refusing to write instance {uid}: the pixel "
                 f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
@@ -7324,7 +7136,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # file that reads 1056964608 where the source said 0.5, with
             # BitsAllocated=32 and PixelRepresentation=0 next to it so
             # the result is internally coherent and nothing downstream
-            # errors (#170). PS3.5 Section 8.2 -- not A.1, which is the
+            # errors. PS3.5 Section 8.2 -- not A.1, which is the
             # Implicit VR Little Endian Transfer Syntax and says nothing
             # about this -- makes Pixel Data and Float Pixel Data
             # mutually exclusive, which is why the
@@ -7333,12 +7145,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # a file carrying both is nonconformant however it got that
             # way.
             #
-            # Refusing to write anything was the first cut of this fix,
-            # and it traded a silent corruption for a quiet
-            # nonconformance: Float Pixel Data is Type 1 in the Floating
-            # Point Image Pixel Module (PS3.3 C.7.6.24), so a Parametric
-            # Map exported with no pixel element at all is invalid in a
-            # way #160 had just finished fixing elsewhere (#193). The
+            # Do not refuse to write anything instead: Float Pixel Data is
+            # Type 1 in the Floating Point Image Pixel Module (PS3.3
+            # C.7.6.24), so a Parametric Map exported with no pixel element
+            # at all is invalid. The
             # array is *in hand* at this point -- `get_pixel_data()`
             # re-read it from the source file and pydicom surfaces
             # (7fe0,0008)/(7fe0,0009) through `.pixel_array` -- so the
@@ -7365,11 +7175,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # float instance has no conformant file to become, so it is
             # refused the way a GUESSED geometry is above -- the raise
             # becomes ExportOutcome(ok=False), an ERROR audit row and a
-            # REVIEW_REQUIRED grade (#181, #215). The condition names
-            # the two arms that write an element; the float16 arm below
-            # writes none, so its samples>1 shape keeps taking the
-            # DATA_LOSS route it always took rather than acquiring a
-            # second failure mode as a ride-along (#222).
+            # REVIEW_REQUIRED grade. The condition names the two arms that
+            # write an element; the float16 arm below writes none, so its
+            # samples>1 shape takes the DATA_LOSS route rather than a
+            # second failure mode.
             #
             # Keyed on the sample count, never on the declared
             # Photometric Interpretation: every declared value is barred
@@ -7377,9 +7186,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # MONOCHROME2 and nothing else, C.7.6.3.1.2 permits
             # MONOCHROME2 only at SamplesPerPixel = 1, and Planar
             # Configuration is in neither module's attribute table --
-            # so passing a declared value through (#224's narrow fix,
-            # which this supersedes) still wrote a file both modules
-            # bar, it merely stopped inventing the value.
+            # so passing a declared value through would still write a file
+            # both modules bar.
             if arr.itemsize in (4, 8) and geom.samples > 1:
                 raise RuntimeError(
                     f"Refusing to write instance {uid}: the pixels "
@@ -7398,7 +7206,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # `written_pixels` is taken in each arm that writes an
             # element, and here rather than at the finalize below: this
             # branch ends with `arr = None`, so a capture after it would
-            # leave every float export unchecked (#449). The float16 arm
+            # leave every float export unchecked. The float16 arm
             # writes no element and takes none, so it is not decoded.
             if arr.itemsize == 4:
                 ds.FloatPixelData = arr.tobytes()
@@ -7410,7 +7218,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 written_pixels = arr
             else:
                 # `ds`, not `inst.attributes` -- same reason as the
-                # missing-pixels check above (#184).
+                # missing-pixels check above.
                 mod = str(ds.get("Modality", "OT"))
                 if mod in _IMAGE_MODALITIES:
                     raise RuntimeError(
@@ -7418,10 +7226,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                         f"{arr.dtype} pixel array has no DICOM element "
                         f"that can carry it.")
                 # Scoped STANDARD: group 7fe0 is even, the same parity
-                # rule every other loss row uses (#146). Not graded
-                # harder: #150 carved out SIGNAL for the multiplex
-                # discard only, and widening it to this branch is its
-                # own call, not a ride-along.
+                # rule every other loss row uses. SIGNAL is reserved for
+                # the multiplex discard.
                 losses.append((
                     LOSS_SCOPE_STANDARD,
                     f"Pixel data is {arr.dtype} and was not written: no "
@@ -7440,13 +7246,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # more than one of Pixel Data Provider URL (0028,7FE0), Pixel
             # Data (7FE0,0010), Float Pixel Data (7FE0,0008) or Double
             # Float Pixel Data (7FE0,0009) in the top level Data Set."
-            # Measured: a float32 array on an instance whose `attributes`
-            # carry a "7fe0,0009" exported with (7fe0,0008) *and*
-            # (7fe0,0009), and `dcmread(...).pixel_array` raises the same
-            # "One and only one of ..." pydicom refuses the other two
-            # directions with. Same reachability class as the rest of this
-            # branch: `populate_attrs` skips group 7fe0 at ingest, so it
-            # arrives from a hand-built graph or a `set_attr` call.
+            # Without it a float32 array on an instance whose `attributes`
+            # carry a "7fe0,0009" exports with (7fe0,0008) *and*
+            # (7fe0,0009), and pydicom's `pixel_array` refuses the file
+            # ("One and only one of ..."). `populate_attrs` skips group
+            # 7fe0 at ingest, so it arrives from a hand-built graph or a
+            # `set_attr` call.
             #
             # The float16 arm is deliberately outside this: it writes no
             # element at all, so there is nothing here for it to be
@@ -7462,9 +7267,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # second pixel element can only arrive from a hand-built
             # graph -- but (0028,7FE0) has VR UR, is not binary, and
             # survives `populate_attrs`, so it comes straight through an
-            # ordinary ingest of a real file that declares one (#223,
-            # measured: (7fe0,0008) and the URL both present in the
-            # exported file, no audit row, graded PASS). Deleting a
+            # ordinary ingest of a real file that declares one. Deleting a
             # caller's URL removes information the exported file does not
             # otherwise carry, so it owes them a row; deleting a
             # duplicate pixel element is a conformance correction on a
@@ -7474,16 +7277,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if other is not None and other in ds:
                 del ds[other]
 
-            # "The descriptors were merged from `attributes`, which is the
-            # same source file this array was read back from, so they
-            # already agree" is what used to stand here instead of this
-            # call, and it was true only of the ingest path. `attributes`
-            # is also whatever a caller last wrote, so a stale
-            # Rows/Columns exported a *decodable* file describing a
-            # different image -- measured Rows=10 Columns=10 beside 16
-            # floats, and Rows=99 Columns=99 beside a (2,4,8) array --
-            # which is worse than the absent-descriptor case #216 filed,
-            # because nothing invites the reader to go back. Rows, Columns
+            # The descriptors merged from `attributes` agree with the array
+            # only on the ingest path. `attributes` is also whatever a
+            # caller last wrote, so without this call a stale Rows/Columns
+            # would export a *decodable* file describing a different image
+            # (Rows=10 Columns=10 beside 16 floats) -- worse than an absent
+            # descriptor, because nothing invites the reader to go back.
+            # Rows, Columns
             # and SamplesPerPixel are Type 1 in C.7.6.24 and C.7.6.25
             # exactly as they are in the Image Pixel Module, and
             # PhotometricInterpretation is Type 1 there with Enumerated
@@ -7497,19 +7297,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # enumerate beside the tag this branch chose, not a width
             # derived from the bytes.
             if arr.itemsize in (4, 8):
-                # PS3.5 Section 8.2's *other* sentence, the one this
-                # branch has never enforced: "Bits Stored (0028,0101),
-                # High Bit (0028,0102) and Pixel Representation
-                # (0028,0103) shall not be present." Deleted rather than
-                # merely not written, for the same reason the pixel
-                # elements above are: `_merge` has already put whatever
-                # `attributes` holds onto `ds`, and `populate_attrs`
-                # skips only group 7fe0, so all three arrive from an
-                # ordinary ingest of a real Parametric Map (#223).
-                # Measured before the fix: BitsStored 32, HighBit 31,
-                # PixelRepresentation 0 beside (7fe0,0008), no loss row,
-                # graded PASS. This branch writes none of the three
-                # itself, so "stop writing them" was never available.
+                # PS3.5 Section 8.2's *other* sentence: "Bits Stored
+                # (0028,0101), High Bit (0028,0102) and Pixel
+                # Representation (0028,0103) shall not be present."
+                # Deleted rather than merely not written, for the same
+                # reason the pixel elements above are: `_merge` has
+                # already put whatever `attributes` holds onto `ds`, and
+                # `populate_attrs` skips only group 7fe0, so all three
+                # arrive from an ordinary ingest of a real Parametric Map.
+                # This branch writes none of the three itself.
                 #
                 # No DATA_LOSS row, and that is the deliberate difference
                 # from the Pixel Data Provider URL below. These three
@@ -7518,9 +7314,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # always occupy the entire word" and "always signed", so
                 # their content is fixed by the standard rather than by
                 # the source file. The same sentence fixes BitsAllocated
-                # to 32 or 64 and this branch has silently overwritten
-                # *that* since #170 -- one sentence, one class of
-                # element, one silent action.
+                # to 32 or 64, which this branch also overwrites silently
+                # -- one sentence, one class of element, one silent action.
                 #
                 # From `ds`, never from `inst.attributes`: the graph is
                 # re-exportable and `SidecarPixelLoader` reads
@@ -7541,7 +7336,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
                 # The fourth direction of the exclusion quoted above.
                 # Reachable from an ordinary ingest, unlike the 7fe0
-                # members, which is why this one is reported (#223).
+                # members, which is why this one is reported.
                 if "PixelDataProviderURL" in ds:
                     del ds.PixelDataProviderURL
                     losses.append((
@@ -7575,18 +7370,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # The second of PS3.5 Section 8.2's three reachable
             # directions -- the float branch above carries the first and
             # the third. The section is 8.2, "Native or Encapsulated
-            # Format Encoding"; A.1, cited here and in #170 before it, is
-            # the Implicit VR Little Endian Transfer Syntax and says
-            # nothing about which pixel elements may coexist.
+            # Format Encoding"; A.1 is the Implicit VR Little Endian
+            # Transfer Syntax and says nothing about which pixel elements
+            # may coexist.
             #
-            # The float branch has deleted (7fe0,0010)
-            # since #170 for exactly this reason; the integer branch never
-            # deleted its counterpart, so an instance carrying a
-            # (7fe0,0008) of its own in `attributes` -- `_merge` writes
-            # whatever it holds -- left with *both* pixel elements, which
-            # pydicom itself refuses to decode: "One and only one of
-            # 'Pixel Data', 'Float Pixel Data' or 'Double Float Pixel
-            # Data' may be present". Measured reachable (#216).
+            # An instance carrying a (7fe0,0008) of its own in
+            # `attributes` -- `_merge` writes whatever it holds -- would
+            # otherwise leave with *both* pixel elements, which pydicom
+            # itself refuses to decode: "One and only one of 'Pixel Data',
+            # 'Float Pixel Data' or 'Double Float Pixel Data' may be
+            # present".
             #
             # `populate_attrs` skips the whole 7fe0 group at ingest, so
             # this arrives only from a hand-built graph or a `set_attr`
@@ -7596,23 +7389,22 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 if kw in ds:
                     del ds[kw]
 
-            # And the fourth member of the same sentence, which neither
-            # branch deleted until #223: Pixel Data Provider URL
-            # (0028,7FE0). It is the only one of the four that reaches
-            # here from an ordinary ingest -- VR UR, not binary, and
-            # `populate_attrs` skips only group 7fe0 -- so it is the only
-            # one whose removal takes a caller's value with it, and it
+            # And the fourth member of the same sentence: Pixel Data
+            # Provider URL (0028,7FE0). It is the only one of the four that
+            # reaches here from an ordinary ingest -- VR UR, not binary,
+            # and `populate_attrs` skips only group 7fe0 -- so it is the
+            # only one whose removal takes a caller's value with it, and it
             # leaves with a DATA_LOSS row rather than in silence. Scoped
             # STANDARD: group 0028 is even, the parity rule every other
-            # loss row uses (#146). Per #146 a STANDARD loss does not by
-            # itself move `validation_status`.
+            # loss row uses; a STANDARD loss does not by itself move
+            # `validation_status`.
             #
             # The gate is this `arr is not None` block, not
             # `"PixelData" in ds`: when `compressed` the worker
             # never assigns `ds.PixelData` at all -- `_finalize_dataset`
             # compresses from the array -- so a membership test would let
-            # the URL survive every compressed export. Measured. Do not
-            # "simplify" it into one.
+            # the URL survive every compressed export. Do not "simplify"
+            # it into one.
             if "PixelDataProviderURL" in ds:
                 del ds.PixelDataProviderURL
                 losses.append((
@@ -7631,40 +7423,28 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                                   syntax_uid=written_syntax,
                                   warnings=warnings)
 
-            # Derived from the array, never read from `attributes`, for the
-            # same reason Rows and SamplesPerPixel now are -- and here the
-            # reason is stronger, because `ds.PixelData = arr.tobytes()` is
-            # three lines above. A declared width that disagrees with
-            # `itemsize` cannot be honoured by the bytes being written, so
-            # "the attributes win" is not one of the options (spec §3.10).
+            # Derived from the array, never read from `attributes`, as Rows
+            # and SamplesPerPixel are: `ds.PixelData = arr.tobytes()` is
+            # three lines above, and a declared width that disagrees with
+            # `itemsize` cannot be honoured by the bytes being written.
             #
-            # This used to be reconciled on the *read* path: the
-            # `set_pixel_data()` call that `get_pixel_data()` made ended in
-            # an unconditional `set_attr("0028,0100", itemsize * 8)`.
-            # Removing that call was right -- a read must not write -- but
-            # it was the only thing correcting a declared width, and
-            # `SidecarPixelLoader` buckets dtype as `uint16 if bits > 8
-            # else uint8`, so every declared value outside {8, 16} reaches
-            # here disagreeing with the array. A binary Segmentation
-            # (BitsAllocated=1) exported as 1-bit beside 8-bit bytes, and
-            # pydicom read a 2-frame 4x8 mask back as 16 frames: decodable,
-            # internally coherent, and a different image. Reconciling it
-            # where the bytes are produced is the fix that does not put a
-            # write back on the load path.
+            # Reconciled here, where the bytes are produced, and not on the
+            # read path: a read must not write. `SidecarPixelLoader`
+            # buckets dtype as `uint16 if bits > 8 else uint8`, so every
+            # declared value outside {8, 16} reaches here disagreeing with
+            # the array; a binary Segmentation (BitsAllocated=1) written as
+            # 1-bit beside 8-bit bytes reads back as a different image.
             #
-            # BitsStored is held against the array too, by
-            # `_stored_width` (#468): a declared width every sample
-            # fits is written as declared, and otherwise -- or when
-            # none was declared, where 8-or-16 stood here and put
-            # `int32` under a 16-bit claim -- the array's own width is.
+            # BitsStored is held against the array too, by `_stored_width`:
+            # a declared width every sample fits is written as declared, and
+            # otherwise, or when none was declared, the array's own width is.
             #
             # HighBit is BitsStored - 1, always, and never the declared
             # value. The array holds right-aligned values, so its most
             # significant stored bit is BitsStored - 1 whatever the
-            # source said; a declared 12/15 written beside them claimed
+            # source said; a declared 12/15 written beside them claims
             # left-aligned samples the bytes do not hold. A HighBit
-            # declared with no BitsStored (16/16/11 before #468) is the
-            # same claim.
+            # declared with no BitsStored is the same claim.
             #
             # A rewrite of the declared BitsStored is handed back on
             # `corrections`, not logged here: this is usually a spawned
@@ -7672,21 +7452,14 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # parent logs it (`_report_export_corrections`). `ds` only,
             # never `inst`, for the reason the float arm above gives.
             #
-            # PixelRepresentation is the array's own signedness too
-            # (#499). It does not constrain how many bytes `tobytes()`
-            # emits, which is why it stood outside this rule until now --
-            # but it decides what every reader makes of those bytes, so a
-            # declaration that disagrees with them is not a descriptor
-            # nit: measured, `int16 [-1, -2, -3]` declared 0 read back
-            # 65535, 65534, 65533 uncompressed and 32767, 32766, 32765
-            # under JPEG 2000, and `uint16 65535` declared 1 read back
-            # -1. `set_pixel_data()` already writes this tag from
-            # `dtype.kind` on the graph side (#386) and names this line
-            # as the defect it could not reach; `_readback_pixel_mismatch`
-            # already treats the array as the truth and this element as
-            # the thing that is wrong about it (#449), which is why
-            # `verify_readback=True` failed all four disagreements while
-            # the default export wrote them in silence.
+            # PixelRepresentation is the array's own signedness too. It
+            # does not constrain how many bytes `tobytes()` emits, but it
+            # decides what every reader makes of them: `int16 [-1, -2, -3]`
+            # declared 0 reads back 65535, 65534, 65533 uncompressed, and
+            # `uint16 65535` declared 1 reads back -1. `set_pixel_data()`
+            # writes this tag from `dtype.kind` on the graph side, and
+            # `_readback_pixel_mismatch` treats the array as the truth and
+            # this element as what is wrong about it.
             #
             # `kind == 'i'` and not `kind != 'u'`: `bool` arrives here as
             # `'b'` -- the `view(np.uint8)` that widens a mask for the
@@ -7704,15 +7477,14 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if (declared_representation is not None
                     and declared_representation != ds.PixelRepresentation):
                 # Read by `declared_int`, the one lenient-free reading of
-                # a declared descriptor (#506): `[1]` is *not* unwrapped,
-                # where the `.get()` this replaced handed pydicom a
-                # one-element list that it unwraps for a US element. A
-                # second, more lenient reading of one descriptor is how
-                # two answers start to disagree.
+                # a declared descriptor: `[1]` is *not* unwrapped, though
+                # pydicom would unwrap it for a US element. A second, more
+                # lenient reading of one descriptor is how two answers
+                # start to disagree.
                 #
-                # Nothing declared is not a correction of anything
-                # (#468's rule), so the note is guarded on the
-                # declaration and not on the value alone.
+                # Nothing declared is not a correction of anything, so
+                # the note is guarded on the declaration and not on the
+                # value alone.
                 corrections.append(
                     f"PixelRepresentation {declared_representation} "
                     f"({_SIGNEDNESS.get(declared_representation, _UNDEFINED_SIGNEDNESS)})"
@@ -7723,9 +7495,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # Waveform samples never reach `attributes` -- populate_attrs
         # routes (5400,1010) to the sidecar at every depth, whatever
-        # its size (#151) -- so the rebuilt dataset carries a complete Waveform
+        # its size -- so the rebuilt dataset carries a complete Waveform
         # Sequence (channel definitions, sampling frequency, sample count)
-        # with no signal in it unless they are put back here (#34).
+        # with no signal in it unless they are put back here.
         #
         # The sidecar's bytes are written back verbatim rather than
         # re-encoded from the decoded array, because nothing in this
@@ -7739,39 +7511,34 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         #
         # Little-endian, whatever the source: ingest converts a big-endian
         # source's samples by Waveform Bits Allocated before they reach the
-        # sidecar (`_stored_byte_order`, #657), and that is why writing
-        # them back verbatim under a little-endian syntax is right. Until
-        # #657 this said the pipeline "already requires a little-endian
-        # source" -- nothing enforced that, and a big-endian source's
-        # samples were exported with every word reversed.
+        # sidecar (`_stored_byte_order`), and that is why writing them
+        # back verbatim under a little-endian syntax is right.
         if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
             w_raw = inst.get_waveform_bytes()
             if w_raw:
-                # Only group 0 is ingested (#36), so only group 0 can
-                # be written -- and by the time the graph gets here it
-                # is the only item there is, because `ingest_worker`
-                # drops the items whose samples it discarded (#160).
-                # Indexing [0] is therefore exhaustive, not a choice
-                # among items: writing samples onto one item of several
-                # is what left the rest declaring a Type 1 element they
-                # did not carry.
+                # Only group 0 is ingested, so only group 0 can be
+                # written -- and by the time the graph gets here it is the
+                # only item there is, because `ingest_worker` drops the
+                # items whose samples it discarded. Indexing [0] is
+                # therefore exhaustive, not a choice among items: writing
+                # samples onto one item of several would leave the rest
+                # declaring a Type 1 element they do not carry.
                 ds.WaveformSequence[0].WaveformData = w_raw
                 written_waveform = w_raw
             else:
-                # Structurally plausible and empty is the failure mode this
-                # whole fix exists to end; if it is still reachable -- a
-                # source that never carried samples -- say so rather than
-                # writing the file in silence.
+                # A Waveform Sequence that is structurally plausible and
+                # empty must not be written in silence; reachable from a
+                # source that never carried samples.
                 #
-                # This is the export side of the same loss #36 records at
-                # ingest, so it rides the same channel (#126). Only the
-                # empty-samples case: the multiplex-group loss above is
-                # reported at ingest and is not re-reported here.
+                # The export side of the same loss ingest records, so it
+                # rides the same channel. Only the empty-samples case: the
+                # multiplex-group loss is reported at ingest and is not
+                # re-reported here.
                 #
                 # Scoped STANDARD: what is missing is Waveform Data
                 # (5400,1010), an even group, and unlike the ingest-side
-                # multiplex loss -- scoped SIGNAL since #150 -- nothing
-                # was discarded by this pipeline. This branch is
+                # multiplex loss (scoped SIGNAL) nothing was discarded by
+                # this pipeline. This branch is
                 # reachable only from a source that never carried
                 # samples, so the export is not smaller than the
                 # acquisition; it is the acquisition, said out loud.
@@ -7787,13 +7554,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # is nothing to delete -- and asking a pydicom Dataset about a
         # string that is neither a tag nor a keyword emits a UserWarning
         # on the *caller's* stream, once per exported instance, because
-        # this package installs no global filter (#144). A defensive
-        # `if key in ds: del` reintroduces that noise and guards nothing;
-        # measured in `test_export_redaction_hash_warning.py` (#248).
+        # this package installs no global filter. A defensive
+        # `if key in ds: del` reintroduces that noise and guards nothing.
 
         # The integer branch's pixel element is written from `arr`, as
         # bytes above or by the encoder inside `_finalize_dataset`, so
-        # this is the array the readback holds the file against (#449).
+        # this is the array the readback holds the file against.
         # After the redaction block and the geometry, and a reference,
         # not a copy. `arr` is None here after the float branch, which
         # took its own capture, and for an instance with no pixels.
@@ -7803,20 +7569,20 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
 
-        # A limit of ours, not a defect in the data (#596, #461): a
+        # A limit of ours, not a defect in the data: a
         # 16-bit or signed 8-bit YBR_FULL file is conformant and is
         # written, and this library cannot read it back -- pydicom's
         # colour conversion takes unsigned 8-bit samples only. Keyed on
         # the samples' dtype, the predicate pydicom itself applies and the
         # one the readback's second decode is gated on, not on
-        # BitsAllocated: int8 is BitsAllocated 8, and a `> 8` key left it
-        # silent. INFO on `corrections`, no row. After
+        # BitsAllocated: int8 is BitsAllocated 8, and a `> 8` key would
+        # leave it silent. INFO on `corrections`, no row. After
         # `_finalize_dataset` and off `ds`, so the label is the written
         # one (`YBR_FULL_422` is already `YBR_FULL`) and a JPEG 2000 file,
         # which keeps `YBR_FULL` (`_compress_j2k` case 3), is covered in
         # the same words. Keyed on the integer arm having written, rather
         # than on `"PixelData" in ds`: a float arm cannot carry a colour
-        # label at all (#222).
+        # label at all.
         if (written_pixels is not None and written_pixels.dtype.kind != "f"
                 and _written_photometric(ds.get("PhotometricInterpretation"))
                 in _PYDICOM_CONVERTS
@@ -7830,14 +7596,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"pydicom's colour conversion takes unsigned 8-bit samples "
                 f"only.")
 
-        # A limit of a reader, not of the file (#670): pydicom's Pillow
+        # A limit of a reader, not of the file: pydicom's Pillow
         # plugin refuses every JPEG 2000 codestream above 8 bits with more
         # than one sample ("Pillow cannot decode 16-bit multi-sample data
         # correctly", pydicom 3.0.2 pixels/decoders/pillow.py), because
         # Pillow narrows such data to 8 bits. The file is conformant and
         # exact: this library and pydicom with pylibjpeg-openjpeg read it
-        # back sample for sample. INFO on `corrections`, no row, as #596
-        # above -- a WARNING would grade a correct file REVIEW_REQUIRED.
+        # back sample for sample. INFO on `corrections`, no row, as the
+        # YBR note above -- a WARNING would grade a correct file
+        # REVIEW_REQUIRED.
         # Keyed on the file as written (its syntax, width and sample
         # count), after `_finalize_dataset`, so a pixel-less file (it
         # stays native) and an icon (always raw) cannot reach it; not on
@@ -7846,8 +7613,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # predicate: `jpeg2k_encode` writes the container width as the
         # precision, and a later widening of `_J2K_ENCODABLE_FRAMES` must
         # not go silent. Not for a label pydicom converts
-        # (`_PYDICOM_CONVERTS`): a 16-bit YBR_FULL file is the #596
-        # note's, and that note is the true one -- no reader here, this
+        # (`_PYDICOM_CONVERTS`): a 16-bit YBR_FULL file gets the YBR
+        # note above, and that note is the true one -- no reader here, this
         # library included, converts 16-bit YBR -- so this note, which
         # says this library reads the file back, would be false beside it.
         if (written_pixels is not None
@@ -7860,7 +7627,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             corrections.append(_PILLOW_J2K_NOTE.format(
                 bits=int(ds.BitsAllocated), samples=int(ds.SamplesPerPixel)))
 
-        # The third arm's label judgement (#534): a file with no pixel
+        # The third arm's label judgement: a file with no pixel
         # element never reaches `_write_pixel_geometry`, which judges the
         # other two. After `_finalize_dataset`, because the syntax judged
         # has to be the one in `ds.file_meta` -- a pixel-less file stays
@@ -7871,15 +7638,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the right order: a warning describes a file that was written.
         #
         # Keyed on the arm -- no pixel arm set `written_pixels`, which is
-        # exactly "`_write_pixel_geometry` was not called". Since #605 that
-        # is also exactly "no pixel element is in the file": only None and
-        # `"j2k"` reach the integer arm, and each writes the element (the
-        # raw bytes, or the encoder), so the arm that set `written_pixels`
-        # always wrote one. It was not before -- `compression="rle"` set it
-        # and wrote nothing, so this judgement was skipped for a file with
-        # no pixels and the #596 note above described pixels the file did
-        # not carry. Keep the key on the arm regardless: the arm is what
-        # decides which of the two label judgements ran.
+        # exactly "`_write_pixel_geometry` was not called". That is also
+        # exactly "no pixel element is in the file": only None and `"j2k"`
+        # reach the integer arm, and each writes the element (the raw
+        # bytes, or the encoder), so the arm that set `written_pixels`
+        # always wrote one. Keep the key on the arm regardless: the arm is
+        # what decides which of the two label judgements ran.
         if written_pixels is None:
             warning = _pixel_less_label_warning(ds)
             if warning is not None:
@@ -7887,9 +7651,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # Every ambiguous VR gets a concrete arm here, while the dataset
         # is complete and before `save_as` asks the same question and
-        # fails the file over it (#674, #675, #681). `save_as` asks again
-        # and finds nothing left to decide, which is why every file that
-        # exported before exports byte for byte as it did.
+        # fails the file over it. `save_as` asks again and finds nothing
+        # left to decide, so a file pydicom could already resolve is
+        # written byte for byte as pydicom alone would write it.
         _resolve_ambiguous_vrs(ds, losses, warnings)
 
         # Ensure dir exists (race safe)
@@ -7898,10 +7662,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # Write under a temporary name and rename into place only once
         # the write has finished. `save_as` creates the file first and
         # streams elements into it in ascending tag order, so a raise
-        # part-way used to leave a *readable* partial under the real
+        # part-way would leave a *readable* partial under the real
         # name: `dcmread` accepts a dataset that simply stops, and
         # Pixel Data (7FE0,0010) is written last, so the element most
-        # often missing was the largest and the least visible (#199).
+        # often missing would be the largest and the least visible.
         # The temp lives in the destination directory because that is
         # what keeps the rename atomic -- same filesystem, one
         # directory-entry swap.
@@ -7912,14 +7676,14 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # them every 25 tasks), so it cannot lean on parent state. The
         # pid suffix keeps recycled and concurrent workers off each
         # other's temp files. A worker killed outright can still orphan
-        # one `.tmp`; that residue is what atomicity costs, and what can
-        # no longer exist is a partial under a name a recipient trusts.
+        # one `.tmp`; that residue is what atomicity costs, and what
+        # cannot exist is a partial under a name a recipient trusts.
         tmp_path = f"{ctx.output_path}.{os.getpid()}.tmp"
         try:
             ds.save_as(tmp_path, enforce_file_format=True)
             # Before the rename, so a file that fails verification is
             # never published under its real name -- see
-            # `_verify_readback` (#209).
+            # `_verify_readback`.
             if ctx.verify_readback:
                 _verify_readback(tmp_path, ds, written_pixels,
                                  written_waveform)
@@ -7937,12 +7701,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
         # Report the failure back for the parent to count and raise on.
+        # The stderr line is a best-effort rendering: the returned
+        # `ExportOutcome` carries the same fact to `ExportSummary`, an
+        # ERROR audit row and `write_tree`'s `RuntimeError`.
         #
         # The console line names the instance, not `ctx.output_path`, and
         # spells the exception without its path: the output path is
-        # `Subject_<Patient ID>/...`, and an OSError's text repeats it
-        # (P8, bunch E; the WFDB half is #588). The parent's `ERROR` row,
-        # `_report_export_failures`', has the same shape.
+        # `Subject_<Patient ID>/...`, and an OSError's text repeats it.
+        # The parent's `ERROR` row, `_report_export_failures`', has the
+        # same shape.
         named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
@@ -7966,8 +7733,8 @@ class _J2kFrameRefusal(RuntimeError):
 
 
 #: The frames this project can compress **and read back**, keyed on
-#: `(itemsize, multi-sample)`. Measured end to end -- ingest, export,
-#: read back, compare against the literal:
+#: `(itemsize, multi-sample)`. End to end -- ingest, export, read back,
+#: compare against the literal:
 #:
 #: | itemsize | samples 1 | samples 3 |
 #: | --- | --- | --- |
@@ -7977,34 +7744,26 @@ class _J2kFrameRefusal(RuntimeError):
 #:
 #: A **positive** rule, because neither the codec's refusals nor the
 #: encoder's exactness marks the boundary of what is safe to write:
-#: 32-bit encodes *silently* to 25 bits, so a deny-list would have had
-#: to anticipate it and would not have. The standard is what this
-#: library can read back, which `_refuse_unencodable_j2k_frame` states.
+#: 32-bit encodes *silently* to 25 bits, so a deny-list would have to
+#: anticipate it. The standard is what this library can read back, which
+#: `_refuse_unencodable_j2k_frame` states.
 #:
-#: **The `(2, True)` cell is where that standard moved (#416).**
-#: `imagecodecs` always encoded 16-bit multi-sample frames exactly, but
+#: **The `(2, True)` cell depends on ingest's imagecodecs fallback.**
 #: Pillow -- the only JPEG 2000 plugin pydicom has here -- reports
-#: `Pillow cannot decode 16-bit multi-sample data correctly`, so
-#: `session.ingest()` on this library's own export returned `ingested=0`
-#: and the cell was refused, on the same standard as 32-bit. Ingest now
-#: falls back to `imagecodecs` when pydicom cannot decode
-#: (`_decode_pixels`), which reads those frames bit-exactly, so the cell
-#: meets the standard. Measured on imagecodecs 2026.8.16, on 3.12 and
-#: 3.14t, for `uint16` and `int16`, one and two frames, and pinned by
-#: `test_our_own_compressed_16_bit_colour_export_re_ingests`. It holds at
-#: the install floor too: imagecodecs 2024.6.1, pydicom 3.0.2 and numpy
-#: 2.2.6, measured in review of #451 (85 passed across the suites that
-#: reach this cell). **Before
-#: narrowing `_IMAGECODECS_FALLBACK_SYNTAXES` to exclude JPEG 2000,
-#: remove this cell**, or the export writes a file ingest refuses again.
+#: `Pillow cannot decode 16-bit multi-sample data correctly`; ingest falls
+#: back to `imagecodecs` when pydicom cannot decode (`_decode_pixels`),
+#: which reads those frames bit-exactly, `uint16` and `int16`, at the
+#: install floor too (imagecodecs 2024.6.1, pydicom 3.0.2, numpy 2.2.6).
+#: **Before narrowing `_IMAGECODECS_FALLBACK_SYNTAXES` to exclude JPEG
+#: 2000, remove this cell**, or the export writes a file ingest refuses.
 #:
 #: What the cell costs: a third-party reader with pydicom and only
 #: Pillow still cannot decode such a file's `pixel_array`, and the
-#: export says so at INFO (#670, `_PILLOW_J2K_NOTE`). A caller
-#: exporting for one passes `use_compression=False`, as before.
-#: `verify_readback=True` decodes every written file through
-#: `_decode_pixels` since #449; `(2, True)` passes it through the
-#: imagecodecs fallback, where `pixel_array` with only Pillow raises.
+#: export says so at INFO (`_PILLOW_J2K_NOTE`). A caller exporting for
+#: one passes `use_compression=False`. `verify_readback=True` decodes
+#: every written file through `_decode_pixels`; `(2, True)` passes it
+#: through the imagecodecs fallback, where `pixel_array` with only Pillow
+#: raises.
 _J2K_ENCODABLE_FRAMES = frozenset({
     (1, False),
     (1, True),
@@ -8012,11 +7771,11 @@ _J2K_ENCODABLE_FRAMES = frozenset({
     (2, True),
 })
 
-#: The note for a JPEG 2000 file pydicom's Pillow plugin refuses (#670).
-#: It names the reader that was measured to work (pylibjpeg-openjpeg,
-#: on 3.12) and not GDCM, which was only read, and it says "and" rather
-#: than "only through", which would claim GDCM by exclusion. No path and
-#: no identifier: the parent prefixes the SOP Instance UID (D10).
+#: The note for a JPEG 2000 file pydicom's Pillow plugin refuses.
+#: It names the reader known to work (pylibjpeg-openjpeg) and not GDCM,
+#: which is untested here, and it says "and" rather than "only through",
+#: which would claim GDCM by exclusion. No path and no identifier: the
+#: parent prefixes the SOP Instance UID.
 _PILLOW_J2K_NOTE = (
     "written as JPEG 2000 Lossless at BitsAllocated {bits} with {samples} "
     "samples per pixel, exactly. pydicom's Pillow plugin, the only one of "
@@ -8028,7 +7787,7 @@ _PILLOW_J2K_NOTE = (
     "only Pillow, export with use_compression=False (#670).")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
-#: component transform (#490). `RGB` is transformed and relabelled
+#: component transform. `RGB` is transformed and relabelled
 #: `YBR_RCT`; `YBR_RCT` and `YBR_ICT` are transformed and keep the label
 #: they came with, because such an instance's samples were already
 #: inverse-transformed into memory by the decode that produced them, so
@@ -8039,12 +7798,11 @@ _PILLOW_J2K_NOTE = (
 #: other label -- `YBR_FULL`, `YBR_PARTIAL_420`, `YBR_PARTIAL_422`, and
 #: every 1-sample label including `PALETTE COLOR` -- encodes `mct=False`.
 #:
-#: **That list is this function's, not the worker's (#528).** Through the
+#: **That list is this function's, not the worker's.** Through the
 #: export worker, a 3-sample `PALETTE COLOR` has already become `RGB`
-#: (case 1) and a 3-sample `YBR_FULL_422` has become `YBR_FULL` (#470),
-#: because `_write_pixel_geometry` runs before the encoder; neither
-#: reaches this function under its own name. A direct caller can still
-#: pass either, which is what the unit tests do.
+#: and a 3-sample `YBR_FULL_422` has become `YBR_FULL`, because
+#: `_write_pixel_geometry` runs before the encoder; neither reaches this
+#: function under its own name. A direct caller can still pass either.
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
 
 
@@ -8115,8 +7873,8 @@ def _refuse_unencodable_j2k_frame(arr, ds, samples):
     if (arr.dtype.itemsize, samples > 1) in _J2K_ENCODABLE_FRAMES:
         return
 
-    # Every 8- and 16-bit cell is encodable since #416, so what reaches
-    # here is 32- or 64-bit, and this is the one reason that applies.
+    # Every 8- and 16-bit cell is encodable, so what reaches here is
+    # 32- or 64-bit, and this is the one reason that applies.
     why = (f"the encoder (imagecodecs {imagecodecs.__version__}) is "
            f"exact only to 25 bits, so a 32-bit frame would be written "
            f"wrong and read back wrong, and a 64-bit frame is refused "
@@ -8168,30 +7926,20 @@ def _compress_j2k(ds, pixel_array=None):
     try:
         arr = pixel_array
         if arr is None:
-            # Nothing to compress, and that is the whole meaning of the
-            # branch. It used to rebuild the array from `ds.PixelData`,
-            # reading those bytes as `uint16` regardless of
-            # `PixelRepresentation` -- a silent-corruption sibling of #386
-            # that would have compressed signed data to wrong values
-            # without raising.
-            #
-            # Deleted rather than corrected, because it is unreachable:
-            # `_compress_j2k`'s only caller is `_finalize_dataset`, whose
-            # only caller is the export worker, which always passes
-            # `pixel_array=arr`; and when compressing the worker
-            # never assigns `ds.PixelData` at all, which the comment at
-            # the `arr is not None` block above already says in those
-            # words. The one path that arrives here with `arr is None` is
-            # the float branch, which has deleted (7fe0,0010) and wants
-            # the file written uncompressed per PS3.5 8.2.
-            #
-            # So: return, leaving `ds` exactly as it was. Restoring a
-            # reconstruction here would reintroduce a decoder that can
-            # disagree with the loader.
+            # Nothing to compress: return, leaving `ds` exactly as it was.
+            # Do not rebuild the array from `ds.PixelData` here: that is a
+            # second decoder that can disagree with the loader (reading
+            # the bytes as `uint16` whatever `PixelRepresentation` says
+            # compresses signed data to wrong values without raising).
+            # Nothing needs it: the export worker, the only caller through
+            # `_finalize_dataset`, always passes `pixel_array=arr` and never
+            # assigns `ds.PixelData` when compressing. The one path that
+            # arrives here with `arr is None` is the float branch, which has
+            # deleted (7fe0,0010) and wants the file written uncompressed
+            # per PS3.5 8.2.
             return
         else:
-            # Array passed explicitly.
-            # Handle Flattened (1D)
+            # A flattened (1-D) array is reshaped to the declared geometry.
             if len(arr.shape) == 1:
                 frames = getattr(ds, "NumberOfFrames", 1)
                 rows = getattr(ds, "Rows", 0)
@@ -8210,9 +7958,9 @@ def _compress_j2k(ds, pixel_array=None):
                     if target_shape:
                         arr = arr.reshape(target_shape)
                 except Exception as e:
-                    # If reshape fails, we MUST fail export. Continuing with 1D array is dangerous.
-                    # This explains the "tuple index out of range" crash when iterating 1D
-                    # array as frames.
+                    # A failed reshape must fail the export: iterating a
+                    # 1-D array as frames encodes garbage or crashes with
+                    # "tuple index out of range".
                     raise RuntimeError(
                         f"Array shape mismatch. Expected {target_shape} for {
                             arr.size} elements. Error: {e}")
@@ -8220,8 +7968,8 @@ def _compress_j2k(ds, pixel_array=None):
             frames = getattr(ds, "NumberOfFrames", 1)
             samples = getattr(ds, "SamplesPerPixel", 1)
 
-            # Robust Squeeze Logic for Single Sample/Single Frame Edge Cases
-            # Pillow prefers (H, W) over (H, W, 1) or (1, H, W) for grayscale.
+            # Single-sample frames are squeezed to (H, W) or (F, H, W), so
+            # each frame reaches the encoder as a 2-D greyscale array.
             if samples == 1:
                 if frames == 1:
                     # Expect (H, W) or (1, H, W) or (H, W, 1)
@@ -8235,34 +7983,30 @@ def _compress_j2k(ds, pixel_array=None):
                     if len(arr.shape) == 4 and arr.shape[-1] == 1:
                         arr = arr.squeeze(-1)  # (F, H, W, 1) -> (F, H, W)
 
-        # 3. Compress
         frames_data = []
 
         # A bool frame is stored, declared and exported as 8-bit: the
         # dtype carrier keeps `bool` because no DICOM descriptor can name
-        # it (#386), but `set_pixel_data` still writes BitsAllocated 8 and
+        # it, but `set_pixel_data` writes BitsAllocated 8 and
         # PixelRepresentation 0, and the uncompressed path writes
         # `arr.tobytes()` -- one byte per element. `view` rather than
         # `astype` says exactly that: the same bytes, read under the dtype
         # the file declares, with no copy and no conversion to get wrong.
-        # The codec refuses kind `b` outright
-        # (`ValueError: sample format not supported by codec`), so without
-        # this a mask that compressed cleanly while it reloaded as `uint8`
-        # would have started failing the *default* export the moment the
-        # carrier began reloading it as `bool`.
+        # The codec refuses kind `b` outright (`ValueError: sample format
+        # not supported by codec`), so without this every bool mask would
+        # fail the default export.
         if arr.dtype.kind == 'b':
             arr = arr.view(np.uint8)
 
-        # **The frame guard, and it runs before any encode and before any
-        # mutation of `ds`.** It is a positive rule -- encode only what is
-        # measured to survive a round trip -- because neither the codec's
-        # refusals nor its exactness lines up with what is safe to write.
+        # The frame guard runs before any encode and before any mutation
+        # of `ds`. It is a positive rule -- encode only what is known to
+        # survive a round trip -- because neither the codec's refusals nor
+        # its exactness lines up with what is safe to write.
         #
-        # 64-bit it does refuse, but with a different sentence on
+        # 64-bit the codec does refuse, but with a different sentence on
         # different releases (`ValueError: item size not supported by
-        # codec` on 2026.8.16, `Jpeg2kError: opj_encode or opj_write_tile
-        # failed` on 2024.6.1), so a message a user can act on cannot come
-        # from the codec.
+        # codec`, `Jpeg2kError: opj_encode or opj_write_tile failed`), so
+        # a message a user can act on cannot come from the codec.
         #
         # 32-bit it does **not** refuse, and that is the dangerous half:
         # it encodes exactly to 25 bits and wrong above that, and the
@@ -8274,41 +8018,34 @@ def _compress_j2k(ds, pixel_array=None):
         # be read back wrong** -- the loss is at the encoder, so a decoder
         # that *does* open the codestream (`imagecodecs.jpeg2k_decode`)
         # hands back the right dtype and shape with silently wrong values
-        # rather than raising. Worse than unreadable, not milder. A
-        # silence created by the fix for a silence (#404).
+        # rather than raising.
         #
-        # 16-bit **multi-sample** was refused here too until #416, for
-        # the other half of the same standard: `imagecodecs` encodes it
-        # bit-exactly, but pydicom's only J2K plugin here (Pillow) cannot
-        # decode it, so this library could not ingest its own export. It
-        # is written now because ingest falls back to `imagecodecs`; see
-        # `_J2K_ENCODABLE_FRAMES`. `int8` RGB, which Pillow's encoder
-        # refused before #404, *is* exact and was never refused by this
-        # guard.
+        # 16-bit multi-sample is written: `imagecodecs` encodes it
+        # bit-exactly, and although pydicom's only J2K plugin here
+        # (Pillow) cannot decode it, ingest falls back to `imagecodecs`, so
+        # this library can read its own export; see `_J2K_ENCODABLE_FRAMES`.
+        # `int8` RGB is exact too.
         _refuse_unencodable_j2k_frame(arr, ds, samples)
 
-        # **The multiple-component transform is the label, and both are
-        # decided here (#490).** `jpeg2k_encode`'s default turns MCT on
-        # for every 3-component frame (measured: the `COD` segment's
-        # transform byte is 1 for `uint8`, `uint16` and a YBR_FULL
-        # source alike). PS3.5 8.2.4 gives that codestream exactly two
-        # Photometric Interpretations -- `YBR_RCT` for the reversible
-        # transform, `YBR_ICT` for the irreversible one -- so writing
-        # MCT under an `RGB` label, which is what this did for every
-        # colour export, is non-conformant: a reader that believes the
-        # label is told no transform was applied. The codestream carries
-        # its own flag, so the readers here recover the samples anyway
-        # (pydicom with Pillow, `opj_decompress` and
-        # `imagecodecs.jpeg2k_decode` all read maxdiff 0 under either
-        # label), which is why it went unnoticed. `YBR_RCT` and not
-        # `YBR_ICT`: `level=0` is the reversible transform, and it is the
-        # only encode this function makes.
+        # The multiple-component transform is the label, and both are
+        # decided here. `jpeg2k_encode`'s default turns MCT on for every
+        # 3-component frame (the `COD` segment's transform byte is 1 for
+        # `uint8`, `uint16` and a YBR_FULL source alike). PS3.5 8.2.4
+        # gives that codestream exactly two Photometric Interpretations --
+        # `YBR_RCT` for the reversible transform, `YBR_ICT` for the
+        # irreversible one -- so MCT under an `RGB` label is
+        # non-conformant: a reader that believes the label is told no
+        # transform was applied. The readers here recover the samples
+        # either way (the codestream carries its own flag), so nothing
+        # but conformance shows the mistake. `YBR_RCT` and not `YBR_ICT`:
+        # `level=0` is the reversible transform, and it is the only encode
+        # this function makes.
         #
-        # **Three cases, and the rule is symmetric (#490, N2).** PS3.5
-        # 8.2.4 binds the transform and the label in both directions: an
-        # MCT codestream must say `YBR_RCT`/`YBR_ICT`, and with no
-        # transformation applied the components shall correspond to those
-        # the Photometric Interpretation specifies. So:
+        # Three cases, and the rule is symmetric: PS3.5 8.2.4 binds the
+        # transform and the label in both directions -- an MCT codestream
+        # must say `YBR_RCT`/`YBR_ICT`, and with no transformation applied
+        # the components shall correspond to those the Photometric
+        # Interpretation specifies. So:
         #
         # 1. An `RGB` source is transformed and **relabelled** `YBR_RCT`.
         #    MCT decorrelates RGB, so it earns its place here (`mct=0` /
@@ -8319,29 +8056,25 @@ def _compress_j2k(ds, pixel_array=None):
         #    already inverse-transformed into memory, so applying the
         #    transform on re-encode is what makes the label true of this
         #    codestream. Encoding it `mct=False` under the label it keeps
-        #    -- which is what #490 first shipped -- declares RCT over a
-        #    `COD` transform byte of 0: the same non-conformance,
-        #    mirrored. Not relabelled to `RGB`, which would discard the
-        #    source's stated colour space against #482's work, and not
+        #    would declare RCT over a `COD` transform byte of 0: the same
+        #    non-conformance, mirrored. Not relabelled to `RGB`, which
+        #    would discard the source's stated colour space, and not
         #    refused, which no ingested file would reach.
         # 3. **Every other label** -- `YBR_FULL`, `YBR_PARTIAL_420`,
         #    `YBR_PARTIAL_422`, and every 1-sample label including
         #    `PALETTE COLOR` -- is encoded `mct=False` and keeps its
         #    label. Through the export worker, a 3-sample `PALETTE COLOR`
         #    has already become `RGB` (case 1) and a 3-sample
-        #    `YBR_FULL_422` has become `YBR_FULL` (#470), so neither
-        #    reaches this function under its own name; a direct caller
-        #    can still pass either (#528). `YBR_PARTIAL_*` is a label the
-        #    export also warns about (#525): the encoder does not decide
-        #    admissibility. A luma/chroma source is already
-        #    decorrelated, so MCT over it is both unnameable and larger:
-        #    measured on a `YBR_FULL` frame, `mct=True` is 66482 bytes against
-        #    `mct=False`'s 48819, a 36% loss for a file that would also
-        #    be mislabelled.
+        #    `YBR_FULL_422` has become `YBR_FULL`, so neither reaches this
+        #    function under its own name; a direct caller can still pass
+        #    either. `YBR_PARTIAL_*` is a label the export also warns
+        #    about: the encoder does not decide admissibility. A
+        #    luma/chroma source is already decorrelated, so MCT over it is
+        #    both unnameable and larger (on a `YBR_FULL` frame, 66482 bytes
+        #    against `mct=False`'s 48819).
         #
         # `mct` is passed in both directions rather than left default, so
-        # the flag in the file is this decision and never the codec's
-        # (whose default is MCT on for every 3-component frame).
+        # the flag in the file is this decision and never the codec's.
         #
         # Keyed on the sample count and the declared label, before any
         # encode. The relabel is written after the last frame encodes,
@@ -8372,20 +8105,19 @@ def _compress_j2k(ds, pixel_array=None):
         else:
             frames_data.append(encode_frame(arr))
 
-        # **An offset table, unless it makes the length a lie (#473).**
-        # pydicom's decoder warns "the number of bytes of compressed pixel
-        # data matches the expected number for uncompressed data" when an
+        # An offset table, unless it makes the length a lie. pydicom's
+        # decoder warns "the number of bytes of compressed pixel data
+        # matches the expected number for uncompressed data" when an
         # encapsulated value's length falls in its window, and small
-        # low-entropy frames land there by chance -- about 1 in 5 random
-        # 16x16 bool masks, measured -- so `verify_readback=True`, and
-        # every later reader, put a false "check the transfer syntax"
-        # warning on the caller's stream about a correct file. An empty
-        # Basic Offset Table is PS3.5 A.4-legal and shortens the value by
-        # 4 bytes per frame; the window is `expected`, or `expected + 1`
-        # when that is odd, so the two encapsulations cannot both fall in
-        # it. Suppressing the warning instead was ruled out in #472: on
-        # 3.12 `catch_warnings` mutates the process-global filters, and
-        # this runs on threads.
+        # low-entropy frames land there by chance (about 1 in 5 random
+        # 16x16 bool masks), so `verify_readback=True`, and every later
+        # reader, would put a false "check the transfer syntax" warning on
+        # the caller's stream about a correct file. An empty Basic Offset
+        # Table is PS3.5 A.4-legal and shortens the value by 4 bytes per
+        # frame; the window is `expected`, or `expected + 1` when that is
+        # odd, so the two encapsulations cannot both fall in it. Do not
+        # suppress the warning instead: on 3.12 `catch_warnings` mutates
+        # the process-global filters, and this runs on threads.
         #
         # The trade, for exactly these files: no table, so the table-based
         # frame check reads nothing (`offset_table_frame_count` answers
@@ -8396,31 +8128,29 @@ def _compress_j2k(ds, pixel_array=None):
         if len(encapsulated) in _heuristic_lengths(ds, frames, samples):
             encapsulated = encapsulate(frames_data, has_bot=False)
         ds.PixelData = encapsulated
-        # ds.TransferSyntaxUID = JPEG2000Lossless # REMOVE: Group 2 tags must be in file_meta only
-        # The transfer syntax is the encoding. `is_implicit_VR` and
-        # `is_little_endian` are not set alongside it: pydicom derives
-        # both from the UID and removes the attributes in 4.0 (#141).
+        # Group 2 tags belong in `file_meta` only, never on `ds`. The
+        # transfer syntax is the encoding: `is_implicit_VR` and
+        # `is_little_endian` are not set alongside it, because pydicom
+        # derives both from the UID and removes the attributes in 4.0.
         ds.file_meta.TransferSyntaxUID = JPEG2000Lossless
         if mct and photometric == "RGB":
             # The label for the transform the codestream now carries
-            # (#490 case 1, see the note above). Only the `RGB` source is
-            # relabelled: a source already labelled `YBR_RCT`/`YBR_ICT`
-            # (case 2) is transformed too, and its own label is already
-            # true of the codestream -- rewriting `YBR_ICT` to `YBR_RCT`
-            # would name the wrong transform for a label this function
-            # did not choose. Written here, after every frame encoded, so
-            # a refusal leaves `ds` saying `RGB` over the pixels it still
-            # has. Re-ingesting this file relabels it `RGB` again,
-            # because `jpeg2k_decode` undoes the transform and
-            # `DECODER_RELABELS` says so (#448, #482) -- the round trip
-            # is stable in both directions.
+            # (case 1 above). Only the `RGB` source is relabelled: a
+            # source already labelled `YBR_RCT`/`YBR_ICT` (case 2) is
+            # transformed too, and its own label is already true of the
+            # codestream -- rewriting `YBR_ICT` to `YBR_RCT` would name the
+            # wrong transform for a label this function did not choose.
+            # Written here, after every frame encoded, so a refusal leaves
+            # `ds` saying `RGB` over the pixels it still has. Re-ingesting
+            # this file relabels it `RGB` again, because `jpeg2k_decode`
+            # undoes the transform and `DECODER_RELABELS` says so -- the
+            # round trip is stable in both directions.
             ds.PhotometricInterpretation = "YBR_RCT"
 
     except _J2kFrameRefusal:
         # Re-raised unchanged, ahead of the generic handler below. Wrapped
         # it would read `Compression failed: Compression failed: ...`, and
-        # the whole point of the refusal is that the sentence the user
-        # reads is ours rather than the codec's.
+        # the sentence the user reads must be ours rather than the codec's.
         raise
     except Exception as e:
         raise RuntimeError(f"Compression failed: {e}")
@@ -8463,8 +8193,8 @@ class SidecarPixelLoader:
         self.length = length
         self.alg = alg
 
-        # We need metadata to reshape safely.
-        # Prefer direct metadata check, fallback to instance extraction.
+        # The descriptors are what the frame is reshaped against:
+        # `metadata` when given, else captured from `instance`.
         if metadata:
             self.sop_instance_uid = metadata.get("sop_instance_uid", "Unknown")
             self.rows = metadata.get("rows", 0) or 0
@@ -8520,13 +8250,10 @@ class SidecarPixelLoader:
         # One snapshot, then every field from it. Seven separate
         # `attributes.get` calls could straddle a concurrent
         # `attributes.update(...)` and read one layout's Rows with the
-        # other's Columns -- a geometry neither layout declared. Measured
-        # on 3.14t with the GIL off: a writer flipping between 4x4 and
-        # 2x8, both valid for the stored bytes, made 10.3% of reads raise
-        # an Integrity Error. `dict()` copies a dict's storage in one step
-        # without calling `.get`, so the capture is one layout or the
-        # other. Pinned by tests/test_descriptor_edit_with_pixels_unloaded.py::
-        # test_the_descriptors_are_read_from_one_snapshot.
+        # other's Columns -- a geometry neither layout declared, which on a
+        # free-threaded build raises Integrity Errors on reads of a valid
+        # frame. `dict()` copies a dict's storage in one step without
+        # calling `.get`, so the capture is one layout or the other.
         return ((instance.sop_instance_uid,)
                 + SidecarPixelLoader._descriptors_of(dict(instance.attributes)))
 
@@ -8598,7 +8325,7 @@ class SidecarPixelLoader:
         # numpy `bool_` and `uint8` both declare BitsAllocated 8 with
         # PixelRepresentation 0. A frame whose dtype is one of those can
         # only be rebuilt from a dtype that was carried, never from one
-        # that was inferred (#183, #386). Checked against the allow-list,
+        # that was inferred. Checked against the allow-list,
         # because this string comes back out of the store and
         # `np.dtype(anything)` is not a thing a loader should do.
         if pixel_dtype in SIDECAR_DTYPE_NAMES:
@@ -8608,8 +8335,8 @@ class SidecarPixelLoader:
             # between them name every integer dtype the sidecar can hold
             # -- and the legacy bucketing as the fallback, because
             # `BitsAllocated` 1 and 12 are real ingested populations that
-            # this table has no row for and must keep decoding as they do
-            # (#386). Do not subscript `_INTEGER_DTYPE_BY_BITS` here.
+            # this table has no row for and must keep decoding as they do.
+            # Do not subscript `_INTEGER_DTYPE_BY_BITS` here.
             dt = np.dtype(_integer_dtype(bits, pixel_representation))
 
         # **Isocenter holds and stores pixels interleaved, always.** The
@@ -8618,22 +8345,19 @@ class SidecarPixelLoader:
         # from a planar source too, `set_pixel_data()` is handed an
         # interleaved-shaped array (`resolve_pixel_geometry` reads
         # `(rows, cols, samples)`), and `persist_pixel_data` writes
-        # `arr.tobytes()` of that. Measured on pydicom 3.0.2: a 2-frame
-        # 3x3 RGB file with PlanarConfiguration 1 and planar bytes
-        # 0..53 gives `pixel_array.shape == (2, 3, 3, 3)` and
+        # `arr.tobytes()` of that. On pydicom 3.0.2 a 2-frame 3x3 RGB file
+        # with PlanarConfiguration 1 and planar bytes 0..53 gives
+        # `pixel_array.shape == (2, 3, 3, 3)` and
         # `ravel() == [0 9 18 1 10 19 ...]` -- interleaved.
         #
         # So there is no planar branch here and there must not be one. A
         # (0028,0006) of 1 in `attributes` describes the *source file*,
         # never the frame this reads, and reshaping as
-        # `(samples, rows, cols)` plus a transpose -- which is what
-        # stood here -- returned a transposed image for every
-        # single-frame colour instance carrying a declared 1. The
-        # multi-frame arm never had the branch, which is why it was the
-        # correct one; #210's issue text has that inverted and its
-        # Option 1 would have made both arms wrong. `self.planar_conf`
-        # went with the branch: a field nothing reads is a second
-        # answer waiting to disagree with this one. (#210)
+        # `(samples, rows, cols)` plus a transpose would return a
+        # transposed image for every colour instance carrying a declared
+        # 1. Nor is PlanarConfiguration kept on the loader: a field
+        # nothing reads is a second answer waiting to disagree with this
+        # one.
         if frames > 1:
             target_shape = (frames, rows, cols, samples)
             if samples == 1:
@@ -8714,7 +8438,6 @@ class SidecarPixelLoader:
                 f"Integrity Error: Failed to read/decompress frame for "
                 f"{self.sop_instance_uid}: {describe_exception(e)}")
 
-        # Integrity Check
         if self.pixel_hash:
             curr_hash = hashlib.sha256(raw).hexdigest()
             if curr_hash != self.pixel_hash:
@@ -8726,7 +8449,7 @@ class SidecarPixelLoader:
 
         # Reconstruct based on the capture, by the one reading rule
         # (`_reading`), in `_frame_from_samples` -- which the file arm of
-        # `Instance.get_pixel_data` reads through too (#595).
+        # `Instance.get_pixel_data` reads through too.
         return _frame_from_samples(raw, (
             self.rows, self.cols, self.samples, self.frames, self.bits,
             self.pixel_representation, self.pixel_dtype),
@@ -8768,7 +8491,7 @@ def _frame_from_samples(raw: bytes, descriptors: tuple, uid: str) -> np.ndarray:
     # and `entities.get_pixel_data` wraps it as `Pixel Loader failed
     # for <uid>`. A 16-bit frame's byte length is even by
     # construction, so an odd one is not a DICOM pad; it is the wrong
-    # bytes (#373).
+    # bytes.
     itemsize = np.dtype(dt).itemsize
     if len(raw) % itemsize:
         raise RuntimeError(
@@ -8786,20 +8509,16 @@ def _frame_from_samples(raw: bytes, descriptors: tuple, uid: str) -> np.ndarray:
         target_size *= d
 
     # A declared geometry of nothing is an integrity failure, not a
-    # shape to reshape or pad towards. Without this, a one-byte frame
-    # took the old padding fallback -- `arr.size >= 0` is always
-    # true, `arr[:0]` is empty -- and a `(0, 0)` array went back to
-    # the caller with the integrity hash *passing*, because the hash
-    # is over the raw bytes. The export worker then failed with
-    # `Compression failed: cannot write empty image`; a caller who
-    # never exports got an empty image that looked like data. The
-    # reachable shape is an instance whose `pixel_array` was assigned
-    # directly, so no Rows/Columns were ever written (#343).
+    # shape to reshape or pad towards: the integrity hash is over the raw
+    # bytes and passes, so without this a caller would get an empty
+    # `(0, 0)` image that looks like data. The reachable shape is an
+    # instance whose `pixel_array` was assigned directly, so no
+    # Rows/Columns were ever written.
     #
     # Kept ahead of the bound rather than folded into it: an *empty*
     # frame satisfies `0 <= 0 <= 1`, and `np.frombuffer(b"")
-    # .reshape((0, 0))` succeeds, so without this the empty array
-    # comes back exactly as before. `target_size == 0` names exactly
+    # .reshape((0, 0))` succeeds, so the bound alone would return the
+    # empty array. `target_size == 0` names exactly
     # that case: `frames` enters the shape only when > 1 and
     # `samples` is normalised to at least 1, so it is zero exactly
     # when Rows or Columns is (Rows=2, Columns=2, Frames=0 loads as
@@ -8816,25 +8535,20 @@ def _frame_from_samples(raw: bytes, descriptors: tuple, uid: str) -> np.ndarray:
             f"cannot be reshaped to nothing")
 
     # The tolerance is one trailing sample, in elements, and nothing
-    # wider in either direction (#373). Why one: DICOM pads an
-    # odd-length OB value to even, which for 8-bit data with an odd
-    # sample count is exactly one byte, and that is the *only*
-    # surplus with a DICOM reason -- ingest itself never writes a
-    # pad (`np.ascontiguousarray(ds.pixel_array).tobytes()`). Why
-    # elements and not bytes: the byte check above has already
-    # refused a partial sample, so here every unit is a whole one.
+    # wider in either direction. Why one: DICOM pads an odd-length OB
+    # value to even, which for 8-bit data with an odd sample count is
+    # exactly one byte, and that is the *only* surplus with a DICOM
+    # reason -- ingest itself never writes a pad
+    # (`np.ascontiguousarray(ds.pixel_array).tobytes()`). Why elements
+    # and not bytes: the byte check above has already refused a partial
+    # sample, so here every unit is a whole one.
     #
-    # This replaced `try: reshape / except ValueError: truncate or
-    # return 1-D`. That fallback took *any* surplus (`arr.size >=
-    # target_size`) and silently truncated -- a 16-byte frame loaded
-    # as a 2x2 image -- and returned a short frame as a 1-D array
-    # that every caller then treated as an image. Both are the right
-    # bytes with the wrong geometry: the hash passes and the reshape
-    # is what lies, which is why this is independent of #368's
-    # hash-beside-the-frame and cannot be produced by any ordering
-    # the sidecar gate closes. The message names the UID, both
-    # sizes and the shape so that an export failing on one frame in
-    # ten thousand is diagnosed from that line alone.
+    # Do not loosen this into "truncate any surplus, return a short
+    # frame 1-D": both are the right bytes with the wrong geometry, the
+    # hash passes and the reshape is what lies, and no ordering the
+    # sidecar gate enforces can catch it. The message names the UID,
+    # both sizes and the shape so that an export failing on one frame
+    # in ten thousand is diagnosed from that line alone.
     if not target_size <= arr.size <= target_size + 1:
         raise RuntimeError(
             f"Integrity Error: frame for {uid} holds "
@@ -9008,8 +8722,8 @@ def export_folder_names(patient, study, series):
     # character.
     #
     # `exported_patient_id`, never `patient_id`: a subject with no Patient
-    # ID is keyed on its source Study UID, which must not name a folder
-    # (#584). Its folder is `Subject_UnknownPatient`, as an empty ID's was.
+    # ID is keyed on its source Study UID, which must not name a folder.
+    # Its folder is `Subject_UnknownPatient`.
     subj_name = "Subject_" + ConfigLoader.clean_filename(
         exported_patient_id(patient) or "UnknownPatient")
 
@@ -9024,16 +8738,16 @@ def export_folder_names(patient, study, series):
                 study.series[0].instances[0].attributes, "0008,1030", "Study")
     except (AttributeError, IndexError, KeyError):
         # No instances, or no description tag: the "Study" default above
-        # stands. Narrow on purpose -- BaseException here also swallowed
+        # stands. Narrow on purpose: a broader catch would also swallow
         # Ctrl-C during a long export.
         pass
     st_date = str(study.study_date or "NoDate")
     # The suffix disambiguates two studies sharing a date and description.
-    # With no UID there is nothing to disambiguate *with*, so say so --
-    # slicing a placeholder produced `"Unknown"[-5:]` == "nknow", a word
+    # With no UID there is nothing to disambiguate *with*, so say so:
+    # slicing a placeholder (`"Unknown"[-5:]` is "nknow") makes a word
     # from nowhere that looks like real data and sorts among real
     # suffixes. Take the last 5 only when there is a UID to take them
-    # from. (#53, #78)
+    # from.
     st_uid_suffix = (study.study_instance_uid[-5:]
                      if study.study_instance_uid else "NoUID")
     study_folder = ConfigLoader.clean_filename(f"Study_{st_date}_{st_desc}_{st_uid_suffix}")
@@ -9343,7 +9057,7 @@ def export_stamp_attributes(patient, study, series):
     patient_attributes = {
         "0010,0010": patient.patient_name,
         # Empty for a subject with no Patient ID, under KEEP and REPLACE
-        # alike (#584, owner ruling Q4): what its source had, and never
+        # alike: what its source had, and never
         # the synthetic key or the placeholder `UnknownPatient`.
         "0010,0020": exported_patient_id(patient),
     }
@@ -9366,9 +9080,9 @@ def export_stamp_attributes(patient, study, series):
     series_attributes = {
         "0020,000e": series.series_instance_uid,
         "0008,0060": series.modality,
-        # None stays None, a zero-length Series Number (Type 2). The
-        # session stamped `str(None)`, which IS refuses, so the element
-        # was dropped with a DATA_LOSS row (#570).
+        # None stays None, a zero-length Series Number (Type 2). Never
+        # `str(None)`: IS refuses "None", so the element would be dropped
+        # with a DATA_LOSS row.
         "0020,0011": (None if series.series_number is None
                       else str(series.series_number)),
     }
@@ -9461,12 +9175,12 @@ def _pixel_representation(ancestors):
     # routes, while decompressing. A sequence item with Pixel Data and none
     # -- an icon -- is not refused: its pixels are dropped with a
     # `DATA_LOSS` row, and its `US or SS` elements are read unsigned (by
-    # this rule, through `_read_element`, under Implicit VR or as `UN`;
-    # #691). So the items that reach this with pixels are items whose
-    # pixels are not written. Unsigned is also what the write-path ruling
-    # asks for: the bytes are the source's either way, and the arm is the
-    # one more readers will read correctly (#700 is what a signed source
-    # loses). None rather than 0 because only the caller that *reports*
+    # this rule, through `_read_element`, under Implicit VR or as `UN`).
+    # So the items that reach this with pixels are items whose pixels are
+    # not written. Unsigned is also the write path's best effort: the
+    # bytes are the source's either way, and the arm is the one more
+    # readers will read correctly (a signed source loses its sign in the
+    # VR field). None rather than 0 because only the caller that *reports*
     # the choice needs to know the difference, and it must not report a
     # header the file lacks.
     return None
@@ -9610,9 +9324,9 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
         # `RawDataElement` `Dataset.__getitem__` resolves the ambiguous VR
         # itself, with no ancestors, and re-raises pydicom's
         # `AttributeError` from here -- outside the per-element `try`
-        # below, so it would be the whole-file failure of #674 again, or a
-        # second answer to the question this pass exists to answer. It is
-        # safe only because every element in this dataset was put there by
+        # below, so it would fail the whole file, or give a second answer
+        # to the question this pass exists to answer. It is safe only
+        # because every element in this dataset was put there by
         # `_merge`/`add_new` and none of them is raw.
         elem = ds[tag]
         if elem.VR == "SQ":
@@ -9629,8 +9343,8 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
             # encapsulated stream, and here the element still carries a
             # defined length and an `original_encoding` of (True, True),
             # which sends pydicom down its Implicit VR arm and answers
-            # `OW` -- for a file we are not writing. Measured: asking the
-            # question early turns every compressed export's `OB` into
+            # `OW` -- for a file we are not writing. Asking the question
+            # early turns every compressed export's `OB` into
             # `OW`, at 8 bits and at 16. pydicom asks it again at the
             # write, where the flag is true, so leaving it alone is both
             # correct and complete. Pixel Data is the only arm in pydicom
@@ -9678,7 +9392,7 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
         # -- except where the chain declares no Pixel Representation at
         # all, and its `US or SS` arm defaults to `US` for a dataset with
         # no pixels either. `None` then, so the row cannot name an element
-        # the file does not carry (#674).
+        # the file does not carry.
         _veto_ambiguous_arm(elem, ds, arms, losses, rows,
                             _named_arm(ancestors, elem.VR))
         return
@@ -9785,8 +9499,6 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
     vr = str(elem.VR)
     if vr not in ("US", "SS"):
         return
-    # Derived rather than passed: one fewer argument, and the caller's
-    # spelling of the tag is the same one.
     tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
     values = _int_values(elem.value)
     if not values or _fitting_arm([vr], values) is not None:
@@ -9798,12 +9510,11 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
         # Spelled out rather than left as a bare `return` so the
         # postcondition is structural -- an element kept here would leave
         # with a VR no writer can serve, and `save_as` would raise
-        # `OSError` for the whole file, which is rule (b)'s failure from
-        # inside the code that exists to prevent it. Nothing reaches it
-        # today: `_merge`'s widened `_numeric_arm` refuses such a value
-        # first, measured for a top-level and a nested element and for a
-        # tabulated and an omitted tag, which is why the test that covers
-        # this line calls this function directly.
+        # `OSError` for the whole file, from inside the code that exists
+        # to prevent it. Nothing on the export path reaches it:
+        # `_merge`'s `_numeric_arm` refuses such a value first, for a
+        # top-level and a nested element and for a tabulated and an
+        # omitted tag.
         _ambiguous_arm_loss(ds, elem, losses, tag, arms)
         return
     elem.VR = other
@@ -9880,7 +9591,7 @@ def _numeric_arm(vr, value):
             # pydicom's Pixel Representation answer, which is the better
             # one when the value fits it -- and when it does not, the
             # export-time pass refuses that answer rather than this one
-            # guessing from a partial dataset (#674).
+            # guessing from a partial dataset.
             return arm if "OW" in arms else vr
     if "OW" in arms:
         raise ValueError(f"the value fits no numeric arm of {vr}, and OW "
@@ -9933,62 +9644,43 @@ class DicomExporter:
             for se in st.series:
                 for inst in se.instances:
                     # The session's stamps, from the one helper both
-                    # doors call (#570). This used to be its own set, with
-                    # a literal Study Time and equipment re-stamped from
-                    # the series -- see `export_stamp_attributes`.
+                    # doors call; see `export_stamp_attributes`.
                     pat_attrs, study_attrs, series_attrs = \
                         export_stamp_attributes(patient, st, se)
 
-                    # Calculate Output Path
-                    # 1-3. Subject/Study/Series folders, via the shared
-                    # hybrid naming used by every other export format --
-                    # see `export_folder_names` for the scheme.
+                    # Subject/Study/Series folders, via the naming every
+                    # export format shares (`export_folder_names`).
                     subj_name, study_folder, series_folder = export_folder_names(
                         patient, st, se)
 
-                    # 4. Filename -- the SOP Instance UID, matching
-                    # `DicomSession._export_dicom`. InstanceNumber
-                    # (0020,0013) used to win here when it parsed as an
-                    # integer, which meant the same instance landed under
-                    # two different names depending on which export path
-                    # wrote it, and a tree built by one could not be
-                    # diffed against a tree built by the other.
-                    #
-                    # The UID is also the only correct choice on its own
-                    # terms: InstanceNumber is not unique and collides
-                    # silently within a series, so `0001.dcm` could be
-                    # overwritten by a second instance claiming the same
-                    # number. Do not reintroduce a "friendlier" name
-                    # here without making it unique. (#50, #78)
+                    # The filename is the SOP Instance UID, as
+                    # `DicomSession._export_dicom` names it, so both export
+                    # paths write identical trees. InstanceNumber is not
+                    # unique and collides silently within a series, so
+                    # `0001.dcm` could be overwritten by a second instance
+                    # claiming the same number. Do not introduce a
+                    # "friendlier" name here without making it unique.
                     fname = f"{inst.sop_instance_uid}.dcm"
 
                     full_out_path = os.path.join(
                         out_dir, subj_name, study_folder, series_folder, fname)
 
-                    # Handle In-Memory Pixels (e.g. Remediated/Detached instances)
-                    # If file_path is None, worker cannot load pixels. send them.
+                    # Resident pixels (a remediated or detached instance)
+                    # travel on the context: the worker may have no other
+                    # way to load them.
                     p_array = None
                     if inst.pixel_array is not None:
                         p_array = inst.pixel_array
 
-                    # Extract Sidecar Info if available (Zero-Copy)
+                    # The sidecar location, so the worker reads the frame
+                    # itself rather than receiving a copy.
                     sc_path, sc_offset, sc_length, sc_alg = None, None, None, None
                     if hasattr(inst, '_pixel_loader') and inst._pixel_loader:
-                        # A type test, not the duck test this used to
-                        # be: the block reads four attributes and the
-                        # `hasattr` pair checked two, so it never
-                        # actually guarded `.length` or `.alg` and was
-                        # not the guard it looked like. Every
-                        # `_pixel_loader` the package assigns is a
-                        # `SidecarPixelLoader`; the only other values
-                        # that reach here are two test doubles
-                        # (`tests/test_redaction_optimization.py`'s bare
-                        # lambda and `tests/test_redaction_parallel.py`'s
-                        # `ConstantPixelLoader`), and neither carries any
-                        # of the four. Behaviour-identical, and it also
-                        # removes a boolean operator the mutation probe
-                        # had to keep re-reporting as an equivalent
-                        # mutant (#285).
+                        # A type test, not a duck test: the block reads four
+                        # attributes. Every `_pixel_loader` the package
+                        # assigns is a `SidecarPixelLoader`; anything else
+                        # (a test double, a bare callable) carries none of
+                        # the four and is skipped.
                         pl = inst._pixel_loader
                         if isinstance(pl, SidecarPixelLoader):
                             sc_path = pl.sidecar_path
@@ -10047,11 +9739,11 @@ class DicomExporter:
             # incomplete, so the row is kept and the statement corrected
             # instead: without the annotation, "was not exported" reads
             # as one element missing from a written file, next to the
-            # `ERROR` row saying the file does not exist (#240).
+            # `ERROR` row saying the file does not exist.
             failed = not getattr(r, "ok", False)
             for scope, loss in getattr(r, "losses", ()):  # Exceptions have none
-                # Never `r.output_path`: it is `Subject_<Patient ID>/...`
-                # (D10). The row's key is `UNKNOWN`, as
+                # Never `r.output_path`: it is `Subject_<Patient ID>/...`.
+                # The row's key is `UNKNOWN`, as
                 # `_report_export_failures` keys it.
                 uid = r.sop_instance_uid or "UNKNOWN"
                 if failed:
@@ -10066,8 +9758,7 @@ class DicomExporter:
                     # writer thread is live, and swallows `sqlite3.Error`
                     # into a log line -- so contention would lose the very
                     # entry that exists because a log line was not enough.
-                    # The queue is the path #36 uses, and `close()` drains
-                    # it.
+                    # The queue is what `close()` drains.
                     store_backend.log_audit(
                         action_type="DATA_LOSS", entity_uid=uid, details=loss,
                         loss_scope=scope)
@@ -10101,7 +9792,8 @@ class DicomExporter:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
             for note in r.corrections:
-                # The instance, never `r.output_path` (D10).
+                # The instance, never `r.output_path`, which names the
+                # Patient ID.
                 logger.info("%s: %s", r.sop_instance_uid or _NO_SOP_UID,
                             note)
                 count += 1
@@ -10148,7 +9840,8 @@ class DicomExporter:
         for r in results:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
-            # Never `r.output_path` (D10): the key is `UNKNOWN`, as
+            # Never `r.output_path`, which names the Patient ID: the key is
+            # `UNKNOWN` when there is no UID, as
             # `_report_export_failures` keys it, and the line names the
             # instance in the worker's own words.
             uid = r.sop_instance_uid or "UNKNOWN"
@@ -10201,21 +9894,19 @@ class DicomExporter:
                 # in the key or the text: that path is
                 # `<folder>/Subject_<Patient ID>/...`, and this row is
                 # persisted, rendered into the compliance report and
-                # carried by `ExportError.failures`. It was
-                # `Export failed for <output path>: <exception>` until
-                # bunch E, and the exception repeated the path -- an
-                # `OSError`'s `str()` appends its filename -- which is
-                # why the reason goes through
+                # carried by `ExportError.failures`. The exception can
+                # repeat the path too -- an `OSError`'s `str()` appends
+                # its filename -- which is why the reason goes through
                 # `describe_exception_without_paths`. The same shape as
-                # the WFDB row (#588) and the worker's console line (P8).
-                # The caller already holds the folder; the `EXPORT` row
-                # records it, and nothing below it is the report's.
+                # the WFDB row and the worker's console line. The caller
+                # already holds the folder; the `EXPORT` row records it,
+                # and nothing below it is the report's.
                 uid = r.sop_instance_uid or "UNKNOWN"
                 named = (f"instance {r.sop_instance_uid}" if r.sop_instance_uid
                          else _NO_SOP_UID)
                 # `error` is the exception the worker caught, not prose,
                 # so it is described here; `str()` of a message-less one
-                # was `''` and the row ended in a colon (#435). A string
+                # is `''` and the row would end in a colon. A string
                 # is kept as given: no worker writes one, and prose
                 # cannot be told apart from a path inside it.
                 if isinstance(r.error, BaseException):
@@ -10292,7 +9983,7 @@ class DicomExporter:
             RuntimeError: If any instance failed to write.
         """
         # First, so an empty tree refuses too: the value is wrong whether
-        # or not there is anything to write with it (#605).
+        # or not there is anything to write with it.
         _compresses(compression)
         if studies is None:
             studies = patient.studies
@@ -10300,32 +9991,27 @@ class DicomExporter:
             os.makedirs(out_dir)
         logger = get_logger()
 
-        # Planning Phase: Generate Contexts
-        #
         # The foreign-icon gate is computed here, once, over the whole tree
         # about to be written -- not inside `_generate_export_contexts`,
-        # which sees one patient at a time (#183). Attestation only: there
+        # which sees one patient at a time. Attestation only: there
         # is no session and so no configuration to consult; this is the
         # serializer, and the configuration half of the condition is
         # structurally unavailable to it. The attestation half is not, and
         # applies -- dropping an icon out of a graph that carries a
         # redaction attestation is a property of carrying icon bytes at
         # all, not one of the pipeline gates `write_tree` deliberately
-        # skips. Each carrier's own icon needs nothing extra here (#542):
-        # the worker reads the attestation off that instance, and the
+        # skips. Each carrier's own icon needs nothing extra here: the
+        # worker reads the attestation off that instance, and the
         # contexts carry no zones on this path.
         drop_foreign = redaction_in_effect(_instances_in(patient, studies))
         export_tasks = DicomExporter._generate_export_contexts(
             patient, studies, out_dir, compression,
             drop_foreign_icons=drop_foreign)
 
-        # Execution Phase
         if not export_tasks:
             logger.warning("No instances found to export.")
             return
 
-        # Log only if progress is shown, or at least one summary line if hidden?
-        # If hidden, the caller (batch export) is logging.
         if show_progress:
             logger.info(f"Starting parallel export of {len(export_tasks)} instances...")
 
@@ -10342,12 +10028,12 @@ class DicomExporter:
         # itself lost a worker. Both shapes have to survive this, and the
         # second only exists because `yield_exceptions=True` above asks
         # for it: without the flag a lost worker raises out of the
-        # iteration and discards every result queued behind it (#232).
+        # iteration and discards every result queued behind it.
         #
         # Materialized because what follows walks it twice, and
-        # `run_parallel` returns a generator when asked to. Neither export
-        # site asks today; if one ever does, the loss report would consume
-        # the results and every success count would silently read zero.
+        # `run_parallel` returns a generator when asked to. If a caller
+        # ever asks, the loss report would otherwise consume the results
+        # and every success count would silently read zero.
         results = list(results)
         DicomExporter._report_export_losses(results, store_backend)
         DicomExporter._report_export_warnings(results, store_backend)
@@ -10361,7 +10047,8 @@ class DicomExporter:
         logger.info(f"Export Complete. Success: {success_count}/{len(export_tasks)}")
 
         if failures:
-            # Raise the first failure to satisfy strict tests
+            # The serializer has no summary to return: any failure raises,
+            # naming the count and the first error.
             raise RuntimeError(
                 f"Export incomplete. {
                     len(failures)} failed. First error: {
@@ -10397,13 +10084,13 @@ class DicomExporter:
                 written; the loss is reported separately.
         """
         logger = get_logger()
-        # if not export_tasks: return # Cannot easily check empty iterator without consuming
+        # No early return for an empty batch: `export_tasks` may be an
+        # iterator, and testing it would consume it.
 
         if show_progress:
             count_str = str(total) if total else "?"
             logger.info(f"Starting global parallel export of {count_str} instances...")
 
-        # Run parallel
         results = run_parallel(
             _export_instance_worker,
             export_tasks,
@@ -10416,7 +10103,7 @@ class DicomExporter:
             disable_gc=disable_gc,
             # Same reason as `write_tree`: `_report_export_failures`'
             # Exception arm is unreachable without it, and a lost worker
-            # would take the whole batch's accounting with it (#232).
+            # would take the whole batch's accounting with it.
             yield_exceptions=True)
 
         # Two passes -- see the note in `write_tree`.
@@ -10424,23 +10111,20 @@ class DicomExporter:
         DicomExporter._report_export_losses(results, store_backend)
         DicomExporter._report_export_warnings(results, store_backend)
         DicomExporter._report_export_corrections(results)
-        # We don't raise here by default (batch mode). The failures are
-        # audited rather than raised, and the summary is what lets the
-        # caller say how many of the requested instances exist (#181).
+        # No raise here: the failures are audited rather than raised, and
+        # the summary is what lets the caller say how many of the
+        # requested instances exist.
         failures = DicomExporter._report_export_failures(results, store_backend)
         summary = ExportSummary(
-            # An `ok` outcome always carries its UID (#613): the write puts
-            # it into Media Storage SOP Instance UID, and `save_as(...,
+            # An `ok` outcome always carries its UID: the write puts it into
+            # Media Storage SOP Instance UID, and `save_as(...,
             # enforce_file_format=True)` refuses an empty one, so a UID-less
             # instance fails and is in `failures`, keyed UNKNOWN like its
-            # ERROR row. This was `sop_instance_uid or output_path`, with a
-            # comment saying `write_tree()` wrote such an instance as
-            # `None.dcm`; `write_tree()` builds no summary and writes no such
-            # file, and the arm could never run. Had it run, it would have
-            # put `Subject_<Patient ID>/...` into a repr that is printed and
-            # logged (D10). **The trap:** turning `enforce_file_format` off
-            # lets a UID-less instance be written (as the dotfile `.dcm`),
-            # and this field would then hold `""`.
+            # ERROR row. Never fall back to `output_path` here: it is
+            # `Subject_<Patient ID>/...`, and this repr is printed and
+            # logged. **The trap:** turning `enforce_file_format` off lets
+            # a UID-less instance be written (as the dotfile `.dcm`), and
+            # this field would then hold `""`.
             written_uids=[r.sop_instance_uid
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],
@@ -10467,18 +10151,15 @@ class DicomExporter:
         Raises:
             ValueError: If validation fails.
         """
-        # `_compresses`, the one predicate (#605): anything but None or
-        # `"j2k"` raises rather than writing natively in silence.
+        # `_compresses`, the one predicate: anything but None or `"j2k"`
+        # raises rather than writing natively in silence.
         if _compresses(compression):
             _compress_j2k(ds, pixel_array)
 
         errs = IODValidator.validate(ds)
         if errs:
-            # We log but might want to raise? logic in worker returns None on error.
-            # But worker expects exception to be raised for error?
-            # In previous logic: "if not errs: save else return None"
-            # So here we should probably return None or raise.
-            # Let's raise to be clearer in worker catch
+            # Raised, not returned: the export worker's `except` is what
+            # turns a failure into an `ExportOutcome` with an ERROR row.
             raise ValueError(f"Validation Errors: {errs}")
 
         return ds
@@ -10487,7 +10168,7 @@ class DicomExporter:
     def _create_ds(inst):
         """Helper to create a fresh FileDataset from an Instance."""
         meta = FileMetaDataset()
-        # Fallback to attributes if sop_class_uid property is missing/empty
+        # The attribute when the `sop_class_uid` property is empty.
         sop_class = inst.sop_class_uid
         if not sop_class and "0008,0016" in inst.attributes:
             sop_class = inst.attributes["0008,0016"]
@@ -10496,7 +10177,7 @@ class DicomExporter:
         meta.MediaStorageSOPInstanceUID = inst.sop_instance_uid
         meta.TransferSyntaxUID = ImplicitVRLittleEndian
         # Encoding comes from meta.TransferSyntaxUID above; see the
-        # note on the JPEG 2000 branch in `_compress_j2k` (#141).
+        # note on the JPEG 2000 branch in `_compress_j2k`.
         ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
         return ds
 
@@ -10536,15 +10217,14 @@ class DicomExporter:
         # `attributes` holds what the element *is*, and pairing every value
         # with a VR would change that shape for every reader of it.
         for t, v in attrs.items():
-            # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
-            # tags. They are private, so `dictionary_VR` below raises for
-            # them and the fallback would only log a warning -- the tags
-            # would silently not be written. Nothing has *written* these
-            # since v0.5.0 (47278f8) migrated to (0400,0500); this is the
-            # read-back path for stores from that one release, and pairs
-            # with the WHITELIST_TAGS exemption in `privacy.py`. Remove
-            # one without the other and the sweep strips what this
-            # preserves.
+            # Explicit VRs for the legacy `gantry` encrypted-identity tags.
+            # Nothing writes them now (identities go in (0400,0500)); this
+            # is the read-back path for a store from the one release that
+            # did. They are private, so `dictionary_VR` below raises for
+            # them and they would fall to the private-tag fallback instead
+            # of their own VRs. This pairs with the WHITELIST_TAGS
+            # exemption in `privacy.py`: remove one without the other and
+            # the sweep strips what this preserves.
             if t == "0099,0010":
                 ds.add_new(0x00990010, 'LO', v)
                 continue
@@ -10552,22 +10232,16 @@ class DicomExporter:
                 ds.add_new(0x00991001, 'OB', v)
                 continue
 
-            # The Encrypted Attributes item's two elements, by the value's
-            # type rather than the tag's dictionary VR (#790). The
-            # dictionary is right -- (0400,0510) is the transfer syntax
-            # UID (UI), (0400,0520) the Encrypted Content (OB) -- and a
-            # lock since 1.0 writes that layout, which this writes at
-            # the dictionary's VRs. This arm used to force OB on
-            # (0400,0510) and UI on (0400,0520), which was the swap
-            # itself. It is by type, not simply the dictionary, because
-            # a graph can still hold an item in the layout releases
-            # before 1.0 wrote (a 0.9.x store reopened, a 0.9.x export
-            # re-ingested), which the export passes through as the graph
-            # holds it (owner ruling on #790; the session writes a
-            # WARNING row for it): its token under (0400,0510) is written
-            # as the OB bytes 0.9.x wrote -- even where an Implicit VR
-            # read handed it back as a `str` -- never as a 248-character
-            # UI. Otherwise a `str` is a UI and bytes an OB.
+            # The Encrypted Attributes item's two elements take their VR
+            # from the value's type, not only the dictionary: (0400,0510)
+            # is the transfer syntax UID (UI), (0400,0520) the Encrypted
+            # Content (OB), and a `str` is written UI and bytes OB. The
+            # type rule exists because a graph can still hold an item in
+            # the pre-1.0 layout, with the token under (0400,0510), which
+            # the export passes through as the graph holds it (the
+            # session writes a WARNING row for it). One of our tokens is
+            # written as OB bytes -- even where an Implicit VR read
+            # handed it back as a `str` -- never as a 248-character UI.
             if t in ("0400,0510", "0400,0520") and isinstance(
                     v, (str, bytes, bytearray)):
                 if ReversibilityService.is_one_of_ours(v):
@@ -10591,11 +10265,9 @@ class DicomExporter:
                 vr = dictionary_VR(Tag(g, e))
             except Exception:
                 # Not a standard tag. Almost always a private (odd-group)
-                # one, which is the whole point of `remove_private_tags=
-                # False`: the caller asked to keep the vendor block, and
-                # until #118 this arm only logged, so the tags reached
-                # the object graph and the index and then never reached
-                # the file (#118).
+                # one, kept because the caller set `remove_private_tags=
+                # False`; logging instead of writing here would leave it
+                # in the graph and the index but not in the file.
                 #
                 # The source element's own VR first, when one was
                 # recorded at ingest and the value STILL CONFORMS TO IT.
@@ -10603,52 +10275,42 @@ class DicomExporter:
                 # VR is a fact about the value the source file carried,
                 # and anonymisation, redaction or a plain `set_attr` can
                 # replace that value with one the VR no longer fits.
-                # Deferring to it unconditionally would put #195's
-                # backslash and #190's over-long value back through a
-                # VR that mangles them, which is the defect this fix
-                # would otherwise reintroduce one layer up. When it does
-                # not fit, the fallback runs exactly as before (#154).
+                # Deferring to it unconditionally would put a backslash
+                # or an over-long value through a VR that mangles it.
+                # When it does not fit, the fallback encoder decides.
                 recorded = (vrs or {}).get(t)
                 if v is None or (isinstance(v, (list, tuple, MultiValue))
                                  and len(v) == 0):
                     # A zero-length element: the source asserted the
                     # tag's presence and gave it no value, and DICOM has
-                    # an encoding for exactly that. Dropping it is a
-                    # claim about the source too, and a different one
-                    # from what the source made -- #60 forbade inventing
-                    # a value *and* discarding one, and this arm is the
-                    # second half (#344). The recorded VR is the
-                    # source's own answer; `UN` is what an element whose
-                    # VR was never known is (PS3.5 6.2.2), which is
-                    # every private element of an Implicit VR source,
-                    # because `_record_private_vr` refuses to record
-                    # `UN`.
+                    # an encoding for exactly that. Dropping it would be
+                    # a different claim about the source, as inventing a
+                    # value would. The recorded VR is the source's own
+                    # answer; `UN` is what an element whose VR was never
+                    # known is (PS3.5 6.2.2), which is every private
+                    # element of an Implicit VR source, because
+                    # `_record_private_vr` refuses to record `UN`.
                     #
                     # An empty container is the same assertion as `None`
                     # -- present, no value; PS3.5 7.4 makes no
-                    # distinction on the wire -- and until #367 it was
-                    # not treated as one: `_value_fits_vr([], vr)` is
-                    # False under every VR (it recurses over the
-                    # elements, and an empty list has none to check), so
-                    # `[]` fell through to the fallback and exported as
-                    # `LO` whatever the source recorded. The value is
-                    # normalised to `None` because pydicom's three empty
-                    # spellings are not interchangeable: `add_new(tag,
-                    # 'DS', ())` raises `TypeError` and `PN` raises
-                    # `AttributeError`, while `None` writes a zero-length
-                    # element under every VR tried (eleven, measured).
+                    # distinction on the wire. It must be caught here:
+                    # `_value_fits_vr([], vr)` is False under every VR
+                    # (it recurses over the elements, and an empty list
+                    # has none), so `[]` would fall through to the
+                    # fallback and export as `LO` whatever the source
+                    # recorded. The value is normalised to `None` because
+                    # pydicom's empty spellings are not interchangeable:
+                    # `add_new(tag, 'DS', ())` raises `TypeError` and `PN`
+                    # raises `AttributeError`, while `None` writes a
+                    # zero-length element under every VR.
                     #
-                    # Handled HERE and not by widening `_value_fits_vr`,
-                    # deliberately. That function recurses over a list,
-                    # so admitting `None` would make `[None, 'B']` "fit"
-                    # LO -- `add_new` accepts it and `filewriter` then
-                    # raises `TypeError: sequence item 0: expected a
-                    # bytes-like object, NoneType found` past `_merge`'s
-                    # try, failing the whole file rather than the
-                    # element. That is the second failure class
-                    # `_value_fits_vr`'s own docstring exists to
-                    # prevent. See
-                    # `test_a_none_among_siblings_is_the_same_loud_loss_on_both_paths`.
+                    # Handled HERE and not by widening `_value_fits_vr`.
+                    # That function recurses over a list, so admitting
+                    # `None` would make `[None, 'B']` "fit" LO --
+                    # `add_new` accepts it and `filewriter` then raises
+                    # `TypeError: sequence item 0: expected a bytes-like
+                    # object, NoneType found` past `_merge`'s try, failing
+                    # the whole file rather than the element.
                     vr = recorded if recorded is not None else 'UN'
                     v = None
                 elif recorded is not None and _value_fits_vr(v, recorded):
@@ -10658,11 +10320,11 @@ class DicomExporter:
 
             try:
                 # An ambiguous VR with an `OW` arm, holding numbers: the
-                # value decides the arm, not pydicom (#653). pydicom
-                # picks `OW` from a sibling descriptor and then writes a
-                # list of ints as bytes, which raises in `dcmwrite` and
-                # fails the file. A value no arm fits raises here instead,
-                # and becomes this element's loss row below.
+                # value decides the arm, not pydicom. pydicom picks `OW`
+                # from a sibling descriptor and then writes a list of ints
+                # as bytes, which raises in `dcmwrite` and fails the file.
+                # A value no arm fits raises here instead, and becomes
+                # this element's loss row below.
                 # Here, inside the loss arm's `try`, and not beside
                 # `dictionary_VR` above: that `except` is the private-tag
                 # fallback, and a standard tag routed through it would be
@@ -10673,18 +10335,17 @@ class DicomExporter:
                     if encoded is None:
                         raise ValueError(
                             f"no VR fits a {type(v).__name__} value")
-                    # The one silent shape change left in the fallback:
-                    # a multi-valued element with an over-long value
-                    # collapses to a single `UT` join -- #165's trade,
-                    # and still the right one, because the values are
-                    # all present and recoverable, so a DATA_LOSS row
-                    # would overstate it. But VM n -> 1 must not be
-                    # discovered by reading the file (#190), so it is
-                    # said, where the tag is still a tag: onto `revrs`
-                    # for the instance's one sentence (#571), or to the
-                    # log when there is nowhere to put it. The
-                    # backslash-bearing case never reaches this: the
-                    # encoder returns None for it before the collapse.
+                    # The one shape change in the fallback: a
+                    # multi-valued element with an over-long value
+                    # collapses to a single `UT` join. That is not a
+                    # DATA_LOSS row, because the values are all present
+                    # and recoverable, but VM n -> 1 must not be
+                    # discovered by reading the file, so it is said where
+                    # the tag is still a tag: onto `revrs` for the
+                    # instance's one sentence, or to the log when there is
+                    # nowhere to put it. The backslash-bearing case never
+                    # reaches this: the encoder returns None for it before
+                    # the collapse.
                     collapsed = (encoded[0] == 'UT'
                                  and isinstance(v, (list, tuple, MultiValue))
                                  and len(v) > 1)
@@ -10697,7 +10358,7 @@ class DicomExporter:
                             "recoverable by splitting.", t, len(v), len(v))
                     # A VR other than the recorded one, or a collapse:
                     # what re-ingest of an explicit-VR file records
-                    # changes, so it is reported under any syntax (#571).
+                    # changes, so it is reported under any syntax.
                     # Kept until `add_new` has accepted the element; a
                     # refusal there is a loss, not a re-VR.
                     if collapsed or (recorded is not None
@@ -10710,16 +10371,15 @@ class DicomExporter:
                 if re_vr is not None and revrs is not None:
                     revrs.append(re_vr)
             except Exception as exc:
-                # Say "not exported". "Failed to merge" reads like an
-                # internal hiccup; this is an element the caller asked
-                # for that will not be in the output.
+                # Say "not exported": this is an element the caller asked
+                # for that will not be in the output, not an internal
+                # hiccup.
                 #
                 # Reported by handing it back rather than logging it
                 # here: `_merge` runs inside `_export_instance_worker`,
                 # which may be in a subprocess with no store handle and
-                # -- as the #126 tests show -- no logger the caller can
-                # see either. The parent logs it and writes the audit
-                # entry (#126).
+                # no logger the caller can see. The parent logs it and
+                # writes the audit entry.
                 loss = (f"Tag {t} not exported (data loss): "
                         f"{describe_exception(exc)}")
                 if losses is None:
@@ -10727,21 +10387,17 @@ class DicomExporter:
                     continue
                 # The scope is attached here, where `t` is still a tag,
                 # not in the parent where it is only a substring of a
-                # sentence (#146).
+                # sentence.
                 #
-                # The dedupe stays, with a narrower reason than it had.
-                # Until #179 the worker merged `inst.attributes` twice,
-                # so *every* loss arrived in duplicate and this was the
-                # only thing keeping section 3 of the compliance report
-                # from double-counting. That is gone. What remains is
-                # that the four surviving merges overlap by tag --
-                # (0010,0010), (0008,0020), (0020,000d), (0020,000e),
+                # The dedupe is needed because the merges overlap by tag
+                # -- (0010,0010), (0008,0020), (0020,000d), (0020,000e),
                 # (0008,0060) are all in `inst.attributes` *and* in the
-                # patient/study/series mapping stamped over it -- and
-                # the message is deterministic, so one malformed value
-                # present at two levels still lands here twice. Keys
-                # within a single `attrs` are unique, so the duplicate
-                # can only ever come from a second call.
+                # patient/study/series mapping stamped over it -- and the
+                # message is deterministic, so one malformed value present
+                # at two levels lands here twice and section 3 of the
+                # compliance report would double-count it. Keys within a
+                # single `attrs` are unique, so the duplicate can only
+                # come from a second call.
                 entry = (loss_scope_for_tag(t), loss)
                 if entry not in losses:
                     losses.append(entry)
@@ -10801,14 +10457,11 @@ class DicomExporter:
         if isinstance(value, memoryview):
             return 'UN', value.tobytes()
         if isinstance(value, bool):
-            # This arm returns exactly what the `int` arm below would:
-            # `str(True)` is already "True", so today deleting it is an
-            # equivalent mutant no test can kill (#283). It is kept as a
-            # pre-placed guard for #154, which is about private tags
-            # ceasing to collapse to `LO`. The day the numeric arm emits
-            # a numeric VR, a `bool` falling through to it becomes `1` --
-            # and ordering above `int` is the entire mechanism that
-            # prevents that, since `bool` is an `int` subclass.
+            # Returns what the `int` arm below would, so deleting it
+            # changes nothing that a test can see. It is a guard: `bool`
+            # is an `int` subclass, and if the numeric arm ever emits a
+            # numeric VR, a `bool` falling through to it is written as
+            # `1`. Ordering this arm above `int` is the mechanism.
             return 'LO', str(value)
         if isinstance(value, (int, float)):
             return 'LO', str(value)
@@ -10817,8 +10470,8 @@ class DicomExporter:
             # Under `LO`, pydicom writes it as a separator and re-splits
             # on it at read time, so a value that legitimately contains
             # one -- a source `LT`/`ST`/`UT` element, where backslash is
-            # ordinary text -- came back as two values, silently, from
-            # conformant input (#195). `UT` is VM 1: no separating in
+            # ordinary text -- would come back as two values, silently, from
+            # conformant input. `UT` is VM 1: no separating in
             # either direction, and the value round-trips byte-faithfully.
             fits_lo = (len(value) <= DicomExporter._LO_MAX
                        and '\\' not in value)
@@ -10890,30 +10543,28 @@ class DicomExporter:
 
         if not atoms:
             # `_merge` never reaches this with an empty container: it
-            # decides before calling (the recorded VR, or `UN`, #367).
-            # This is the answer a *direct* caller gets, and it is PS3.5
-            # 6.2.2's -- a zero-length element whose VR was never known
-            # is `UN`, not `LO`. `None` rather than `[]` because `None`
-            # is the one empty spelling `add_new` accepts under every
-            # VR. Stated rather than deleted: with this arm gone the
-            # join below returns `('LO', [])` for an empty list anyway
-            # (`all(...)` over nothing is True), so the function needs
-            # an answer of its own and it has to agree with `_merge`'s.
+            # decides before calling (the recorded VR, or `UN`). This is
+            # the answer a *direct* caller gets, and it is PS3.5 6.2.2's
+            # -- a zero-length element whose VR was never known is `UN`,
+            # not `LO`. `None` rather than `[]` because `None` is the one
+            # empty spelling `add_new` accepts under every VR. Without
+            # this arm the join below returns `('LO', [])` for an empty
+            # list (`all(...)` over nothing is True), which disagrees
+            # with `_merge`.
             return 'UN', None
 
         # An atom containing `\` cannot be a value of any 1-n VR: the
         # backslash *is* the multiplicity on the wire (PS3.5 6.2), so a
         # reader cannot tell the atom's content from the element's
-        # arity -- `LO` re-splits it and the VM inflates, silently
-        # (#190, #195). Joining to `UT` is ambiguous in the same way,
-        # so the whole element is reported as data loss instead: a loud
-        # loss beats a silently wrong element, the same call the #165
-        # entry makes for a partial one. This check must run BEFORE the
+        # arity -- `LO` re-splits it and the VM inflates, silently.
+        # Joining to `UT` is ambiguous in the same way, so the whole
+        # element is reported as data loss instead: a loud loss beats a
+        # silently wrong element. This check must run BEFORE the
         # over-long collapse below -- once collapsed to `UT`, the join
         # and the atom's own backslash are indistinguishable and the
         # value is unrecoverable, so the combination of an over-long
         # sibling and a backslash-bearing atom takes this arm, not the
-        # join (#190).
+        # join.
         if any('\\' in atom for atom in atoms):
             return None
 
@@ -10927,8 +10578,7 @@ class DicomExporter:
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
                          revrs=None, within="", corrections=None):
-        """
-        Recursively populates sequences into the dataset.
+        """Write the graph's sequences into `ds`, recursing into each item.
 
         Args:
             ds (pydicom.Dataset): The dataset to modify.
@@ -10948,16 +10598,14 @@ class DicomExporter:
 
             pydicom_seq = Sequence()
             for index, item in enumerate(dicom_seq.items):
-                # A sequence item is never encoded on its own: pydicom
-                # writes it with the enclosing file's encoding, so these
-                # flags were read by nothing even before 4.0 drops them.
+                # No encoding flags on the item: pydicom writes a sequence
+                # item with the enclosing file's encoding.
                 ds_item = Dataset()
 
-                # Recursively merge item attributes and sub-sequences
                 path = (f"{within} > ({tag_str})" if within
                         else f"({tag_str})")
-                # #532's respelling, per item and before its `_merge`
-                # (#602): pydicom warns as the raw value is assigned, so
+                # The (0028,0004) respelling, per item and before its
+                # `_merge`: pydicom warns as the raw value is assigned, so
                 # respelling afterwards would be too late. A copy, never
                 # `item.attributes` -- under threads that is the live graph.
                 attributes, respelled = _label_as_written(item.attributes)
