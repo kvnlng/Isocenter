@@ -28,10 +28,10 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 
 ## Changes land on `main`
 
-`main` is the development branch. While a line is in candidates, work meant
-for a later minor may merge too, but its PR carries that minor's milestone,
-so whoever cuts the line's next release can leave it out ("Later releases
-on an existing line").
+`main` is the development branch. Work meant for a minor later than the next
+unreleased line may merge at any time, but its PR carries that minor's
+milestone, so whoever cuts the line can leave it out ("Later releases on an
+existing line").
 
 1. The architect writes the specification.
 2. The developer writes the tests first, then the code, on a work branch
@@ -186,12 +186,13 @@ fixes, never features.
 
 1. **Choose the commit** on `main`. It must hold no work for a later minor
    (see "Changes land on `main`"): choose the last commit before any. X.Y's
-   commits merged after it reach the new branch by the picks of "Later
-   releases on an existing line", before the release commit. Run the full
-   suite on 3.12 and 3.14t at that SHA. **This is the integration test**, and the first time this code
-   meets the whole suite. A failure is fixed on `main` by the procedure
-   above, and step 1 starts again at the new commit. (A patch release skips
-   this step; its integration test is step 3's run.)
+   commits merged after it then reach the new branch by picks, before the
+   release commit, as "Later releases on an existing line" describes (its
+   first paragraph says what changes for a first cut). Run the full suite on
+   3.12 and 3.14t at that SHA. **This is the integration test**, and the
+   first time this code meets the whole suite. A failure is fixed on `main`
+   by the procedure above, and step 1 starts again at the new commit. (A
+   patch release skips this step; its integration test is step 3's run.)
 
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
@@ -394,10 +395,13 @@ same number.
 
 ## Later releases on an existing line
 
-This applies when `release/X.Y` already exists because a candidate was
-tagged from it (say `vX.Y.Zrc1`), and the line's next release must carry
-work merged to `main` since: **the next candidate (`X.Y.Zrc<N+1>`) or
-X.Y.Z final.** A patch to a released line is "Patch releases" instead.
+This applies when `release/X.Y` already exists and the line's next
+release must carry X.Y's work merged to `main` since the cut: **the next
+candidate (`X.Y.Zrc<N+1>`), X.Y.Z final, or the line's first release when
+the cut (step 1) had to be made before some of X.Y's commits.** For a
+first release the previous-candidate prerequisite in step 1 below does not
+apply, and step 3's integration run at the release commit does. A patch to
+a released line is "Patch releases" instead.
 
 `main` is the development branch and can hold work for a later minor, so
 **the release carries the commits on `main` that belong to X.Y,**
@@ -422,8 +426,13 @@ cut this way (#818, #821, #822).
        (the command below) equals one already on the branch is a
        forward-port. A pick that comes out empty is one too:
        `git cherry-pick --skip` it;
-     - work for a later minor, which its PR's milestone names. List each
-       such commit in the PR body with its milestone.
+     - work for a later minor, which its PR's milestone names.
+
+     **The line's left-out list** is every commit left out as later-minor
+     work since the line was cut, in this PR and in every earlier pick PR
+     on the line. Each pick PR's body carries the whole list forward, with
+     each commit's milestone, and the rules below read the whole list, not
+     only this PR's additions.
    - On a work branch off `release/X.Y`, run `git cherry-pick -x` on each
      commit that remains:
      - A conflict in `CHANGELOG.md` (the branch has no `[Unreleased]`
@@ -442,19 +451,20 @@ cut this way (#818, #821, #822).
        the chosen commit (a later commit may have amended an entry);
      - take back from `main` the files the record-back commits changed,
        apart from the version files (`RELEASING.md` at rc2);
-     - **if any left-out commit touched `fingerprint/output.json`,**
-       retake it on 3.12
+     - **if the line's left-out list is not empty and any pick touched
+       `fingerprint/output.json`,** or any commit on the list did, retake
+       it on 3.12
        (`python -m scripts.output_fingerprint take --out fingerprint/output.json --jobs 4`),
        then `check` on 3.14t, which must report no difference. Add an
        `**Output:**` line to `[Unreleased]` only for a difference the
        picked entries do not already name.
-   - **When nothing was left out,** the PR head's tree must equal the
-     chosen commit's (`git diff --stat <chosen sha> HEAD` prints nothing),
-     and `[Unreleased]` is `main`'s whole. Any file that still differs
-     means a pick is missing. Pick it; never copy it into the last
-     commit. **When commits were left out,** `git diff HEAD <chosen sha>
-     -- . ':!CHANGELOG.md' ':!fingerprint/output.json'` is the left-out
-     commits' combined change, apart from any hand-resolved conflict.
+   - **When the line's left-out list is empty,** the PR head's tree must
+     equal the chosen commit's (`git diff --stat <chosen sha> HEAD` prints
+     nothing), and `[Unreleased]` is `main`'s whole. Any file that still
+     differs means a pick is missing. Pick it; never copy it into the last
+     commit. **Otherwise** `git diff HEAD <chosen sha> -- .
+     ':!CHANGELOG.md' ':!fingerprint/output.json'` is the combined change
+     of every commit on the list, apart from any hand-resolved conflict.
    - **Tests.** A PR whose picks all applied cleanly, or whose conflicts
      touched only the files above, runs no tests of its own: the picks
      were each tested on `main`, and step 3's integration run covers the
@@ -465,12 +475,15 @@ cut this way (#818, #821, #822).
      log, recorded in the PR body.
    - The reviewer checks, on the PR branch before the squash merge
      removes the picks:
-     - the range: every commit in it is picked, or listed as left out
-       with its milestone;
-     - that each pick's patch equals its source's apart from the
-       changelog (`git show <sha> -- . ':!CHANGELOG.md' | git patch-id
-       --stable` gives the same id for the pick and its `main` commit);
-       a pick with a hand-resolved conflict is read instead;
+     - the range: every commit in it is picked, or on the line's
+       left-out list with its milestone, and the list carries forward
+       every earlier PR's entries;
+     - that each pick's patch equals its source's apart from the files
+       resolved with `--ours` (`git show <sha> -- . ':!CHANGELOG.md'
+       ':!fingerprint/output.json' ':!RELEASING.md' | git patch-id
+       --stable` gives the same id for the pick and its `main` commit;
+       exclude any other record-back file the same way); a pick with a
+       hand-resolved conflict is read instead;
      - tree identity, or the left-out difference, as above;
      - that `[Unreleased]` holds exactly the picked commits' entries;
      - that nothing else rides along.
