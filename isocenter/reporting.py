@@ -1,3 +1,4 @@
+"""The compliance report: its data, and its Markdown rendering."""
 import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Protocol
@@ -6,10 +7,10 @@ from typing import Dict, List, Optional, Protocol
 #: open. The `SCAN_GAP` row is written at ingest, before
 #: `remove_private_tags` has been applied and long before any export, so
 #: the row cannot say this and `generate_report` resolves it against the
-#: object graph instead (#167).
+#: object graph instead.
 #:
 #: Worded tenselessly on purpose. A report can be generated before any
-#: export -- it then carries the boundary note (#153) but still renders
+#: export -- it then carries the boundary note but still renders
 #: this section -- so "was exported" would be a claim about something
 #: that may not have happened; what the graph actually settles is
 #: whether the element is still there to be written, and
@@ -26,16 +27,16 @@ GAP_RETAINED = "retained for export"
 GAP_UNRESOLVED = "unresolved"
 
 
+# Not persisted, like `_actions_performed`: a stored copy would be a second
+# answer to "what happened" beside the audit log, and could disagree with it.
 @dataclass(frozen=True)
 class PixelScanSummary:
-    """What one `scan_pixel_content()` call did, for section 5 (#481).
+    """What one `scan_pixel_content()` call did, for section 5.
 
     Recorded by the session on every exit of the call -- the early return
     with nothing configured to read, the normal return, and just before a
-    `PixelScanError` -- and never persisted, for the reason
-    `_actions_performed` is not: a stored copy would be a second answer to
-    "what happened" beside the audit log, and could disagree with it. So
-    section 5 speaks for *this session* and says so.
+    `PixelScanError` -- and never persisted, so section 5 describes the
+    scans of *this session* only, and says so.
 
     Attributes:
         serial_number (str, optional): The serial the call was restricted
@@ -57,10 +58,9 @@ class PixelScanSummary:
     skipped: int
 
 
-#: Kept verbatim from the sentence it outlived; the rest of that sentence
-#: ("Metadata was remediated ...; pixel data was scanned ...") was printed
-#: for every session whatever it had done, and is now the two lines above
-#: this one, each read from what happened (#481).
+#: Closes section 5, after the grade basis and the metadata, PHI-scan and
+#: pixel-scan lines, which each say what happened. This sentence claims
+#: nothing about the run.
 _METHODOLOGY_DISCLAIMER = (
     "This section records what the tooling was configured to do and what it "
     "logged doing -- whether the result meets HIPAA Safe Harbor, a Limited "
@@ -71,11 +71,16 @@ _METHODOLOGY_DISCLAIMER = (
 def _grade_basis_lines(report: "ComplianceReport") -> str:
     """Section 5's account of the grade, from the list the grade came from.
 
-    `generate_report` grades PASS exactly when `review_reasons` is empty,
-    so rendering the list is what keeps this section from saying "no
-    issues" beside a REVIEW_REQUIRED -- which is what the two dead fields
-    this replaced did on every report (#481).
+    A status other than PASS or REVIEW_REQUIRED renders as "not graded".
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Grade Basis bullet, with one sub-bullet per review reason.
     """
+    # `generate_report` grades PASS exactly when `review_reasons` is empty,
+    # so rendering the list keeps this section from contradicting the grade.
     if report.validation_status == "PASS":
         return ("*   **Grade Basis:** PASS -- nothing recorded in sections 2 "
                 "to 4 costs this run its PASS.\n")
@@ -91,11 +96,16 @@ def _grade_basis_lines(report: "ComplianceReport") -> str:
 def _metadata_line(report: "ComplianceReport") -> str:
     """Whether the audit trail records a metadata remediation.
 
-    Read from the same rows section 2 prints, so the two cannot disagree,
-    and durable where the session's own memory is not: a report over a
-    reopened store still sees the remediation rows an earlier session
-    wrote.
+    Read from the audit rows, so a report over a reopened store still sees
+    the remediation rows an earlier session wrote.
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Metadata Remediation bullet.
     """
+    # The same rows section 2 prints, so the two cannot disagree.
     if report.metadata_remediations:
         return (f"*   **Metadata Remediation:** {report.metadata_remediations} "
                 "`REMEDIATION_*` row(s) in the audit trail (section 2) record "
@@ -108,11 +118,18 @@ def _metadata_line(report: "ComplianceReport") -> str:
 def _phi_scan_line(report: "ComplianceReport") -> str:
     """How many instances no PHI scan has seen at their current revision.
 
-    Not a grade term (#573, Q3): an unscanned instance is the absence of a
-    measurement, and grading it would make every ingest -> export
-    conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
-    no scan has read cannot pass for a PASS over data one cleared.
+    Said on every report; never graded.
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The PHI Scan bullet.
     """
+    # Not a grade term: an unscanned instance is the absence of a
+    # measurement, and grading it would make every ingest -> export
+    # conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
+    # no scan has read cannot pass for a PASS over data one cleared.
     line = (f"*   **PHI Scan (`audit()`):** {report.unscanned_instances} of "
             f"{report.total_instances} instance(s) have no PHI scan at their "
             "current revision.")
@@ -126,10 +143,15 @@ def _phi_scan_line(report: "ComplianceReport") -> str:
 def _pixel_scan_line(report: "ComplianceReport") -> str:
     """What `scan_pixel_content()` did in this session, one line.
 
-    Names the method because `discover_redaction_zones()` also runs OCR,
-    and its failures reach section 4 too (#479); a line that said only
-    "pixel scan" would read as contradicting a discovery row there.
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Pixel Scan bullet, one clause per run.
     """
+    # Names the method because `discover_redaction_zones()` also runs OCR,
+    # and its failures reach section 4 too; a line that said only
+    # "pixel scan" would read as contradicting a discovery row there.
     label = "*   **Pixel Scan (`scan_pixel_content()`):** "
     if not report.pixel_scans:
         return (label + "No `scan_pixel_content()` ran in this session, so "
@@ -148,11 +170,12 @@ def _pixel_scan_line(report: "ComplianceReport") -> str:
             run += (f"; {scan.skipped} instance(s) skipped because their "
                     f"machine has no configured redaction zones")
         runs.append(run)
-    # Said whenever any run left an instance unread, because #479's rows
-    # are permanent: a later run that reads the instance writes nothing and
-    # removes nothing, so a session whose last scan was clean still grades
-    # REVIEW_REQUIRED on the earlier row. Without this sentence the Grade
-    # Basis above and a clean final run read as a contradiction (#481).
+    # Said whenever any run left an instance unread, because the unread
+    # rows are permanent: a later run that reads the instance writes
+    # nothing and removes nothing, so a session whose last scan was clean
+    # still grades REVIEW_REQUIRED on the earlier row. Without this
+    # sentence the Grade Basis above and a clean final run would read as a
+    # contradiction.
     kept = ""
     if any(scan.unread for scan in report.pixel_scans):
         kept = (" Each instance a run could not read has a `WARNING` row in "
@@ -179,8 +202,7 @@ class ComplianceReport:
         deid_method (str): Factual description of what was configured --
             profile, tag-rule count, pixel-rule count. Never the name of a
             compliance standard: whether the output satisfies one is a
-            determination for the data steward, and this report carries a
-            DPO signature line beneath whatever it claims.
+            determination for the data steward.
         total_patients (int): Total patients processed.
         total_studies (int): Total studies processed.
         total_series (int): Total series processed.
@@ -190,40 +212,33 @@ class ComplianceReport:
             has run here -- which is not the same as zero, so the row is
             omitted rather than rendered as one.
         instances_requested (int, optional): How many that export asked
-            for. The pair is what stops `total_instances` -- a count of
-            the object graph -- from reading as a count of delivered
-            files (#181).
+            for. `total_instances` counts the object graph, not delivered
+            files.
         audit_summary (Dict[str, int]): Aggregated counts of audit actions.
         exceptions (list): List of error tuples (timestamp, action, details).
         data_losses (list): Elements present in the source and not in the
             output, as (timestamp, entity_uid, details, loss_scope).
         declined_remediations (list): Remediations that were proposed
             and did not run, as (timestamp, entity_uid, details). The
-            value each one targeted is still in the object graph, which
-            is why one of these takes the grade to `REVIEW_REQUIRED` --
-            the same argument `open_gaps` makes (#301).
+            value each one targeted is still in the object graph, so any
+            one of these grades the run `REVIEW_REQUIRED`.
         scan_gaps (list): Elements the PHI scan could not open, as
             (timestamp, entity_uid, details, disposition). The
             disposition is one of `GAP_REMOVED`, `GAP_RETAINED` or
             `GAP_UNRESOLVED`, resolved by `generate_report` against the
-            object graph -- the audit row is written at ingest and
-            cannot know it. The opposite claim from `data_losses`, which
-            is why it is not more of them (#167).
+            object graph, since the audit row is written at ingest.
         export_recorded (bool): Whether the audit log held an EXPORT
             row when the report was assembled. False renders the
             boundary note in the Executive Summary; it never moves the
-            grade (#153).
+            grade.
         validation_status (str): Overall status -- `PENDING` until a
             report is generated, then `PASS` or `REVIEW_REQUIRED`.
-            Nothing emits `FAIL`: this report describes a run, and a run
-            that fails raises rather than grading itself.
+            Nothing emits `FAIL`: a run that fails raises rather than
+            grading itself.
         review_reasons (List[str]): Why the run is not PASS, one entry
             per term of the grade -- empty exactly when it is PASS, because
             `generate_report` derives the grade from this list. Section 5
-            renders it, so the section cannot contradict the grade.
-            Replaces `validation_issues` and `verification_details`, which
-            nothing ever set: every report said "Identified Issues: 0"
-            (#481).
+            renders it.
         metadata_remediations (int): `REMEDIATION_*` rows in the audit
             trail, the evidence section 5's metadata line reads.
         pixel_scans (List[PixelScanSummary]): Each `scan_pixel_content()`
@@ -233,10 +248,10 @@ class ComplianceReport:
             reading IDENTIFIED when the report was assembled, keyed
             "patients", "studies", "instances": a finding the last PHI
             scan raised and no `anonymize()` pass since acted on. Any
-            non-zero count grades the run `REVIEW_REQUIRED` (#573).
+            non-zero count grades the run `REVIEW_REQUIRED`.
         unscanned_instances (int): Instances with no PHI scan at their
             current revision -- never scanned, or edited since. Rendered
-            in section 5 against `total_instances`; never graded (#573).
+            in section 5 against `total_instances`; never graded.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
@@ -244,11 +259,9 @@ class ComplianceReport:
 
     # Configuration / Context
     privacy_profile: str = "Unknown"
-    # Not a compliance claim. This used to default to "Safe Harbor (Basic
-    # Profile)" and no caller ever assigned it, so every report asserted
-    # HIPAA Safe Harbor -- including for a session whose PHI scan covers
-    # the six shipped default tags. DicomSession.generate_report now
-    # always passes a description derived from the live configuration.
+    # Not a compliance claim, and never the name of a standard.
+    # DicomSession.generate_report always passes a description derived
+    # from the live configuration.
     deid_method: str = "Not recorded"
 
     # Cohort Statistics
@@ -259,11 +272,9 @@ class ComplianceReport:
 
     # Export Delivery
     #
-    # `total_instances` counts the graph, and used to be the only count
-    # in the Executive Summary: a run that wrote none of its three
-    # instances reported "Total Instances | 3" beneath a PASS. These two
-    # say what was written, and are None when this session has not
-    # exported (#181).
+    # `total_instances` counts the graph, not the files written. These
+    # two say what was written, and are None when this session has not
+    # exported.
     instances_written: Optional[int] = None
     instances_requested: Optional[int] = None
 
@@ -280,7 +291,7 @@ class ComplianceReport:
     # loss_scope), where loss_scope is PRIVATE, STANDARD, SIGNAL, or
     # None for a row written before the column existed.
     #
-    # Its own field rather than more `exceptions` (#146): nothing
+    # Its own field rather than more `exceptions`: nothing
     # failed, and an overlay dropped from an ordinary image belongs
     # nowhere near a section headed "Exceptions & Errors". The grade is
     # answered per row, on `loss_scope`, which is what lets the report
@@ -289,18 +300,18 @@ class ComplianceReport:
 
     # Content that reached the exported file and that the PHI scan
     # could not open: (timestamp, entity_uid, details). Its own field
-    # rather than more `data_losses` -- see get_audit_scan_gaps (#167).
+    # rather than more `data_losses` -- see get_audit_scan_gaps.
     scan_gaps: list = field(default_factory=list)
 
     # Remediations that were proposed and did not run, as (timestamp,
-    # entity_uid, details): `REMEDIATION_DECLINED` rows (#301). Its own
+    # entity_uid, details): `REMEDIATION_DECLINED` rows. Its own
     # field for the same reason `scan_gaps` is: a third claim, not more
     # of either. 3.1 is content that is not in the export, 3.2 is
     # content that is and was never read, and this is content that was
     # read, was meant to be removed, and is still there.
     declined_remediations: list = field(default_factory=list)
 
-    # Export Boundary (#153)
+    # Export Boundary
     #
     # True when the audit log held at least one EXPORT row as this
     # report was assembled. Keyed on the log rather than on a session
@@ -318,17 +329,15 @@ class ComplianceReport:
     validation_status: str = "PENDING"
     review_reasons: List[str] = field(default_factory=list)
 
-    # Section 5 (#481). Both are what happened, never what was configured:
-    # the sentence they replace said "pixel data was scanned" and
-    # "metadata was remediated" for every session, whatever it had done.
+    # Section 5. Both are what happened, never what was configured.
     metadata_remediations: int = 0
     pixel_scans: List[PixelScanSummary] = field(default_factory=list)
 
-    # Condition 7 of the grade (#573): patients, studies and instances
+    # Condition 7 of the grade: patients, studies and instances
     # reading IDENTIFIED, per level. Its reason line in `review_reasons`
     # is the rendering; this is the count behind it.
     unacted_findings: Dict[str, int] = field(default_factory=dict)
-    # Instances with no PHI scan at their current revision (Q3 of #573).
+    # Instances with no PHI scan at their current revision.
     # Not graded; section 5 says how many, so a PASS over data no scan
     # has seen does not read as a PASS over data a scan cleared.
     unscanned_instances: int = 0
@@ -355,8 +364,9 @@ class MarkdownRenderer:
         """
         Renders the report as a Markdown file.
 
-        Includes an Executive Summary, Processing Audit table, Exceptions log,
-        and Verification details.
+        Sections: 1. Executive Summary, 2. Processing Audit, 3. Data Loss &
+        Unscanned Content, 4. Exceptions & Errors, 5. Validation &
+        Verification, then a signature line. Overwrites `output_path`.
 
         Args:
             report (ComplianceReport): The data to render.
@@ -365,7 +375,7 @@ class MarkdownRenderer:
         # Rendered only when an export ran in this session. An absent
         # row says "not answered here"; a zero would say "nothing was
         # written", and the report cannot tell those apart for a session
-        # that never exported (#181).
+        # that never exported.
         written_row = ""
         if report.instances_written is not None:
             written_row = (
@@ -373,10 +383,9 @@ class MarkdownRenderer:
                 f"{report.instances_requested} requested |\n")
 
         # The boundary note sits under the grade, not in section 3,
-        # because the grade is the part people quote: a pre-export PASS
-        # with the caveat three sections away is how #153 read in the
-        # first place. Absence-of-row logic, same as `written_row`
-        # above -- no EXPORT row says "not answered here", and the note
+        # because the grade is the part people quote, and a pre-export
+        # PASS needs its caveat beside it. Absence-of-row logic, same as
+        # `written_row` above -- no EXPORT row says "not answered here", and the note
         # is that statement made out loud rather than a penalty (a
         # session that only audits keeps its grade).
         boundary_note = ""
@@ -426,15 +435,12 @@ The following actions were recorded in the secure audit trail:
         # skimming for problems would otherwise stop at "no exceptions".
         # Each row names the element and its VR -- "a tag was dropped" is
         # not actionable; the VR is what says whether it was a four-byte
-        # serial number or a megabyte of vendor telemetry (#146).
+        # serial number or a megabyte of vendor telemetry.
         #
         # The section carries two claims under one number, and they are
         # opposites: 3.1 is content that is *not* in the export, 3.2 is
-        # content that *is* and was never read. The retitle keeps 4 and
-        # 5 at their numbers, which `tests/test_reporting.py`,
-        # `tests/test_export_failure_audit.py` and
-        # `tests/test_float_pixel_data_export.py` assert verbatim
-        # (#167).
+        # content that *is* and was never read. Sections 4 and 5 keep
+        # their numbers: tests assert their headings verbatim.
         md_content += "\n## 3. Data Loss & Unscanned Content\n"
         if report.data_losses:
             md_content += "\n### 3.1 Data Loss\n\n> [!WARNING]\n> Elements below were present in the source and are **not** in the exported data:\n\n"
@@ -443,32 +449,23 @@ The following actions were recorded in the secure audit trail:
                 # (timestamp, entity_uid, details, loss_scope)
                 #
                 # The scope is printed because it decides the grade: a
-                # report that reads REVIEW_REQUIRED with no way to see
-                # which row caused it is the same defect as the bare
-                # `DATA_LOSS: 3` this section replaced. "unrecorded" is
-                # a row from a store older than the column, not a third
-                # kind of loss.
+                # REVIEW_REQUIRED must show which row caused it.
+                # "unrecorded" is a row from a store older than the
+                # column, not a third kind of loss.
                 scope = loss[3] or "unrecorded"
                 md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} | {scope} |\n"
         else:
             md_content += "\n### 3.1 Data Loss\n\n*No data loss was recorded.*\n"
 
         # The empty case is prose, never an empty table, for symmetry
-        # with 3.1 above -- and only for that. It used to also keep an
-        # unconditional 3.2 header out of the slice
-        # `tests/test_data_loss_reporting.py::_loss_table` read, which
-        # ran from "Data Loss" to "Exceptions" and swallowed both
-        # tables; that helper is now bounded by `### 3.1` and `### 3.2`,
-        # so the hazard is gone and this is no longer load-bearing
-        # (#167).
+        # with 3.1 above.
         #
         # The header claims only what is true of every row. Whether the
         # element reached the export is per-row and lives in
         # Disposition, because `remove_private_tags=True` -- the
         # shipped default -- deletes some of these and not others, and a
-        # header that asserted "retained in the exported data" over a
-        # row that was swept made section 3.2 contradict section 2's
-        # own REMEDIATION_REMOVE (#167).
+        # header asserting "retained in the exported data" over a swept
+        # row would contradict section 2's own REMEDIATION_REMOVE.
         if report.scan_gaps:
             md_content += "\n### 3.2 Unscanned Content\n\n> [!WARNING]\n> The PHI scan could not open the elements below. **Disposition** says whether each one is still held for export:\n\n"
             md_content += "| Timestamp | Instance | Element | Disposition |\n| :--- | :--- | :--- | :--- |\n"
@@ -479,18 +476,16 @@ The following actions were recorded in the secure audit trail:
             md_content += "\n### 3.2 Unscanned Content\n\n*No unscanned content was recorded.*\n"
 
         # 3.3 -- the third claim under this number, and the reason it
-        # sits here rather than under a number of its own: 4 and 5 are
-        # asserted verbatim by three test files, so a new top-level
-        # section would renumber Exceptions. It belongs beside 3.2 on
+        # sits here rather than under a number of its own: tests assert 4
+        # and 5 verbatim, so a new top-level section would renumber
+        # Exceptions. It belongs beside 3.2 on
         # the merits anyway -- 3.2 is content that reached the export
         # and was never read; this is content that was read, was meant
         # to be removed, and reached the export regardless.
         #
         # **The empty case renders nothing at all**, unlike 3.1 and 3.2,
-        # whose empty prose is load-bearing for the bounded slices
-        # `tests/test_data_loss_reporting.py` and
-        # `tests/test_private_sequence_implicit_vr.py` take between
-        # those headers. Nothing slices on 3.3, and a header saying
+        # whose empty prose tests slice between those headers. Nothing
+        # slices on 3.3, and a header saying
         # "the following remediations declined" over no rows is a claim
         # about a run that had none.
         if report.declined_remediations:
@@ -517,12 +512,9 @@ The following actions were recorded in the secure audit trail:
         else:
             md_content += f"\n## 4. Exceptions & Errors\n\n*No exceptions or errors were recorded.*\n"
 
-        # Section 5 says only what happened (#481). It used to be two
-        # fields nothing set and a sentence that claimed a pixel scan and a
-        # metadata remediation for every session, so a run that never
-        # scanned and one whose scan failed rendered it identically --
-        # "Identified Issues: 0" beside a section 4 listing the failure.
-        # The heading is split on verbatim by tests; keep it byte-for-byte.
+        # Section 5 says only what happened: each line is read from the
+        # run, never from the configuration. The heading is split on
+        # verbatim by tests; keep it byte-for-byte.
         md_content += "\n## 5. Validation & Verification\n\n"
         md_content += _grade_basis_lines(report)
         md_content += _metadata_line(report)
@@ -545,10 +537,18 @@ __________________________________________________
 def get_renderer(format_type: str) -> ReportRenderer:
     """The renderer for `generate_report(format=)`: `'markdown'`, exactly.
 
-    `'md'` and every case variant were accepted until the 1.0 freeze
-    (#26). One spelling per behaviour: a second one accepted at the tag
-    could never be removed in 1.x, so it is refused now, not tolerated.
+    Args:
+        format_type (str): `'markdown'`.
+
+    Returns:
+        ReportRenderer: A new `MarkdownRenderer`.
+
+    Raises:
+        ValueError: For any other spelling, `'md'` and case variants
+            included.
     """
+    # One spelling per behaviour: a second spelling accepted in 1.0 could
+    # never be removed in 1.x, so 'md' and case variants are refused.
     if format_type == "markdown":
         return MarkdownRenderer()
     raise ValueError(

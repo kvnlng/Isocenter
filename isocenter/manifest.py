@@ -1,3 +1,4 @@
+"""The export manifest: one entry per instance, rendered as JSON or HTML."""
 from dataclasses import dataclass, asdict
 from typing import List, Protocol
 import json
@@ -30,10 +31,10 @@ class ManifestItem:
             current revision. Not "`anonymize()` ran": an input the scan
             found clean reads True after `audit()` alone. Not a statement
             about burned-in pixel text, which the tag scan does not read.
-            A remediation inside a sequence counts as one on its instance
-            (#494). False when the status does not establish it: never
-            scanned, edited since, or a remediation declined on it or
-            inside it in its last pass (#486).
+            A remediation inside a sequence counts as one on its instance.
+            False when the status does not establish it: never scanned,
+            edited since, or a remediation declined on it or inside it in
+            its last pass. False by default.
     """
     patient_id: str
     study_instance_uid: str
@@ -52,10 +53,8 @@ class ManifestItem:
     # Processing details
     #
     # False by default: an item nobody described has not been shown to be
-    # anonymized. This defaulted to True and `generate_manifest` never
-    # passed it, so every manifest said `"anonymized": true` for every
-    # instance -- beside the untouched PatientID of a session that never
-    # called `anonymize()` (#486).
+    # anonymized. A True default would claim `"anonymized": true` for every
+    # instance a caller did not describe.
     anonymized: bool = False
 
 
@@ -80,6 +79,12 @@ class Manifest:
     def to_dict(self):
         """
         Converts the manifest to a dictionary for JSON serialization.
+
+        Returns:
+            dict: `generated_at`, `project_name`, `total_files`,
+                `total_size_bytes` and `items` (each a dict of its
+                `ManifestItem` fields). The two totals are computed from
+                `items`, not read from the fields of the same name.
         """
         return {
             "generated_at": self.generated_at,
@@ -108,6 +113,12 @@ class JSONManifestRenderer:
     """Renders the manifest as a JSON file."""
 
     def render(self, manifest: Manifest, output_path: str) -> None:
+        """Writes `manifest.to_dict()` to `output_path` as indented JSON.
+
+        Args:
+            manifest (Manifest): The manifest data.
+            output_path (str): The destination file path, overwritten.
+        """
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(manifest.to_dict(), f, indent=2)
 
@@ -116,6 +127,14 @@ class HTMLManifestRenderer:
     """Renders the manifest as a standalone HTML file."""
 
     def render(self, manifest: Manifest, output_path: str) -> None:
+        """Writes the manifest to `output_path` as one HTML table.
+
+        One row per item. Values are interpolated without HTML escaping.
+
+        Args:
+            manifest (Manifest): The manifest data.
+            output_path (str): The destination file path, overwritten.
+        """
         # Basic accessible HTML table
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -185,10 +204,16 @@ def get_manifest_renderer(format: str):
     """The renderer for `generate_manifest(format=)`: `'json'` or `'html'`,
     exactly.
 
+    Args:
+        format (str): `'json'` or `'html'`.
+
+    Returns:
+        JSONManifestRenderer | HTMLManifestRenderer: A new renderer for the
+            format.
+
     Raises:
-        ValueError: For any other spelling, `None` included. A case variant
-            (`'HTML'`) was accepted until the 1.0 freeze (#26); one spelling
-            per behaviour, so it is refused rather than frozen.
+        ValueError: For any other spelling, `None` and case variants
+            (`'HTML'`) included.
     """
     if format == "json":
         return JSONManifestRenderer()

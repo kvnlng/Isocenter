@@ -1,41 +1,33 @@
-# No warning filter is installed here, deliberately (#144).
+"""Isocenter: index, de-identify and export DICOM datasets.
+
+`Session` is the entry point. The package also exports `Builder`,
+`Equipment`, `RedactionError` and `ExportError`.
+"""
+# No warning filter is installed here, deliberately.
 #
-# This module used to run `warnings.filterwarnings("ignore",
-# module="pydicom.*")` before anything else. `filterwarnings` prepends
-# to the process-wide filter list, so it won even over the host
-# application's own `-W` flag: importing Isocenter silenced pydicom
-# warnings in the host's own pydicom code, unasked and invisibly.
+# `warnings.filterwarnings` prepends to the process-wide filter list, so
+# a filter set at import wins even over the host application's own `-W`
+# flag, and would silence pydicom warnings in the host's own pydicom
+# code. It would also hide pydicom's deprecation announcements, the
+# signal for lifting the `pydicom<4.0` cap in `setup.py`.
 #
-# It was there for non-conformant UID noise -- which came entirely from
-# this project's own test fixtures (`SERIES_UID_1` and friends), not
-# from user data. `pytest.ini` silences that for the suite independently,
-# and removing this line leaves the suite just as quiet, so the filter
-# was redundant for the reason it existed and harmful for the reason it
-# did not.
-#
-# It also hid pydicom's own deprecation announcements, which are the
-# only signal that would tell us how to lift the `pydicom<4.0` cap in
-# `setup.py`. See `tests/test_pydicom_deprecations.py`.
-#
-# If Isocenter ever needs to suppress a warning its own operations
-# provoke, scope it to those calls with a context manager. Do not set a
-# global filter at import.
+# If Isocenter needs to suppress a warning its own operations provoke,
+# scope it to those calls with a context manager. Do not set a global
+# filter at import.
 
 try:
     from .session import DicomSession as Session
 
-    # Expose the Builder for power users
     from .builders import DicomBuilder as Builder
 
-    # Expose Equipment for type hinting
     from .entities import Equipment
 
     # An exception a caller is expected to catch needs a stable import
     # path, and `isocenter.services` is not one this package advertises.
     from .services import RedactionError
 
-    # Same reasoning, and `isocenter.io_handlers` is no more advertised
-    # than `isocenter.services` (#191).
+    # Same reasoning: `isocenter.io_handlers` is no more advertised
+    # than `isocenter.services`.
     from .io_handlers import ExportError
 
     # Expose handler for direct import check
@@ -58,28 +50,22 @@ except ImportError as e:
 
 # Codec preference is deliberately NOT expressed here.
 #
-# Isocenter used to assign a four-entry priority list to
-# `pydicom.config.pixel_data_handlers`. On pydicom 3.x nothing reads it:
-# decoding picks its backend from `Dataset._pixel_array_opts`, which
-# defaults to `{"use_pdh": False}`, and the handler list is consulted
-# only on the `use_pdh` branch. The assignment succeeded and the
-# attribute held the list, so it looked configured to anyone reading
-# this file -- silent precisely because the attribute is writable.
+# Do not assign `pydicom.config.pixel_data_handlers`. On pydicom 3.x
+# nothing reads it: decoding picks its backend from
+# `Dataset._pixel_array_opts`, which defaults to `{"use_pdh": False}`,
+# and the handler list is consulted only on the `use_pdh` branch. The
+# assignment succeeds, so it looks configured while doing nothing; and a
+# list, if it were read, would *replace* pydicom's defaults and drop the
+# jpeg_ls, pylibjpeg and rle handlers that ship with it.
 #
-# It was also net-negative if it had ever been read: the list *replaced*
-# pydicom's defaults, dropping the jpeg_ls, pylibjpeg and rle handlers
-# that ship with it. setup.py requires pydicom>=3.0.0, so there is no
-# supported version on which this did anything but narrow support.
+# pydicom 3.x has no priority list: `pixel_array(...,
+# decoding_plugin=...)` names a single plugin, and the `pydicom.pixels`
+# backend orders its own fallbacks per transfer syntax.
 #
-# pydicom 3.x has no notion of a priority list to migrate it to --
-# `pixel_array(..., decoding_plugin=...)` names a single plugin, and the
-# `pydicom.pixels` backend orders its own fallbacks per transfer syntax.
-# Expressing a preference is therefore a feature, not a repair, and is
-# left to #33.
-#
-# `imagecodecs` support is unaffected, because it never came from this
-# list: `Instance.get_pixel_data` calls `isocenter.imagecodecs_handler`
-# directly when pydicom fails to decode (see entities.py).
+# `imagecodecs` support does not come from this list: the decode path
+# (`io_handlers._decode_pixels`, which `Instance.get_pixel_data` uses)
+# calls `isocenter.imagecodecs_handler` itself where pydicom has no
+# plugin.
 
 # Declared in _version.py, which setup.py also reads. Deriving it from
 # importlib.metadata instead asks "what is installed under this name",

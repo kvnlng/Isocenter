@@ -6,8 +6,8 @@ pydicom and numpy, which a build environment is not required to have.
 
 Everything else derives from here: `isocenter.__version__` re-exports it,
 `setup.py` parses it, and the wheel's installed metadata is generated
-from it. `tests/test_version_contract.py` checks that the files which
-restate it -- CITATION.cff, CHANGELOG.md -- still agree.
+from it. CITATION.cff and CHANGELOG.md restate it and must be changed
+with it.
 """
 
 __version__ = "1.0.0rc1"
