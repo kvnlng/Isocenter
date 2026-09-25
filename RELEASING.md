@@ -274,10 +274,12 @@ fixes, never features.
      Its entries do that for a candidate, a patch, or a final that had no
      candidates. A final that followed candidates, whose entries sit in
      the candidates' sections, opens with a summary of the changes since
-     the previous final release, candidates included. A major release
-     (`X.0.0`) opens instead with highlights of all its changes and
-     capabilities, written for a reader upgrading from the previous major.
-     A final's section is never empty (#826).
+     the highest final version below it, candidates included. A major
+     release's final (`X.0.0`, whether or not candidates preceded it; not
+     the candidates themselves) opens with highlights of all its changes
+     and capabilities in place of that summary, written for a reader
+     upgrading from the previous major line (0.9.x for 1.0.0). A final's
+     section is never empty (#826).
 
    Run the full suite on both interpreters at this commit
    (`tests/test_version_contract.py` checks that the three files agree).
@@ -411,7 +413,9 @@ candidate (`X.Y.Zrc<N+1>`), X.Y.Z final, or the line's first release when
 the cut (step 1) had to be made before some of X.Y's commits.** For a
 first release the previous-candidate prerequisite in step 1 below does not
 apply, and step 3's integration run at the release commit does. A patch to
-a released line is "Patch releases" instead.
+a released line is "Patch releases" instead. A final that follows
+candidates is cut by this section even when nothing new belongs to X.Y;
+step 2 is then skipped.
 
 `main` is the development branch and can hold work for a later minor, so
 **the release carries the commits on `main` that belong to X.Y,**
@@ -424,6 +428,8 @@ cut this way (#818, #821, #822).
 1. **Choose the commit** on `main`. The previous candidate's step 8 (its
    record back to `main`) must already be merged.
 2. **Pick X.Y's work onto the branch** in a PR into `release/X.Y`.
+   When the range holds nothing to pick, skip this step: open no PR and
+   add no `[Unreleased]`.
    - **The range is every squash commit on `main` after the commit the
      line was cut from**, or after the last commit already picked onto
      the line. It runs up to the chosen commit, in order. Leave out three
@@ -541,11 +547,12 @@ cut this way (#818, #821, #822).
      release's range leaves out. A fix `main` does not need at all
      ("Patch releases" step 3), or one forward-ported adapted, goes on the
      line's branch-only fixes.
-   - **Final's section opens with the summary that step 3's
-     `CHANGELOG.md` item requires,** above any picked entries. When step
-     2 had nothing to pick, the branch has no `[Unreleased]` to rename, so
-     the release commit adds the `## [X.Y.Z] - YYYY-MM-DD` heading with
-     the summary under it.
+   - **Final's section opens with the summary, or a major's highlights,
+     that step 3's `CHANGELOG.md` item requires,** above any picked
+     entries. When the branch has no `[Unreleased]` (nothing belonged to
+     X.Y, so step 2 opened no PR, and no fix has added one), the release
+     commit adds the `## [X.Y.Z] - YYYY-MM-DD` heading with the summary
+     under it, together with any `**Output:**` line `compare` requires.
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
