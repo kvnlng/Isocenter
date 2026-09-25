@@ -277,3 +277,13 @@ session.save()
 ```
 
 No source file is needed: the identifier is still in the store's own pixels. Every instance the rules match is redacted again, and each takes a **new SOP Instance UID**, so its exported filename changes and it stops matching the source file it was ingested from.
+
+## Repairs on a 0.9.x store
+
+Two `Session` methods have entries that point here.
+
+**`redact(force=True)`** repairs a store redacted on 0.9.0 or earlier with a multi-zone rule: see [Redacted on 0.9.0 or earlier with a multi-zone rule](#redacted-on-090-or-earlier-with-a-multi-zone-rule).
+
+**`reconcile_private_tags()`** repairs a store de-identified before 0.9.1, whose stripped private tags come back when it is opened. [Resurrected private tags](#resurrected-private-tags) says when to call it and what it deletes.
+
+`recover_patient_identity()` and `lock_identities()` refuse every token written before 1.0, whichever release wrote it: see [Identity tokens locked before 1.0](#identity-tokens-locked-before-10).

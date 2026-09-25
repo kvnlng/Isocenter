@@ -14,7 +14,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DiscoveryCandidate:
-    """A single text region detected during discovery."""
+    """A single text region detected during discovery.
+
+    Attributes:
+        text (str): The text OCR read.
+        confidence (float): OCR confidence, 0 to 100.
+        box (List[int]): `[x, y, w, h]` in pixels. A redaction zone is
+            spelled differently, `[y1, y2, x1, x2]`; `to_zones()` converts.
+        source_index (int): Which sampled instance it was read from,
+            counting only the instances that could be read.
+        classification (str): `TEXT`, `NAME_PATTERN`, `PROPER_NOUN` or
+            `PROPER_NOUN_CANDIDATE`.
+    """
     text: str
     confidence: float
     box: List[int] # [x, y, w, h]

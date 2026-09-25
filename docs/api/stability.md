@@ -6,9 +6,10 @@ frozen; the internal seams behind it are not.
 - **Frozen (tier 1)** names keep their spelling, their parameter names,
   their return shapes and their documented behaviour for every 1.x
   release; a change is a 2.0.
-- **Documented but internal (tier 2)** names are rendered on this site
-  and safe to call, and may change in a 1.x release with a CHANGELOG
-  entry that names the old spelling and the new one. They exist so a
+- **Documented but internal (tier 2)** names are listed on this page,
+  and rendered in the API reference or named by a guide where a reader
+  needs them. They are safe to call, and may change in a 1.x release with
+  a CHANGELOG entry that names the old spelling and the new one. They exist so a
   reader can see the seams, not so a program can lean on them.
 - **Private (tier 3)** names — everything with a leading underscore, and
   every module not listed below — may change without notice.
@@ -27,7 +28,7 @@ behaviour came to be is in the
   ([Frozen at 1.0](#frozen-at-10)).
 - **The output.** For the same input, configuration and project secret,
   a 1.x exports what the previous release exported, or its changelog
-  says what changed ([Data promises](#frozen-at-10); #717). The grade's
+  says what changed ([Data promises](#frozen-at-10)). The grade's
   values and the audit words keep their spelling, and no condition that
   grades a run is removed or narrowed; a 1.x may add words and
   conditions, with a changelog entry.
@@ -202,7 +203,8 @@ same Patient ID into the one that was in the session first, removing the
 other from `store.patients`; `audit()` runs inside
 `export(check_burned_in=True)`, so that merges too.
 
-**Shapes the frozen methods return** (attribute names).
+**Shapes the frozen methods return** (attribute names; each is
+rendered on [Results and errors](results.md)).
 `IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
 `ExportSummary(written_uids, failures)` plus `written`, `failed`;
 `written_uids` holds the SOP Instance UID of each written instance and
@@ -269,7 +271,7 @@ A subject whose files carry no Patient ID (absent, empty or blank) is a
 `Patient` per study, whose `patient_id` is
 `entities.NO_PATIENT_ID_PREFIX + <its source Study Instance UID>`
 (`"\\no-patient-id\\1.2.3..."`); `entities.is_synthetic_patient_id()`
-is the test for it (#584). No single-valued Patient ID read from a file
+is the test for it. No single-valued Patient ID read from a file
 can take that form, because the backslash is DICOM's value delimiter. The
 key is never exported: such a subject's exported Patient ID is empty
 under `KEEP` and `REPLACE` alike, and its folder is
@@ -375,7 +377,7 @@ otherwise.
   `RuntimeError` when the patient has no instances or no identity token,
   the key does not decrypt it, or it holds no identity record this
   library writes, or the token is in the layout releases before 1.0
-  wrote (#790), in which case nothing on the patient is restored. It
+  wrote, in which case nothing on the patient is restored. It
   prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
@@ -420,7 +422,7 @@ default.
   a label. Releases before 1.0 wrote the two item elements the other
   way round (the token in `(0400,0510)`). 1.x does not read that
   layout: recovering such a file, or locking over it, raises an error
-  naming the layout, and 0.9.x recovers it with its key (#790).
+  naming the layout, and 0.9.x recovers it with its key.
 - An identity token holds exactly the locked values captured from each
   instance that carries it: a lock writes one token per distinct set of
   values, and a restore gives each instance the values of the token it
@@ -469,13 +471,12 @@ default.
 - A configuration file that 1.0 loads, every 1.x loads unchanged. Its
   schema is version 2, and a 1.x never raises the major. A 1.x raises
   the 2.x minor when it adds keys or values, and when it applies an
-  unchanged file differently (#762). A 1.x never changes how a file is
+  unchanged file differently. A 1.x never changes how a file is
   applied without raising the minor. The minor is part of the policy
   each PHI status records, so a store scanned under an older minor is
   asked to re-audit. Its next `export()` writes a `WARNING` row saying
   the statuses were recorded under another policy, and the report
-  grades `REVIEW_REQUIRED` until `audit()` runs under the new release
-  (#555).
+  grades `REVIEW_REQUIRED` until `audit()` runs under the new release.
 
 **Output vocabularies.** Five separate vocabularies, not one list.
 
@@ -534,24 +535,25 @@ interpreter; and the two below.
 
 ## Documented but internal
 
-Rendered by this site or named by a guide, safe to call, and changeable
-in a 1.x release with a CHANGELOG entry naming both spellings:
+Listed here, rendered in the API reference or named by a guide where a
+reader needs them, safe to call, and changeable in a 1.x release with a
+CHANGELOG entry naming both spellings:
 
 - **`DicomSession`**, the class's own name. `isocenter.Session` is the
   frozen spelling.
-- **`session.store_backend` and `SqliteStore`** — everything
-  [Persistence](persistence.md) renders, including
-  `get_flattened_instances()`, `get_audit_losses()` and the other
-  `get_audit_*`, `persist_pixel_data`, `save_all`, `compact_sidecar`,
-  `stop`.
-  The store's *forward compatibility* is frozen; its API is not.
+- **`session.store_backend` and `SqliteStore`** — the methods
+  [Audit trail](persistence.md) renders: `get_audit_summary()`,
+  `get_audit_errors()`, `get_audit_losses()`, `get_audit_declines()`,
+  `get_audit_scan_gaps()`, `get_audit_drops()` and
+  `get_flattened_instances()`. The store's *forward compatibility* is
+  frozen; its API is not, and its other methods are private.
 - **`session.key_manager`, `session.persistence_manager`,
   `session.reversibility_service`** — attributes that expose services.
 - **`TrackedEntity` bookkeeping**: `has_unsaved_changes`, `phi_status`,
   `phi_status_policy`, `mark_modified()`, `mark_persisted()`,
   `mark_subtree_persisted()`, `record_phi_status()`; `PhiStatus`;
   `ScanPolicy`, the policy a status was recorded under, which the store
-  keeps beside it (#555); `DicomItem.add_sequence()` and
+  keeps beside it; `DicomItem.add_sequence()` and
   `add_sequence_item()`, `record_attr_vr()`; `DicomSequence`;
   `Instance.regenerate_uid()`, `get_waveform_bytes()`,
   `unload_waveform_data()`, `pixel_array`, `waveform_array`;
@@ -576,12 +578,13 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   instance keeps the SOP Instance UID it held before its UID first
   changed (the ingested one, unless `sop_instance_uid` was assigned first).
   `exported_patient_id` is on the registry's provisional terms (below).
-- **The [Intelligent OCR](ocr.md) page**: `ZoneDiscoverer.group_boxes`,
+- **The [OCR API](ocr.md) page**: `DiscoveryCandidate`,
+  `ZoneDiscoverer.group_boxes`,
   `RedactionVerifier` (`__init__`, `get_matching_rule`, `is_covered`,
   `verify_instance`), `ConfigAutomator.suggest_config_updates`,
   `pixel_analysis.analyze_pixels`, `pixel_analysis.detect_text_regions`,
-  `pixel_analysis.HAS_OCR`, `pixel_analysis.OcrUnavailableError`,
-  `pixel_analysis.PixelScanError`;
+  `pixel_analysis.TextRegion`, `pixel_analysis.HAS_OCR`,
+  `pixel_analysis.OcrUnavailableError`, `pixel_analysis.PixelScanError`;
   `DiscoveryResult.get_density_matrix`, `visualize_heatmap`,
   `analyze_temporal_stability`, `inspect_clusters`, and its attributes
   `candidates` and `n_sources`.
@@ -589,6 +592,9 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   exporter registry `Exporter`, `register()`, `get_exporter()`,
   `available_formats()`, which is provisional (below).
 - **`RedactionService.apply_redaction_to_array`** (static).
+- **`PhiRemediation`**, the proposal a `PhiFinding` carries in
+  `remediation_proposal`. Its `action_type` words are frozen (above);
+  the class is not.
 - **`Builder`'s fluent chain beyond `start_patient()`.**
 - **`ComplianceReport`'s fields** and the report's section layout and
   wording; log messages and `print` lines; the manifest's HTML.
@@ -626,13 +632,15 @@ or later.
 
 Every leading-underscore name, and wholesale: `parallel.py`
 (`run_parallel` included — the environment registry is the contract,
-the function is not), `io_handlers.py` except `DicomExporter.write_tree`
-and the two summaries, `privacy.py` except `PhiFinding` and `PhiReport`,
-`remediation.py`, `services.py` except `RedactionError` and
+the function is not), `io_handlers.py` except `DicomExporter.write_tree`,
+the two summaries and `ExportError`, `privacy.py` except `PhiFinding`,
+`PhiReport` and `PhiRemediation` (tier 2), `persistence.py` except the
+`SqliteStore` methods named above, `remediation.py`, `services.py` except `RedactionError` and
 `apply_redaction_to_array`, `crypto.py`, `reversibility.py`,
 `sidecar.py`, `persistence_manager.py`, `pixel_geometry.py`,
 `murmur.py`, `reporting.py` except `ComplianceReport`, `discovery.py`
-except `DiscoveryResult` and `ZoneDiscoverer.group_boxes`,
+except `DiscoveryResult`, `DiscoveryCandidate` and
+`ZoneDiscoverer.group_boxes`,
 `verification.py` except `RedactionVerifier`, `automation.py` except
 `ConfigAutomator.suggest_config_updates`, `config_manager.py`,
 `profiles.py` except `FLOOR_POLICY` (tier 2),

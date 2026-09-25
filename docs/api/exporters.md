@@ -15,7 +15,6 @@ can be registered too:
 
 ```python
 from isocenter import exporters
-from isocenter.entities import exported_patient_id
 
 
 class AcmeExporter(exporters.Exporter):

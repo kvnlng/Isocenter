@@ -310,3 +310,43 @@ The user guides describe behaviour; the names behind it are here.
 - **The 65534-byte limit** on held binary values is `io_handlers.BINARY_RETENTION_MAX_BYTES`, the largest value an explicit-VR 16-bit length field can carry.
 - **Why large private values are not stored.** Holding a megabyte vendor blob in `attributes` makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. `session.compact()` rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a `redact()` or `ingest()` pass is open. That is design work, not a flag (#125).
 - **Data-loss rows** are read with `session.store_backend.get_audit_losses()`; the compliance report's section 3.1 is the user-facing view.
+
+## Notes moved from the API docstrings
+
+The API reference describes what a caller sees. The mechanisms behind
+four of those descriptions are here.
+
+**`ingest()` and a worker that dies.** When a worker process ends while
+reading a file (the out-of-memory killer, a decoder crash, `SIGKILL`),
+the results already returned are kept, and the files not yet returned
+are read again one at a time on a fresh one-worker process pool. A file
+is rejected only when a fresh worker ends on it as the first file it was
+given, with the reason "An ingest worker process ended before this file
+was returned, and a fresh worker process given this file alone, as its
+first file, ended while reading it". The rest are read at full width,
+the call saves as usual, and the session's pool is replaced. A death
+that does not recur costs no file and writes no row; a `WARNING` log
+line records it. If two fresh workers in a row cannot run a trivial
+task, every file left is rejected as "Not read" and the call returns. A
+worker that ends on a later file had read others first, so that file is
+not blamed: reading starts again from it on another fresh worker. Each
+worker death costs a fresh pool, a few tenths of a second; a fatal file
+costs two or three, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read
+one at a time.
+
+**`compact()`, `ingest()` and `redact()` locks.** Every frame writer, and
+`compact()` for the whole rewrite, holds the sidecar lock
+(`<sidecar>.lock`, a cross-process `fcntl.flock`); a writer that cannot
+take it within 180 s raises `RuntimeError` naming the lock file. An
+ingest or a redaction pass holds the pass-lock (`<sidecar>.pass.lock`)
+shared for the whole pass, and `compact()` takes it exclusively and
+without waiting, which is how it refuses while a pass is open. Neither
+file name is frozen.
+
+**`redact(force=)`.** An instance is skipped as already redacted when its
+`_ISOCENTER_REDACTION_HASH` attribute matches the configuration's zones;
+`force=True` ignores the match. A failed instance gets no hash.
+
+**`Instance.unload_waveform_data()`.** It unloads only when the instance
+has a `_waveform_loader` (set when the store holds the samples), because
+`get_waveform_data()` has no file fallback.

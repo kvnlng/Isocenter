@@ -1,16 +1,24 @@
 # Session API
 
-Every method on this page is **frozen at 1.0**
-([API stability](stability.md)). They are listed in pipeline order:
-lifecycle first, then ingest → examine → config → audit → anonymize →
-redact → verify → export → report.
+`Session` is the entry point: `from isocenter import Session`. It is the
+class `isocenter.session.DicomSession`, rendered below. Its constructor
+and every method on this page are **frozen at 1.0**
+([API stability](stability.md)). The methods are listed in pipeline
+order, ingest → examine → config → audit → anonymize → redact → verify →
+export → report, with `compact`, `release_memory` and `close` last. What
+the methods return and raise is on [Results and errors](results.md).
 
 <!-- tests/test_frozen_surface.py asserts the `members:` block below
-     renders every method stability.md freezes. -->
+     renders every method stability.md freezes. `configuration` is not a
+     member here: the class docstring's Attributes table describes it with
+     the other three attributes. -->
 
 ::: isocenter.session.DicomSession
     handler: python
     options:
+      heading: Session(persistence_file=None)
+      toc_label: Session
+      merge_init_into_class: true
       members:
         - ingest
         - save
@@ -18,7 +26,6 @@ redact → verify → export → report.
         - create_config
         - load_config
         - preview_config
-        - configuration
         - audit
         - auto_remediate_config
         - anonymize
@@ -44,13 +51,12 @@ redact → verify → export → report.
 
 ## DICOM export options
 
-`export(folder, format="dicom", **options)` hands `options` to the DICOM
-format, whose parameters after `folder` are the options below. The option names and
-defaults are frozen with `export()` ([API stability](stability.md#frozen-at-10));
-an option name the format does not take raises `TypeError`, and nothing is
-written. Pass them to `export()`. The method rendered here is where they
-are defined, and its own name is private (tier 3): calling it directly
-skips what `export()` does before dispatch.
+`export(folder, format="dicom", **options)` takes the options below for
+the `dicom` format. Their names and defaults are frozen with `export()`
+([API stability](stability.md#frozen-at-10)). An option name the format
+does not take raises `TypeError`, and nothing is written. The table is
+read from the format's own method, which is private: pass the options to
+`export()`, never call that method directly.
 
 <!-- `_export_dicom` is private (leading underscore) and rendered here on
      purpose (#27): its docstring is the one definition of the `dicom`
@@ -65,4 +71,5 @@ skips what `export()` does before dispatch.
 ::: isocenter.session.DicomSession._export_dicom
     handler: python
     options:
-      show_root_full_path: false
+      show_root_heading: false
+      show_root_toc_entry: false

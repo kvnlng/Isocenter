@@ -190,7 +190,7 @@ class ReversibilityService:
             # `mark_modified()` is NOT redundant and must not be tidied
             # away. `add_sequence()` marks the instance modified **only
             # when it creates** -- `self.mark_modified()` at
-            # `entities.py` line 498 sits under `if sequence is None`
+            # `entities.py` line 513 sits under `if sequence is None`
             # -- and this path reaches into `items` in place
             # rather than through `add_sequence_item()`, which marks on
             # every call. Without the line below the second and later

@@ -993,7 +993,9 @@ def _lock_selection(value, option):
 
 class LockingResult(list):
     """
-    A list subclass that suppresses verbose REPL output for large datasets.
+    What `lock_identities()` returns: a `list` of the `Instance` objects
+    that received an identity token, whose repr is one line
+    (`<LockingResult: N instances secured>`) rather than every instance.
     """
 
     def __repr__(self):
@@ -1195,15 +1197,21 @@ def _edited_since_its_status(entity) -> bool:
 
 class DicomSession:
     """
-    The Main Facade for the Isocenter library.
+    The session: an indexed store of DICOM files and the de-identification
+    pipeline over it.
 
-    Manages the lifecycle of the DicomStore including:
-    - Loading/Saving session state from SQLite.
-    - Ingesting DICOM files.
-    - Managing Configuration and Rules.
-    - Auditing for PHI.
-    - Redaction and Anonymization.
-    - Exporting cleaned data.
+    Import it as `from isocenter import Session`. Use it in a `with` block,
+    or call `close()`: an open session holds a worker pool and two threads.
+
+    Attributes:
+        store (DicomStore): The object graph. `store.patients` is the
+            `List[Patient]` of `Patient` -> `Study` -> `Series` ->
+            `Instance`.
+        configuration (IsocenterConfiguration): The configuration
+            `audit()`, `anonymize()`, `redact()` and `export()` apply.
+        store_backend (SqliteStore): The session's SQLite store. Its
+            `get_audit_*` methods read the audit trail.
+        persistence_file (str): The store's path, or `":memory:"`.
     """
 
     # =========================================================================
@@ -1212,7 +1220,18 @@ class DicomSession:
 
     def __init__(self, persistence_file=None):
         """
-        Initialize the DicomSession.
+        Open the session store at `persistence_file`, creating it if needed.
+
+        The store is the SQLite file and a pixel file beside it
+        (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
+        original identifiers and pixels** of everything ingested: nothing
+        de-identified is written anywhere until `export()`. Keep it where
+        you keep the source data.
+
+        When a file named `isocenter.key` exists in the current working
+        directory, the session calls `enable_reversible_anonymization()`
+        with it, resolved to an absolute path now. With no such file,
+        reversible anonymization stays off and no key is created.
 
         Args:
             persistence_file (str): Path to the SQLite database file for session persistence.
@@ -1224,8 +1243,12 @@ class DicomSession:
                 because its worker writes to the store and a process
                 cannot share an in-memory database; with
                 `ISOCENTER_MAX_TASKS_PER_CHILD` set, recycling overrides
-                that and the call fails -- see that variable's row in
-                `docs/environment.md`.
+                that and the call fails -- see that variable on the
+                Environment Variables page.
+
+        Raises:
+            ValueError: `isocenter.key` in the working directory is empty or
+                is not a Fernet key.
         """
         configure_logger()
         self.persistence_file = persistence_file or os.getenv("ISOCENTER_DB_PATH", "isocenter.db")
@@ -1846,13 +1869,12 @@ class DicomSession:
         2. A `redact()` or `ingest()` that starts while it is saving or
            rewriting **waits**, bounded by 180 s, and then proceeds.
 
-        Every frame writer, and this method for the whole rewrite, holds
-        the sidecar lock (`<sidecar>.lock`, a cross-process `fcntl.flock`),
-        so a frame written while compaction runs lands in the compacted
-        file. A writer that cannot take the lock within 180 s raises
-        `RuntimeError` naming the lock file; a background save that expires
-        this way is logged as `Background save failed` and its instances
-        stay unsaved for the next save.
+        Every frame writer, and this method for the whole rewrite, holds a
+        cross-process lock beside the sidecar, so a frame written while
+        compaction runs lands in the compacted file. A writer that cannot
+        take the lock within 180 s raises `RuntimeError`; a background save
+        that expires this way is logged as `Background save failed` and its
+        instances stay unsaved for the next save.
 
         The rewrite holds the lock for its whole length, about 0.2 s per GB
         on local SSD. A `close()` whose persistence worker is queued behind
@@ -2051,11 +2073,9 @@ class DicomSession:
     def reconcile_private_tags(self) -> int:
         """Delete stored private-tag rows that the store's core attributes do not hold.
 
-        A repair for a store de-identified before 0.9.1. There, a
-        `remove_private_tags: true` pass removed the private tags from the
-        graph but left their rows in the store's `instance_attributes`
-        table; opening the store puts them back on the graph, and an export
-        then carries them.
+        A repair for a store de-identified before 0.9.1, whose stripped
+        private tags come back when it is opened; see Upgrading from
+        0.9.x.
 
         It deletes every `instance_attributes` row whose tag is absent from
         its instance's stored core attributes, removes the same tags from
@@ -2164,27 +2184,14 @@ class DicomSession:
         run that rejected files completes normally.
 
         **A file that ends the worker process reading it** (the
-        out-of-memory killer, a decoder crash, `SIGKILL`) is handled the
-        same way. Results already returned are kept, and the files not yet
-        returned are read again one at a time on a fresh one-worker process
-        pool. A file is rejected only when a fresh worker ends on it as the
-        first file it was given, with the reason "An ingest worker process
-        ended before this file was returned, and a fresh worker process
-        given this file alone, as its first file, ended while reading it".
-        The rest are read at full width, the call saves as usual, and the
-        session's pool is replaced. A death that does not recur costs no
-        file and writes no row; a `WARNING` log line records it. If two
-        fresh workers in a row cannot run a trivial task, every file left is
-        rejected as "Not read", with a reason naming the causes that do this
-        (a script without the main guard among them), and the call returns.
-        A worker that ends on a later file had read others first, so that
-        file is not blamed: reading starts again from it on another fresh
-        worker. Any other failure of the worker pool raises.
-
-        Each worker death costs a fresh pool, a few tenths of a second, so
-        a run whose deaths do not recur can pay for several. A fatal file
-        costs two or three, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files
-        read one at a time.
+        out-of-memory killer, a decoder crash, `SIGKILL`) is read again
+        alone on a fresh worker, and rejected only if it ends that worker
+        too. Files already read are kept, and a death that does not recur
+        costs no file and logs one `WARNING` line. If fresh workers cannot
+        run at all, every file left is rejected as "Not read", with a
+        reason naming the usual causes (a script without the
+        `if __name__ == "__main__":` guard among them), and the call
+        returns. Any other failure of the worker pool raises.
 
         **Duplicate SOP Instance UIDs.** A file whose SOP Instance UID an
         instance in this session already holds (ingested earlier in this
@@ -2217,13 +2224,12 @@ class DicomSession:
         session is running on the pool, a changed width is reported in one
         `WARNING` and this call runs at the pool's current width.
 
-        **Concurrency.** An ingest holds the sidecar pass-lock, shared, for
-        the whole import, and `compact()` on any thread of this session
-        raises while it is held. While a `compact()` is saving or
-        rewriting, this call waits (bounded, see `Raises`) and then
-        proceeds. A result whose frame write cannot take the sidecar lock
-        in time is rejected like any other failed file, with an `ERROR`
-        audit row naming the path and the reason.
+        **Concurrency.** `compact()` on any thread of this session raises
+        while an ingest runs. While a `compact()` is saving or rewriting,
+        this call waits (bounded, see `Raises`) and then proceeds. A file
+        whose pixels cannot be written in that time is rejected like any
+        other failed file, with an `ERROR` audit row naming the path and
+        the reason.
 
         Args:
             directory (str): The path to the directory containing DICOM files.
@@ -3406,7 +3412,7 @@ class DicomSession:
 
         The report holds the grade (`PASS` or `REVIEW_REQUIRED`), decided
         from the audit trail the store holds and the graph's PHI statuses
-        (docs/analytics.md, "How the grade is decided"), with the session's counts,
+        ("How the grade is decided" in Analytics & Reporting), with the session's counts,
         the audit actions, data loss, exceptions, and the policy in force.
         Generate it after `export()`: an export writes rows of its own, and
         a report generated before any export carries a note saying so.
@@ -4866,12 +4872,10 @@ class DicomSession:
           Patient ID, such an instance keeps a non-blank Patient ID of its
           own rather than take the token's blank one, and a second WARNING
           counts those.
-        - A token a release before 0.9.8 shared across studies, holding a
-          non-blank value outside group 0010 and not stamped by this store,
-          is restored in full on the first study carrying it and as group
-          0010 elsewhere, with a WARNING giving the count. A shared token a
-          0.9.8 pre-release stamped is not told apart and is restored in
-          full everywhere.
+        - A token written before 0.9.8 and shared across studies is restored
+          in full on the first study carrying it and as group 0010
+          elsewhere, with a WARNING giving the count; see Upgrading from
+          0.9.x.
         - Where tokens disagree on Patient's Name or Patient ID, each
           instance keeps its own and the `Patient` takes the speaking
           token's, with a WARNING. A token whose Patient ID is blank does
@@ -5329,26 +5333,20 @@ class DicomSession:
         for persistence); call `save()` afterwards to persist it. A
         redacted instance takes a new SOP Instance UID.
 
-        **Concurrency.** A pass holds the sidecar pass-lock, shared, from
-        before the first worker runs until every outcome has been applied,
-        and `compact()` on any thread of this session raises while it is
-        held. While a `compact()` is saving or rewriting, this call waits
-        (bounded, see `Raises`) and then proceeds. A worker whose sidecar
-        write cannot take the sidecar lock in time comes back as a failed
-        redaction, with an `ERROR` audit row.
+        **Concurrency.** `compact()` on any thread of this session raises
+        while a pass runs. While a `compact()` is saving or rewriting, this
+        call waits (bounded, see `Raises`) and then proceeds. A worker whose
+        pixels cannot be written in time comes back as a failed redaction,
+        with an `ERROR` audit row.
 
         Args:
             show_progress (bool): If True, displays a progress bar.
-            force (bool): Redact again the instances whose
-                `_ISOCENTER_REDACTION_HASH` already matches this
-                configuration, instead of skipping them. For a store
-                redacted with a rule of two or more zones, saved and
-                reopened, on 0.9.0 or earlier, which applied only the last
-                zone and still recorded the pass as complete:
-                `session.redact(force=True)` then `session.save()` repairs
-                it from the store's own pixels. Every instance the rules
-                match is redacted again and takes a **new SOP Instance
-                UID**, a new exported filename and `file_path = None`.
+            force (bool): Redact again the instances already redacted under
+                this configuration, instead of skipping them. Every
+                instance the rules match is redacted again and takes a
+                **new SOP Instance UID**, a new exported filename and
+                `file_path = None`. To repair a store redacted by 0.9.0 or
+                earlier, see Upgrading from 0.9.x.
 
         Returns:
             int: How many instances had at least one configured zone
@@ -5371,9 +5369,9 @@ class DicomSession:
                 `(sop_uid, detail)` per failed instance. It subclasses
                 `RuntimeError`, so `except RuntimeError` catches it and the
                 `RuntimeError`s below alike. A failed instance is
-                left exactly as it was found: no `DERIVED` flag, no
-                `_ISOCENTER_REDACTION_HASH`, nothing persisted, so a
-                corrected configuration retries it.
+                left exactly as it was found: no `DERIVED` flag, no record
+                of the redaction, nothing persisted, so a corrected
+                configuration retries it.
             Exception: Whatever the redaction backend raised, after logging
                 it.
             RuntimeError: If the pass cannot start within 180 s because a
@@ -6124,17 +6122,41 @@ class DicomSession:
     def export(self, folder: str, format: str = "dicom", **options):
         """Export the session to a directory in the requested format.
 
+        Either format writes one `WARNING` audit row, and changes nothing it
+        writes, when the instances it writes carry PHI statuses recorded
+        under a policy that is neither the one in force nor one this
+        session scanned under, or with no recorded policy (a store written
+        before 1.0); the report then grades `REVIEW_REQUIRED`.
+        `check_burned_in=True` re-audits first, so it never does.
+
+        Either format also writes one `WARNING` audit row, and logs one
+        `WARNING` line, when `patient_ids` names an ID no patient in the
+        session holds: counted by position, never named, and the report
+        then grades `REVIEW_REQUIRED`. The patients that match are exported
+        as asked; nothing raises. The `dicom` format does the same for a
+        `subset` value that names nothing in the session at any level.
+
+        A format served by any exporter other than the two built-in classes
+        (one registered through `exporters.register`, a subclass of a
+        built-in, or another class registered as `dicom`) writes one
+        `WARNING` audit row before it runs, saying its output is not
+        attested by Isocenter, so the report grades `REVIEW_REQUIRED`. None
+        of the export gates runs for it, and it writes no `EXPORT` row. The
+        registry is provisional until 1.1; see
+        [Exporter registry][isocenter.exporters].
+
         Args:
             folder (str): Output directory.
             format (str): Registered format name. "dicom" (default) writes
                 cleaned DICOM files; "wfdb" writes PhysioNet WFDB records.
             **options (dict): Passed through to the selected exporter. The
                 DICOM format's options are listed under "DICOM export
-                options".
+                options" on the Session API page.
 
         Returns:
             Any: The selected format's own result object. The DICOM
-                exporter returns an `io_handlers.ExportSummary`, whose
+                exporter returns an
+                [ExportSummary][isocenter.io_handlers.ExportSummary], whose
                 `written` counts the files that reached disk and whose
                 `failures` names the instances that did not. `written` is
                 counted over *de-duplicated* UIDs, because the UID names the
@@ -6159,36 +6181,13 @@ class DicomSession:
                 that is not a `str`; and on `dicom` for a `subset` that is
                 bytes-like, not iterable, or holds an element that is not a
                 `str`.
-            io_handlers.ExportError: From either exporter, when zero of N
+            ExportError: From either exporter, when zero of N
                 attempted instances reached disk and at least one failed.
                 An empty plan (zero of zero) does not raise: a subset that
                 matched nothing is a fact about the run, and the `EXPORT`
                 audit row already carries it. Nor does a DICOM export whose
                 every instance the pre-export scan withheld: nothing was
                 attempted, and its `WARNING` rows grade the run.
-
-        Either format writes one `WARNING` audit row, and changes nothing it
-        writes, when the instances it writes carry PHI statuses recorded
-        under a policy that is neither the one in force nor one this
-        session scanned under, or with no recorded policy (a store written
-        before 1.0); the report then grades `REVIEW_REQUIRED`.
-        `check_burned_in=True` re-audits first, so it never does.
-
-        Either format also writes one `WARNING` audit row, and logs one
-        `WARNING` line, when `patient_ids` names an ID no patient in the
-        session holds: counted by position, never named, and the report
-        then grades `REVIEW_REQUIRED`. The patients that match are exported
-        as asked; nothing raises. The `dicom` format does the same for a
-        `subset` value that names nothing in the session at any level.
-
-        A format served by any exporter other than the two built-in classes
-        (one registered through `exporters.register`, a subclass of a
-        built-in, or another class registered as `dicom`) writes one
-        `WARNING` audit row before it runs, saying its output is not
-        attested by Isocenter, so the report grades `REVIEW_REQUIRED`. None
-        of the gates above runs for it, and it writes no `EXPORT` row. The
-        registry is provisional until 1.1; see the exporter registry page
-        in the API reference.
         """
         # Cleared first, before the exporter is even resolved. These are
         # session-scoped, and assigning them only on success would let an
