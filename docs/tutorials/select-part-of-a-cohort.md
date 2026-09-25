@@ -23,8 +23,9 @@ their own.
       script, put them under `if __name__ == "__main__":`
       ([why](../quickstart.md#1-initialize-a-session)).
     - In a block with `>>>`, type what follows each `>>>`; the lines
-      under it are what Python prints. A `...` in that output stands for
-      a value that differs on every run, such as a pseudonym or a UID.
+      under it are what Python prints. A `...` inside a printed value
+      stands for a part that differs on every run, such as a pseudonym or
+      a UID.
     - The session also prints progress bars, status lines and `WARNING`
       lines as it works. They are not shown here.
       `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
