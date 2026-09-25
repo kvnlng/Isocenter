@@ -210,7 +210,7 @@ print(df.groupby('Modality').size())
 
 ### 2. Write to CSV or Parquet
 
-`export_dataframe()` builds the frame `get_cohort_report()` builds, writes it to a file and returns it. It takes the same `expand_metadata` argument, also `False` by default, so pass `expand_metadata=True` for the tag columns. Write the expanded frame as CSV: Parquet cannot yet hold a multi-valued tag such as Image Type, and a cohort that has one makes the call raise. The format follows the extension: Parquet for `.parquet`, CSV for anything else. With no path it writes `export_metadata.csv` in the current directory. Called before `anonymize()`, the file holds the original identifiers, so write it where PHI may live, or use `get_cohort_report()` when you only want the frame.
+`export_dataframe()` builds the frame `get_cohort_report()` builds, writes it to a file and returns it. It takes the same `expand_metadata` argument, also `False` by default, so pass `expand_metadata=True` for the tag columns. Write the expanded frame as CSV: Parquet cannot yet hold a multi-valued tag such as Image Type, and a cohort that has one makes the call raise ([#816](https://github.com/kvnlng/Isocenter/issues/816)). The format follows the extension: Parquet for `.parquet`, CSV for anything else. With no path it writes `export_metadata.csv` in the current directory. Called before `anonymize()`, the file holds the original identifiers, so write it where PHI may live, or use `get_cohort_report()` when you only want the frame.
 
 For large cohorts (100k+ images), Parquet is smaller and faster to read, and BI tools (PowerBI, Tableau, Apache Spark) read it directly.
 

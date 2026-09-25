@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `set_phi_tag`'s action list includes `SHIFT`.
     - `Instance`, `PhiStatus`, `ScanPolicy` and the summaries carry `Attributes:` tables.
     - `get_pixel_data`'s message templates no longer render as HTML tags. `tests/test_api_docstrings_render_cleanly.py` now fails on a raw HTML tag in a rendered docstring; an autolink is exempt only as Python-Markdown's own patterns read one, so `<tag: value>` is flagged.
-  - **Code defects** the reviews found are filed, not fixed here: #806–#814.
+  - **Code defects** the reviews found are filed, not fixed here: #806–#816.
   - **No package code changed:** with docstrings removed, every module's AST is identical to before. Code comments, test docstrings and the assert messages in `tests/test_mid_stream_corruption_is_a_documented_limit.py` that cited `docs/installation.md` for the decode limits now cite `docs/codecs.md`. Test code changed in one place: rule 4 of `tests/test_api_docstrings_render_cleanly.py` and its two fixtures.
 
 ### Added
