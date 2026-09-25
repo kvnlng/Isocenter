@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`RELEASING.md` says how to cut another candidate on a line that already exists.** It adds a section, "Another candidate on an existing line", with these rules:
-  - Before X.Y.Z final, a candidate carries everything on `main`.
+  - Before X.Y.Z final, a candidate carries everything on `main` at the chosen commit.
   - `main`'s commits since the line was cut, or since the last pick, reach `release/X.Y` by `git cherry-pick -x` in one reviewed PR. Record-backs and forward-ports are left out.
   - The PR's tree must equal `main`'s at the chosen commit. A file that still differs is a missing pick, never a copy.
   - Each pick is checked by `patch-id` with the changelog excluded.

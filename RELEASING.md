@@ -389,12 +389,11 @@ same number.
 This applies when `release/X.Y` already exists because a candidate was
 tagged from it (say `vX.Y.Zrc1`), and the next candidate must carry what
 `main` has gained since. **Before X.Y.Z final, a candidate carries
-everything on `main`,** features included. That is the exception to "it
-takes fixes, never features": the line is not released yet, so work meant
-for a later minor must not merge to `main` until X.Y.Z final ships. That
-work reaches the branch by cherry-pick, never by moving the branch:
-`release/X.Y` is locked, and it holds the commit a published tag points
-to. This is how v1.0.0rc2 was cut (#818, #821, #822).
+everything on `main` at the chosen commit,** features included. That is
+the exception to "it takes fixes, never features": the line is not
+released yet. `main`'s work reaches the branch by cherry-pick, never by
+moving the branch: `release/X.Y` is locked, and it holds the commit a
+published tag points to. This is how v1.0.0rc2 was cut (#818, #821, #822).
 
 1. **Choose the commit** on `main`. The previous candidate's step 8 (its
    record back to `main`) must already be merged.
@@ -404,13 +403,19 @@ to. This is how v1.0.0rc2 was cut (#818, #821, #822).
      the line. It runs up to the chosen commit, in order. Leave out two
      kinds of commit:
      - the record-back commits (step 8), which carry the version files;
-     - forward-ports of release-branch fixes, whose `-x` line names a
-       `release/X.Y` commit. The branch already has them.
+     - forward-ports of release-branch fixes, which the branch already
+       has. The `-x` line of one names the fix PR's commit, which may
+       exist only on that PR's deleted work branch. So also compare
+       patches: a `main` commit whose `patch-id` (the command below)
+       equals one already on the branch is a forward-port. A pick that
+       comes out empty is one too: `git cherry-pick --skip` it.
    - On a work branch off `release/X.Y`, run `git cherry-pick -x` on each.
      A pick can conflict in `CHANGELOG.md`, because the branch has no
      `[Unreleased]` section. Resolve it with `git checkout --ours
      CHANGELOG.md` (ours is the branch), `git add CHANGELOG.md`, then
-     `git cherry-pick --continue`.
+     `git cherry-pick --continue`. A conflict in a file a record-back
+     changed (`RELEASING.md` at rc2) is resolved the same way, since the
+     last commit takes that file back.
    - In a last commit, take back `main`'s `CHANGELOG.md`
      (`git checkout <chosen sha> -- CHANGELOG.md`), plus only the files
      the record-back commits changed, apart from the version files
