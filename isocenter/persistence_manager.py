@@ -44,27 +44,18 @@ def _flush_at_exit(manager_ref):
 def _report_abandoned_saves(work_queue, held=None):
     """Say that a collected manager took unwritten saves with it.
 
-    This loss is **new** (#318): until the worker stopped pinning its
-    manager, a manager with queued saves could not be collected at all.
-    So it needs a channel, and the queue is held strongly by the worker
-    precisely so the exit path can count what it is dropping.
+    The worker holds the queue strongly so that this exit path can count
+    what it drops once the manager is gone.
 
-    **A log line and no audit row**, and that is the same conclusion
-    `_report_abandoned_audit_rows` reached one level down. Writing the
-    row would need `manager.store_backend`, which is gone -- that is the
-    whole premise -- and a second weakref to the store would be added
-    surface for a report that would almost never resolve, since a
-    `Session` holds the manager and the store together and they die
-    together.
+    **A log line and no audit row**, as in `_report_abandoned_audit_rows`:
+    writing the row would need `manager.store_backend`, which is gone
+    with the manager.
 
-    **It drains rather than reading `qsize()`**, which is where it parts
-    company with `_report_abandoned_audit_rows`. That queue holds only
-    rows; this one also holds shutdown sentinels, and counting a `None`
-    as a lost save would be a false claim about data loss -- the worse
-    direction to err. `_drain_recoverable_saves` calls the same number a
-    "queue depth" for exactly this reason. Draining is safe here and
-    nowhere else: the manager is unreachable, so no `flush()` can be
-    waiting on the count and no other consumer can be started.
+    **It drains rather than reading `qsize()`**: the queue also holds
+    shutdown sentinels, and counting a `None` as a lost save would
+    overstate the data loss. Draining is safe here and nowhere else: the
+    manager is unreachable, so no `flush()` can be waiting on the count
+    and no other consumer can be started.
 
     `held` is the item this worker had already taken off the deque when
     it found the manager gone, passed rather than pushed back so that
@@ -91,51 +82,44 @@ def _report_abandoned_saves(work_queue, held=None):
 def _persistence_worker_loop(manager_ref, work_queue):
     """Background save worker that does not keep its manager alive.
 
-    Module-level, taking a **weak** reference. `_start_worker` used
-    `target=self._worker`, and a running `Thread` holds its target while
-    a bound method holds `self` -- so a manager with a live worker was
-    immortal, and with it its `SqliteStore`, that store's sqlite
-    handles, its audit-writer thread and its sidecar descriptors. #316
-    fixed the same shape for the store's own audit writer; this is the
-    other half, which #250's `atexit` fix named in passing.
+    Module-level, taking a **weak** reference: a running `Thread` holds
+    its target, and a bound-method target would hold `self`, keeping the
+    manager alive for as long as the worker runs -- and with it its
+    `SqliteStore`, that store's sqlite handles, its audit-writer thread
+    and its sidecar descriptors. The `finally` in `threading.Thread.run`
+    drops the target, so only a running worker could pin its manager.
 
-    **The population is bounded, and was checked against CPython rather
-    than assumed.** The `finally` in `threading.Thread.run` does `del
-    self._target, self._args, self._kwargs`, so a worker that has
-    already *finished* does not pin its manager. Only a running one
-    does. (Spelled without a trailing call on purpose:
-    `tests/test_documented_api_exists.py` reads a dotted method call in
-    a package string as a method this package promises, and `run` here
-    is CPython's, not ours.)
+    On start, before consuming anything, the worker re-queues the saves
+    held by dead workers (`_reap_orphans`, then `_requeue_orphans`).
 
     Four things not to "simplify":
 
     - **`del manager` before returning to the blocking wait.**
       `work_queue.get(timeout=1.0)` blocks for a second, and a strong
-      reference held across it restores exactly the immortality this
-      fixes -- for a second at a time, forever. `_audit_worker_loop`'s
-      comment says the same thing about its own wait.
+      reference held across it keeps the manager alive a second at a
+      time, forever.
     - **The weakref is a thread argument and is never stored on the
       manager.** Stored, it would be reachable from the object it is
-      supposed not to keep alive, which is harmless but is also the
-      first step back towards a strong reference someone adds later.
+      supposed not to keep alive, one step from a strong reference.
     - **The `queue.Empty` arm resolves the weakref too.** An idle
       abandoned manager never reaches a successful `get()`, so a loop
-      that only checked after one would spin here forever: a leaked
-      manager traded for a leaked thread, with the collectability test
-      still green.
+      that only checked after one would spin forever: a leaked thread in
+      place of a leaked manager.
     - **The queue is held strongly, and that is safe *and*
       load-bearing.** It holds `(list(patients), bool)` tuples -- entity
       graphs, never the manager -- so there is no cycle back, and it is
-      what lets the exit path count what it abandons. Same argument
-      `_audit_worker_loop` makes for its own queue.
+      what lets the exit path count what it abandons.
 
-    A dead weakref is a second stop signal alongside the sentinel, and
-    the division between them is worth stating because #319 hangs off
-    the other one: **manager alive at the sentinel -> the worker drains
-    what is behind it and writes it (#319); manager collected -> the
-    worker exits and reports the count on the log, because there is no
-    store left to write to (#318).**
+    Each item a worker takes is recorded in the manager's `_inflight`
+    under this thread until its save finishes, and `task_done()` is
+    reached whatever the save does; a failed save is logged at ERROR.
+
+    A dead weakref is a second stop signal alongside the sentinel:
+    **manager alive at the sentinel -> the worker writes what is queued
+    behind it (`_drain_queued_saves`) and stops; manager collected -> the
+    worker exits and logs the count of abandoned saves
+    (`_report_abandoned_saves`), because there is no store left to write
+    to.** A sentinel taken while `running` is True is stale and skipped.
     """
     # **Reap before consuming anything, on the newly started thread.**
     # A worker restart is the event that always accompanies a recovery
@@ -306,7 +290,7 @@ class PersistenceManager:
     This manager:
     - Maintains a queue of patient snapshots to save.
     - Runs a background worker thread (`_persistence_worker_loop`, module-level
-      over a weakref since #318) to process the queue.
+      over a weakref) to process the queue.
     - Registers an `atexit` handler to ensure pending data is flushed before process termination.
     """
 
@@ -467,12 +451,12 @@ class PersistenceManager:
         was carrying and restarts it to drain the queue.
 
         **It never returns early.** A bounded wait that gave up and
-        returned would turn a visible hang into a silently dropped save,
-        which is strictly worse: callers flush precisely so they can read
-        or shut down afterwards. What is bounded is the *silence* -- every
-        `_FLUSH_REPORT_INTERVAL_S` a wait that has not finished says what
-        it is waiting for and re-attempts recovery, so a worker that dies
-        after this flush began is recovered too.
+        returned would turn a visible hang into a silently dropped save:
+        callers flush precisely so they can read or shut down afterwards.
+        What is bounded is the *silence* -- every
+        `_FLUSH_REPORT_INTERVAL_S` a wait that has not finished logs a
+        WARNING saying what it is waiting for and re-attempts recovery,
+        so a worker that dies after this flush began is recovered too.
         """
         self._recover_orphaned_item()
 
@@ -523,10 +507,10 @@ class PersistenceManager:
         worker is simply mid-save, and re-queueing under it would both
         duplicate the write and unbalance the queue's count.
 
-        Takes `_inflight_lock` and nothing else, and calls nothing.
-        That is deliberate and is what lets the worker loop call it (see the
-        comment at its head) without the reentrancy that calling
-        `_recover_orphaned_item` there would need.
+        Takes `_inflight_lock` and nothing else, and calls nothing, so
+        the worker loop can call it on start. Calling
+        `_recover_orphaned_item` there instead would take `_recover_lock`
+        and then `_worker_lock` from inside a worker start.
         """
         with self._inflight_lock:
             return [self._inflight.pop(owner)
@@ -536,13 +520,13 @@ class PersistenceManager:
     def _requeue_orphans(self, orphaned):
         """Put reaped payloads back, `put()` **then** `task_done()`.
 
-        One spelling for that ordering, because it has two callers and
-        the ordering is the load-bearing part. Reversed,
+        One spelling for that ordering, which has two callers. Reversed,
         `unfinished_tasks` reaches zero between the two calls, a waiting
         `queue.join` wakes, and `flush()` can return before the payload
-        is back in the deque -- a dropped save wearing a clean return.
+        is back in the deque -- a dropped save behind a clean return.
         In this order the net count is unchanged and the payload is
-        queued before the orphan is counted off.
+        queued before the orphan is counted off. Logs one WARNING per
+        payload.
         """
         for payload in orphaned:
             get_logger().warning(
@@ -560,18 +544,14 @@ class PersistenceManager:
         simply mid-save, and re-queueing under it would both duplicate
         the write and unbalance the queue's count. Both halves of that
         argument are about *the thread that took the item*. Gating on
-        `self.thread` instead reads as the same thing only while the
-        manager has had exactly one worker ever: as soon as a save
-        arrives after the orphaning -- `save_async` restarts the worker
-        -- `self.thread` is alive, recovery becomes a permanent no-op,
-        and the flush hangs with the orphan unreachable. Per-owner, a
-        live worker's own entry is still never touched, so nothing is
-        traded away for that.
+        `self.thread` would make recovery a no-op as soon as `save_async`
+        restarted the worker, and the flush would hang with the orphan
+        unreachable.
 
         The reap and the re-queue live in `_reap_orphans` and
-        `_requeue_orphans`, which `_persistence_worker_loop` also calls on startup
-        (#315); the `put()`-then-`task_done()` ordering is argued at the
-        latter, in one place because it has two callers.
+        `_requeue_orphans`, which `_persistence_worker_loop` also calls on
+        start. If the current worker is dead and the queue still has
+        unfinished tasks, a new worker is started.
 
         Re-queueing exactly once does not depend on `_recover_lock`:
         each entry is *popped* out of `_inflight` under `_inflight_lock`
@@ -624,10 +604,9 @@ class PersistenceManager:
         """Is any save queued or in flight right now?
 
         A point-in-time reading, and callers must treat it as one: a
-        save queued the instant after it returns is not covered. It
-        exists so `Session.compact()` can *refuse* a compaction started
-        against a manager that provably has work outstanding, rather
-        than documenting a precondition nothing checks (#295).
+        save queued the instant after it returns is not covered.
+        `Session.compact()` reads it to refuse a compaction started
+        against a manager with work outstanding.
         """
         with self._inflight_lock:
             inflight = bool(self._inflight)
@@ -641,9 +620,8 @@ class PersistenceManager:
         before killing the thread (via sentinel and join), and then --
         always, including on the early return below --
         `_drain_recoverable_saves()` writes whatever a dead worker left
-        behind. `close()` is the last call a user makes for the express
-        purpose of having their work on disk; before #314 it dropped an
-        orphaned or still-queued save silently.
+        behind, so an orphaned or still-queued save reaches the store
+        rather than being dropped at `close()`.
 
         **It is not `flush()` and must never become one.** `close()` is
         what `__exit__` calls, `flush()` documents that it never returns
@@ -657,7 +635,11 @@ class PersistenceManager:
             self._drain_recoverable_saves()
 
     def _shutdown_worker(self):
-        """Post the sentinel and join, which is all `shutdown()` used to do."""
+        """Post the sentinel and join, waiting at most `_SHUTDOWN_JOIN_TIMEOUT_S`.
+
+        Returns at once if the worker is not alive. Sets `running` to
+        False before posting the sentinel.
+        """
         # Avoid double shutdown or shutdown if never started
         if not self.thread.is_alive():
             return
@@ -684,28 +666,27 @@ class PersistenceManager:
         """Write what a stopped worker left behind, or say why it cannot.
 
         Runs from the `finally` of `shutdown()`, so it also covers the early
-        return taken when the worker was already dead -- which is the
-        state #309 leaves and the one `close()` used to walk past (#314).
+        return taken when the worker was already dead. With the worker
+        dead, it reaps the dead workers' in-flight saves and writes them
+        and everything left in the queue (`_drain_queued_saves`).
 
         **Nothing is touched while a worker is still alive.** A join that
         timed out means a save is genuinely running: *that worker's*
         `_inflight` entry is the item it is inside `save_all` with, and
-        saving it here would double-write and race. Its queue is worse
-        still -- `shutdown()` has already posted the sentinel that stops
-        it, and a drain that swallowed that sentinel would leave a
-        `while True` worker with nothing left to end it, which is #250's
-        leak reintroduced by its own fix. So: report and return.
+        saving it here would double-write and race. Its queue must not be
+        drained either -- `shutdown()` has already posted the sentinel
+        that stops it, and a drain that swallowed that sentinel would
+        leave a `while True` worker with nothing left to end it. So it
+        reports (`_report_unreconciled`) and returns, when anything is
+        outstanding.
 
-        **Nothing is left unwritten by that, since #319.** The sentinel
-        sits at the position it was `put` at, so the items *ahead* of it
-        are still the live worker's and it will write them before it
-        stops. The items *behind* it were queued after `shutdown()`
-        began; **that worker now writes them too, at the instant it takes
-        its own sentinel** -- see `_drain_queued_saves` and the sentinel
-        arm of `_persistence_worker_loop`. Both populations are deferred
-        rather than lost, which is why the reported number is still a
-        queue *depth* (it counts the sentinel as well) rather than a
-        count of lost saves.
+        **Nothing is left unwritten by that.** The items *ahead* of the
+        sentinel are still the live worker's and it writes them before it
+        stops; the items *behind* it the worker writes at the instant it
+        takes its own sentinel (`_drain_queued_saves`). Both are deferred
+        rather than lost, which is why the reported number is a queue
+        *depth* (it counts the sentinel as well) rather than a count of
+        lost saves.
 
         **It never raises.** `Session.close()` re-raises the first
         exception any of its steps produced and `__exit__` returns None,
@@ -754,15 +735,14 @@ class PersistenceManager:
         for a manager whose worker is dead, passing the orphans it
         reaped; `_persistence_worker_loop` calls it with nothing held,
         at the instant it takes its own shutdown sentinel, to write what
-        was queued behind that sentinel (#319). The `task_done()`
-        arithmetic below is the reason this is one method rather than
-        two copies.
+        was queued behind that sentinel. Each item written logs a
+        WARNING; a failed write is reported through
+        `_report_unreconciled`.
 
-        **The worker never reaps, and that asymmetry is deliberate.**
-        `_reap_orphans` is about items a *dead* thread was holding;
-        the worker calling it would be asking that question about
-        itself. So the reap stays with the caller that has a reason to
-        ask it, and arrives here as `already_held`.
+        **This method never reaps.** `_reap_orphans` is about items a
+        *dead* thread was holding, which the worker calling it would be
+        asking about itself; the caller that reaps passes them in as
+        `already_held`.
 
         **`task_done()` exactly once per item consumed**, and the
         arithmetic is the part to get right. A reaped orphan was
@@ -770,8 +750,8 @@ class PersistenceManager:
         one. An item still in the deque owes one for the `get_nowait()`
         below. Miss one and `unfinished_tasks` stays above zero on a
         manager `save_async` can restart, and the next `flush()` never
-        returns -- #309's hang, reintroduced. Count one too many and the
-        queue raises `ValueError: task_done() called too many times`.
+        returns. Count one too many and the queue raises `ValueError:
+        task_done() called too many times`, which is caught and logged.
 
         **One pass to `Empty`, never a re-post loop.** Two sentinels with
         `running` still False would ping-pong forever under a re-post;
@@ -779,13 +759,11 @@ class PersistenceManager:
 
         **An item queued after this sees `Empty` is not stranded.** It
         arrives through `save_async`, which restarts a worker once this
-        thread is dead. That is unchanged by #319 and is named here so it
-        is not read as new.
+        thread is dead.
 
-        **`_inflight` is deliberately not written during this drain.** A
-        thread killed mid-drain loses the item it holds -- the same class
-        as #309's two documented residual windows, and closing either
-        needs atomicity inside `Queue`.
+        **`_inflight` is not written during this drain.** A thread killed
+        mid-drain loses the item it holds; closing that window would need
+        atomicity inside `Queue`.
 
         **It never raises**, and both callers depend on that: one runs
         from `Session.close()`, which would otherwise replace whatever a
@@ -851,14 +829,11 @@ class PersistenceManager:
         row is the durable half. Both are best-effort by construction:
         this runs on a teardown path and must not raise.
 
-        **The row is settled here rather than by a later `stop()`.**
-        `Session.close()` does run `store_backend.stop()` after
-        `shutdown()`, and that would flush it -- but `_flush_at_exit`
-        calls `shutdown()` with no `stop()` behind it, and that
-        `atexit` path is precisely the new exposure #314 opened. There
-        the row would sit in a queue whose daemon writer the
-        interpreter is about to stop at finalization, so "reported on
-        two channels" would be true on one path and false on the other.
+        **The row is flushed here rather than by a later `stop()`.**
+        `Session.close()` runs `store_backend.stop()` after `shutdown()`,
+        but `_flush_at_exit` calls `shutdown()` with no `stop()` behind it,
+        and there the row would sit in a queue whose daemon writer the
+        interpreter is about to stop at finalization.
         `flush_audit_queue()` drains on this thread under
         `_audit_write_lock`, takes no manager lock, and is bounded by
         one `log_audit_batch`, so it neither touches the invariant nor

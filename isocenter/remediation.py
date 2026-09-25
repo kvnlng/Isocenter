@@ -37,14 +37,9 @@ def _count(number: int, singular: str, plural: str = None) -> str:
     """A number and its noun, agreeing: `"1 instance copy"`, `"2 instance
     copies"`.
 
-    One spelling for the three places #492 and #496 added a count to a
-    `REMEDIATION_*` row or to the log. Written inline, each of the three
-    said `"1 instance copies"` and `"1 instance-level findings"` -- a row
-    an operator reads, and the one place the fold is explained at all, so
-    the plural is not a cosmetic slip but a row that misdescribes itself.
-    `plural` is optional because most of these nouns take `s`; `copy`
-    does not, which is why the parameter exists rather than a bare
-    `+ "s"` at the call sites.
+    The one spelling of every count in a `REMEDIATION_*` row or its log
+    line. `plural` defaults to `singular + "s"`; pass it for a noun that
+    does not take `s` (`copy`).
     """
     return f"{number} {singular if number == 1 else (plural or singular + 's')}"
 
@@ -236,15 +231,11 @@ class RemediationService:
 
         Returns:
             bool: True when the entity was actually changed. False on
-                every declining path -- and `apply_remediation` keys its
-                dedup set and its returned count on this, so a decline
-                neither counts as an applied remediation nor suppresses
-                a later finding that could have succeeded against the
-                same attribute (#301). The dedup key carries no action
-                type, so before this a `REMOVE_TAG` that declined
-                blocked a `REPLACE_TAG` on the same tag, and
-                `apply_remediation` returned both of them as applied
-                while `anonymize()` printed the total.
+                every declining path, and when the end state was already
+                there. `apply_remediation` keys its dedup set and its
+                returned count on this, so a decline neither counts as
+                applied nor suppresses a later finding against the same
+                attribute (the dedup key carries no action type).
         """
         proposal = finding.remediation_proposal
         entity = finding.entity
@@ -598,46 +589,45 @@ class RemediationService:
         `details` is the audit row's text when the item was changed and
         None when nothing was written; `decline_reason` is set when that
         was a decline. The caller writes both rows, so the action type
-        and `audit_buffer` stay where `tests/test_frozen_surface.py`'s Pin
-        A reads them.
+        and `audit_buffer` stay in `_apply_single_remediation`, where the
+        frozen-surface pin (Pin A) reads them.
 
         **The contract on `(None, None)`: it means the item already holds
         what the rule asks**, and the caller stamps the entity REMEDIATED
-        on the strength of it (#567). Any other path that writes nothing
-        must return a reason, or it reads as remediated with the value
-        still there.
+        on the strength of it. Any other path that writes nothing must
+        return a reason, or it reads as remediated with the value still
+        there.
 
-        Three things the arm used to get wrong, all reached by default
-        once #547 made the basic profile the whole of Table E.1-1:
+        In order:
 
-        - **A target the item no longer holds declines.** The audit saw
-          the tag and something removed it before the remediation ran.
-          `REMOVE_TAG` has always declined there (its arms match nothing
-          and the bottom `else` records it); this arm called `set_attr`
-          regardless, which put back an element the graph no longer had
-          -- #57's decoy, at the top level -- and filed
-          `REMEDIATION_REPLACE` for it. Four basic rules were `EMPTY`
-          while the profile was 35; since #547, 154 of 620 are.
-          The same for a sequence that vanished: the old sequence branch
-          was gated on the tag being in `sequences`, so it fell through
-          to `set_attr` and wrote `""` under the SQ key, which the
-          exporter wrote as a zero-item SQ. A value other than `""` aimed
-          at a sequence declines too: there is no value to write into
-          one, and the scan never proposes it (it warns instead).
+        - **An owner-stamped copy** is decided by `_owner_stamps_copy`,
+          whose reason wins; then a UID replacement that is not this
+          store's declines (`_foreign_uid_refused`).
         - **EMPTY on a sequence clears its items, and only says so when
-          it did.** `clear_sequence_items` returns False for a sequence
-          already at zero items; that is what the rule asks for, so no
-          decline row and no success row either -- `(None, None)`, which
-          the caller stamps REMEDIATED with no row (#567).
-        - **EMPTY on a binary VR writes `b""`.** The str `""` in an OB
-          element made pydicom warn in the export worker, and the file
-          read back as `b""`, which the scan's `val != ""` then raised
-          again: the floor did not converge on its own output. The VR
+          it did.** A sequence already at zero items returns
+          `(None, None)`: no decline row and no success row.
+        - **A target the item no longer holds declines**, rather than
+          writing an element the graph no longer had. So does a value
+          other than `""` aimed at a sequence: there is no value to write
+          into one.
+        - **A value the tag's dictionary VR cannot hold declines** (a
+          standard tag only; a private value is written as LO).
+        - **EMPTY on a binary VR writes `b""`**, so the export writes a
+          binary empty and the scan meets one spelling of empty. The VR
           decides -- the item's recorded one for a private tag, the
           dictionary's otherwise -- and the value's type only when
-          neither knows. The VR first because the value's type is not
-          reliable: a binary slot can already hold a str (a `""` written
-          before this fix reloads as one).
+          neither knows: a binary slot can already hold a str.
+        - **The SOP Instance UID under a UID replacement** moves the
+          instance (`_take_sop_uid`, pixels unchanged) only while it
+          still holds the scanned UID or already holds the replacement.
+          At a UID this project minted (replaced or redacted) it is
+          satisfied, `(None, None)`; at any other it declines, so a kept
+          report cannot move a redacted instance back onto the
+          unredacted export's UID. A `REPLACE` with a value writes the
+          element alone.
+
+        A value write (not a sequence clear) is preceded by
+        `_record_what_is_left`.
         """
         # Local: the dictionary is wanted only on this arm, and `entities`
         # is imported at module scope for other names already.
@@ -766,11 +756,10 @@ class RemediationService:
 
         A UID for an instance or a study, and never the value of a
         patient finding's `entity_uid`, which is the original Patient ID.
-        The audit row keeps it: the store is documented as holding the
-        ID-to-pseudonym map and every offset, and is guarded as the
-        project secret is. The log file is not, and until 0.9.7 it held
-        the same map line by line, so a log shipped with an export undid
-        the de-identification.
+        The audit row keeps it, because the store holds the
+        ID-to-pseudonym map and is guarded as the project secret is; the
+        log file is not guarded, and a Patient ID in it beside a
+        pseudonym or an offset would undo the de-identification.
         """
         if finding.entity_type == "Patient":
             return "a patient"
@@ -779,7 +768,7 @@ class RemediationService:
     @staticmethod
     def _record_what_is_left(item, tag: str, value) -> None:
         """Record on `item` what the write about to run leaves at `tag`
-        (`value` None: a removal), for `lock_identities()` (#537).
+        (`value` None: a removal), for `lock_identities()`.
 
         Called as the statement **immediately before** each write, never
         after: a background `save()` between the two would otherwise
@@ -788,8 +777,8 @@ class RemediationService:
         item has no slot, and the lock reads top-level values only, so a
         write inside a sequence records nothing on the instance holding
         it. Not a wrapper around `_apply_single_remediation`: that would
-        hand `audit_buffer` to a callee Pin A does not list
-        (`tests/test_frozen_surface.py`).
+        hand `audit_buffer` to a callee the frozen-surface pin (Pin A)
+        does not list.
         """
         if hasattr(item, "record_remediation"):
             item.record_remediation(tag, value)
@@ -816,40 +805,32 @@ class RemediationService:
 
     def _record_decline(self, finding: PhiFinding, reason: str,
                         audit_buffer: list = None):
-        """Write the audit row for a remediation that did not run (#301).
+        """Write the `REMEDIATION_DECLINED` audit row for a remediation that
+        did not run.
 
-        The log line each caller already emits is kept and this is added
-        beside it: the log was never the problem, its being the *only*
-        record was. A log line reaches whoever is watching stdout at the
-        time; the compliance report, the grade, and any later session
-        reading this store all key on the audit table, and a value the
-        pipeline was told to remove and did not remove is exactly the
-        thing that has to survive into all three.
+        The row sits beside the log line each caller already emits: the
+        compliance report, the grade and any later session reading this
+        store key on the audit table, not the log. The reason is prose in
+        `details`; `element_tag` stays empty, as that slot is for
+        `SCAN_GAP` rows only.
 
-        The reason is prose in `details`, not a column. **Rejected: a
-        `decline_reason` column** -- no caller would branch on it, since
-        grading turns on the row existing and the report lists the rows,
-        so it would be a column with no reader. **Rejected: re-using
-        `element_tag`** -- that slot is documented "for `SCAN_GAP` only"
-        in three places (`persistence.py`'s reader, `log_audit`'s
-        docstring and `log_audit_batch`'s), and filling it here would
-        falsify all three.
+        Does **not** call `record_phi_status`: a later proposal on the
+        same entity can succeed and stamp REMEDIATED over the decline.
+        The entity (and, for a nested item, the instance holding it) is
+        named in `_declined_entities` instead, and the pass end demotes
+        every named entity that ends the pass REMEDIATED to IDENTIFIED.
+        Named before the no-backend return: the demotion is about the
+        graph, not the audit table.
 
-        Deliberately does **not** call `record_phi_status` here. The
-        success block stamps `REMEDIATED` per proposal, and a declined
-        entity has not been remediated, so its status has to keep
-        saying so -- but per proposal is the wrong unit for that: a
-        later proposal on the same entity can succeed and stamp
-        REMEDIATED over the decline. So the entity is named in
-        `_declined_entities` instead, and `apply_remediation` demotes
-        every named entity that ends the pass REMEDIATED back to
-        IDENTIFIED (#486). Named before the no-backend return below:
-        the demotion is about the graph, not the audit table.
+        Two reasons from `_owner_stamps_copy` are not declines and write
+        no row: a `_CopyLeftEmpty` is routed to `_satisfied`, and an
+        `_OwnerNotHandedIn` does nothing, leaving the finding unhandled
+        for the scan tally.
 
-        Same two-shape dispatch as the success block, for the same
-        reason: `log_audit_batch` takes one tuple shape, so a caller with
-        no `loss_scope` and no `element_tag` to describe still writes
-        both slots.
+        With `audit_buffer` the row is appended as a five-element tuple
+        (`loss_scope` and `element_tag` None), the one shape
+        `log_audit_batch` takes; without it, `log_audit` writes it at
+        once. With no store backend no row is written.
         """
         if isinstance(reason, _CopyLeftEmpty):
             # Not a decline either: an owner-stamped copy left empty, as
@@ -883,14 +864,12 @@ class RemediationService:
                 REMEDIATION_DECLINED, finding.entity_uid, details)
 
     def _raised(self, finding: PhiFinding, error: Exception) -> str:
-        """Log a remediation that raised, and return its decline reason (#553).
+        """Log a remediation that raised, and return its decline reason.
 
-        The `except` arm in `apply_remediation` used to log this line and
-        nothing else: no row and no demotion. So a proposal that raised
-        left its entity REMEDIATED -- stamped by a sibling's success --
-        with the value still in the graph, and the run graded PASS. A
-        raise is a decline: the value was not removed, and may be partly
-        written, which the reason says.
+        A raise is a decline: `apply_remediation` records the reason with
+        `_record_decline`, so the entity is demoted at the pass end even
+        when a sibling's success stamped it REMEDIATED. The value was not
+        removed and may be partly written, which the reason says.
 
         Flattened and pipe-escaped: the reason lands in `details`, which
         the report's section 3.3 renders into a markdown table cell, and
@@ -907,25 +886,25 @@ class RemediationService:
         return " ".join(reason.split()).replace("|", "\\|")
 
     def _satisfied(self, finding: PhiFinding, declined) -> bool:
-        """A proposal whose end state the item already holds (#567, #626).
+        """A proposal whose end state the item already holds.
 
-        Two callers, three cases: `_replace_on_item` returning `(None,
-        None)`, an `EMPTY` on a sequence already at zero items; and the
-        bottom `else` of `_apply_single_remediation`, a `REMOVE_TAG`
-        whose tag is already gone from the item (#626), or whose
-        `Patient` or `Study` field is already None with no instance copy
-        of it left (#661) -- `_remove_is_satisfied` for both.
-        Nothing was written,
-        so there is no row and nothing is counted as applied -- and
-        nothing is left to remove either, so the entity (and the instance
-        holding a nested item) is stamped REMEDIATED, and the key is
-        counted as handled for the scan tally. It used to be left at
-        whatever status the audit gave it: IDENTIFIED, over an instance
-        with nothing in it, beside a PASS grade.
+        Callers: `_replace_on_item` returning `(None, None)` (an `EMPTY`
+        on a sequence already at zero items, a SOP UID this project
+        already minted, an owner-stamped copy already holding the value
+        the export writes); `_record_decline` for a `_CopyLeftEmpty`; and
+        the bottom `else` of `_apply_single_remediation`, a `REMOVE_TAG`
+        whose tag is already gone from the item, or whose `Patient` or
+        `Study` field is already None with no instance copy of it left
+        (`_remove_is_satisfied` for both).
+
+        When `declined` is falsy: nothing was written, so there is no row
+        and nothing is counted as applied; nothing is left to remove
+        either, so the entity (and the instance holding a nested item)
+        is stamped REMEDIATED, and the key is counted as handled for the
+        scan tally. When `declined` is set, nothing is stamped.
 
         No `mark_modified()`: nothing changed. The stamp itself advances
-        the revision when the status changes, which is right -- a status
-        change is a change the store should hold.
+        the revision when the status changes, as a status change should.
 
         `_satisfied_keys` is rebound, never mutated: its class default is
         a `frozenset` shared by every service, and a direct
@@ -945,26 +924,22 @@ class RemediationService:
 
     def _shift_target_moved(self, entity, finding: PhiFinding,
                             new_date) -> Optional[str]:
-        """Why a `SHIFT_DATE` must not write, or None when it may (#569).
+        """Why a `SHIFT_DATE` must not write, or None when it may.
 
         The arm's output is a function of `proposal.original_value`, the
-        value the scan read, and not of what the target holds now. Written
-        without this check, a date deleted between `audit()` and
-        `anonymize()` came back shifted, a blanked or edited one was
-        overwritten with a shift of the value it no longer held, and each
-        was filed `REMEDIATION_SHIFT_DATE` and stamped REMEDIATED.
+        value the scan read, and not of what the target holds now, so
+        without this check a date deleted, blanked or edited between
+        `audit()` and `anonymize()` would be re-created or overwritten
+        with a shift of a value it no longer holds.
 
         It may write when the target still holds the audited value, **or
         already holds `new_date`**: `anonymize(report)` handed the same
         report twice re-applies every shift onto its own output, and that
-        call is idempotent and must stay so. Admitting only the audited
-        value would decline every date on the second call and grade
-        REVIEW_REQUIRED over a clean graph. Shifting the live value
-        instead would move it twice.
+        call must stay idempotent. Shifting the live value instead would
+        move it twice.
 
         Anything else declines, absent included, rather than counting as
-        satisfied (#567): nothing was shifted, and `_replace_on_item`
-        declines a vanished target for the same reason (#547).
+        satisfied: nothing was shifted.
 
         A `DicomItem` is read at the canonical key, because `set_attr`
         writes there and a hand-built `target_attr` may be upper-case; a
@@ -984,39 +959,34 @@ class RemediationService:
         **A blank original passes whatever the target holds**, to the
         arm's empty-date branch, which writes no row: there was no date to
         shift, so nothing can have been re-created or overwritten, and a
-        decline would be `REVIEW_REQUIRED` over nothing -- the cry-wolf
-        shape `test_an_empty_date_is_not_a_decline` pins, whose instance
-        does not hold the tag at all. The scan never raises a blank.
+        decline would grade REVIEW_REQUIRED over nothing, even where the
+        target does not hold the tag at all. The scan never raises a
+        blank.
 
-        The warning is logged here so the arm stays within its line
-        budget: every line above the success block counts toward the five
-        `mark_modified()` pins (#310).
+        The warning is logged here rather than in the arm, so the arm
+        adds no line above the five line-cited `mark_modified()` calls.
 
-        **A seed that is not the holder's declines (#644).** The offset is
+        **An owner-stamped copy** is judged first: a non-empty reason
+        from `_owner_stamps_copy` is returned as this one.
+
+        **A seed that is not the holder's declines.** The offset is
         derived from the Patient ID and scheme the finding carries
         (`_resolve_patient_id`, `metadata["jitter_scheme"]`), never from
         the patient holding the date, and `Session.anonymize(findings)`
         resolves a report against the live graph, so a report can reach a
-        patient that is not the one it was raised for. Measured before
-        this check, each written as an offset that is not the patient's
-        own: a report from another store, raised after its own pass,
-        seeded on that store's keyed pseudonym (-184 days on CT_small
-        where this store's offset for the patient is -359); a legacy
-        store's report, seeded under the unkeyed scheme, whose offset
-        anyone can compute from the ID (GHSA-phg9), graded PASS; and a
-        report from a site whose files carry other Patient IDs under the
-        same UIDs, graded PASS. So in a session the seed must key to the
-        patient holding the date, as the pass began (`_use_holders`,
+        patient that is not the one it was raised for (another store's
+        report, a legacy unkeyed report, or another site's files under
+        the same UIDs), and would write an offset that is not the
+        patient's own. So in a session the seed must key to the patient
+        holding the date, as the pass began (`_use_holders`,
         `_belongs_to_holder`). That admits every spelling of one patient
-        this store gives -- the original ID and its pseudonym, keyed
-        (#517) or unkeyed -- and an export from another project ingested
-        here, whose real Patient ID is that project's pseudonym and whose
-        own seed is that ID (0.9.7,
-        `test_a_reingested_export_under_another_secret_is_warned`). A
-        nested date's holder is its instance (`_instance_owners`). A
-        finding whose entity has no holder declines too. A service used
-        without a session has no holders and checks nothing, as before
-        #644.
+        this store gives -- the original ID and its pseudonym, keyed or
+        unkeyed -- and an export from another project ingested here,
+        whose real Patient ID is that project's pseudonym and whose own
+        seed is that ID. A nested date's holder is its instance
+        (`_instance_owners`). A finding whose entity has no holder
+        declines too. A service used without a session has no holders
+        and checks nothing.
         """
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
 
@@ -1065,55 +1035,40 @@ class RemediationService:
 
     def _replace_attr_refused(self, entity, proposal) -> Optional[str]:
         """Why a `REPLACE_TAG` must not write a Python attribute, or None
-        when it may (#625).
+        when it may.
 
-        The arm's test was `hasattr(entity, target_attr)`, which is True
-        of a slots field holding None: `Study(uid, study_date=None)` has
-        the attribute. So a `0008,0020: REPLACE` rule with a value, over
-        a Study whose date the caller cleared between `audit()` and
-        `anonymize()`, wrote the rule's date into it, filed
-        `REMEDIATION_REPLACE ... written to 1 instance copy` and stamped
-        REMEDIATED -- #569's re-creation on the attribute arm, where
-        `_replace_on_item` already declines a target the item no longer
-        holds (#547). Measured on a67eb30 for `Study.study_date`,
-        `Study.study_time`, `Patient.patient_name`, `Patient.patient_id`
-        and `Series.modality`: the arm is generic, so this is.
-
-        A slot holding None refuses a value and takes `""`: the exporter
-        writes None and `""` as the same zero-length element, so an
-        EMPTY fabricates nothing, and the entity then holds `""` with a
-        row that says so, as it did before this check. A present but
-        empty value is not a cleared one and is written. A name the
-        entity lacks refuses as it always did. The reasons name the
-        attribute and the type and never a value: they are persisted in
-        the row and rendered into the report.
+        A name the entity lacks refuses. A slots field holding None (a
+        value the caller cleared after `audit()`) refuses a value, so the
+        rule's value is not re-created where the caller cleared one; it
+        takes `""`, because the exporter writes None and `""` as the same
+        zero-length element, and the entity then holds `""` with a row
+        that says so. A present but empty value is not a cleared one and
+        is written. Generic over every entity field (`Study.study_date`,
+        `Patient.patient_name`, `Series.modality`, ...). The reasons name
+        the attribute and the type and never a value: they are persisted
+        in the row and rendered into the report.
 
         **A Patient ID that is not this store's pseudonym for the patient
-        refuses (#644).** `Session.anonymize(findings)` resolves a report
+        refuses.** `Session.anonymize(findings)` resolves a report
         against the live graph, so a report raised in one store can act on
         another that holds the same files, and its `patient_id` proposals
-        carry the first store's pseudonyms. Measured before this check:
-        store B exported store A's keyed `ANON_...` IDs, and a legacy
-        store's unkeyed ones -- an unsalted SHA-256 of the MRN -- graded
-        PASS; B's next `audit()` does not re-propose an ID already shaped
-        `ANON_`, so the link the project secret exists to prevent
-        (GHSA-phg9) was written and kept. So in a session the value
-        written must be the one this store mints for `original_value`
-        under the patient's own scheme, as the pass began (`_use_holders`),
-        and `original_value` must key to that patient
+        carry the first store's pseudonyms; written, they would link the
+        two exports, and this store's next `audit()` does not re-propose
+        an ID already shaped `ANON_`. So in a session the value written
+        must be the one this store mints for `original_value` under the
+        patient's own scheme, as the pass began (`_use_holders`), and
+        `original_value` must key to that patient
         (`_is_holders_pseudonym`). A report from this store writes the
         value its patient already holds or would be given; anything else
         refuses, whatever produced it. A service used without a session
-        checks nothing, as before #644.
+        checks nothing. Finally a UID replacement is checked by
+        `_foreign_uid_refused`.
 
-        Pure, with no `audit_buffer`: Pin A in
-        `tests/test_frozen_surface.py` refuses a new callee that takes
-        one. Called twice from the arm, once as the condition and once
-        for the reason, because binding the answer above the arm is a
-        line above the pinned `mark_modified()` at 291 (#310). A method
-        rather than static since #644, for the holders; both call sites
-        already spelt `self._replace_attr_refused(...)`, so no line above
-        the pins moved.
+        Pure, with no `audit_buffer`: the frozen-surface pin (Pin A)
+        refuses a new callee that takes one. Called twice from the arm,
+        once as the condition and once for the reason, because binding
+        the answer above the arm adds a line above the line-cited
+        `mark_modified()` calls.
         """
         attr = proposal.target_attr
         if not hasattr(entity, attr):
@@ -1131,17 +1086,17 @@ class RemediationService:
     def _foreign_uid_refused(self, proposal) -> Optional[str]:
         """Why a UID replacement must not be written, or None when it may.
 
-        The UID analogue of #644's refusal above. A report resolves against
-        the live graph by the UIDs it names, so a report raised in another
-        store over the same files reaches this one, and its proposals carry
-        that store's replacements: written, they link this store's export
-        to the other project's by UID -- the link the project secret exists
-        to prevent -- and this store's next `audit()`, which does not
-        recognise them as its own, replaces them a second time. Found in
-        the rebase of #544 over #624. So the value written must be the one
-        this store mints for `original_value`. Without a secret (a service
-        used with none) nothing is checked, as `_holders` reads it. The
-        reason names no value.
+        The UID analogue of the Patient ID refusal in
+        `_replace_attr_refused`. A report resolves against the live graph
+        by the UIDs it names, so a report raised in another store over the
+        same files reaches this one, and its proposals carry that store's
+        replacements: written, they link this store's export to the other
+        project's by UID, and this store's next `audit()`, which does not
+        recognise them as its own, replaces them a second time. So a
+        proposal carrying `UID_REPLACEMENT` is written only when its
+        `new_value` is the one this store mints for `original_value`
+        (`_replaced_uids`). Without a secret (a service used with none)
+        nothing is checked. The reason names no value.
         """
         from .privacy import UID_REPLACEMENT, _replaced_uids  # pylint: disable=import-outside-toplevel
 
@@ -1158,59 +1113,48 @@ class RemediationService:
     @classmethod
     def _holds_attr_to_remove(cls, entity, attr) -> bool:
         """Whether the `REMOVE_TAG` Python-attribute arm has something to
-        remove on `entity` (#661).
+        remove on `entity`.
 
-        The arm's test was `hasattr(entity, attr)`, which is True of a
-        slots field holding None -- `_replace_attr_refused`'s trap
-        (#625), one arm over. So `0010,0010: {action: REMOVE}` over a
-        graph whose `patient_name` a pass had already cleared wrote
-        `Cleared Attribute patient_name on <uid>; removed from 0 instance
-        copies`, counted it as applied and stamped REMEDIATED: a row and
-        a count for work nothing did. Measured on 5e2d62d over CT_small
-        and MR_small, one report handed over twice in one session wrote
-        4 such rows and returned 24 where 20 remediations happened.
-
-        False where the field is already gone (`_owner_field_gone`). The
-        removal then falls past every arm to the bottom `else`, where it
-        is satisfied when the object at its address reads gone too, and
-        declines otherwise -- the route a removal whose tag an item no
-        longer holds has taken since #626.
+        `hasattr` alone is True of a slots field holding None, so a
+        removal of a field already cleared would write a row and count
+        as applied for work nothing did. False where the field is
+        already gone (`_owner_field_gone`): the removal then falls past
+        every arm to the bottom `else`, where it is satisfied when the
+        object at its address reads gone too, and declines otherwise --
+        the same route as a removal whose tag an item no longer holds.
 
         Pure, with no `audit_buffer`, as `_replace_attr_refused` is, and
-        below the five pinned `mark_modified()` lines for the same
-        reason (#310): the arm's condition is a same-line swap.
+        defined below the five line-cited `mark_modified()` calls so the
+        arm's condition stays a same-line call.
         """
         return hasattr(entity, attr) and not cls._owner_field_gone(entity, attr)
 
     @classmethod
     def _owner_field_gone(cls, entity, attr) -> bool:
         """Whether the end state a `REMOVE_TAG` asks for on a `Patient` or
-        `Study` field is already there (#661).
+        `Study` field is already there.
 
-        All four hold:
+        True only when all four hold:
 
         - `attr` is a field the exporter stamps from the entity
           (`ENTITY_FIELD_TAGS`). The mirror of `_remove_is_satisfied`'s
           well-formed-tag gate: absence under a name the export never
           writes is no evidence about an element, so a removal on any
-          other name is the arm's business and behaves exactly as it did
-          (the arm's looseness there is #679).
+          other name is left to the arm.
         - The entity is not a `DicomItem` (no `set_attr`): an item's
           removal is the arm above this one.
         - It has the attribute, and the attribute holds None. A `""` is a
-          present, empty value and is removed with its row, as #625 rules
-          for REPLACE -- and nothing turns one into the other behind this
-          reader's back: `Study.__setattr__` runs `normalize_study_date`
-          on every assignment, and `normalize_study_date("")` returns
-          `""`.
+          present, empty value and is removed with its row, as REPLACE
+          treats it (`Study.__setattr__`'s `normalize_study_date("")`
+          keeps `""`, so the two never convert).
         - No instance beneath the entity still holds the field's tag at
           the top level. The same walk `_write_to_instances` does, reading
           `attributes` the same raw way, so the writer and this reader
           cannot disagree about one instance: a field cleared by hand
           while the copies survive is **not** gone, and the removal takes
           those copies away with its row, folding the instance-level
-          findings on the tag into it (#492, #496). Where something is
-          still there to write, it is written.
+          findings on the tag into it. Where something is still there to
+          write, it is written.
 
         `getattr` with defaults throughout, because the arm fires for any
         object carrying the field, test doubles included.
@@ -1229,9 +1173,9 @@ class RemediationService:
     def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
         """Whether `patient_id`, read under `scheme`, names the patient
         `holder`: a `(patient_id, jitter_scheme)` pair from `_use_holders`,
-        or None for an entity with no holder in the graph (#644).
+        or None for an entity with no holder in the graph (always False).
 
-        One patient has one canonical key per scheme (#517): the original
+        One patient has one canonical key per scheme: the original
         ID and the pseudonym this store gives it key alike, keyed or
         unkeyed, and another patient's ID does not. The schemes must match
         as well as the keys, so a legacy spelling never admits a keyed
@@ -1247,7 +1191,7 @@ class RemediationService:
     def _is_holders_pseudonym(self, proposal, holder) -> bool:
         """Whether a `patient_id` REPLACE writes the pseudonym this store
         mints for its `original_value` under the holder's scheme, and that
-        original names the holder (#644)."""
+        original names the holder. False with no holder or no original."""
         from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
         from .privacy import (  # pylint: disable=import-outside-toplevel
             _replacement_id_for, _unkeyed_replacement_id_for)
@@ -1264,53 +1208,46 @@ class RemediationService:
     @staticmethod
     def _remove_is_satisfied(entity, proposal) -> bool:
         """Whether a `REMOVE_TAG` that matched no arm is one whose target
-        is already gone -- from a `DicomItem` (#626), or from a `Patient`
-        or `Study` whose own field it names (#661).
+        is already gone -- from a `DicomItem`, or from a `Patient` or
+        `Study` whose own field it names. False for any action other than
+        `REMOVE_TAG`.
 
         **An item.** True only when all three hold: the entity has an
         `attributes` dict; `target_attr` lower-cased is a well-formed
         `gggg,eeee` tag (`config_manager._is_tag_key`, the check a
         config's tag keys already pass); and neither `attributes` nor
-        `sequences` holds that canonical key. Anything else declines, as
-        it did.
+        `sequences` holds that canonical key. Anything else declines.
 
-        **A Patient or a Study**, which has no `attributes` dict and so
-        was an immediate False until #661: `_owner_field_gone` answers,
-        and says what "gone" means for a field the exporter stamps from
-        the entity. Nothing else about an entity without that dict
-        changed -- a name outside `ENTITY_FIELD_TAGS`, a field still
-        holding a value, an instance copy still holding the tag, and
-        None (an address that named no object) are all False, so the
-        hand-built shapes that declined with `matched no applicable arm`
-        still do.
+        **A Patient or a Study** (no `attributes` dict):
+        `_owner_field_gone` answers, and says what "gone" means for a
+        field the exporter stamps from the entity. A name outside
+        `ENTITY_FIELD_TAGS`, a field still holding a value, an instance
+        copy still holding the tag, and None (an address that named no
+        object) are all False, so those decline with `matched no
+        applicable arm`.
 
         Read canonically because the REMOVE arms above test the raw
         `target_attr`: a hand-built upper-case tag the item holds
-        lower-case fell past them, and read raw here it would count as
+        lower-case falls past them, and read raw here it would count as
         satisfied over a value still there.
 
         Well-formed because absence under a key is evidence only for the
         key the graph would store the element under. `00080080`,
         `(0008,0080)`, `0008, 0080`, ` 0008,0080`, `InstitutionName`, and
         `patient_id` against an item holding `0010,0020` all lower-case
-        onto keys no item has, so they read as absent over a value still
-        there: in review of #626 (c6d0112) each was stamped REMEDIATED
-        with no row, and through a session the run graded PASS with the
-        value in the exported file. Only a well-formed tag is satisfied;
-        a malformed or non-tag key reaches the decline, whether or not
-        the element it seems to name is held -- the arm cannot tell.
+        onto keys no item has, so they would read as absent over a value
+        still there. Only a well-formed tag is satisfied; a malformed or
+        non-tag key reaches the decline, whether or not the element it
+        seems to name is held -- the arm cannot tell.
 
         And only on the object the finding addresses. Under a session the
         caller passes `_removal_subject`'s answer, the live object at the
         finding's `entity_uid` and `entity_path`, not `finding.entity`, and
         None when the address cannot be read as done, which has neither
-        an `attributes` dict nor a field of its own and so declines through
-        `_owner_field_gone`'s `hasattr`: a report kept across a reopen, or a hand-built finding
-        filed under another instance's UID, read absence on an object
-        export never writes (review of #639 r2).
-
-        An action this method does not implement is the other way to the
-        bottom `else`, and stays a decline.
+        an `attributes` dict nor a field of its own and so declines
+        through `_owner_field_gone`'s `hasattr`: a report kept across a
+        reopen, or a hand-built finding filed under another instance's
+        UID, must not read absence on an object the export never writes.
         """
         # pylint: disable=import-outside-toplevel
         from .config_manager import _is_tag_key
@@ -1331,10 +1268,10 @@ class RemediationService:
         return tag not in attributes and tag not in sequences
 
     def _settle_statuses(self, findings: list, handled: set) -> None:
-        """Demote every entity a pass left REMEDIATED over something it did
-        not remove (#486, #553).
+        """Demote to IDENTIFIED every entity a pass left REMEDIATED over
+        something it did not remove.
 
-        Two sources, one demotion:
+        Four sources, one demotion:
 
         - **A decline** -- including a proposal that raised -- names its
           entity in `_declined_entities`. The success block stamps
@@ -1343,31 +1280,47 @@ class RemediationService:
         - **The scan tally**, when `audit()` built one: every uid this
           pass's findings name is settled against the keys the pass
           handled (applied, folded, already satisfied, or inside a
-          sequence a pass removed, #644). An incomplete
-          uid demotes every entity the pass's findings under it resolve
-          to, and the instance holding a nested one. Keyed on the
-          scan-time `entity_uid` strings, not live entities: a patient's
+          sequence a pass removed). An incomplete uid demotes every
+          entity the pass's findings under it resolve to, and the
+          instance holding a nested one. Keyed on the scan-time
+          `entity_uid` strings, not live entities: a patient's
           `patient_id` changes during the pass.
+        - **A Series held open by the tally** (the tally arm): each
+          Series of the session (`_series_at_start`) whose pass-start UID
+          the tally settles incomplete -- raised and not handed in, or
+          handed and declined -- is demoted with its instances, whether
+          or not this pass named it. A uid already settled this pass is
+          not asked twice.
+        - **A Series still open as it stands** (the live arm), tally or
+          none, because a Series has no stored status and a pass handed a
+          plain list after a reopen has no tally to hold it open. Each
+          Series is asked the scan's own condition
+          (`privacy._owned_uid_is_open`) under `_series_policy`, reading
+          its UID at the pass end (one this pass replaced is minted and
+          reads closed). An open Series demotes only the instances beneath
+          it whose status revision this pass moved
+          (`_status_revisions_at_start`): a status recorded before the
+          pass is not this pass's to change. Needs a secret and a policy.
 
-        **The entity's own UID is settled too.** A finding names its uid,
-        and a hand-built one can name the wrong one or none: asked only
-        about that name, the tally had no opinion, and the success stamped
-        the instance REMEDIATED over everything the audit raised under
-        its real UID that the pass was never handed. So each resolved
-        finding's live UID (`_live_uid`) is settled beside the name, with
-        the keys handled under it. For a scan finding the two are the
+        Neither Series arm lifts a demotion: a Series completed later
+        completes its instances only when their own findings are handed in
+        again or a re-audit runs.
+
+        **The entity's own UID is settled too.** A hand-built finding can
+        name the wrong uid or none, so each resolved finding's live UID
+        (`_live_uid`) is settled beside the name, with the keys handled
+        under it; otherwise the success would stamp the instance
+        REMEDIATED over everything the audit raised under its real UID
+        that the pass was never handed. For a scan finding the two are the
         same string and it is settled once. A UID the audit did not raise
-        under -- one `redact()` regenerated since -- gets no opinion, as
-        before. A patient is settled under the `patient_id` it held when
-        the pass began, snapshotted at the tally handover: the pass may
-        replace it, so reading it at the settle would give the pseudonym
-        for a pass that handled the ID, and the original only for one
-        that did not.
+        under -- one `redact()` regenerated since -- gets no opinion. A
+        patient is settled under the `patient_id` it held when the pass
+        began, snapshotted at the tally handover: the pass may replace it.
 
         Only an entity that ends the pass REMEDIATED is touched: one that
-        only declined keeps whatever status it had, which
-        `test_a_pass_that_only_declined_leaves_the_status_alone` pins.
-        `getattr`, because a hand-built entity need carry no status.
+        only declined keeps whatever status it had. A Series in the list
+        demotes the instances that bear its status. `getattr`, because a
+        hand-built entity need carry no status.
         """
         by_uid = {}
         for key in handled | self._satisfied_keys | self._gone_keys:
@@ -1444,8 +1397,11 @@ class RemediationService:
     def _live_uid(self, entity) -> Optional[str]:
         """The UID the scan files `entity`'s findings under.
 
-        An instance's SOP Instance UID or a study's Study Instance UID,
-        read now -- the uids `PhiInspector` writes into `entity_uid`. A
+        An instance's SOP Instance UID, a study's Study Instance UID or a
+        series' Series Instance UID -- the uids `PhiInspector` writes into
+        `entity_uid` -- as the pass began (`_pass_start_uids`), since the
+        pass may replace it; read now (`_uid_of`) only for an entity the
+        snapshot does not hold. A
         patient's is its `patient_id` as the pass began
         (`_pass_start_ids`), because the pass may already have replaced
         it with the pseudonym; None for a patient the snapshot does not
@@ -1476,8 +1432,7 @@ class RemediationService:
         pass end only because `_use_series` is always called beside
         `_use_scan_tally` -- once, in `Session.anonymize()`, the one place
         a tally is set. A new caller of `_use_scan_tally` that skips
-        `_use_series` makes this arm load-bearing again (review of #544,
-        R11)."""
+        `_use_series` makes this arm load-bearing."""
         if isinstance(entity, Instance):
             return entity.sop_instance_uid
         if isinstance(entity, Study):
@@ -1555,17 +1510,16 @@ class RemediationService:
     _instance_owners = _MappingProxyType({})
 
     def _use_instance_owners(self, owners) -> None:
-        """Name the instance that holds each nested finding's item (#494).
+        """Name the instance that holds each nested finding's item.
 
         A nested success then marks that instance modified and stamps it
         REMEDIATED, and a nested decline names it for the pass-end
         demotion, exactly as a top-level finding on the instance would.
 
-        What this does not do: decide that the pass is the whole story. A
+        This only says which instance a nested entity belongs to. A
         partial list, and a proposal that raised, are settled at the pass
-        end against the scan tally and the declines (#553), for nested
-        and top-level findings alike; this only says which instance a
-        nested entity belongs to.
+        end against the scan tally and the declines, for nested and
+        top-level findings alike.
         """
         self._instance_owners = self._MappingProxyType(dict(owners))
 
@@ -1646,36 +1600,53 @@ class RemediationService:
 
     def _owner_stamps_copy(self, entity, finding: PhiFinding) -> Optional[str]:
         """Why an instance finding on an owner-stamped copy must not run, or
-        None when the copy is not one (#624).
+        None when the copy is not one.
 
         The export writes `0010,0010` and `0010,0020` from the `Patient`,
         `0008,0020` and `0020,000d` from the `Study` and `0020,000e` from
-        the `Series` (the UIDs since #544) over whatever the instance holds
+        the `Series` over whatever the instance holds
         (`io_handlers.export_stamp_attributes`), so an instance's
         top-level copy of one of them is never what the file carries. An
         owner's write in this pass reaches the copy and the instance
-        finding folds into it (#496) before any arm runs; a finding that
-        reaches an arm is one whose owner did not write -- its own
-        finding declined, or was not handed in. Run anyway, it wrote a
-        value no file carries (a shift of a date the Study no longer
-        holds, `ANONYMIZED` beside a file carrying the source name) and
-        its REMEDIATED stamp vouched for it.
+        finding folds into it before any arm runs; a finding that reaches
+        an arm is one whose owner did not write -- its own finding
+        declined, or was not handed in. Run anyway, it would write a value
+        no file carries and stamp REMEDIATED over it. None also when
+        there is no session (`_copy_owners` unset) or the instance has no
+        entry.
 
-        So it declines, and first the copy is set to what the export
-        writes: the owner's current value, rendered as the export renders
-        it (`exported_patient_id`, `format_study_date`), `''` for an owner
-        holding None -- the empty element the file carries (owner ruling,
-        2026-09-22, Q-C2) -- even when that is the source identifier
-        (Q-C1: the graph copy equals the file; graph copies are outside
-        de-identification scope). A copy no longer there is not
-        re-created (#57's decoy). When the owner's own finding was handed
-        in and declined, the decline demotes the instance to IDENTIFIED at
-        the pass end, as its owner is. When it was not handed in, nothing
-        declined: the reason is an `_OwnerNotHandedIn`, which
-        `_record_decline` writes no row for, and the finding is left
-        unhandled for the scan tally (coordinator ruling, Q-C5).
+        **Already there**: when the copy holds the owner's value and a
+        remediation record vouches for it, returns `""`, which the
+        callers read as satisfied (REPLACE) or run their own checks on
+        (SHIFT).
 
-        No `audit_buffer` (Pin A, `tests/test_frozen_surface.py`): the
+        Otherwise the copy is first set to what the export writes: the
+        owner's current value, rendered as the export renders it
+        (`exported_patient_id`, `format_study_date`), `''` for an owner
+        holding None -- even when that is the source identifier, since
+        the graph copy equals the file. A copy no longer there is not
+        re-created. The write is recorded with `_record_what_is_left`
+        only when another instance under the same owner vouches for the
+        value (it is an owner's write, not a source value). The
+        instance's status is re-recorded at the new revision (unless it
+        read UNSCANNED): kept when vouched or empty, and otherwise set to
+        IDENTIFIED and the instance named in `_declined_entities`, with no
+        row, so later successes in the pass cannot leave it REMEDIATED.
+
+        Then, by whether the owner's finding was handed to this pass
+        (`_owners_handed`, keyed `(id(owner), field)` or `(None, field)`):
+
+        - **Handed in (and so declined):** returns a decline reason; the
+          decline demotes the instance to IDENTIFIED at the pass end, as
+          its owner is.
+        - **Not handed in, owner and copy both empty:** returns a
+          `_CopyLeftEmpty`, which `_record_decline` routes to `_satisfied`.
+        - **Not handed in otherwise:** returns an `_OwnerNotHandedIn`,
+          which `_record_decline` writes no row for; the finding is left
+          unhandled for the scan tally, so the instance stays IDENTIFIED
+          until the owner is acted on and a re-audit runs.
+
+        No `audit_buffer` (Pin A of the frozen-surface tests): the
         callers return the reason and the arm records the row. The reason
         names the tag and the owner's type, never a value.
         """
@@ -1808,7 +1779,7 @@ class RemediationService:
     _pass_start_uids = _MappingProxyType({})
 
     def _use_scan_tally(self, tally, findings=()) -> None:
-        """Settle this service's passes against `tally` (#553).
+        """Settle this service's passes against `tally`.
 
         The session's own tally, not a copy: a partial pass leaves the
         keys it handled in it, so the next pass over the same audit
@@ -1817,9 +1788,10 @@ class RemediationService:
         `findings` are the pass's, and each patient they resolve to has
         its `patient_id` snapshotted here, before the pass can replace
         it, so a patient finding filed under a wrong uid or none is still
-        settled under the patient's real one. Here and not at the top of
-        `apply_remediation`, which would move the five pinned
-        `mark_modified()` lines (#310). A patient whose ID an earlier pass
+        settled under the patient's real one; each other entity's UID is
+        snapshotted likewise (`_pass_start_uids`). Here and not at the top
+        of `apply_remediation`, which would move the five line-cited
+        `mark_modified()` calls. A patient whose ID an earlier pass
         already replaced is snapshotted as its pseudonym, which the tally
         does not hold, so a mis-named finding on it has no opinion.
         """
@@ -1859,10 +1831,10 @@ class RemediationService:
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
-        instance beneath it that carries the field's tag (#492).
+        instance beneath it that carries the field's tag.
 
         Each copy written is recorded in `_owner_copies`, so an instance
-        finding on it later in the pass folds into this write (#496; see
+        finding on it later in the pass folds into this write (see
         `_folds_into_owner`).
 
         Returns `(written, folds)` -- how many instance copies were
@@ -1873,8 +1845,8 @@ class RemediationService:
 
         The value is read back off the entity, after the arm wrote it,
         rather than passed in from the arm: that is the one source the
-        exporter reads too (`export_stamp_attributes`, both doors, #570),
-        and it makes the three actions one case. REPLACE_TAG left the
+        exporter reads too (`export_stamp_attributes`), and it makes the
+        three actions one case. REPLACE_TAG left the
         replacement; SHIFT_DATE left the shifted date, rendered here as
         the exporter renders it (`format_study_date`, "YYYYMMDD"), so an
         instance's DA string stays a DA string; REMOVE_TAG left None,
@@ -1887,12 +1859,13 @@ class RemediationService:
         from the study's would stay different from what the file says.
 
         Only a copy that exists is replaced. An instance without the tag
-        is not given one: the exporter stamps the patient module on
-        every file because the module is mandatory there, but a tag
-        fabricated onto the graph is #57's decoy in a new place.
-        Top-level `attributes` only, because the exporter's stamp
-        (`_merge(ds, ctx.patient_attributes)`) reaches the dataset root
-        only; a nested copy is the instance scan's to find.
+        is not given one: the exporter stamps the module on every file,
+        but a tag fabricated onto the graph would be a decoy element the
+        file never held. Top-level `attributes` only, because the
+        exporter's stamp (`_merge(ds, ctx.patient_attributes)`) reaches
+        the dataset root only; a nested copy is the instance scan's to
+        find. Each write is preceded by `_record_what_is_left`; a removal
+        deletes the key and calls `mark_modified()`.
 
         Each instance keeps the PHI status it had, re-recorded at the
         revision the write produced -- the "edit whose content is known"
@@ -1902,8 +1875,8 @@ class RemediationService:
         would then vouch for an instance whose own IDENTIFIED findings
         were never applied. Not left alone either: the write moves the
         revision, and a status at the old revision reads UNSCANNED,
-        which the manifest reads as not anonymized (#486). An instance
-        already UNSCANNED stays so; a status it has left is not revived.
+        which the manifest reads as not anonymized. An instance already
+        UNSCANNED stays so; a status it has left is not revived.
         """
         if hasattr(entity, "set_attr"):
             return None
@@ -1945,53 +1918,48 @@ class RemediationService:
 
     @staticmethod
     def _entity_findings_first(findings) -> list:
-        """The findings with every entity-level one first (#496).
+        """The findings with every entity-level one first.
 
         Entity-level means the finding's entity has no `set_attr`: a
-        `Patient` or a `Study`, whose write reaches the instances' copies
-        through `_write_to_instances`. Stable, so each half keeps the
-        caller's relative order -- #167's deepest-first private-sequence
-        removals included. A finding with no entity sorts with the
+        `Patient`, `Study` or `Series`, whose write reaches the instances'
+        copies through `_write_to_instances`. Stable, so each half keeps
+        the caller's relative order -- the deepest-first order of
+        private-sequence removals included. A finding with no entity sorts with the
         entity-level half; it only declines, so where it sits changes
         nothing.
         """
         return sorted(findings, key=lambda f: hasattr(f.entity, "set_attr"))
 
     def _folds_into_owner(self, finding: PhiFinding) -> bool:
-        """Whether an instance finding folds into an owner's write (#496).
+        """Whether an instance finding folds into an owner's write.
 
         True when an entity-level write earlier in this pass reached
         exactly this copy: the finding's own instance, at the top level,
         on the tag the owner wrote. A folded finding does not run.
 
-        A REMOVE folds only into a write that *removed* the copy, and a
-        REPLACE only into one that wrote a value (`_owner_copies` records
-        which). REMOVE was exempt until #537 made an owner's REMOVE
-        reachable: the owner's removal took the copy away, the instance's
-        own REMOVE then matched nothing and filed `REMEDIATION_DECLINED`,
-        and a correct outcome graded REVIEW_REQUIRED. An owner that wrote
-        a value does not absorb an instance REMOVE, which still runs and
-        removes the copy; one rule feeds both levels on every scanned path,
-        so that pairing only arises from a hand-built list.
+        A REMOVE folds only into a write that *removed* the copy, and
+        anything else only into one that wrote a value (`_owner_copies`
+        records which). An owner that wrote a value does not absorb an
+        instance REMOVE, which still runs and removes the copy; one rule
+        feeds both levels on every scanned path, so that pairing only
+        arises from a hand-built list.
 
-        Three things never fold, each measured before this was written:
+        Three things never fold:
 
         - **A mismatch of the two** above.
         - **A nested copy.** The owner's write and the exporter's stamp
           reach the dataset root only; a copy inside a sequence is the
-          instance scan's to judge. There is no `entity_path` check for
-          it, and none is needed: a nested finding's entity is its
-          sequence item, and `_owner_copies` holds only the instances the
-          owner wrote, so the lookup cannot find one. A check was written
-          first and measured dead (#496 mutant N4).
+          instance scan's to judge. No `entity_path` check is needed: a
+          nested finding's entity is its sequence item, and
+          `_owner_copies` holds only the instances the owner wrote, so
+          the lookup cannot find one.
         - **A copy the owner's write did not reach** -- the owner's own
           finding declined, or was not handed in. A fold would stamp
-          REMEDIATED over a copy no write reached. Since #624 the copy is
-          set to what the export writes by `_owner_stamps_copy` either
-          way -- the original, when the owner declined -- and the finding
-          declines beside its owner's DECLINED row, or is left unhandled
-          when the owner was not handed in; either grades
-          REVIEW_REQUIRED.
+          REMEDIATED over a copy no write reached. `_owner_stamps_copy`
+          sets the copy to what the export writes either way -- the
+          original, when the owner declined -- and the finding declines
+          beside its owner's DECLINED row, or is left unhandled when the
+          owner was not handed in; either grades REVIEW_REQUIRED.
         """
         proposal = finding.remediation_proposal
         # No "is this an instance?" check either, for the same reason as
@@ -2005,17 +1973,16 @@ class RemediationService:
     @staticmethod
     def _foldable_instance_findings(findings: list) -> dict:
         """The instance findings that fold if an owner's write reaches
-        their copy, counted per `(id(instance), tag, removed)` (#496).
+        their copy, counted per `(id(instance), tag, removed)`.
 
         Counted before the pass so an owner's audit row can name its folds
         when it is appended: the row is complete from the start, and no
-        row is rewritten after the fact, which Pin A in
-        `tests/test_frozen_surface.py` refuses. `removed` is whether the
-        owner's write removed the copy; a REMOVE folds only into a removal
-        and anything else only into a value (see `_folds_into_owner`,
-        #537). Only a copy an owner's write reaches is ever asked for its
-        count, so a finding counted here whose copy no owner reaches costs
-        nothing.
+        row is rewritten after the fact, which the frozen-surface pin
+        (Pin A) refuses. `removed` is whether the owner's write removed
+        the copy; a REMOVE folds only into a removal and anything else
+        only into a value (see `_folds_into_owner`). Only a copy an
+        owner's write reaches is ever asked for its count, so a finding
+        counted here whose copy no owner reaches costs nothing.
 
         **Counted per loop key (`_remediation_key`), because that is what
         the loop runs.** The loop takes each key at most once, and the key
@@ -2027,28 +1994,29 @@ class RemediationService:
           copy, after which the rest are duplicates. The value copy counts
           the key iff that first finding is not a REMOVE.
         - **A removal.** The copy is absent, so every non-REMOVE on it
-          declines -- `_replace_on_item` for REPLACE (#547),
-          `_shift_target_moved` for SHIFT (#569), the arm's bottom `else`
-          for anything else -- and a decline claims no key. The key
-          therefore reaches its first REMOVE, which folds. The removal
-          copy counts the key iff any finding on it is a REMOVE.
+          declines -- `_replace_on_item` for REPLACE,
+          `_shift_target_moved` for SHIFT, the arm's bottom `else` for
+          anything else -- and a decline claims no key. The key therefore
+          reaches its first REMOVE, which folds. The removal copy counts
+          the key iff any finding on it is a REMOVE. This relies on
+          `_shift_target_moved` declining an absent target: a SHIFT that
+          re-created the copy would claim the key, and its REMOVE would
+          never fold.
 
-        Counted per `(key, removed)` instead, until 0.9.8, a REMOVE and a
-        REPLACE on one tag were two folds waiting, and an owner that wrote
-        a value claimed the REPLACE the loop skipped as a duplicate of the
-        REMOVE it ran (#576). The second bullet needs #569: a SHIFT that
-        re-created the absent copy claimed the key, and its REMOVE never
-        folded.
+        Counting per `(key, removed)` instead would over-claim: a REMOVE
+        and a REPLACE on one tag would be two folds waiting, and an owner
+        that wrote a value would claim the REPLACE the loop skips as a
+        duplicate of the REMOVE it ran.
 
         A finding that raises claims no key. On a removed copy that is a
         decline, and is counted as one; on a value copy a REMOVE that
         raises leaves the key to a later non-REMOVE, which folds and is not
-        counted, so the row under-claims by one (57400d1 counted it). That
-        is not restored: before the pass a REMOVE that will raise cannot be
-        told from one that will apply, and counting it is #576's
-        over-claim. The copy is the first finding's, which is exact while
-        the findings on a key name one entity; two entities sharing a UID
-        can under-claim the same way, unchanged from 57400d1.
+        counted, so the row under-claims by one. That is accepted: before
+        the pass a REMOVE that will raise cannot be told from one that
+        will apply, and counting it would over-claim. The copy is the
+        first finding's, which is exact while the findings on a key name
+        one entity; two entities sharing a UID can under-claim the same
+        way.
         """
         chains = {}
         for finding in findings:
@@ -2101,10 +2069,11 @@ class RemediationService:
 
         Seeded on the patient's **canonical key**
         (`privacy.canonical_patient_key`) rather than on the PatientID
-        text, so the offset survives `anonymize()` replacing that id
-        (#517): the original and the pseudonym the first pass wrote over
-        it give one offset, so a date first shifted in a later pass
-        lands where its siblings did.
+        text, so the offset survives `anonymize()` replacing that id:
+        the original and the pseudonym the first pass wrote over it give
+        one offset, so a date first shifted in a later pass lands where
+        its siblings did. The offset is `key % span + min_days` over the
+        configured range, whose bounds are swapped if given reversed.
 
         For a keyed patient the key is derived under the project secret,
         so the offset is deterministic per patient *within a project*
@@ -2166,39 +2135,27 @@ class RemediationService:
           precision -- `...HHMMSS`, `...HHMMSS.F` to six fraction digits.
           The date moves; everything after it is re-attached exactly as
           written.
-        - The dotted DT `YYYYMMDD.HHMMSS[.F...]` this parser has always
-          accepted, the same way.
+        - The dotted DT `YYYYMMDD.HHMMSS[.F...]`, the same way.
         - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
-          rendered zero-padded as before.
+          rendered zero-padded.
 
         The time part must be a clock time (hour < 24, minute and second
         < 60), and a shift that leaves years 1-9999 declines rather than
         raising `OverflowError` into the pass.
 
-        **Why not `strptime` (#559).** This was a loop over strptime
-        formats, and `%Y%m%d` is not length-strict: it reads `072731`, a
-        Study Time, as the year 0727, so a JITTER rule on a TM wrote
-        `07270219`, a DA-shaped value, into the TM. A six-digit date
-        `230515` became `23041226`; an hour-precision DateTime
-        `2023051510` matched `%Y%m%d%H%M%S` as `2023 05 1 5 10` and came
-        back `20230421050100`, date and time both wrong. Each branch also
-        re-rendered with `strftime`, which turned a fraction of `.1` into
-        `.100000`, and a year below 1000 into three digits on Linux.
+        Matching is by whole-string, length-strict pattern, not
+        `strptime`, whose `%Y%m%d` is not length-strict and would read a
+        TM (`072731`), a six-digit date or an hour-precision DT as a
+        date and fabricate a shifted value. So TM-shaped values, six- and
+        seven-digit dates, a dotted time that is not six digits, and
+        hour- and minute-precision DT (10 or 12 digits) all decline.
 
-        **The accept set only narrows.** Every value this shifted before
-        and shifted correctly is still shifted, to the same result but for
-        the two fraction spellings above; only the fabricating shapes
-        (TM-shaped, six- and seven-digit dates, a dotted time that is not
-        six digits, and hour- and minute-precision DT) now decline.
-        Widening it is not safe: `_date_shift_declines` answers "would
-        this shift" for the legacy scan branch, which skips what would
-        shift as already shifted, so a wider parser silently skips PHI on
-        a pre-0.9.6 store. That is why a 10- or 12-digit DT declines
-        rather than shifting correctly: the old loop declined
-        `2023060510`, a legacy instance can still hold it unshifted, and
-        shifting it here graded that instance CLEARED with the value
-        retained (review of #574; the misread ones, `2023051510`, it
-        accepted, and they now decline visibly instead).
+        **Do not widen the accept set.** `_date_shift_declines` answers
+        "would this shift" for the legacy scan branch, which skips what
+        would shift as already shifted, so a wider parser silently skips
+        PHI on a legacy store: a 10- or 12-digit DT such a store can still
+        hold unshifted must keep declining, even though it could be
+        shifted correctly.
 
         Args:
             date_val (Union[str, date, datetime]): The original date value.
@@ -2252,70 +2209,38 @@ class RemediationService:
 
 
 def _date_shift_declines(value) -> bool:
-    """True when the `SHIFT_DATE` arm's parser would leave `value` unshifted (#498).
+    """True when the `SHIFT_DATE` arm's parser would leave `value` unshifted.
 
-    **Who asks this, since 0.9.6.** The entity-level rule this was written
-    under is gone: the scan no longer reads `Instance.date_shifted` (the
-    field does not exist) nor `Study.date_shifted` in its instance arm.
-    It asks a per-value record instead -- `DicomItem._shifted_dates`,
-    the value the `SHIFT_DATE` arm wrote at that tag -- so a value the
-    pipeline never shifted is raised because no record vouches for it,
-    not because a predicate rescued it from a flag (#510, #513).
+    **Who asks this.** The scan decides whether a date was shifted from a
+    per-value record (`DicomItem._shifted_dates`), not from this. The one
+    caller inside the scan is the **legacy branch** of
+    `PhiInspector._scan_instance`: an instance hydrated from a store with
+    no per-value records keeps the entity-level rule (`Study.date_shifted`),
+    since reading "no record" as "not shifted" there would shift every
+    already-shifted date a second time. Under that rule a value the arm
+    could not parse must still be raised again even while a sibling date
+    on the same entity was shifted, which is what this answers.
 
-    The one place the old rule survives is the **legacy branch** of
-    `PhiInspector._scan_instance`: an instance hydrated from a pre-0.9.6
-    store carries no records for the dates it already holds, so reading
-    "no record" as "not shifted" there would shift every already-shifted
-    date in an archive a second time. Such an instance therefore keeps
-    the entity-level rule, permanently, and that branch is the only
-    caller inside the scan -- which is exactly why it asks *this* rather
-    than a constant: #498's defect is that a value the arm could not
-    parse must be raised again even while a sibling date on the same
-    entity was shifted. So the rule the branch keeps is #498's version of
-    the entity-level rule, not the older one, and the branch (with this
-    caller) dies when no pre-0.9.6 store remains.
+    The answer is the arm's own parser (`_shift_date_string`) rather than
+    a second one, so the scan re-raises exactly what the arm declines: a
+    DA range, a multi-valued DA, a DT with a UTC offset, a TM-shaped value
+    (`072731`) and a six-digit date answer True, as `'notadate'` does.
+    Blank (None or whitespace) is False because the arm skips a blank
+    value without a decline -- nothing is left behind -- and answering
+    True would make this predicate disagree with the arm it models. The
+    blank guard stays although the scan's own blank arm sits above the
+    legacy branch: the predicate is also read directly, paired against
+    the arm's blank-value guard.
 
-    The predicate itself is unchanged and is still read directly --
-    `tests/test_declined_date_recurs.py` pairs it against the arm's own
-    blank-value guard so the two spellings cannot silently disagree --
-    which is why its blank guard below stays even though the scan's own
-    blank arm now sits *above* the legacy branch and makes it unreachable
-    from there.
-
-    The answer is the arm's own parser rather than a second one, so the
-    scan re-raises exactly what the arm declines: a DA range, a
-    multi-valued DA, and a DT with a UTC offset are declined here the same
-    as `'notadate'`. Since #559 the parser is length-strict, so a
-    TM-shaped value (`072731`) or a six-digit date, which it used to
-    misread as a date, now answers True here too: the legacy branch
-    re-raises it where it used to skip it, which is right, because the
-    arm never could shift it. Blank is False because the arm skips a blank value
-    without a decline -- nothing is left behind -- and answering True
-    would make this predicate disagree with the arm it models.
-
-    The parser is the *one* decline this models, and the arm has a second:
-    an unresolvable PatientID. The sentence above says "the parser" rather
-    than "the arm" on purpose, because widening it would invite a caller
-    to trust this for a decline it does not see. Within one pass that
-    other decline cannot be reached from here at all: one PatientID, off
-    the patient being walked, seeds every date proposal in a pass
-    (`_scan_study` and `_scan_instance` are both handed
-    `patient.patient_id`, and a proposal's `metadata` carries it from the
-    scan), so an unresolvable one declines the study's own date and every
-    sibling date beside it and nothing on that patient is shifted at all.
-
-    Across passes it is reachable on the legacy path -- `Study.date_shifted`
-    persists, so a pass whose PatientID the pipeline has since **emptied**
-    can ask this about a value shifted under the old one. The answer is
-    still right: a True says re-raise, the arm declines on the PatientID
-    instead of the parser, and the value still ends raised, declined and
-    IDENTIFIED -- the same outcome by the other arm, which is why
-    modelling that arm buys nothing and would mean threading an entity
-    through a predicate that takes a value. A PatientID the pipeline
-    *replaced* rather than emptied resolves and seeds the same offset it
-    seeded in pass 1 (#517), so that case reaches the parser, which was
-    measured across both spellings of the identity rather than reasoned
-    about.
+    The parser is the *one* decline this models; the arm's other decline,
+    an unresolvable PatientID, is deliberately not modelled, so a caller
+    must not trust this for it. Within one pass it cannot matter: one
+    PatientID seeds every date proposal on a patient, so an unresolvable
+    one declines them all. Across passes, on the legacy path, a PatientID
+    since emptied makes the arm decline on the PatientID instead, and the
+    value still ends raised, declined and IDENTIFIED. A PatientID
+    replaced rather than emptied seeds the same offset, so that case
+    reaches the parser.
     """
     if value is None or not str(value).strip():
         return False
@@ -2330,7 +2255,7 @@ def _remediation_key(finding: PhiFinding) -> tuple:
     `(entity_uid, entity_path, target_attr)`: the attribute the proposal
     writes, and where it lives -- see the comment at the dedup for why
     each half is there. One spelling for both readers, so "already
-    handled" and "what the audit raised" cannot drift apart (#553).
+    handled" and "what the audit raised" cannot drift apart.
     """
     return (finding.entity_uid, finding.entity_path,
             finding.remediation_proposal.target_attr)
@@ -2357,8 +2282,8 @@ def _canonical_key(value) -> str:
     """A remediation key as text that is the same in every process.
 
     A scan's key is `(str, tuple of (str, int) pairs, str)`: JSON spells
-    each of those one way, in C (the pure-Python spelling below cost about
-    4 us a key), and keeps `1`, `True`, `"1"` and `None` four keys. A key
+    each of those one way, in C (faster than `_typed_key`), and keeps
+    `1`, `True`, `"1"` and `None` four keys. A key
     JSON refuses can only come from a hand-built finding, and gets
     `_typed_key`'s spelling, behind a `~` no JSON text begins with.
     """
@@ -2371,8 +2296,8 @@ def _canonical_key(value) -> str:
 def _typed_key(value) -> str:
     """The fallback spelling: tagged by type, `repr` for anything else.
 
-    `repr` is stable for the builtins a key can hold (a float's shortest
-    `repr` has been fixed since 3.1). For an object with a default `repr`
+    `repr` is stable for the builtins a key can hold. For an object with
+    a default `repr`
     it differs between processes, and such a key then fails to match,
     which the tally reads as incomplete (fail-closed), never as complete.
     """
@@ -2398,25 +2323,21 @@ def _key_hash(key) -> int:
 def _key_digest(keys) -> int:
     """The 64-bit sum of `_key_hash(key)` over a set of remediation keys.
 
-    Not `hash(key)`: that is salted per process, and a report carries its
-    scan's tally into whatever process reopens the store (#555, the ruling
-    on #750). Measured: a tally pickled into a child under another
-    `PYTHONHASHSEED` settled every uid False. Costs about 1.2 us a key
-    (the encoding 0.8, blake2b 0.3) against `hash()`'s 0.04, about 0.25 ms
-    for a 200-key instance.
+    Must not be `hash(key)`: that is salted per process, and a report
+    carries its scan's tally into whatever process reopens the store,
+    where a salted hash would settle every uid False. Costs about 1.2 us
+    a key, about 0.25 ms for a 200-key instance.
     """
     return sum(_key_hash(key) for key in keys) & _TALLY_MASK
 
 
 class _ScanTally:
-    """What the most recent `audit()` raised, per scan-time `entity_uid` (#553).
+    """What the most recent `audit()` raised, per scan-time `entity_uid`.
 
     `anonymize(findings=...)` applies what it is handed, and each success
-    stamps its entity REMEDIATED. Without this, one of an instance's 202
-    findings handed alone read REMEDIATED over the other 201, and the
-    manifest's `anonymized` -- documented as "left no identifier
-    unremediated" -- read that status. The tally is how a pass knows what
-    else the audit raised against an entity it touched.
+    stamps its entity REMEDIATED; the tally is how a pass knows what else
+    the audit raised against an entity it touched, so one finding handed
+    alone does not leave the entity REMEDIATED over the rest.
 
     **Two ints per entity**: how many distinct remediation keys the audit
     raised under the uid, and their 64-bit hash-sum. Not the keys: a CT
@@ -2453,28 +2374,27 @@ class _ScanTally:
     from before it, or from an audit under another config, carries keys
     it does not hold, and an instance with nothing left on it reads
     IDENTIFIED until the next `audit()`. Count and hash-sum cannot test
-    containment without holding the keys; whether a superset should
-    complete is #582, and
-    `test_an_earlier_report_is_settled_against_the_latest_audit` pins
-    today's answer. The hash-sum only stops such a key
-    from making up the count in place of a raised key that was not
-    handled; two distinct sets of equal size colliding is about 2^-64.
-    It is not a secret and not an integrity check. The hash is blake2b
-    over a canonical spelling of the key (`_key_hash`), not `hash()`,
-    because the tally crosses processes: `audit()` puts it on its report
-    (`report._scan_tally`), and a report kept across `close()` -- pickled,
-    even -- settles in whatever session is handed it as it would have in
-    the session that scanned (#555, the ruling on #750). It is still not
-    persisted with the store: a reopened session without the report has no
-    tally and keeps pass accounting.
+    containment without holding the keys, so a superset never completes.
+    The hash-sum only stops such a key from making up the count in place
+    of a raised key that was not handled; two distinct sets of equal size
+    colliding is about 2^-64. It is not a secret and not an integrity
+    check. The hash is blake2b over a canonical spelling of the key
+    (`_key_hash`), not `hash()`, because the tally crosses processes:
+    `audit()` puts it on its report (`report._scan_tally`), and a report
+    kept across `close()` -- pickled, even -- settles in whatever session
+    is handed it as it would have in the session that scanned. It is not
+    persisted with the store: a reopened session without the report has
+    no tally and keeps pass accounting.
 
     **`_partial`'s cost.** Nothing on a full pass. A deliberately partial
     workflow -- a patient-level pass now, the instances later -- keeps
     the handled key set of every uid it left incomplete, about 77 B per
-    handled key (measured on CT_small when #553 was designed): about two
-    keys per patient for a patient-only pass, one per instance for a
-    one-finding-per-instance list. Freed when
-    the uid completes, or by the next `audit()`, which replaces the tally.
+    handled key: about two keys per patient for a patient-only pass, one
+    per instance for a one-finding-per-instance list. Freed when the uid
+    completes, or by the next `audit()`, which replaces the tally.
+
+    Each tally carries an audit token (`_audit`, a uuid4 hex) naming the
+    audit it came from; pickling, `copy.deepcopy` and `copy()` keep it.
     """
 
     def __init__(self, findings):
@@ -2506,14 +2426,13 @@ class _ScanTally:
         use (`Session._working_tally`), which that session's passes over
         the audit's reports then drain. Never the session's own tally: it
         is drained as its passes complete uids, and a report sharing it
-        named nothing after a reopen of a pass that was never saved
-        (#644's flow). A pass handed the whole report over a pristine copy
-        still completes what an earlier *saved* pass applied, whose end
-        state the graph holds (#567's satisfied keys). A pass handed only
-        the rest of an entity's findings does not: the keys an earlier
-        session's pass handled are not in its list, and that session's
-        `_partial` died with it, so the entity stays IDENTIFIED (sixth
-        review of #750).
+        would name nothing after a reopen of a pass that was never saved.
+        A pass handed the whole report over a pristine copy still
+        completes what an earlier *saved* pass applied, whose end state
+        the graph holds (satisfied keys). A pass handed only the rest of
+        an entity's findings does not: the keys an earlier session's pass
+        handled are not in its list, and that session's `_partial` died
+        with it, so the entity stays IDENTIFIED.
         """
         fresh = _ScanTally(())
         fresh._raised = dict(self._raised)
@@ -2523,11 +2442,14 @@ class _ScanTally:
     def raised_under(self, uid) -> bool:
         """Whether the audit raised anything under `uid` that no pass has
         yet completed. Read by `Session.anonymize` before a pass, to know
-        which entities a kept report's scan speaks for (#555)."""
+        which entities a kept report's scan speaks for."""
         return uid in self._raised
 
     def settle(self, uid, handled) -> Optional[bool]:
-        """Whether the keys handled under `uid` complete what was raised."""
+        """Whether the keys handled under `uid` complete what was raised.
+
+        None when nothing is raised under `uid`. True drops the uid; False
+        keeps the merged handled set in `_partial` for a later pass."""
         raised = self._raised.get(uid)
         if raised is None:
             return None
@@ -2543,13 +2465,13 @@ class _ScanTally:
 class _CopyLeftEmpty(str):
     """The reason `RemediationService._owner_stamps_copy` gives for an
     owner-stamped copy left empty under an owner holding no value, with
-    no owner finding handed in (#624, Q-C8): truthy, so both arms stop,
+    no owner finding handed in: truthy, so both arms stop,
     and routed by type in `_record_decline` to `_satisfied`. Carries the
     tag only."""
 
 
 class _OwnerNotHandedIn(str):
     """The reason `RemediationService._owner_stamps_copy` gives for an
-    owner-stamped copy whose owner the pass was not handed (#624, Q-C5):
+    owner-stamped copy whose owner the pass was not handed:
     truthy, so both arms stop as at a decline, and told apart by type in
     `_record_decline`, which then writes no row. Carries the tag only."""

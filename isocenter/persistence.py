@@ -125,19 +125,16 @@ def _status_columns(entity):
     From one read of the record, in `_phi_status_record`'s order (the
     recorded revision first, the current one last), so a save racing an
     audit writes a status with its own policy or neither changed, never
-    one status beside another's policy (#555). An UNSCANNED status, and a
-    status recorded before policies were, write NULL for both policy
+    one status beside another's policy. An UNSCANNED status, and a
+    status recorded without a policy, write NULL for both policy
     columns.
 
     **A stale status** -- recorded, then left behind by an edit no scan has
-    read -- writes `phi_status = 'unscanned'`, as it always did, and the
-    status the edit left behind in `phi_status_edited` (#767, review of
-    #774 finding 1, owner ruling). Before, the row said only UNSCANNED,
-    hydration recorded that at the current revision, and a save and a
-    reopen turned "scanned, then edited" into "never scanned": condition 8
-    went quiet and the run graded PASS with the edited value exported.
-    `phi_status` keeps saying UNSCANNED so that a build from before this
-    column, which does not read it, reads what it always read -- never the
+    read -- writes `phi_status = 'unscanned'` and the status the edit left
+    behind in `phi_status_edited`, so hydration can restore "scanned, then
+    edited" rather than "never scanned" (grade condition 8 depends on it).
+    `phi_status` must stay UNSCANNED for such a row: a build that does not
+    read `phi_status_edited` then reads the entity as unscanned, never the
     stale status as a current one, which would grade PASS and let the
     export write `(0012,0062) YES` over a value no scan read.
     """
@@ -171,7 +168,7 @@ def _held_uids(patients) -> _HeldUids:
 
     One walk over the graph, read at the moment the scoped deletes run,
     so a UID renamed in place since the prepass is read as it is now
-    (#548; `SqliteStore.save_all`).
+    (see `SqliteStore.save_all`).
     """
     held = _HeldUids(set(), set(), set())
     for patient in patients:
@@ -185,15 +182,15 @@ def _held_uids(patients) -> _HeldUids:
 
 
 def _warn_on_shared_patient_ids(logger, patients) -> None:
-    """One WARNING when two `Patient` objects in a save carry one ID (#548).
+    """One WARNING when two `Patient` objects in a save carry one ID.
 
     The store holds one `patients` row per ID, so the row's name and
     status come from the last of those objects the save writes: each one
     with unsaved changes, and the first one walked if the store had no
     row for the ID (`_upsert_patient`). If none is written the row keeps
-    what it held. Every study is kept (`_held_uids`). A counts-only line: since 0.9.7 the log file
-    names no Patient ID, because a log shipped beside an export would
-    otherwise pair identities with what replaced them.
+    what it held. Every study is kept (`_held_uids`). The line carries
+    counts only and must name no Patient ID, because a log shipped beside
+    an export would otherwise pair identities with what replaced them.
     """
     per_id = Counter(p.patient_id for p in patients)
     sharing = sum(n for n in per_id.values() if n > 1)
@@ -332,7 +329,7 @@ def _flock_within(path, flags, deadline, describe):
     including exception: a leaked fd holds the flock for the life of
     the process, and `flock` is per open file description, so a second
     fd on the same path from the same thread would deadlock against the
-    first (the self-deadlock the 2026-09-07 spec measured). `describe`
+    first. `describe`
     is called only on expiry, to build the error.
     """
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
@@ -365,13 +362,14 @@ class _SaveTally:
 
 
 class _NoRowFor(Exception):
-    """`update_attributes` matched fewer rows than it was given (#641).
+    """`update_attributes` matched fewer rows than it was given.
 
     Private, and never leaves `update_attributes`: raised inside the
     connection's `with` so the write rolls back, and turned into the
     `RuntimeError` callers see outside it. Not a `sqlite3.Error`, so the
-    #599 arm cannot catch it, and not a `RuntimeError`, so nothing between
-    the raise and its own `except` can mistake it for the public one."""
+    `sqlite3.Error` handler there cannot catch it, and not a
+    `RuntimeError`, so nothing between the raise and its own `except` can
+    mistake it for the public one."""
 
     def __init__(self, shortfall: int, total: int):
         super().__init__(shortfall, total)
@@ -408,49 +406,30 @@ def _as_stored_date(value) -> Optional[str]:
 def _as_loaded_date(value):
     """The inverse of `_as_stored_date`: text back into a `date`.
 
-    Hydration had no inverse, so `Study.study_date` came back as the ISO
-    string `_as_stored_date` wrote where `ingest` had produced a
-    `datetime.date`. Nothing checks the type and both exporters read the
-    field, so the same code emitted a legal (0008,0020) on a fresh
-    session and `'2024-01-15'` -- not a DA value, which PS3.5 Table
-    6.2-1 fixes at eight digits -- on a reloaded one, and WFDB's
-    `_start_datetime` quietly fell through to the instance's own
-    never-shifted date tags because its `strptime` raised inside a
-    `try`. Restoring the type here rather than patching each exporter is
-    what makes `study_date` one type everywhere; a normaliser at an
-    export boundary leaves the next consumer meeting the same trap
-    (#171).
+    Hydration restores `Study.study_date` to the `datetime.date` that
+    ingest produces, so the field is one type on a fresh and a reloaded
+    session. Both exporters read it without checking the type: left as
+    the stored ISO string it would export as `'2024-01-15'`, which is not
+    a DA value (PS3.5 Table 6.2-1 fixes it at eight digits), and WFDB's
+    `_start_datetime` would fall through to the instance's own unshifted
+    date tags.
 
-    An unparseable value is returned as it was stored, not replaced:
-    same rule as ingest's, where a date we cannot read is a date we do
-    not have rather than one we invent (#60). NULL stays None for the
-    same reason.
+    An unparseable value is returned as it was stored, not replaced: a
+    date that cannot be read is a date we do not have rather than one we
+    invent, as at ingest. NULL stays None for the same reason.
 
     `date.fromisoformat` also accepts the basic form `YYYYMMDD` on the
     3.12 floor, so a study whose date was set as a DICOM-spelled string
     rather than parsed at ingest normalizes to a `date` here too. That
-    is deliberate and is the whole point -- one type everywhere. Do not
-    "tighten" this to a strict `%Y-%m-%d` parse to keep such a value a
-    string: that restores exactly the second type this exists to remove.
+    is deliberate -- one type everywhere. Do not "tighten" this to a
+    strict `%Y-%m-%d` parse: that would leave such a value a string, a
+    second type for the field.
 
-    The (0008,0020) *element* is unaffected by which spelling arrived,
-    because either one loads as a `date` and both export paths render a
-    `date` as `YYYYMMDD` -- `session.export()` by handing it to pydicom,
-    `write_tree` via `format_study_date`. The exported *directory name*
-    used to diverge, because `export_folder_names` builds it with
-    `str(study.study_date or "NoDate")` rather than
-    `format_study_date`: a hand-built graph carrying `"20240101"` filed
-    under `Study_20240101_` before a round trip and `Study_2024-01-01_`
-    after one, so the same study occupied two directories and a
-    re-export into an existing tree wrote a second copy instead of
-    overwriting the first. Closed at the other end of the same rule --
-    `Study.__setattr__` normalises on assignment -- rather than in
-    `export_folder_names`, which would have renamed every *ingested*
-    study's directory (#189).
-
-    The body is `entities.normalize_study_date`, and it must stay that
-    way: two copies of "text that names a day becomes a `date`" is
-    exactly how the two ends came to disagree.
+    The body is `entities.normalize_study_date`, which `Study.__setattr__`
+    also applies on assignment, and it must stay that way: two copies of
+    "text that names a day becomes a `date`" can disagree, and the export
+    directory name (`export_folder_names`, which formats with `str()`)
+    would then differ before and after a round trip.
     """
     return normalize_study_date(value)
 
@@ -485,12 +464,11 @@ def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
     inverse. This pair has to stay a pair.
 
     `None` is the one value that is not stringified, and it is a SQL
-    NULL instead (#339). `str(None)` is the four-character text `None`,
-    which is a conformant `LO` value, so a zero-length private element
-    -- what pydicom hands back for `DS`, `US`, `AT`, `UN` and their
-    siblings when the source wrote no value -- reloaded as a word the
-    source never said and was exported as though it had. Absent beats
-    fabricated, which is the ruling #60 made for a missing Study Date.
+    NULL instead. `str(None)` is the four-character text `None`, which is
+    a conformant `LO` value, so a zero-length private element -- what
+    pydicom hands back for `DS`, `US`, `AT`, `UN` and their siblings when
+    the source wrote no value -- would reload as a word the source never
+    said and export as though it had.
 
     The guard has to come BEFORE the `AT` arm. Without it `int(None)`
     raises `TypeError`, the arm's own `except` catches it, and it
@@ -513,10 +491,9 @@ def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
 def _vertical_atom_value(vr: str, text: Optional[str]) -> Any:
     """The inverse of `_vertical_atom_text`, keyed on the stored VR.
 
-    A NULL `value_text` is the atom that was `None` (#339), and nothing
-    else can produce one: every other arm above goes through `str()`,
-    which never returns `None`, so no row written by any released
-    version can be NULL here.
+    A NULL `value_text` is the atom that was `None`, and nothing else can
+    produce one: every other arm of `_vertical_atom_text` goes through
+    `str()`, which never returns `None`.
     """
     if text is None:
         # Behaviour-equivalent to falling through, and written anyway.
@@ -545,8 +522,8 @@ def _is_private_tag(key) -> bool:
     """Whether `key` is a well-formed "gggg,eeee" tag in an odd group.
 
     The one statement of it for the storage split: `_split_core_and_private`
-    routes by it, and `_serialize_item` picks the root `__vrs__` by it
-    (#676), so the two cannot disagree about which tags the vertical
+    routes by it, and `_serialize_item` picks the root `__vrs__` by it,
+    so the two cannot disagree about which tags the vertical
     table holds.
     """
     try:
@@ -592,12 +569,10 @@ def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
 def _report_abandoned_audit_rows(audit_queue):
     """Say that a collected store took undrained audit rows with it.
 
-    This loss is **new** (#316): until the worker stopped pinning its
-    store, a store with queued rows could not be collected at all. So it
-    needs a channel, and the queue is held strongly by the worker
-    precisely so the exit path can count what it is dropping rather than
-    dropping it silently -- which is the one thing an audit log must
-    never do.
+    The worker holds only a weak reference to its store, so a store with
+    queued rows can be collected. The queue is held strongly by the
+    worker so the exit path can count what it is dropping and report it
+    here rather than drop it silently.
     """
     pending = audit_queue.qsize()
     if pending:
@@ -611,18 +586,13 @@ def _report_abandoned_audit_rows(audit_queue):
 def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
     """Background audit writer that does not keep its store alive.
 
-    Module-level, taking a **weak** reference. `SqliteStore.__init__`
-    used `target=self._audit_worker`, and a running `Thread` holds its
-    target while a bound method holds `self` -- so every store ever
-    constructed was immortal for as long as its worker ran, and the
-    worker's only exit is `stop()`, which nothing calls on a store its
-    owner simply dropped. Measured over one full suite run: 149 threads
-    at interpreter exit, 147 of them audit writers, each holding a
-    store, its sqlite handles and its sidecar descriptors. #250 fixed
-    the same shape for `PersistenceManager`; this is the other half its
-    argument named.
+    Module-level, taking a **weak** reference. A bound method as the
+    thread target would hold `self`, and a running `Thread` holds its
+    target, so the store would stay alive for as long as its worker ran;
+    the worker exits when the store has been collected, as well as on
+    `stop()`.
 
-    **Why exiting on a dead weakref is safe, in one line.**
+    **Why exiting on a dead weakref is safe.**
     `flush_audit_queue()` calls `_drain_and_write()` on the *caller's*
     thread, and `_drain_and_write` takes `_audit_write_lock` itself. The
     read barrier does not depend on this worker existing at all -- the
@@ -634,8 +604,8 @@ def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
     Two things not to "simplify":
 
     - **`del store` before returning to the wait.** A strong reference
-      held across the one-second wait on `wakeup` restores exactly the
-      immortality this fixes -- for a second at a time, forever.
+      held across the one-second wait on `wakeup` keeps the store alive
+      -- for a second at a time, forever.
     - **The Events and the Queue are held strongly, and that is safe.**
       `threading.Event` references nothing, and audit rows are plain
       string tuples (see `log_audit`), so the queue holds no entity
@@ -1023,13 +993,13 @@ class SqliteStore:
         A stable path *beside* the sidecar, never the sidecar itself.
         `flock` binds to an inode, and `compact_sidecar` swaps the
         sidecar in with `os.replace`, which gives the path a new inode:
-        a writer blocked on the old one wakes after the swap and appends
-        into the unlinked file (#368). This path is never replaced.
+        a writer blocked on the old one would wake after the swap and
+        append into the unlinked file. This path is never replaced.
         """
         return self.sidecar_path + ".lock"
 
     def _pass_lock_path(self) -> str:
-        """The pass-lock's file: `<sidecar>.pass.lock` (#368)."""
+        """The pass-lock's file: `<sidecar>.pass.lock`."""
         return self.sidecar_path + ".pass.lock"
 
     def _gate_timeout_message(self) -> str:
@@ -1040,7 +1010,7 @@ class SqliteStore:
 
     @contextlib.contextmanager
     def _hold_sidecar_gate(self):
-        """Hold the sidecar gate for the block (#368).
+        """Hold the sidecar gate for the block.
 
         Mutual exclusion between every frame writer and the compaction
         rewrite. Held at the six `write_frame` sites across the append
@@ -1055,19 +1025,14 @@ class SqliteStore:
         it as `RedactionOutcome(ok=False)` and the parent raises
         `RedactionError` with an ERROR audit row; ingest files an ERROR
         audit row per result; a background save logs `Background save
-        failed` and leaves its instances dirty for the next save
-        (owner's decision C1, no audit row); `save(sync=True)` and
-        `compact()` raise to the caller.
+        failed` and leaves its instances dirty for the next save (no
+        audit row); `save(sync=True)` and `compact()` raise to the caller.
 
-        The known liveness cost, stated rather than hidden: a `close()`
-        whose persistence worker is queued behind a compaction longer
-        than `_SHUTDOWN_JOIN_TIMEOUT_S` (30 s -- about 3 GB live on
-        local SSD, ~300 MB on 100 MB/s network storage) will have
-        #314's wedged-worker machinery misfire on a healthy compaction.
-        The same ordering used to corrupt the save instead. Loud and
-        late beats silent and wrong; the structural fix is a two-phase
-        compaction that holds the gate only for the O(delta) tail, and
-        that is a filed follow-up, not this.
+        Known liveness cost: a `close()` whose persistence worker is
+        queued behind a compaction longer than `_SHUTDOWN_JOIN_TIMEOUT_S`
+        (30 s -- about 3 GB live on local SSD, ~300 MB on 100 MB/s network
+        storage) treats the worker as wedged although the compaction is
+        healthy.
         """
         deadline = time.monotonic() + _SIDECAR_GATE_TIMEOUT_S
         if not self._sidecar_gate.acquire(timeout=_SIDECAR_GATE_TIMEOUT_S):
@@ -1081,23 +1046,22 @@ class SqliteStore:
 
     @contextlib.contextmanager
     def _hold_pass_lock(self):
-        """Hold the pass-lock shared for a `redact()`/`ingest()` pass (#368).
+        """Hold the pass-lock shared for a `redact()`/`ingest()` pass.
 
         `LOCK_SH` on `_pass_lock_path()`, taken holding nothing, for
         the whole pass: from before the first worker can call
         `regenerate_uid()` until after `_apply_redaction_outcomes` has
         bound every loader. While any pass holds it, `compact()`'s
-        `LOCK_EX|LOCK_NB` attempt is refused. Why a lock and not a
-        predicate change: during a pass the graph carries references
-        the store has not been told about yet -- a worker commits its
-        blob row under a regenerated UID before any `instances` row
-        names it -- and compaction's orphan predicate is *correct* to
-        reclaim such a row; the fix is to keep compaction out until
-        the pass has told the store, not to teach the predicate a
-        second answer to "what is live". Kernel-released on any death.
+        `LOCK_EX|LOCK_NB` attempt is refused. During a pass the graph
+        carries references the store has not been told about yet -- a
+        worker commits its blob row under a regenerated UID before any
+        `instances` row names it -- and compaction's orphan predicate is
+        correct to reclaim such a row, so compaction is kept out until
+        the pass has told the store; do not teach the predicate a second
+        answer to "what is live" instead. Kernel-released on any death.
         Waits, bounded by `_SIDECAR_GATE_TIMEOUT_S`, behind a running
-        compaction's EX -- which now spans its leading save as well as
-        the rewrite -- and then proceeds.
+        compaction's EX -- which spans its leading save as well as the
+        rewrite -- and then proceeds.
         """
         deadline = time.monotonic() + _SIDECAR_GATE_TIMEOUT_S
         path = self._pass_lock_path()
@@ -1112,18 +1076,18 @@ class SqliteStore:
 
     @contextlib.contextmanager
     def _refuse_while_pass_open(self):
-        """Hold the pass-lock exclusive for a compaction, or refuse (#368).
+        """Hold the pass-lock exclusive for a compaction, or refuse.
 
         `LOCK_EX|LOCK_NB` on `_pass_lock_path()`, taken holding nothing
         and held through the block, so a pass starting anywhere inside
         `compact()` -- during its leading save, its rewrite or its
-        rewire -- waits at its `LOCK_SH`. Taken before the leading save
-        rather than under the gate since the review of PR #385: a pass
-        that opened and closed inside that save was admitted with its
-        rows unnamed. `LOCK_NB` because the refusal is an answer, not a
-        wait (a pass holds SH for its whole length, and "wait for it to
-        return" is the caller's call to make). Refusal is `RuntimeError`
-        before anything -- save included -- has happened.
+        rewire -- waits at its `LOCK_SH`. It must be taken before the
+        leading save, not under the gate: otherwise a pass that opens and
+        closes inside that save is admitted with its rows unnamed, and the
+        rewrite reclaims its frames. `LOCK_NB` because the refusal is an
+        answer, not a wait (a pass holds SH for its whole length, and
+        "wait for it to return" is the caller's call to make). Refusal is
+        `RuntimeError` before anything -- save included -- has happened.
         """
         path = self._pass_lock_path()
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
@@ -1191,14 +1155,13 @@ class SqliteStore:
         """Adds columns introduced after a database was first created.
 
         `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it
-        was, so a column added to the schema never appears in a store an
-        earlier version created. Each ALTER is guarded by the table's own
+        was, so a column added to the schema never appears in a store
+        created without it. Each ALTER is guarded by the table's own
         column list rather than a version number, which keeps this
         idempotent and independent of how the database got here.
 
-        Rows predating the column read as NULL, which `_phi_status_from_stored`
-        maps to UNSCANNED -- correct, since they were never scanned under
-        this scheme.
+        Existing rows read the new column as NULL, which
+        `_phi_status_from_stored` maps to UNSCANNED.
         """
         for table in ("patients", "studies", "instances"):
             columns = {row[1] for row in conn.execute(
@@ -1362,27 +1325,28 @@ class SqliteStore:
     def _classify_unclassified_patients(conn):
         """Fix the jitter scheme of every patient row that has none.
 
-        A patient a release before 0.9.7 already de-identified -- its id
-        has exactly the shape that release minted, or any of its dates
-        was shifted -- keeps the unkeyed scheme, because a keyed offset
-        would put a second offset on its dates, and its old offset is
-        already readable out of every file exported for it. Every other
-        patient is keyed.
+        A patient already de-identified under the unkeyed scheme -- its id
+        has exactly the shape that scheme minted, or any of its dates was
+        shifted -- keeps the unkeyed scheme, because a keyed offset would
+        put a second offset on its dates, and its old offset is already
+        readable out of every file exported for it. Every other patient
+        is keyed.
 
         **On every open, not only when the column is added**, and only
-        for NULL rows. 0.9.7 writes the column on every INSERT and never
-        overwrites it, so a NULL can only come from a release before
-        0.9.7 -- including one run against this store after an upgrade,
-        which this also catches. A class once written is never revisited:
-        after a keyed shift is saved, "has a shifted date" is true of
-        keyed patients too, so re-deriving would downgrade them.
+        for NULL rows. This code writes the column on every INSERT and
+        never overwrites it, so a NULL comes only from a build that
+        predates the column -- including one run against this store after
+        a newer build opened it, which this also catches. A class once
+        written is never revisited: after a keyed shift is saved, "has a
+        shifted date" is true of keyed patients too, so re-deriving would
+        downgrade them.
 
         **The id arm is the exact shape, never a prefix.** A prefix
         would class a keyed patient's 29-character pseudonym unkeyed if
-        an older release ever wrote its row, and the unkeyed arm would
+        an older build ever wrote its row, and the unkeyed arm would
         then seed that patient's offset on characters of the pseudonym
-        the export carries. A non-hex `ANON_` id an older release shifted
-        is still caught by the two witness arms. `instr` over the
+        the export carries. A non-hex `ANON_` id that was shifted is
+        still caught by the two witness arms. `instr` over the
         serialized JSON finds a nested item's `__shifted__` record too,
         because nested items are serialized into the same blob.
         """
@@ -1403,7 +1367,7 @@ class SqliteStore:
               entities.JITTER_SCHEME_UNKEYED, entities.JITTER_SCHEME_KEYED))
 
     def _backfill_legacy_blobs(self, conn):
-        """Migrate 0.6.x pixel_* columns into instance_blobs.
+        """Migrate the legacy `instances.pixel_*` columns into instance_blobs.
 
         Idempotent: INSERT OR IGNORE means rows already migrated, or written
         by the current code path, are left untouched. The legacy columns are
@@ -1430,7 +1394,7 @@ class SqliteStore:
         return SidecarPixelLoader(self.sidecar_path, offset, length, alg, instance=instance, pixel_hash=pixel_hash)
 
     def _wire_nested_pixel_refs(self, instance, rows):
-        """Restore an Instance's nested pixel references (#183).
+        """Restore an Instance's nested pixel references.
 
         Shared by `load_all` and `load_patient`, which hydrate the same rows
         through two separate loops.
@@ -1440,14 +1404,12 @@ class SqliteStore:
         export post-pass is the single place that decides carried-or-
         reported: silently discarding it at hydration would mean no
         `DATA_LOSS` row for bytes that are in the store and cannot be
-        placed, which is a loss the caller cannot see -- the shape #125 and
-        #169 are both about.
+        placed, a loss the caller cannot see.
 
         **And no geometry is captured here.** These are references, not
-        loaders, and the reason is in `io_handlers.NestedPixelRef`: a loader
-        built now would reshape against the geometry the graph has *now*,
-        and the whole point of re-checking at export is that the graph may
-        have moved by then.
+        loaders (see `io_handlers.NestedPixelRef`): a loader built now
+        would reshape against the geometry the graph has *now*, and
+        export re-checks it because the graph may have moved by then.
 
         Args:
             instance (Instance): The hydrated instance.
@@ -1525,32 +1487,31 @@ class SqliteStore:
                 "Waveform Sequence; skipping loader.")
 
     def _prune_hollow_multiplex_items(self, instance):
-        """Heal a pre-#160 store: drop multiplex items that have no samples.
+        """Heal a legacy store: drop multiplex items that have no samples.
 
-        A store indexed before the #160 fix holds one Waveform Sequence
+        A store indexed by an older build can hold one Waveform Sequence
         (5400,0100) item per multiplex group while the sidecar holds
-        group 0's samples alone -- ingest discarded groups 1..n (#36)
+        group 0's samples alone -- that ingest discarded groups 1..n
         and `populate_attrs` kept their metadata anyway. `ingest_worker`
         never runs again on an existing index, so without this the
         export writes every item back and declares a multiplex group
-        with no Waveform Data (5400,1010), a Type 1 element (#168).
+        with no Waveform Data (5400,1010), a Type 1 element.
 
-        Pruned at hydration rather than at export, for #160's own
-        reason: the graph is what every consumer reads -- the DICOM
-        writer, the WFDB record, the annotation bridge, the PHI scan --
-        and a writer that quietly drops items is a second answer to
-        "which multiplex groups does this record have". This edits a
-        graph the user did not ask to have edited, so it is a logged
-        warning naming the instance and the remedy; it is NOT an audit
-        row, because the loss it describes was already audited by the
-        session that ingested (0.8.2 onward writes the DATA_LOSS entry
-        into this same store's audit_log), and this heals the graph to
-        agree with what that log already says.
+        Pruned at hydration rather than at export: the graph is what
+        every consumer reads -- the DICOM writer, the WFDB record, the
+        annotation bridge, the PHI scan -- and a writer that quietly
+        drops items is a second answer to "which multiplex groups does
+        this record have". This edits a graph the user did not ask to
+        have edited, so it is a logged warning naming the instance and
+        the remedy; it is NOT an audit row, because the loss it describes
+        was already audited as a DATA_LOSS entry in this store's
+        audit_log by the session that ingested, and this heals the graph
+        to agree with what that log already says.
 
         The annotations referencing the pruned items go with them,
-        through the same filter ingest uses (#177) -- pruning the item
-        alone would unmask exactly the dangling ordinal that filter
-        exists to prevent. `DicomExporter.write_tree()` on a hand-built
+        through the same filter ingest uses -- pruning the item alone
+        would leave a dangling ordinal, which that filter exists to
+        prevent. `DicomExporter.write_tree()` on a hand-built
         graph is deliberately NOT covered: the serializer applies no
         gates by design, and there is no store -- and no earlier
         session's audit trail -- anywhere in that picture.
@@ -1596,14 +1557,13 @@ class SqliteStore:
         """Move every currently queued audit row into the database.
 
         The only place rows leave `audit_queue`, and the lock is what
-        makes `flush_audit_queue` a barrier rather than a hopeful drain
-        (#218). Rows leave the queue only under `_audit_write_lock` and
-        are in the database before it is released, so a row is never
-        owned by a local variable a reader cannot see. The worker used
-        to `get()` rows into its own local `batch` and write them later;
-        between those two points a row was in neither the queue nor the
-        table, and a reader that "flushed" found nothing to do and
-        selected without it.
+        makes `flush_audit_queue` a barrier rather than a hopeful drain.
+        Rows leave the queue only under `_audit_write_lock` and are in
+        the database before it is released, so a row is never owned by a
+        local variable a reader cannot see. Do not move the `get()` out
+        from under the lock: a row taken off the queue but not yet
+        written is in neither the queue nor the table, and a reader that
+        "flushed" would find nothing to do and select without it.
 
         `log_audit_batch` must never acquire `_audit_write_lock`: it is
         called here *while holding it*, and `threading.Lock` is not
@@ -2453,16 +2413,15 @@ class SqliteStore:
 
         `stored_statuses` pairs each patient, study and instance with the
         row it was built from. The status is restored as recorded, and so
-        is the policy (#555): nothing is reinterpreted against the policy
-        in force, which a load cannot know -- `Session(db)` hydrates
-        before any `load_config`. A status whose row has no policy keeps
-        None -- written before 1.0, which recorded none, or remediated
-        from findings that are not a whole `audit()` report -- and a
-        policy made up here would be the back-fill `_add_missing_columns`
-        refuses. Policies are interned per load, so ten thousand instances
-        scanned under one policy share one object.
+        is the policy: nothing is reinterpreted against the policy in
+        force, which a load cannot know -- `Session(db)` hydrates before
+        any `load_config`. A status whose row has no policy keeps None --
+        a row that recorded none, or one remediated from findings that
+        are not a whole `audit()` report -- and no policy is made up
+        here; nothing is back-filled. Policies are interned per load, so
+        ten thousand instances scanned under one policy share one object.
 
-        A row whose status an edit left stale (`phi_status_edited`, #767)
+        A row whose status an edit left stale (`phi_status_edited`)
         is restored as it was in memory: the status recorded, then the
         revision moved past it, so it reads UNSCANNED and grade condition 8
         counts it until `audit()` reads it. Both steps run before the load's
@@ -2515,7 +2474,7 @@ class SqliteStore:
         "configuration you mean, then save() (#555).")
 
     def _report_statuses_without_a_policy(self, count: int):
-        """Say once per load how many statuses carry no policy (#555).
+        """Say once per load how many statuses carry no policy.
 
         The same "per load" call-site caveat as
         `_report_legacy_shift_provenance`: `load_patient` calls this too,
@@ -2529,26 +2488,28 @@ class SqliteStore:
             carry="carries" if count == 1 else "carry"))
 
     def _report_legacy_shift_provenance(self, instances: int, studies: int = 0):
-        """Say once that part of this graph keeps the pre-0.9.6 rule.
+        """Say once that part of this graph has no per-value shift records.
 
-        One notice, not two: the instance half (#510) and the study half
-        (#518) are the same limitation at two levels, and an operator
-        reading two rows about one store would reasonably think there
-        were two problems.
+        Those instances and studies keep the study-level rule: once the
+        study's date is shifted, their SHIFT/JITTER values are not
+        re-examined (`_LEGACY_SHIFT_NOTICE` is the text).
 
-        **"Per load" is a call-site fact here, not a shape.** The owner's
-        ruling is one `WARNING` row and one log line per *load*, counting
-        the instances and studies affected -- never one per instance.
-        Nothing in this method enforces that: it reports whatever counts
-        it is handed, and `load_patient` calls it as well as `load_all`.
-        On every path the public API can reach it is still one notice,
-        because `Session` loads through `load_all` exactly once and never
-        calls `load_patient`. A caller that loaded patients one at a time
-        would get one notice each and break the ruling, so such a caller
-        has to accumulate its counts and report once -- or this method
-        has to learn to speak for a load rather than for a call. Said
-        here because the constraint lives at the call site, where a
-        future reader will not be looking.
+        One notice, not two: the instance half and the study half are
+        the same limitation at two levels, and an operator reading two
+        rows about one store would reasonably think there were two
+        problems.
+
+        **"Per load" is a call-site fact here, not a shape.** The
+        contract is one `WARNING` row and one log line per *load*,
+        counting the instances and studies affected -- never one per
+        instance. Nothing in this method enforces that: it reports
+        whatever counts it is handed, and `load_patient` calls it as well
+        as `load_all`. On every path the public API can reach it is still
+        one notice, because `Session` loads through `load_all` exactly
+        once and never calls `load_patient`. A caller that loaded patients
+        one at a time would get one notice each, so such a caller has to
+        accumulate its counts and report once -- or this method has to
+        learn to speak for a load rather than for a call.
         """
         if not instances and not studies:
             return
@@ -2618,7 +2579,7 @@ class SqliteStore:
 
         Two counts: patients classed `JITTER_SCHEME_UNKEYED` (their
         offset stays recoverable), and keyed patients whose id is an
-        unkeyed pseudonym carried in from a pre-0.9.7 export (an id
+        unkeyed pseudonym carried in from an earlier export (an id
         already `ANON_` is never replaced, so it is exported as it is).
         """
         legacy = sum(1 for p in patients
@@ -2721,7 +2682,7 @@ class SqliteStore:
         With `diagnose` (what `audit()` passes; `anonymize()` does not,
         so `anonymize(audit())` writes each notice once), a `WARNING` row
         also names keyed pseudonyms that do not verify under the secret,
-        ids re-ingested from a pre-0.9.7 export, and patients whose raw
+        ids re-ingested from an unkeyed-scheme export, and patients whose raw
         data arrived after this store de-identified them under the
         unkeyed scheme.
 
@@ -2805,14 +2766,15 @@ class SqliteStore:
         """How many instances carry a SOP Instance UID of the shape this
         library mints (`2.25.` and an RFC 9562 version-8 UUID) beside the
         UID they were ingested under (`SOURCE_SOP_UID_ATTR`): a UID replaced
-        by `anonymize()` or `redact()` since #544.
+        by `anonymize()` or `redact()`.
 
         By shape, since the secret that would verify them is what is
-        missing. 0.9.x redaction drew its UIDs under pydicom's root
-        (`1.2.826.0.1.3680043.8.498.`), so a 0.9.x store that never
-        audited is not counted and still gets a secret. A UID L8
-        generated for an absent Study or Series has the shape too, but no
-        source record beside it, and it is not a SOP Instance UID.
+        missing. A UID drawn under pydicom's root
+        (`1.2.826.0.1.3680043.8.498.`) does not have the shape, so a
+        store holding only such UIDs is not counted and still gets a
+        secret. A UID `uids.generated_uid` makes for an absent Study or
+        Series has the shape too, but no source record beside it, and it
+        is not a SOP Instance UID.
         """
         with self._get_connection() as conn:
             rows = conn.execute(
@@ -2822,7 +2784,7 @@ class SqliteStore:
         return sum(1 for (uid,) in rows if _has_minted_uid_shape(uid))
 
     def _project_secret_if_present(self) -> Optional[bytes]:
-        """The project secret if this store holds one, else None (#544).
+        """The project secret if this store holds one, else None.
 
         Never creates one and writes no notice: for the readers that must
         not change the store -- `ingest()`, which recognises a file of a
@@ -2944,7 +2906,7 @@ class SqliteStore:
     def _serialize_dicom_item(self, item) -> Dict[str, Any]:
         """Helper for recursive serialization of generic DicomItems.
 
-        Carries `__vrs__` alongside `__sequences__` (#154). A nested
+        Carries `__vrs__` alongside `__sequences__`. A nested
         private tag never reaches the `instance_attributes` table -- it
         rides this JSON -- so `value_rep`, the storage home the top-level
         carrier uses, does not exist for it. Without this key an inner
@@ -2952,7 +2914,7 @@ class SqliteStore:
         very same instance.
 
         `_serialize_item`, the root, emits a top-level `__vrs__` for its
-        private `bytes` values only (#676), the one root population
+        private `bytes` values only, the one root population
         `value_rep` never holds: every other root private tag's VR lives
         there, and a second copy would be a second answer that can
         disagree with it after a partial write.
@@ -3395,11 +3357,8 @@ class SqliteStore:
         Both callers do apply these values before their
         `record_phi_status` loop and before `mark_subtree_persisted()`,
         which between them absorb a stray bump -- so a `set_attr` here
-        would be survivable and, worse, invisible: it passes every
-        round-trip test. The ordering is defence and worth keeping; direct
-        assignment is the rule. Pinned by
-        `test_applying_a_loaded_private_tag_is_not_an_edit`, which is the
-        only test that fails when this line changes.
+        would be survivable and invisible to a round trip. The ordering
+        is defence and worth keeping; direct assignment is the rule.
         """
         for (grp, elem), value in private.items():
             instance.attributes[f"{grp},{elem}"] = value
@@ -3462,8 +3421,8 @@ class SqliteStore:
 
         Callers already inside a transaction MUST pass their connection.
         Opening a nested one is not merely untidy: on a file-backed DB the
-        inner write blocks on the outer write lock for the full 900 s
-        `timeout` (see `_get_connection`) before failing, and on a `:memory:`
+        inner write blocks on the outer write lock for the full
+        `_SQLITE_BUSY_TIMEOUT_S` before failing, and on a `:memory:`
         store `_memory_lock` is a plain, non-reentrant `threading.Lock`, so
         it deadlocks outright. Follows the same `conn=None` convention as
         `save_vertical_attributes`.
@@ -3867,7 +3826,7 @@ class SqliteStore:
         here. They must not execute until every parent in the save has
         been walked: a scoped `WHERE parent_id_fk = ?` delete is only
         correct once the row it might delete has had the chance to be
-        claimed by its new parent (#77).
+        claimed by its new parent.
         """
         patient_pk = self._upsert_patient(cur, patient, tally)
         if patient_pk is None:
@@ -3917,17 +3876,15 @@ class SqliteStore:
     def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
         """Writes the patient row if dirty or missing; returns its primary key.
 
-        **Or missing** (#552): a patient with no row under its ID is not
-        persisted, whatever its revision says. `Patient` tracks no
-        attribute assignment, so `patient.patient_id = ...` -- in user
-        code, or in `recover_patient_identity` before it recorded the
-        change -- left a clean patient under an ID with no row. The save
-        then wrote nothing, found no key, skipped the whole subtree, and
-        the prune deleted the old ID's row with every study beneath it.
-        This reads the store rather than the bookkeeping, so it moves no
-        revision and needs no setter. On the ordinary paths it never
-        fires: an ingested patient is dirty until its first save, and a
-        hydrated one was read from its row.
+        **Or missing**: a patient with no row under its ID is not
+        persisted, whatever its revision says. A write that goes around
+        the tracked-field path can leave a clean patient under an ID with
+        no row; without this the save would write nothing, find no key,
+        skip the whole subtree, and the prune would delete the old ID's
+        row with every study beneath it. This reads the store rather than
+        the bookkeeping, so it moves no revision and needs no setter. On
+        the ordinary paths it never fires: an ingested patient is dirty
+        until its first save, and a hydrated one was read from its row.
         """
         existing = cur.execute(
             "SELECT id FROM patients WHERE patient_id=?",
@@ -4079,12 +4036,12 @@ class SqliteStore:
         so the only way to notice a deletion is to compare the two sets.
 
         The comparison is against `held` -- every UID the saved list
-        holds, at any parent -- and not against this series' own list
-        (#548): two `Series` objects can share this row, and each list is
-        only half of what memory holds. A partial save
+        holds, at any parent -- and not against this series' own list:
+        two `Series` objects can share this row, and each list is only
+        half of what memory holds. A partial save
         (`prune_absent_patients=False`, a sub-list) still deletes a row
-        whose object moved to a patient outside the list, as it always
-        did: `held` is built from the list given, not the whole session.
+        whose object moved to a patient outside the list: `held` is built
+        from the list given, not the whole session.
         """
         stored = {row[0] for row in cur.execute(
             "SELECT sop_instance_uid FROM instances WHERE series_id_fk=?",
@@ -4125,9 +4082,8 @@ class SqliteStore:
         one, with the original name and identifier still in it.
         `_reparent_studies` points every study the patient holds at the
         new row on every save, dirty or not, so nothing ever visits the
-        old one again and no scoped deletion reaches it. (Until #551 only
-        a study the pass had itself changed was re-parented; a clean one
-        stayed under the old row and was deleted here.)
+        old one again and no scoped deletion reaches it. A study left
+        under the old row would be deleted here with it.
 
         Runs after every patient has been written, never before: the
         re-parenting has to have happened already, or this would delete
@@ -4149,9 +4105,9 @@ class SqliteStore:
         revision is captured *before* the write, so a concurrent edit
         arriving mid-save is not mistaken for the state that was stored.
 
-        Neither the dirty set nor the revision is computed here any more:
-        both were fixed by `_prepare_pixel_frames` before the transaction
-        opened (#287), and this method selects the instances that prepass
+        Neither the dirty set nor the revision is computed here: both
+        were fixed by `_prepare_pixel_frames` before the transaction
+        opened, and this method selects the instances that prepass
         claimed. The set is therefore FROZEN at prepass time -- an
         instance dirtied afterwards is simply not saved this round and
         stays dirty for the next, which is the same direction of error
@@ -4199,19 +4155,17 @@ class SqliteStore:
     def _build_instance_writes(self, unsaved, series_pk, tally, prepared):
         """Turns (instance, revision) pairs into the rows three tables need.
 
-        This method does **no I/O of any kind**. Its predecessor wrote
-        each instance's pixel frame to the sidecar from right here, which
-        put bulk I/O inside `save_all`'s open transaction; the frames now
-        arrive already written, in `prepared`, from the prepass that runs
-        before the connection opens (#287). Nothing here touches the
-        database either: the caller decides when, and in what order,
-        these rows go in.
+        This method does **no I/O of any kind**, and must not: it runs
+        inside `save_all`'s open transaction. The frames arrive already
+        written, in `prepared`, from the prepass that runs before the
+        connection opens. Nothing here touches the database either: the
+        caller decides when, and in what order, these rows go in.
 
         `unsaved` carries the revision the prepass captured before the
         sidecar write started -- the same capture `mark_persisted` will
-        be given -- so the #274 guard can be re-evaluated at the last
-        moment, below, against a window that is now as long as all of the
-        save's pixel I/O.
+        be given -- so the revision guard (see `_persist_pixels`) can be
+        re-evaluated at the last moment, below, against a window as long
+        as all of the save's pixel I/O.
 
         Returns:
             Tuple of (instance rows, instance_blobs rows, (uid, private
@@ -4343,16 +4297,15 @@ class SqliteStore:
         unsaved changes captures its revision and calls `_persist_pixels`.
         The transaction that follows therefore does row upserts and
         nothing else -- no compression, no sidecar append, no `flock`
-        wait -- so the SQLite write lock is no longer held for the length
-        of the save's pixel payload (#287).
+        wait -- so the SQLite write lock is not held for the length of
+        the save's pixel payload.
 
         Keyed by **object identity**, which is the only key that
         survives everything that can happen between this walk and the
         transaction's. Position cannot: `series_pk` is unknowable
         before the transaction and a series can be re-parented in
-        between -- `_reparent_series` exists precisely because that
-        happens. The SOP Instance UID cannot either, and that is the
-        sharper trap, because it looks like the natural key: redaction
+        between (see `_reparent_series`). The SOP Instance UID cannot
+        either, although it looks like the natural key: redaction
         mutates `sop_instance_uid` **in place** (`regenerate_uid()`,
         `Session._apply_redaction_outcomes`), so a UID-keyed lookup
         misses a renamed instance -- which then gets skipped by the walk
@@ -4360,15 +4313,11 @@ class SqliteStore:
         orphaned, losing the instance from the index entirely.
 
         The key is the instance itself. Entities hash and compare by
-        identity since #299 (`eq=False` on every `TrackedEntity`
-        subclass; `tests/test_entity_state_vocabulary.py` pins it), so
-        two field-equal instances are two entries and a renamed one is
-        still found. Before #299 `Instance` carried the dataclass default
-        `eq=True`, was unhashable, and this had to be `id(inst)`; the
-        object key is what #300 closed, and
-        `tests/test_save_all_contract.py` asserts the key shape.
+        identity (`eq=False` on every `TrackedEntity` subclass), so two
+        field-equal instances are two entries and a renamed one is still
+        found.
 
-        Two consequences, both stated rather than hidden:
+        Two consequences:
 
         - The dirty SET is frozen here. An instance dirtied after this
           walk is not saved this round; it stays dirty for the next.
@@ -4384,8 +4333,8 @@ class SqliteStore:
         the orphan is reclaimable dead space -- bounded by one save's
         dirty resident pixel bytes. Bounded and reclaimable ON DEMAND, not
         self-healing: `session.compact()` is manual and nothing reclaims
-        automatically. Same artifact class the #274 revision guard
-        already produces.
+        automatically. The revision guard in `_persist_pixels` leaves the
+        same kind of orphan.
 
         Returns:
             Dict[Instance, Tuple[int, _StoredFrame]]: instance ->
@@ -4414,7 +4363,7 @@ class SqliteStore:
         `revision` is the caller's capture from before the save started.
         This runs on the persistence manager's thread against live
         objects a redaction pass may be mutating, so publishing what was
-        read here needs two protections (#274):
+        read here needs two protections:
 
         - The lock makes read -> write -> rebind atomic against
           `persist_pixel_data`, so this save's rebind can never land
@@ -5318,7 +5267,7 @@ class SqliteStore:
 
 
 def _tag_number_strings(obj):
-    """`obj` with every DS and IS atom replaced by its tagged text (#662).
+    """`obj` with every DS and IS atom replaced by its tagged text.
 
     Returns new containers and never edits `obj`'s: `_serialize_item`
     hands this a shallow copy whose lists are the graph's own.

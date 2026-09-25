@@ -541,7 +541,7 @@ def test_a_declined_finding_on_an_instance_whose_uid_moves_keeps_it_identified(
 
 @pytest.mark.parametrize("owner", ["study", "series"])
 def test_a_reloaded_owners_uid_replacement_is_saved(owner):
-    """Pins `entity.mark_modified()` at remediation.py line 291 for the
+    """Pins `entity.mark_modified()` at remediation.py line 282 for the
     owners' UIDs (#544), on a *reloaded* owner: one the store hands back
     REMEDIATED, where the status stamp at the end of the pass
     short-circuits and the bump is the only thing that makes the next save

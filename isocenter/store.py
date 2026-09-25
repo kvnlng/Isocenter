@@ -34,7 +34,7 @@ class DicomStore:
 
     def _merge_patients_sharing_an_id(
             self, drain: Optional[Callable[[], None]] = None) -> Tuple[int, int]:
-        """Make every Patient ID name one `Patient` object again (#548).
+        """Make every Patient ID name one `Patient` object again.
 
         The store keeps one `patients` row per ID (`UNIQUE(patient_id)`),
         so two objects with one ID are one patient whether or not memory
@@ -42,7 +42,7 @@ class DicomStore:
         patient the pseudonym a stored patient already carries, or when
         `recover_patient_identity(restore=True)` puts back an ID a raw
         patient holds. Left in the graph, each object's scoped delete
-        removed the other's studies at the next save.
+        would remove the other's studies at the next save.
 
         **Survivor.** The first object in `patients` order: hydrated
         patients precede ingested ones and an earlier ingest precedes a
@@ -151,7 +151,7 @@ class DicomStore:
 
     def _refuse_a_merge_across_schemes(
             self, renamed: Optional[Tuple[Patient, str]] = None) -> None:
-        """Raise the #548 `RuntimeError` if a merge would mix jitter schemes.
+        """Raise `RuntimeError` if a merge would mix jitter schemes.
 
         `recover_patient_identity` calls it with `renamed` *before* it
         writes the original identifiers back: the merge's own check runs
@@ -173,12 +173,9 @@ class DicomStore:
         """
         Returns all unique Equipment (Manufacturer/Model/Serial) in the store.
 
-        The result is sorted. `list(set(...))` iterates in hash order, which
-        varies between processes because string hashing is randomised, so
-        `session.create_config()` emitted the same machines in a different
-        order on each run -- a generated file people keep in version control
-        and diff. Sorting costs nothing at these sizes and makes the output
-        reproducible.
+        The result is sorted, so `session.create_config()` lists the same
+        machines in the same order on every run; set iteration order varies
+        between processes because string hashing is randomised.
 
         Returns:
             List[Equipment]: Unique equipment, ordered by manufacturer,
@@ -198,11 +195,10 @@ class DicomStore:
     def get_ingested_paths(self) -> Set[str]:
         """Every file path this store has imported, for ingest de-duplication.
 
-        Keyed on `Instance.source_path`, not `file_path`. It was
-        `file_path` until #238, and `regenerate_uid()` clears that, so a
-        redacted instance stopped contributing its source path and the
-        next `ingest()` of the same folder re-added the un-redacted
-        original as a second instance.
+        Keyed on `Instance.source_path`, not `file_path`: `regenerate_uid()`
+        clears `file_path`, so keying on it would let the next `ingest()` of
+        the same folder re-add a redacted instance's un-redacted original as
+        a second instance.
 
         **A path in this set does not mean the file matches the
         instance.** For a redacted instance it means the opposite: the
@@ -212,12 +208,9 @@ class DicomStore:
         `file_path` is for, and it is absent precisely where it would be
         wrong.
 
-        `file_path` is deliberately not consulted as a fallback: no
-        production site assigns it after construction (the only two
-        assignments set it to `None`), so `Instance.__post_init__` has
-        already mirrored it into `source_path`, and a fallback here
-        would be dead code re-asserting the reading this docstring
-        denies.
+        `file_path` is not consulted as a fallback: nothing assigns it a
+        path after construction, and `Instance.__post_init__` has already
+        mirrored it into `source_path`.
 
         Returns:
             Set[str]: Absolute paths, one per instance that came from a file.
@@ -236,18 +229,17 @@ class DicomStore:
         instance that holds them now.
 
         `Instance._take_sop_uid` records the SOP Instance UID an instance
-        carried before redaction (`regenerate_uid()`) or, since #544, UID
-        replacement at `anonymize()` first gave it a new one. A file
+        carried before redaction (`regenerate_uid()`) or UID replacement
+        at `anonymize()` first gave it a new one. A file
         offered to `ingest()` under one of these UIDs is the source of an
         image this store already holds -- un-redacted, if it was
         redacted -- reached by a path
         de-duplication did not recognise -- a copy, a move, or a
-        symlinked mount. `DicomImporter.import_files` declines it (#238).
+        symlinked mount. `DicomImporter.import_files` declines it.
 
         Deliberately narrow. This is *not* "every UID in the store": a
         map that answered that would make the ingest gate refuse every
-        re-offered file, including files this store has never seen, and
-        would be a second, worse answer to #197.
+        re-offered file, including files this store has never seen.
 
         Returns:
             Dict[str, str]: pre-redaction UID -> the current SOP Instance

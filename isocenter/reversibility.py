@@ -11,21 +11,20 @@ from .logger import get_logger, describe_exception
 
 class _TokenHoldsNoRecord(RuntimeError):
     """A token of ours that the key opens, whose plaintext is not the JSON
-    object `generate_identity_token` writes (review of #633, P-2).
+    object `generate_identity_token` writes.
 
-    Only constructible with the key, so it is a corner; but until it had
-    a type of its own it escaped `lock_identities()` as a `JSONDecodeError`
-    whose `.doc` is the decrypted plaintext, and the batch, which collects
-    `RuntimeError` alone, did not number it. A `RuntimeError` so every
-    strict-read caller that refuses on "cannot open" refuses on this too;
-    a subclass so the lock's plan can say the truer thing -- the key
-    *opens* the token -- instead of the wrong-key text.
+    A `RuntimeError`, so the batch lock, which collects `RuntimeError`
+    alone, numbers it, and every strict-read caller that refuses on
+    "cannot open" refuses on this too; a class of its own so the lock's
+    plan can say that the key *opens* the token instead of the wrong-key
+    text. Raised in place of the `JSONDecodeError`, whose `.doc` would
+    carry the decrypted plaintext.
     """
 
 
 class _TokenOfALaterScheme(_TokenHoldsNoRecord):
     """A token of ours whose plaintext names a scheme this release does not
-    know (#652): a later release wrote it.
+    know: a later release wrote it.
 
     A subclass of `_TokenHoldsNoRecord`, so every caller that refuses on
     that refuses on this, and its own class, so a caller that words its
@@ -37,17 +36,16 @@ class _TokenOfALaterScheme(_TokenHoldsNoRecord):
 
 
 class _TokenOfAnEarlierLayout(RuntimeError):
-    """A token of ours in `(0400,0510)`, where every release through 0.9.8
-    wrote it, with the transfer syntax UID in `(0400,0520)` (#790).
+    """A token of ours in `(0400,0510)`, with the transfer syntax UID in
+    `(0400,0520)`: the layout releases before 1.0 wrote.
 
-    Those two tags are the other way round in PS3.6, and the owner ruled
-    that 1.x writes and reads the conformant layout only: compatibility
-    promises begin at 1.0. Recognised by shape, never decrypted, so that
-    recovery and the lock refuse it by name -- read as foreign it would
-    be "no token", and a lock would replace it (#399, #617's silent
-    loss). A `RuntimeError`, so the batch lock collects and numbers it;
-    not a `_TokenHoldsNoRecord`, which says the key *opens* the token,
-    and nothing here was opened.
+    Those two tags are the other way round in PS3.6, and this library
+    writes and reads the conformant layout only. The earlier layout is
+    recognised by shape, never decrypted, so that recovery and the lock
+    refuse it by name; read as foreign it would be "no token", and a lock
+    would replace it, losing the identity silently. A `RuntimeError`, so
+    the batch lock collects and numbers it; not a `_TokenHoldsNoRecord`,
+    which says the key *opens* the token, and nothing here was opened.
     """
 
 
@@ -65,14 +63,13 @@ class ReversibilityService:
     Compliant with DICOM Part 15, E.1.2 "Re-identifier" logic via the
     Encrypted Attributes Sequence (0400,0500). Uses `CryptoEngine` for encryption.
 
-    **What a token's plaintext holds (#652).** A JSON object of the locked
-    tags' values and, since 1.0, one more key, `TOKEN_SCHEME_KEY`, whose
-    value `TOKEN_SCHEME` says how the lock captured it: per instance, one
-    token per value-set (#583). Inside the encryption, so it is bound to
-    the token, authenticated with it, carried through every export,
-    re-ingest and store, and readable by exactly whoever can restore. A
-    token with no key is scheme 1, every token written through 0.9.8.
-    Written in one place (`generate_identity_token`) and stripped in one
+    **What a token's plaintext holds.** A JSON object of the locked
+    tags' values and one more key, `TOKEN_SCHEME_KEY`, whose value
+    `TOKEN_SCHEME` says how the lock captured it: per instance, one token
+    per value-set. Inside the encryption, so it is bound to the token,
+    authenticated with it, carried through every export, re-ingest and
+    store, and readable by exactly whoever can restore. A token with no
+    scheme key is scheme 1. Written in one place (`generate_identity_token`) and stripped in one
     (`_split_record`, behind `open_token` and `recover_original_data`), so
     no caller ever sees it as a tag.
     """
@@ -120,7 +117,7 @@ class ReversibilityService:
     def engine(self) -> CryptoEngine:
         """The `CryptoEngine` over the key manager's key, built on first use.
 
-        Lazy because the key may not exist yet: since #539
+        Lazy because the key may not exist yet:
         `enable_reversible_anonymization()` creates no key file, the first
         lock does, so a service built at enable has no key to build an
         engine from. Cached, so every later read -- and a test patching
@@ -137,14 +134,14 @@ class ReversibilityService:
         Serializes and encrypts the attributes into a reusable token.
 
         The one place a token's plaintext is built, so the one place the
-        scheme key is added (#652). After the empty check: the marker never
+        scheme key is added. After the empty check: the marker never
         turns an empty record into a token.
 
         Args:
             original_attributes (Dict[str, Any]): Dictionary of tag-value pairs to preserve.
 
         Returns:
-            bytes: The encrypted JSON payload.
+            bytes: The encrypted JSON payload, or `b""` for an empty record.
         """
         if not original_attributes:
             return b""
@@ -160,8 +157,16 @@ class ReversibilityService:
 
         Wraps the token in an Encrypted Attributes Sequence item with the
         appropriate Transfer Syntax UID, and **replaces** whatever
-        `(0400,0500)` held: after any call the sequence carries exactly
-        one item, however many times the instance has been locked (#399).
+        `(0400,0500)` held, including a sequence the source file carried:
+        after any call the sequence carries exactly one item, however many
+        times the instance has been locked. An empty `token` does nothing.
+
+        Records the token on the instance (`record_identity_token`) before
+        the write and marks the instance modified. A PHI status that was
+        current before the call is recorded again after it, so the token
+        write alone does not leave the instance reading as edited since
+        its scan; a status an earlier edit had already left stale is not
+        carried. Any exception is logged at ERROR and re-raised.
 
         Args:
             instance (Instance): The target instance.
@@ -260,7 +265,7 @@ class ReversibilityService:
     @classmethod
     def is_one_of_ours(cls, content) -> bool:
         """Whether `content` is shaped like a token this library wrote:
-        base64url whose first decoded byte is Fernet's version (#617).
+        base64url whose first decoded byte is Fernet's version.
 
         A shape test on the first 12 characters (nine bytes) only, and
         deliberately not a whole-string check: a token of ours that was
@@ -298,11 +303,11 @@ class ReversibilityService:
         """The Encrypted Content of `instance`'s token item as `bytes`, if
         it is shaped like one of ours; None for no item, no content, or a
         foreign sequence. No key is needed: this is what the lock reads
-        before it decides whether to create one (#617, Q8).
+        before it decides whether to create one.
 
         Raises:
             _TokenOfAnEarlierLayout: The item holds a token of ours where
-                releases before 1.0 wrote it (#790).
+                releases before 1.0 wrote it.
         """
         item = self._token_item(instance)
         content = self._token_content(item) if item else None
@@ -317,7 +322,7 @@ class ReversibilityService:
 
     def open_token(self, content: bytes) -> Dict[str, Any]:
         """The values a token of ours holds, under this key: the locked
-        tags only, the scheme key stripped (#652).
+        tags only, the scheme key stripped.
 
         `open_token_with_scheme` without the scheme, for every caller that
         reads values alone (the lock's plan, `held_identity`,
@@ -330,11 +335,10 @@ class ReversibilityService:
 
     def open_token_with_scheme(self, content: bytes):
         """`(values, scheme)` for a token of ours, under this key, from one
-        decrypt (#652): the locked tags' values with the scheme key
-        stripped, and the scheme it names -- 1 for a token with none, which
-        is every token written through 0.9.8. The restore reads the scheme
-        to tell a token captured per value-set from one an earlier release
-        may have shared across studies.
+        decrypt: the locked tags' values with the scheme key stripped, and
+        the scheme it names -- 1 for a token with none. The restore reads
+        the scheme to tell a token captured per value-set from a scheme-1
+        token, which may be shared across studies.
 
         Raises:
             RuntimeError: The key does not decrypt it. No message names
@@ -355,11 +359,11 @@ class ReversibilityService:
                 so no formatted traceback prints the `JSONDecodeError`;
                 the object stays attached as `__context__`, reachable
                 to whoever holds the exception, who also holds the key
-                and the session (review of #633 round 2, P-1). A
+                and the session. A
                 plaintext holding the scheme key and nothing else is an
                 empty record too: the check runs after the strip.
             _TokenOfALaterScheme: The key opens it and it holds a record,
-                under a scheme this release does not know (#652).
+                under a scheme this release does not know.
         """
         try:
             decrypted_bytes = self.engine.decrypt(content)
@@ -389,7 +393,7 @@ class ReversibilityService:
 
     def _split_record(self, record: Dict[str, Any]):
         """`(values, scheme)` from a decrypted record: the one door between
-        a token's plaintext and anything that reads it as tags (#652).
+        a token's plaintext and anything that reads it as tags.
 
         A copy without the scheme key, never the record with it popped, so
         the caller's dict is untouched. No key is scheme 1. A scheme that
@@ -417,7 +421,7 @@ class ReversibilityService:
 
     def held_identity(self, instance: Instance):
         """`(token bytes, values)` for a token of ours this key opens, or
-        None when the instance carries no token of ours (#617).
+        None when the instance carries no token of ours.
 
         One spelling of "what is on this instance, and can we open it":
         `token_of_ours` then `open_token`, which a caller reading many
@@ -427,6 +431,7 @@ class ReversibilityService:
         Raises:
             RuntimeError: A token of ours does not open under this key,
                 or opens to no record (`open_token`'s messages).
+            _TokenOfAnEarlierLayout: As `token_of_ours`.
         """
         content = self.token_of_ours(instance)
         if content is None:
@@ -436,18 +441,17 @@ class ReversibilityService:
     def recover_or_raise(self, instance: Instance) -> Dict[str, Any]:
         """The recovered attributes of `instance`'s token, or an exception.
 
-        `recover_patient_identity`'s read (#539). `recover_original_data`
-        below answers None for "no token" and "this key cannot open it"
-        alike, which recovery printed as one sentence and a caller could
-        not act on; that tolerant read is released and tests read
-        through it, so the strict read is a second method rather than a
-        changed one. Built on `held_identity` since #617, so a foreign
-        Encrypted Attributes Sequence -- one holding no Fernet token --
-        is "no token", not "the wrong key".
+        `recover_patient_identity`'s read: the strict counterpart of
+        `recover_original_data`, which answers None for "no token" and
+        "this key cannot open it" alike. Built on `held_identity`, so a
+        foreign Encrypted Attributes Sequence -- one holding no Fernet
+        token -- is "no token", not "the wrong key".
 
         Raises:
             RuntimeError: No Encrypted Attributes Sequence item holding a
-                token of ours, or the key does not decrypt the token.
+                token of ours, or any of `held_identity`'s raises: the key
+                does not decrypt the token, it opens to no record, or the
+                token is in the earlier layout.
         """
         found = self.held_identity(instance)
         if found is None:
@@ -461,19 +465,10 @@ class ReversibilityService:
         """The Encrypted Attributes Sequence item recovery reads, or None.
 
         **Item 0, and not the last item** -- the one spelling of the index
-        both reads share. Since #399 every sequence this library writes
-        holds exactly one item, so `items[0]` and `items[-1]` are the same
-        expression on every file it will write again; they are not the
-        same on a file written by 0.9.4 or earlier, which carries one item
-        per lock and whose *first* one is what that release's recovery
-        answered with. Such a file is in the earlier layout, which 1.x
-        refuses by name (#790), and the index that refusal reads is still
-        item 0, so a multi-item sequence is refused rather than read at
-        some other index. It was
-        spelled once in each read until review of #615 (F-2) measured
-        `items[-1]` in the strict read green on the whole suite;
-        `tests/test_relock_identity_token.py` holds it on both reads and
-        through `recover_patient_identity()`.
+        both reads share. Every sequence this library writes holds exactly
+        one item. A multi-item sequence comes from a file in the earlier
+        layout, one item per lock, and is refused by name on its first
+        item rather than read at some other index.
         """
         seq = instance.sequences.get(cls.TAG_ENCRYPTED_ATTRS_SEQ)
         return seq.items[0] if seq is not None and seq.items else None
@@ -486,8 +481,8 @@ class ReversibilityService:
     def _token_content(cls, item):
         """The token of ours in `item`'s Encrypted Content `(0400,0520)`;
         `EARLIER_LAYOUT` when `(0400,0520)` holds none and `(0400,0510)`
-        does, which is where every release through 0.9.8 wrote it (#790);
-        else None -- no content, or a foreign item.
+        does, which is where releases before 1.0 wrote it; else None -- no
+        content, or a foreign item.
 
         By shape alone (`is_one_of_ours`), no key and no decrypt: the
         earlier layout is recognised only so that it can be refused by
@@ -505,8 +500,8 @@ class ReversibilityService:
     @classmethod
     def holds_a_token_of_ours(cls, instance: Instance) -> bool:
         """Whether `instance` carries a token this library wrote, in either
-        layout. The lock's key-creation sniff (#617, Q8): a key created
-        here opens a 0.9.x token no better than a 1.0 one, so an
+        layout. The lock's key-creation sniff: a key created here opens
+        an earlier-layout token no better than a current one, so an
         earlier-layout item counts, and the sniff answers rather than
         raising the layout refusal for every patient in the session."""
         item = cls._token_item(instance)
@@ -515,7 +510,7 @@ class ReversibilityService:
     @classmethod
     def holds_an_earlier_layout_token(cls, instance: Instance) -> bool:
         """Whether `instance`'s token is in the layout releases before 1.0
-        wrote (#790): the export's count of files 1.x cannot recover.
+        wrote: the export's count of files this library cannot recover.
         Shape only, no key."""
         item = cls._token_item(instance)
         return item is not None and cls._token_content(item) is cls.EARLIER_LAYOUT
@@ -529,8 +524,12 @@ class ReversibilityService:
 
         **Item 0, and not the last item**, through `_token_item`, which
         says why. An item in the layout releases before 1.0 wrote
-        (`_TokenOfAnEarlierLayout`, #790) answers None, with the ERROR
-        below naming the cause; it is never decrypted.
+        (`_TokenOfAnEarlierLayout`) answers None, with an ERROR log naming
+        the cause; it is never decrypted. Any other failure (a wrong key,
+        a later scheme, a plaintext that is not JSON) is logged at ERROR
+        and answers None; an item with no Encrypted Content logs a WARNING
+        and answers None. A plaintext that is JSON but not an object is
+        returned as decoded.
 
         Args:
             instance (Instance): The anonymized instance.
