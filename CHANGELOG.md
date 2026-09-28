@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc4] - 2026-09-28
+
 ### Added
 
 - **A security policy, and issue forms that say what never to post (#837).** Every contact statement sent bug reports to public issues, and none named a private route for a leak. Private vulnerability reporting, which was off, is now on.
