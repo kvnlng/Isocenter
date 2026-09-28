@@ -9,7 +9,7 @@ body:
 
         Everything written here is public. Replace every path, UID and value from your data with a placeholder, in tracebacks too: Isocenter's messages can name an instance by its source UID and a file by its source path. The shape details this form asks for (modality, manufacturer and model, transfer syntax, tag paths) are fine; a device serial number is not.
 
-        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot of an image, or the compliance report beyond its two summary tables. If a file is needed to show the problem, make a synthetic one.
+        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot from your data, or the compliance report beyond its two summary tables. If a file is needed to show the problem, make a synthetic one.
   - type: input
     id: version
     attributes:

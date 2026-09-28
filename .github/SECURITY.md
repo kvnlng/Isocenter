@@ -25,7 +25,7 @@ The following are not security problems. If they are bugs, report them in public
 
 - What the session store contains (the `.db` file with its `-wal` and `-shm`, and its `_pixels.bin`), and likewise the compliance report, a manifest, the cohort table that `export_dataframe()` writes, or `isocenter.log`. These are for the operator, who already holds the source data. They are not de-identification outputs: they can carry source UIDs and file paths, and the store holds the original data.
 - A value that the configuration keeps on purpose, either through a rule of your own or through one of the departures from Table E.1-1 that [Configuration](https://kvnlng.github.io/Isocenter/configuration/#privacy-profile) lists.
-- A value outside Table E.1-1 that no rule removes. Whether it identifies anyone is for your configuration to decide.
+- A value outside Table E.1-1 that no rule removes or replaces. Whether it identifies anyone is for your configuration to decide.
 - Burned-in text in a region that no redaction rule covers. Neither the export nor the grade detects it, and optical character recognition runs only when asked ([Burned-in text](https://kvnlng.github.io/Isocenter/ocr/)).
 
 ## Supported versions

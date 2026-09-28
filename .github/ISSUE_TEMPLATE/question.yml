@@ -9,7 +9,7 @@ body:
 
         Everything written here is public. Replace every path, UID and value from your data with a placeholder. Shape details (modality, manufacturer and model, transfer syntax, tag paths) are fine; a device serial number is not.
 
-        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot of an image, or the compliance report beyond its two summary tables. If a file is needed to show the question, make a synthetic one.
+        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot from your data, or the compliance report beyond its two summary tables. If a file is needed to show the question, make a synthetic one.
   - type: textarea
     id: question
     attributes:
@@ -27,5 +27,5 @@ body:
     attributes:
       label: Before you submit
       options:
-        - label: Nothing in this issue is patient data. Every path, UID and value from my data, other than shape details, is replaced with a placeholder, and nothing from my data is attached except the report's two summary tables.
+        - label: Nothing in this issue is patient data. Every path, UID and value from my data, other than shape details, is replaced with a placeholder, and nothing from my data is attached or pasted except the report's two summary tables.
           required: true
