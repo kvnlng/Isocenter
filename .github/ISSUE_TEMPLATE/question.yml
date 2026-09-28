@@ -1,0 +1,27 @@
+name: Question
+description: A question about documented behaviour.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never post patient data here.** Everything written here is public, so replace every path, UID and value from your data with a placeholder. If an export still carries something it should have removed, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Link the documentation page it is about, if there is one.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Isocenter version (optional)
+      placeholder: 1.0.0rc3
+  - type: checkboxes
+    id: no-patient-data
+    attributes:
+      label: Before you submit
+      options:
+        - label: Nothing in this issue is patient data, and every path, UID and value from my data is replaced with a placeholder.
+          required: true

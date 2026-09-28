@@ -33,6 +33,7 @@ setup(
     project_urls={
         "Documentation": "https://kvnlng.github.io/Isocenter/",
         "Issues": "https://github.com/kvnlng/Isocenter/issues",
+        "Security policy": "https://github.com/kvnlng/Isocenter/security/policy",
         "Changelog": "https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md",
     },
     license="Apache-2.0",

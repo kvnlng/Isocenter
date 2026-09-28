@@ -139,8 +139,6 @@ Releases up to and including 0.9.2 were published under the GNU Affero General P
 
 ## Contact
 
-Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues); they are answered there, in public, for free.
+Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues); they are answered there, in public, for free. Never post patient data, or anything taken from it, in an issue. If an export still carries something it should have removed, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
 
-Help beyond that is available as paid consulting: configuring a de-identification profile for a protocol, integrating Isocenter into a pipeline, reviewing a run's report before it goes to a reviewer, or a feature your study needs sooner than the roadmap. Write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
-
-An export that leaks identifying information is a security report, not an issue: make it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+Help beyond bug reports and questions is available as paid consulting: configuring a de-identification profile for a protocol, integrating Isocenter into a pipeline, reviewing a run's report before it goes to a reviewer, or a feature your study needs sooner than the roadmap. Write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
