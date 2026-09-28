@@ -1,0 +1,15 @@
+# Off, so that an issue starts from a form, whose header says what never to
+# post and whose checkbox must be ticked. GitHub still offers a blank issue to
+# anyone with write access, marked "Maintainers only", and the API (`gh issue
+# create --title --body`) takes no form, so the maintainer's own issues need none.
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/kvnlng/Isocenter/security/advisories/new
+    about: An export still carries something it should have removed or replaced, or lets someone recover an identity or a real date. Never a public issue.
+  - name: Feedback and ideas
+    url: https://github.com/kvnlng/Isocenter/discussions
+    about: Tell us how a run went, or suggest a change. Never post patient data, logs or report rows.
+  - name: Help beyond bug reports
+    url: https://github.com/kvnlng/Isocenter#contact
+    about: Configuring a profile, integrating a pipeline or reviewing a report is paid consulting.

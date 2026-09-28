@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A security policy, and issue forms that say what never to post (#837).** Every contact statement sent bug reports to public issues, and none named a private route for a leak. Private vulnerability reporting, which was off, is now on.
+  - **What counts.** `.github/SECURITY.md` names four kinds of security problem. The first is an exported file that still carries what the session's policy says to remove or replace. The second is a value that the built-in `basic` profile, or the floor built on it, keeps against Table E.1-1 when Configuration lists no departure for it. The third is an export that lets someone recover an identity or a real date that it was meant to hide, or confirm a guess about one, without the project's secret or key; GHSA-phg9-vcvc-j4r7 was this kind. The fourth is an identity token that opens without the key, or the project secret reaching an export.
+  - **What does not.** The contents of the store, the report, a manifest, the cohort table or the log are not security problems, because those belong to the operator and are not de-identification outputs. The same goes for a value the configuration keeps on purpose, a value outside Table E.1-1 that no rule removes or replaces (whether it identifies anyone is the configuration's call), and burned-in text in a region no rule covers. Those go to public issues, described by their shape and never by their content.
+  - The policy also says how to report privately, what happens after a report, and that security fixes are made on the 1.0 line only.
+  - **The issue forms.** Blank issues are off for everyone without write access, so an issue opened on GitHub's web page by anyone else starts from a form: a bug report or a question. Both forms open with what never to post. Both require the reporter to confirm that every path, UID and value from their data, other than the shape details the form asks for, is replaced with a placeholder. Tracebacks need that, because Isocenter's messages can name an instance by its source UID and a file by its source path.
+  - The bug form also asks for the version, the Python build and where the session store lives. On a network or cluster filesystem, no test has run the store's `fcntl.flock` locks, and SQLite documents that its WAL mode, which the store uses, does not work there.
+  - The contact statements in the README, the docs home page and For institutions now say never to post patient data in an issue, and send a leak to the private channel. `setup.py`'s project links name the security policy.
+  - No package code and no output change.
+
 ## [1.0.0rc3] - 2026-09-25
 
 ### Added
