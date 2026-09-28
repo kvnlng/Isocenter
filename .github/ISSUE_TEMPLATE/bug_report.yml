@@ -1,0 +1,77 @@
+name: Bug report
+description: Isocenter did something its documentation says it should not, or failed to do something it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never post patient data here.** If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+
+        Everything written here is public. Replace every path, UID and value from your data with a placeholder, in tracebacks too: Isocenter's messages can name an instance by its source UID and a file by its source path. The shape details this form asks for (modality, manufacturer and model, transfer syntax, tag paths) are fine; a device serial number is not.
+
+        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot from your data, or the compliance report beyond its two summary tables. If a file is needed to show the problem, make a synthetic one.
+  - type: input
+    id: version
+    attributes:
+      label: Isocenter version
+      description: 'The output of `python -c "import isocenter; print(isocenter.__version__)"`'
+      placeholder: 1.0.0rc3
+    validations:
+      required: true
+  - type: textarea
+    id: platform
+    attributes:
+      label: Python and platform
+      description: 'The output of `python -c "import platform, sys; print(sys.version); print(platform.platform())"`'
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: store-location
+    attributes:
+      label: Where the session store lives
+      description: The file named in `Session(...)` (else `$ISOCENTER_DB_PATH`, else `isocenter.db`), with the `_pixels.bin` beside it.
+      options:
+        - Local disk
+        - NFS
+        - SMB / CIFS
+        - Lustre
+        - GPFS / Spectrum Scale
+        - Other (say which below)
+        - Don't know
+    validations:
+      required: true
+  - type: textarea
+    id: what-you-ran
+    attributes:
+      label: What you ran
+      description: The smallest code that shows the problem, with every path, UID and value from your data replaced by a placeholder.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: Paste tracebacks in full, after replacing every path, UID and value from your data with a placeholder. Describe the data by its shape (modality, manufacturer and model, transfer syntax, the tag or sequence path, how many files), never by its contents.
+    validations:
+      required: true
+  - type: textarea
+    id: summary-tables
+    attributes:
+      label: The report's summary tables (optional)
+      description: If you generated a compliance report, paste the Executive Summary table and the Action Type counts under Processing Audit, with any file path in them replaced. Nothing else from it.
+      render: markdown
+  - type: textarea
+    id: packages
+    attributes:
+      label: Other packages (optional)
+      description: The output of `pip freeze`, if a codec, OCR or NLP extra is involved.
+      render: text
+  - type: checkboxes
+    id: no-patient-data
+    attributes:
+      label: Before you submit
+      options:
+        - label: Nothing in this issue is patient data. Every path, UID and value from my data, other than the shape details this form asks for, is replaced with a placeholder, and nothing from my data is attached or pasted except the report's two summary tables.
+          required: true
