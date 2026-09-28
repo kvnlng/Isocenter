@@ -16,7 +16,7 @@ absent outright, whatever its row (#556). The probe list only makes sure
 each kind of identifier is in the input, so an edit to the fixture
 cannot quietly stop testing one.
 
-Both worker paths, because the process path pickles the 647-rule policy
+Both worker paths, because the process path pickles the 648-rule policy
 into every scan task and the thread path does not.
 """
 import os

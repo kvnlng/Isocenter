@@ -107,8 +107,6 @@ NO_ENTRY_CODES = {
 NO_ENTRY = {
     "gggg,eeee": "private attributes are the `remove_private_tags` sweep, "
                  "on by default, not a rule",
-    "0070,0001": "D on a sequence whose identifying contents are rows of "
-                 "their own, so recursion cleans it",
     "0040,a073": "D on a sequence whose identifying contents are rows of "
                  "their own, so recursion cleans it",
     "0034,0001": "D on a sequence whose identifying contents are rows of "
@@ -165,14 +163,22 @@ DEVIATIONS = {
         "action": "EMPTY", "authority": "#557",
         "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
                   "and its items are person identification codes"},
-    # Content Sequence is a fifth. Not all of its identifying contents are
-    # rows: a TEXT item's Text Value (0040,a160) is free text the table has
-    # no row for, so recursion cannot clean it (NO_ENTRY's claim is false
-    # here), and the sequence goes the way the four above do.
+    # Content Sequence and Graphic Annotation Sequence are a fifth and a
+    # sixth. Not all of their identifying contents are rows: a TEXT item's
+    # Text Value (0040,a160), and a text or graphic object's Tracking ID
+    # (0062,0020) and a major tick's Tick Label (0070,0289), are free text
+    # the table has no row for, so recursion cannot clean them (NO_ENTRY's
+    # claim is false for these two), and they go the way the four above do.
     "0040,a730": {
         "action": "EMPTY", "authority": "#557",
         "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
                   "and a TEXT item's Text Value (0040,a160) is free text "
+                  "that no row reaches"},
+    "0070,0001": {
+        "action": "EMPTY", "authority": "#557",
+        "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
+                  "and a text or graphic object's Tracking ID (0062,0020) "
+                  "and a major tick's Tick Label (0070,0289) are free text "
                   "that no row reaches"},
     # Folded into the `60xx,xxxx` group rule (#556). With them beside it,
     # `"60xx,xxxx": {action: KEEP}` would still remove Overlay Data
@@ -256,6 +262,12 @@ LITERAL_COMMENTS = {
         "TEXT item's Text Value (0040,a160) is free text that no row reaches,",
         "so the rows nested here cannot clean it. Without this rule a",
         "Structured Report's text was exported as written, until 1.0.0rc4.",
+    ],
+    "0070,0001": [
+        "D in the table, EMPTY here as for Content Sequence above: a text or",
+        "graphic object's Tracking ID (0062,0020) and a major tick's Tick",
+        "Label (0070,0289) are free text that no row reaches. Without this",
+        "rule a presentation state's annotations kept them, until 1.0.0rc4.",
     ],
     "0070,0006": [
         "Free-text annotation commentary. Reaches annotations.json `note`",

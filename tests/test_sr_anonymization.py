@@ -200,7 +200,8 @@ def test_an_sr_s_free_text_is_not_exported(tmp_path, config):
     item's Text Value (0040,A160) is free text and no row of its own, so
     the rows nested inside cannot clean it: `basic@2026c`, and the floor
     built on it, empty the sequence, as they do Person Identification
-    Code Sequence, the other sequence coded `D` alone. Until 1.0.0rc4 the
+    Code Sequence and Graphic Annotation Sequence, which the table also
+    codes `D` alone. Until 1.0.0rc4 the
     sequence had no rule, and every TEXT item -- a name, an MRN, an
     institution -- was exported as written under `(0012,0062) YES`.
 

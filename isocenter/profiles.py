@@ -550,6 +550,11 @@ BASIC_PROFILE = {
     "006a,0003": {"action": "REPLACE", "name": "Annotation Group UID"},  # D
     "006a,0005": {"action": "REPLACE", "name": "Annotation Group Label"},  # D
     "006a,0006": {"action": "REMOVE", "name": "Annotation Group Description"},  # X
+    # D in the table, EMPTY here as for Content Sequence above: a text or
+    # graphic object's Tracking ID (0062,0020) and a major tick's Tick
+    # Label (0070,0289) are free text that no row reaches. Without this
+    # rule a presentation state's annotations kept them, until 1.0.0rc4.
+    "0070,0001": {"action": "EMPTY", "name": "Graphic Annotation Sequence"},  # D
     # Free-text annotation commentary. Reaches annotations.json `note`
     # when a caller opts in via include_annotation_text; remediated here
     # so that opting in still does not surface raw text.
