@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A security policy, and a bug-report form that keeps patient data out of public issues.** A tester who found a leak had no private way to report it: private vulnerability reporting was off, and every contact statement sent bug reports to public issues. It is now on. `.github/SECURITY.md` defines a security problem as an exported file that still carries what the session's policy says to remove or replace, or an export that lets someone recover an identity or a real date, or confirm a guess about one, without the project's secret or key (GHSA-phg9-vcvc-j4r7's kind). It lists what is not one: what the store, the report, a manifest or the log contains, since those are the operator's and are not de-identified; a value the configuration keeps; and burned-in text in a region no rule covers. It says how to report privately, what happens after a report, and that security fixes are made on the 1.0 line only.
+  - The new bug-report form asks for the version, the Python build, and where the session store lives: local disk, or a network or cluster filesystem, on which no test has run the store's `fcntl.flock` locks. Before the form can be submitted, the reporter must confirm that nothing in it is patient data, and it names the report's two summary tables as the only part of a report to paste.
+  - The contact statements in the README, the docs home page and For institutions send a leak to the private channel.
+  - No package code and no output change.
+
 ## [1.0.0rc3] - 2026-09-25
 
 ### Added

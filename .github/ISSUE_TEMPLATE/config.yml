@@ -1,0 +1,12 @@
+# Blank issues stay on: the maintainer files most issues without a form.
+blank_issues_enabled: true
+contact_links:
+  - name: An export leaks identifying information
+    url: https://github.com/kvnlng/Isocenter/security/advisories/new
+    about: This is a security report. Make it privately, never as a public issue.
+  - name: Feedback and ideas
+    url: https://github.com/kvnlng/Isocenter/discussions
+    about: Tell us how a run went, or suggest a change.
+  - name: Help beyond bug reports
+    url: https://github.com/kvnlng/Isocenter#contact
+    about: Configuring a profile, integrating a pipeline or reviewing a report is paid consulting.
