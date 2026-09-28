@@ -59,7 +59,7 @@ print(f"{len(report)} findings")
 
 `audit()` checks the tags against the policy. Each finding is one value a rule acts on, so a small cohort can have hundreds. It does not read the pixels.
 
-With no configuration loaded, a **floor policy** of 646 tag rules still applies: the PS3.15 Annex E Basic Profile table (2026c), with Study Date jittered and Patient's Sex and Age kept, and private tags removed. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
+With no configuration loaded, a **floor policy** of 647 tag rules still applies: the PS3.15 Annex E Basic Profile table (2026c), with Study Date jittered and Patient's Sex and Age kept, and private tags removed. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
 
 The scaffold lists each machine in the cohort that has a Device Serial Number, with empty `redaction_zones`. `redact()` changes nothing until you fill them in: see [Pixel Redaction (Machines)](configuration.md#pixel-redaction-machines), and [Burned-in text (OCR)](ocr.md) to find where a machine writes text.
 

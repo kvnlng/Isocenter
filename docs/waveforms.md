@@ -129,10 +129,10 @@ Which policy runs depends on the configuration:
 - **A bare `Session()`, never `load_config()`-ed**, applies the floor
   policy: the basic profile plus three research defaults.
 - **The Quick Start above** loads `privacy_profile: basic@2026c`, the Basic
-  Profile column of DICOM PS3.15 Annex E Table E.1-1 (2026c): **646 tags, 646
+  Profile column of DICOM PS3.15 Annex E Table E.1-1 (2026c): **647 tags, 647
   effective**, every one reachable by the scan, including those inside
   sequences. The scaffold `create_config()` writes carries the same three
-  research defaults, so it applies the same 646 rules as a bare session.
+  research defaults, so it applies the same 647 rules as a bare session.
 - **Your own configuration** is layered on the floor, on a profile, or,
   with `privacy_profile: none`, is the whole policy. Your explicit tags win
   over the base, and `action: KEEP` opts a tag out.

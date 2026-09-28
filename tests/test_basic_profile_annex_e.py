@@ -66,11 +66,12 @@ def test_basic_profile_is_derived_from_annex_e():
     # group rules, and 119 D-arm rules moved from EMPTY or REMOVE to
     # REPLACE, which writes the VR's dummy. 646 since #544: the 55 `U`
     # rows and Annotation Group UID (`006a,0003`, D on a UI) REPLACE with
-    # no value, which on a UI is the keyed UID. Literal numbers, checked
-    # against the arithmetic by hand, never computed.
-    assert len(BASIC_PROFILE) == 646
+    # no value, which on a UI is the keyed UID. 647 since 1.0.0rc4:
+    # Content Sequence's D became EMPTY, one more. Literal numbers,
+    # checked against the arithmetic by hand, never computed.
+    assert len(BASIC_PROFILE) == 647
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
-        "REMOVE": 412, "EMPTY": 57, "REPLACE": 177}
+        "REMOVE": 412, "EMPTY": 58, "REPLACE": 177}
 
 
 #: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
@@ -141,7 +142,7 @@ def test_the_floor_overrides_three_basic_rules_and_adds_none():
     """Patient's Age is a basic rule since 0.9.8, so all three research
     defaults override one and the floor is the profile's size."""
     assert set(RESEARCH_DEFAULTS) <= set(BASIC_PROFILE)
-    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 646
+    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 647
 
 
 def test_every_departure_is_a_row_and_is_a_departure():

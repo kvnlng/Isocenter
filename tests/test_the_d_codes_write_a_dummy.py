@@ -105,6 +105,12 @@ def _export(tmp_path, source, profile="basic", phi_tags=None, anonymize=True):
 
 SR = pydicom.data.get_testdata_file("test-SR.dcm")
 
+#: Content Sequence kept. `basic` empties it since 1.0.0rc4, because a TEXT
+#: item's free text is no row; the SR tests here measure the nested walk
+#: reaching the content items, which the rows still clean inside a
+#: sequence the configuration keeps.
+KEEP_CONTENT = {"0040,a730": {"action": "KEEP"}}
+
 #: The twelve zero-length values of the measurement, by path and VR.
 SR_DUMMIED = [
     ((), "0008,0013", "TM"),
@@ -142,7 +148,7 @@ def test_a_structured_report_exports_its_type_1_dates_and_names_filled(tmp_path)
     """Kills the mapping left at EMPTY or REMOVE; a D arm missed; and the
     nested walk not reaching the content items."""
     source = pydicom.dcmread(SR)
-    out, _ = _export(tmp_path, SR)
+    out, _ = _export(tmp_path, SR, phi_tags=KEEP_CONTENT)
 
     for path, key, vr in SR_DUMMIED + SR_WERE_REMOVED:
         element = _at(out, path)[int(key.replace(",", ""), 16)]
@@ -174,7 +180,7 @@ def test_the_dummy_is_computed_in_the_worker(tmp_path, monkeypatch):
             monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
         root = tmp_path / strategy
         root.mkdir()
-        out, _ = _export(root, SR)
+        out, _ = _export(root, SR, phi_tags=KEEP_CONTENT)
         exports[strategy] = {k: v for k, v in _d_arm_values(out).items()}
     assert len(exports["processes"]) == 16
     assert exports["processes"] == exports["threads"]

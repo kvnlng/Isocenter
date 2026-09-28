@@ -46,8 +46,10 @@ PINNED_FLOOR_BASE = "basic@2026c"
 PINNED_DIGESTS = {
     # #544: the 55 `U` rows and `006a,0003` gained a value-less REPLACE,
     # the keyed UID replacement (590 -> 646 rules).
-    "basic@2026c": "113e1151d676310a4c577690ddf6701c993473426d9db348625a28a664fbc6e2",
-    "floor": "60d328ee0fb22c9602bb1dc7ad7d8b3d0fb1a1760c7835031e9fefcfc446108a",
+    # 1.0.0rc4: Content Sequence (0040,a730), coded D, gained EMPTY: a
+    # TEXT item's free text is no row, so recursion left it (646 -> 647).
+    "basic@2026c": "49b92de98c6ee3ba883f31fe0fd5401b448f45c58d2198090d9f6f8c3ef569ec",
+    "floor": "3a5e6d5091463fff33a35648047e47dec8de2b983867e7950578a6dde4436347",
 }
 #: The rules 1.0 ships under each pinned name: `PINNED_DIGESTS` as it
 #: stood when L14 (#26, #527) filled this on `main`, before RELEASING.md's
@@ -57,8 +59,8 @@ PINNED_DIGESTS = {
 #: floor updates **both** dicts in the same PR, and its review checks that
 #: it did; after the tag this one never changes.
 FROZEN_AT_1_0 = {
-    "basic@2026c": "113e1151d676310a4c577690ddf6701c993473426d9db348625a28a664fbc6e2",
-    "floor": "60d328ee0fb22c9602bb1dc7ad7d8b3d0fb1a1760c7835031e9fefcfc446108a",
+    "basic@2026c": "49b92de98c6ee3ba883f31fe0fd5401b448f45c58d2198090d9f6f8c3ef569ec",
+    "floor": "3a5e6d5091463fff33a35648047e47dec8de2b983867e7950578a6dde4436347",
 }
 
 #: The one sentence both digest tests end on (owner ruling Q3, 2026-09-21).
@@ -112,7 +114,7 @@ def test_the_pinned_name_loads_the_2026c_table(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(path)
         assert session.configuration.phi_tags == BASIC_PROFILE
-        assert len(session.configuration.phi_tags) == 646
+        assert len(session.configuration.phi_tags) == 647
         assert session.configuration.privacy_profile == "basic@2026c"
 
 
@@ -339,7 +341,7 @@ def test_the_report_names_the_edition_and_tells_floor_from_none(tmp_path):
         basic = _report_rows(session, tmp_path, "basic.md")
     assert basic["Privacy Profile"] == "| Privacy Profile | basic@2026c |", basic
     assert "edition 2026c" in basic["De-ID Method"], basic
-    assert "646 tag rules" in basic["De-ID Method"], basic
+    assert "647 tag rules" in basic["De-ID Method"], basic
 
     with Session(str(tmp_path / "none.db")) as session:
         session.load_config(_config(tmp_path, "privacy_profile: none\n", "n.yaml"))

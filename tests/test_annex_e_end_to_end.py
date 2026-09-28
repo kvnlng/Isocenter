@@ -16,7 +16,7 @@ absent outright, whatever its row (#556). The probe list only makes sure
 each kind of identifier is in the input, so an edit to the fixture
 cannot quietly stop testing one.
 
-Both worker paths, because the process path pickles the 646-rule policy
+Both worker paths, because the process path pickles the 647-rule policy
 into every scan task and the thread path does not.
 """
 import os
@@ -79,7 +79,7 @@ SEQUENCE_PROBES = {
     0x00081110: "sequence",               # Referenced Study Sequence (X/Z)
     0x04000561: "sequence",               # Original Attributes Sequence (X)
     0x00101002: "nested in a sequence",   # Other Patient IDs Sequence: nested Patient ID
-    0x0040A730: "nested in a sequence",   # Content Sequence (no rule): nested DT and PN
+    0x0040A730: "sequence",               # Content Sequence (D): emptied, nested DT and PN with it
     0x0040A073: "nested in a sequence",   # Verifying Observer Sequence (no rule): nested SQ and PN
 }
 
@@ -298,11 +298,13 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
 
     # Emptied, not removed: a zero-item sequence is present.
     assert (0x0008, 0x1110) in out and len(out[0x0008, 0x1110].value) == 0
+    # Content Sequence's D too: a TEXT item's free text is no row, so
+    # recursion could not clean it (1.0.0rc4).
+    assert (0x0040, 0xA730) in out and len(out[0x0040, 0xA730].value) == 0
     for tag in (0x00400275, 0x04000561):
         assert tag not in out, f"{tag:08x} survived"
-    # Cleaned by recursion: the containers with no rule keep their items,
-    # and what is inside them is empty.
-    assert len(out[0x0040, 0xA730].value) == 1
+    # Cleaned by recursion: the container with no rule keeps its item,
+    # and what is inside it is empty.
     observer = out[0x0040, 0xA073].value[0]
     # D: Verifying Observer Name is Type 1 in an SR, so it is replaced by
     # a dummy rather than emptied (#557).

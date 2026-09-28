@@ -517,6 +517,11 @@ BASIC_PROFILE = {
     "0040,a354": {"action": "REMOVE", "name": "Telephone Number (Trial)"},  # X
     "0040,a358": {"action": "REMOVE", "name": "Verbal Source Identifier Code Sequence (Trial)"},  # X
     "0040,a402": {"action": "REPLACE", "name": "Observation Subject UID (Trial)"},  # U
+    # D in the table, EMPTY here as for the other D-arm sequences (#557): a
+    # TEXT item's Text Value (0040,a160) is free text that no row reaches,
+    # so the rows nested here cannot clean it. Without this rule a
+    # Structured Report's text was exported as written, until 1.0.0rc4.
+    "0040,a730": {"action": "EMPTY", "name": "Content Sequence"},  # D
     "0040,b034": {"action": "REMOVE", "name": "Annotation DateTime"},  # X
     "0040,b036": {"action": "REMOVE", "name": "Segment Definition DateTime"},  # X
     "0040,b03b": {"action": "REMOVE", "name": "Montage Name"},  # X
