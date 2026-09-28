@@ -5,7 +5,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Never post patient data here.** Everything written here is public, so replace every path, UID and value from your data with a placeholder. If an export still carries something it should have removed, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+        **Never post patient data here.** If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+
+        Everything written here is public. Replace every path, UID and value from your data with a placeholder. Shape details (modality, manufacturer and model, transfer syntax, tag paths) are fine; a device serial number is not.
+
+        Never attach the session store (`.db`, `-wal`, `-shm`, `_pixels.bin`), the key file, exported files, a manifest, the cohort table (`export_metadata.csv`), `isocenter.log`, a screenshot of an image, or the compliance report beyond its two summary tables. If a file is needed to show the question, make a synthetic one.
   - type: textarea
     id: question
     attributes:
@@ -23,5 +27,5 @@ body:
     attributes:
       label: Before you submit
       options:
-        - label: Nothing in this issue is patient data, and every path, UID and value from my data is replaced with a placeholder.
+        - label: Nothing in this issue is patient data. Every path, UID and value from my data, other than shape details, is replaced with a placeholder, and nothing from my data is attached except the report's two summary tables.
           required: true

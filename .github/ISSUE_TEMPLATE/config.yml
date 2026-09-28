@@ -6,7 +6,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Private security report
     url: https://github.com/kvnlng/Isocenter/security/advisories/new
-    about: An export still carries something it should have removed, or lets someone recover an identity or a real date. Never a public issue.
+    about: An export still carries something it should have removed or replaced, or lets someone recover an identity or a real date. Never a public issue.
   - name: Feedback and ideas
     url: https://github.com/kvnlng/Isocenter/discussions
     about: Tell us how a run went, or suggest a change. Never post patient data, logs or report rows.
