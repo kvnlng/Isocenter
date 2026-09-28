@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A security policy, and issue forms that say what never to post.** Every contact statement sent bug reports to public issues, and none named a private route for a leak. Private vulnerability reporting, which was off, is now on.
+- **A security policy, and issue forms that say what never to post (#837).** Every contact statement sent bug reports to public issues, and none named a private route for a leak. Private vulnerability reporting, which was off, is now on.
   - **What counts.** `.github/SECURITY.md` names three kinds of security problem. The first is an exported file that still carries what the session's policy says to remove or replace. The second is a value that the built-in `basic` profile keeps against Table E.1-1 when Configuration lists no departure for it. The third is an export that lets someone recover an identity or a real date, or confirm a guess about one, without the project's secret or key; GHSA-phg9-vcvc-j4r7 was this kind.
   - **What does not.** The contents of the store, the report, a manifest, the cohort table or the log are not security problems, because those belong to the operator and are not de-identification outputs. Neither is a value the configuration keeps on purpose, nor burned-in text in a region no rule covers. Those go to public issues, described by their shape and never by their content.
   - The policy also says how to report privately, what happens after a report, and that security fixes are made on the 1.0 line only.
