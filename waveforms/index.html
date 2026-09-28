@@ -1970,10 +1970,10 @@ use routinely, are dropped at ingest (see
 <li><strong>A bare <code>Session()</code>, never <code>load_config()</code>-ed</strong>, applies the floor
   policy: the basic profile plus three research defaults.</li>
 <li><strong>The Quick Start above</strong> loads <code>privacy_profile: basic@2026c</code>, the Basic
-  Profile column of DICOM PS3.15 Annex E Table E.1-1 (2026c): <strong>646 tags, 646
+  Profile column of DICOM PS3.15 Annex E Table E.1-1 (2026c): <strong>648 tags, 648
   effective</strong>, every one reachable by the scan, including those inside
   sequences. The scaffold <code>create_config()</code> writes carries the same three
-  research defaults, so it applies the same 646 rules as a bare session.</li>
+  research defaults, so it applies the same 648 rules as a bare session.</li>
 <li><strong>Your own configuration</strong> is layered on the floor, on a profile, or,
   with <code>privacy_profile: none</code>, is the whole policy. Your explicit tags win
   over the base, and <code>action: KEEP</code> opts a tag out.</li>
