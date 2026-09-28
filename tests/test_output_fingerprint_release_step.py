@@ -152,6 +152,7 @@ COMMITTED = {
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
     "float_pixels": ["float_pixels-1.dcm"],
+    "graphic_annotation": ["graphic_annotation-1.dcm"],
     "implicit": ["implicit-1.dcm"],
     "longitudinal": ["longitudinal-s1-1.dcm", "longitudinal-s1-2.dcm",
                      "longitudinal-s1-3.dcm", "longitudinal-s2-1.dcm",

@@ -291,10 +291,46 @@ def prior_markers(out: Path):
     write(ds, out / "prior_markers-1.dcm")
 
 
+def graphic_annotation(out: Path):
+    """A CT with a Graphic Annotation Sequence whose objects hold free text
+    no row of the table reaches -- a text object's Tracking ID and a
+    ruler's Tick Label -- beside an Unformatted Text Value and a Tracking
+    UID, which are rows. `basic@2026c` empties the sequence (#840). No
+    other member carries one."""
+    ds = ct("graphic_annotation")
+    text = Dataset()
+    text.AnchorPointAnnotationUnits = "PIXEL"
+    text.AnchorPoint = [4.0, 4.0]
+    text.AnchorPointVisibility = "Y"
+    text.UnformattedTextValue = "GOLD annotation text"
+    text.TrackingID = "GOLD tracking label"
+    text.TrackingUID = uid("graphic_annotation", "tracking")
+    tick = Dataset()
+    tick.TickPosition = 0.5
+    tick.TickLabel = "GOLD tick"
+    ruler = Dataset()
+    ruler.CompoundGraphicInstanceID = 1
+    ruler.CompoundGraphicUnits = "PIXEL"
+    ruler.GraphicDimensions = 2
+    ruler.NumberOfGraphicPoints = 2
+    ruler.GraphicData = [0.0, 0.0, 8.0, 8.0]
+    ruler.CompoundGraphicType = "RULER"
+    ruler.MajorTicksSequence = Sequence([tick])
+    ruler.TickAlignment = "CENTER"
+    ruler.TickLabelAlignment = "TOP"
+    ruler.ShowTickLabel = "Y"
+    annotation = Dataset()
+    annotation.GraphicLayer = "GOLD"
+    annotation.TextObjectSequence = Sequence([text])
+    annotation.CompoundGraphicSequence = Sequence([ruler])
+    ds.GraphicAnnotationSequence = Sequence([annotation])
+    write(ds, out / "graphic_annotation-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id, withheld, prior_markers)}
+    no_patient_id, withheld, prior_markers, graphic_annotation)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

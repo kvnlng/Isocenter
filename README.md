@@ -62,7 +62,7 @@ if __name__ == "__main__":
         session.generate_report("compliance_report.md")
 ```
 
-With no configuration loaded, the default policy is the Basic Profile table (646 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient written. An image the default lossless JPEG 2000 cannot hold (32-bit samples, for example) is not written: its `ERROR` row says so and names `use_compression=False`. The Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
+With no configuration loaded, the default policy is the Basic Profile table (648 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient written. An image the default lossless JPEG 2000 cannot hold (32-bit samples, for example) is not written: its `ERROR` row says so and names `use_compression=False`. The Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
 
 ## Burned-in text
 
@@ -139,6 +139,6 @@ Releases up to and including 0.9.2 were published under the GNU Affero General P
 
 ## Contact
 
-Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues); they are answered there, in public, for free.
+Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues); they are answered there, in public, for free. Never post patient data, or anything taken from it, in an issue. If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
 
-Help beyond that is available as paid consulting: configuring a de-identification profile for a protocol, integrating Isocenter into a pipeline, reviewing a run's report before it goes to a reviewer, or a feature your study needs sooner than the roadmap. Write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
+Help beyond bug reports and questions is available as paid consulting: configuring a de-identification profile for a protocol, integrating Isocenter into a pipeline, reviewing a run's report before it goes to a reviewer, or a feature your study needs sooner than the roadmap. Write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.

@@ -47,6 +47,15 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: every fingerprint, so it re-measures the (0012,0063) literals in
 #: `tests/test_an_export_says_how_it_was_de_identified.py` and retakes
 #: `fingerprint/output.json`.
+#:
+#: Before the v1.0.0 tag, a change to a pinned profile's own rules is not
+#: a bump: 2.0 is still the schema 1.0 ships, and those rules are in the
+#: fingerprint themselves, so the policies built on the profile move and
+#: `none` does not. After the tag the profile is frozen
+#: (`tests/test_profile_editions.py`), and the one change it allows,
+#: correcting a row the published standard shows was transcribed wrongly,
+#: is a Breaking entry that raises the minor, since it applies an
+#: unchanged file differently.
 CONFIG_VERSION = "2.0"
 
 #: The one major this library reads. A string, compared as a string, so
