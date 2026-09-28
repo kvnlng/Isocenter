@@ -291,7 +291,6 @@ def prior_markers(out: Path):
     write(ds, out / "prior_markers-1.dcm")
 
 
-
 def graphic_annotation(out: Path):
     """A CT with a Graphic Annotation Sequence whose objects hold free text
     no row of the table reaches -- a text object's Tracking ID and a
@@ -326,6 +325,7 @@ def graphic_annotation(out: Path):
     annotation.CompoundGraphicSequence = Sequence([ruler])
     ds.GraphicAnnotationSequence = Sequence([annotation])
     write(ds, out / "graphic_annotation-1.dcm")
+
 
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
