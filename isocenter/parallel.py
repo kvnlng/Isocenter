@@ -687,10 +687,12 @@ def _run_on_shared_executor(executor, func, items, strategy):
     _end_broken_pool_stragglers(executor)
     try:
         # The dispatch is inside: `map` submits every item before it
-        # returns, and `submit()` raises on a pool that broke meanwhile.
-        # One that breaks during those submits while a worker outlives its
-        # SIGTERM blocks the next submit instead, and nothing on this
-        # thread can end that worker.
+        # returns, and `submit()` raises on a pool already broken. A death
+        # during the submits is seen after them, all but always: the
+        # manager thread counts a pool broken only when neither a submit's
+        # wakeup nor a result is waiting. Seen between two submits, it
+        # would block the next one behind a worker that outlived SIGTERM,
+        # which nothing on this thread could end.
         iterator = mapper(func, items, chunksize=strategy.chunksize)
         yield from _tracked(iterator, items, strategy)
     except BrokenProcessPool:
