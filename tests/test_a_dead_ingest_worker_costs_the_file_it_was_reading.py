@@ -51,6 +51,11 @@ from isocenter.io_handlers import DicomImporter
 from isocenter.session import DicomSession
 from isocenter.store import DicomStore
 
+from test_parallel_contract import (_bounded, _break_while_idle,
+                                    _outlive_sigterm, _sigkill_records,
+                                    _start_two_workers,
+                                    _wait_for_a_ready_sibling)
+
 
 def _die_reading(marker, how, once_marker=None):
     """Pool initializer: reading a path containing `marker` ends the worker.
@@ -852,3 +857,187 @@ def test_a_fresh_worker_that_ends_once_at_start_gets_one_more_pool(
     assert [p for p, _ in summary.failures] == [paths[3]]
     assert summary.failures[0][1].startswith(io_handlers._WORKER_ENDED_READING)
     assert summary.ingested == 7
+
+
+# --- #796: a worker that outlives its broken pool's SIGTERM ------------------
+#
+# When a worker ends outright, CPython sends every other worker of the pool
+# SIGTERM and then waits for each with no timeout, holding the pool's
+# shutdown lock, which `submit()` and `shutdown()` take first. So a worker
+# that handles SIGTERM hung `ingest()` for good: in the pool rebuild after
+# the import, or in the next call's first dispatch when the pool broke
+# while idle, or in `close()`. The product shape is a script that installs
+# a graceful-shutdown handler at module level, which spawn runs again in
+# every worker. The helpers and the handshake are `test_parallel_contract`'s.
+
+
+def _die_reading_outliving_sigterm(marker_dir):
+    """Pool initializer: every worker outlives SIGTERM, and reading a
+    POISON path ends the worker once a sibling has installed its handler.
+
+    The handshake orders the death after the sibling's handler: a sibling
+    still starting has SIGTERM's default disposition, dies of the pool's
+    SIGTERM, and leaves nothing to end.
+    """
+    _outlive_sigterm(marker_dir)
+    real = pydicom.dcmread
+
+    def dcmread(fp, *args, **kwargs):
+        if "POISON" in str(fp):
+            _wait_for_a_ready_sibling(marker_dir)
+            os._exit(13)  # pylint: disable=protected-access
+        return real(fp, *args, **kwargs)
+    pydicom.dcmread = dcmread
+
+
+@pytest.fixture
+def _a_second_of_grace(monkeypatch):
+    """`_BROKEN_POOL_GRACE_S` at one second, so a kill costs one.
+
+    `raising=False`: on a tree without the constant these tests go red for
+    the hang they exist for, not on an `AttributeError` here.
+    """
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0, raising=False)
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_a_worker_that_outlives_its_broken_pool_is_ended_and_ingest_returns(
+        tmp_path, monkeypatch, caplog):
+    """The dead worker's sibling ignores SIGTERM, and `ingest()` returns.
+
+    It hung in the pool rebuild after the import:
+    `_restart_executor`'s `shutdown(wait=False)` waited for the lock the
+    manager thread held while it waited on the sibling. Killed, the sibling
+    frees it, and the summary is the one a dead worker always gives.
+
+    Killing mutations: the reap on `BrokenProcessPool` in
+    `_run_on_shared_executor` deleted; its `kill()` deleted, or turned into
+    `terminate()`.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _die_reading_outliving_sigterm, str(markers)))
+    src, paths = _folder(tmp_path, 8, poison_at=(3,))
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(src)), 60)
+        assert not hung, (
+            "ingest() did not return: a worker that outlives the broken "
+            "pool's SIGTERM hangs it (#796)")
+        assert multiprocessing.active_children() == []
+    assert summary.ingested == 7
+    assert [p for p, _ in summary.failures] == [paths[3]]
+    ended = _sigkill_records(caplog)
+    assert len(ended) == 1 and ended[0].levelno == logging.WARNING, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_the_next_ingest_ends_a_worker_that_outlived_an_idle_break(
+        tmp_path, monkeypatch, caplog):
+    """The shared pool broke between two `ingest()` calls, and the second
+    one returns.
+
+    The out-of-memory killer on an idle worker. The second call's first
+    `submit()` waited for the lock the manager thread held while it
+    waited on the sibling, so nothing raised and nothing reaped: the
+    sibling has to be ended before the dispatch.
+
+    Killing mutation: the call before the dispatch in
+    `_run_on_shared_executor` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first, _ = _folder(tmp_path / "a", 2)
+    second, _ = _folder(tmp_path / "b", 3)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        assert session.ingest(str(first)).ingested == 2
+        _break_while_idle(session._executor, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(second)), 60)
+        assert not hung, (
+            "ingest() did not return: dispatching on a pool that broke "
+            "while idle waits behind the worker that outlived it (#796)")
+        assert multiprocessing.active_children() == []
+    assert summary.ingested == 3 and summary.failures == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_close_ends_a_worker_that_outlived_an_idle_break(
+        tmp_path, monkeypatch, caplog):
+    """`close()` returns though its pool broke while idle.
+
+    Its `shutdown(wait=True)` takes the same lock, so it hung behind the
+    worker that outlived the pool's SIGTERM, with no `ingest()` after the
+    break to end it.
+
+    Killing mutation: the call before the shutdown in `close()` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    session = DicomSession(str(tmp_path / "s.db"))
+    closed = False
+    try:
+        pool = session._executor
+        _start_two_workers(pool)
+        processes = list(pool._processes.values())
+        _break_while_idle(pool, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, _ = _bounded(session.close, 60)
+        closed = True
+    finally:
+        if not closed:
+            for child in multiprocessing.active_children():
+                child.kill()
+            session.close()
+    assert not hung, (
+        "close() did not return: its pool broke while idle, and a worker "
+        "that outlived the pool's SIGTERM held the pool's lock (#796)")
+    assert not any(p.is_alive() for p in processes)
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_a_resize_retires_a_pool_that_broke_while_idle(
+        tmp_path, monkeypatch, caplog):
+    """An `ingest()` that resizes the shared pool returns though the pool it
+    retires broke while idle.
+
+    `_retire_shared_executor` shuts the old pool down with `wait=True`,
+    which hung behind the worker that outlived the pool's SIGTERM.
+
+    Killing mutation: the call before the shutdown in
+    `_retire_shared_executor` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    src, _ = _folder(tmp_path, 3)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        pool = session._executor
+        _start_two_workers(pool)
+        processes = list(pool._processes.values())
+        _break_while_idle(pool, str(markers))
+        monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "1")
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(src)), 60)
+        assert not hung, (
+            "ingest() did not return: the resize's retirement of a pool "
+            "that broke while idle waited behind the worker that outlived "
+            "it (#796)")
+        assert session._executor is not pool
+        assert not any(p.is_alive() for p in processes)
+    assert summary.ingested == 3 and summary.failures == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]

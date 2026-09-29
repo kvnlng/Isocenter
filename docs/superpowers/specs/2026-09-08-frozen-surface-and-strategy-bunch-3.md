@@ -39,6 +39,13 @@ rendered in tier 2 (the page now renders the `get_audit_*` readers and
 private); and §5.7's Q8 rule, with its recommendation under Q8 in §0.2,
 that no `members:` filter is added to `api/persistence.md` and
 `api/entities.md` (both pages are now filtered).
+**Superseded in part:** #796 (2026-09-29). §4.1's `.coveragerc`, as
+quoted, ends its `core = ctrace` paragraph with "The C tracer takes a
+lock only while registering a new file." That is false: the C tracer
+takes the collector's `data_lock` on every call into a measured file,
+and that lock is a real, non-reentrant `threading.Lock` whenever
+`concurrency` includes `thread` or is unset. The sentence is struck in
+place, with the correction under the quoted file.
 
 **Status:** Determinations MADE, with evidence. §1–§5 are the
 recommendations; §0.2 lists the calls that are the owner's, each as
@@ -673,8 +680,8 @@ and get a hang that reproduces once in ~460 workers.
 # and stop() takes the same lock; a SIGTERM handler that runs while the
 # main thread is inside that region self-deadlocks the worker, and the
 # parent then waits forever in Pool._terminate_pool -> p.join().
-# Measured once in ~460 spawned workers on 3.14.6. The C tracer takes a
-# lock only while registering a new file.
+# Measured once in ~460 spawned workers on 3.14.6. ~~The C tracer takes a
+# lock only while registering a new file.~~
 #
 # No `patch = subprocess`: with it every spawned child is instrumented
 # twice (the .pth hook at interpreter start and the multiprocessing
@@ -691,6 +698,15 @@ sigterm = True
 show_missing = False
 skip_empty = True
 ```
+
+> **Superseded in part by #796 (2026-09-29).** The struck sentence is
+> false. The C tracer calls `lock_data()` and `unlock_data()` in
+> `CTracer_handle_call` on every call into a measured file (coverage
+> 7.16.0, `tracer.c`), not only in its branch for a new file. The lock
+> it takes is the collector's `data_lock`, which is a non-reentrant
+> `threading.Lock` whenever `concurrency` includes `thread` or is unset,
+> and `None` under this file's `concurrency = multiprocessing` alone.
+> The `.coveragerc` in the repository now says so.
 
 **The documented invocation**, for CLAUDE.md's Commands block (needs the
 `dev` extra, §4.5):

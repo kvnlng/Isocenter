@@ -64,6 +64,7 @@ The table layout is described for contributors in [Contributing](developer_guide
 - Once the fatal file is found, the rest are read at full width (`ISOCENTER_MAX_WORKERS`), the call saves as usual, and the session's pool is replaced.
 - A death that does not recur costs no file and writes no audit row; a `WARNING` log line records it.
 - If two fresh workers in a row cannot run a trivial task, every file left is rejected as "Not read", with a reason naming the causes that do this (a script without the `if __name__ == "__main__":` guard among them), and the call returns.
+- When a worker ends, the other workers in its pool are sent `SIGTERM`. Once `ingest()` or `close()` finds the pool broken, one still running 10 s later is ended with `SIGKILL`, and a `WARNING` log line names it, so neither waits on it for good. A worker keeps running after `SIGTERM` when something in it handles the signal: a handler your script installs at module level runs again in every spawned worker.
 - Any other failure of the worker pool raises.
 
 Each worker death costs a fresh pool, a few tenths of a second, so a run whose deaths do not recur can pay for several. A fatal file costs two or three pools, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a time. The retry rounds send one file per task whatever `ISOCENTER_CHUNKSIZE` says.
