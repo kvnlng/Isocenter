@@ -1758,8 +1758,8 @@ def test_the_sidecar_gate_deadline_sits_inside_the_timeout_family():
 
 
 def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
-    """`5 <= _BROKEN_POOL_GRACE_S < _STALL_S < 300`, and the helper reads it
-    (#796).
+    """`5 <= _BROKEN_POOL_GRACE_S < _STALL_S`, below the faulthandler window
+    too, and the helper reads it (#796).
 
     After a pool breaks, its workers get the grace to end before
     `_end_broken_pool_stragglers` SIGKILLs them. Below `_STALL_S`, so a

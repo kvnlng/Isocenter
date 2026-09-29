@@ -566,20 +566,20 @@ def _tracked(iterator, items, strategy) -> Iterator:
                     desc=strategy.desc)
 
 
-#: How long the workers of a broken process pool get to end before
-#: `_end_broken_pool_stragglers` sends SIGKILL to each one still running
-#: (#796). No environment variable: tests patch it.
+#: How long the workers of a broken process pool get to end, counted from
+#: when `_end_broken_pool_stragglers` finds the pool broken, before it
+#: sends SIGKILL to each one still running (#796). No environment
+#: variable: tests patch it.
 #:
-#: The bottom of the timeout family, 10 < 120 < 180 < 240 < 300. Below
-#: conftest's `_STALL_S` (120 s), so a pool teardown that ends in a kill is
-#: never reported as a stall or dumped; `test_packaging_contract.py` pins
-#: that. It has no order to keep with the sqlite busy timeout or the
-#: sidecar gate: it holds no sqlite handle and no gate, and the only lock
-#: around it is the shared pass-lock of `ingest()` and `redact()`, which
-#: `compact()` refuses on rather than waits for. Not below a few seconds: a
-#: worker that saves its state on SIGTERM must get to finish, and coverage's
-#: `sigterm = True` handler takes up to 0.8 s under load to write the
-#: worker's data file.
+#: Below conftest's `_STALL_S` and pytest's faulthandler window, so a pool
+#: teardown that ends in a kill is never reported as a stall or dumped.
+#: Unrelated to the family of waits on sqlite and the sidecar gate: it
+#: holds no sqlite handle and no gate, and the only lock around it is the
+#: shared pass-lock of `ingest()` and `redact()`, which `compact()` refuses
+#: on rather than waits for. Not below a few seconds: a worker that saves
+#: its state on SIGTERM must get to finish, and coverage's `sigterm = True`
+#: handler takes up to 0.8 s under load to write the worker's data file.
+#: `test_packaging_contract.py` pins both ends, the floor at 5 s.
 _BROKEN_POOL_GRACE_S = 10.0
 
 
@@ -655,7 +655,7 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
         # already gone, so the cost is a second line naming the same pids.
         get_logger().warning(
             "%d worker process(es) of a broken process pool were still "
-            "running %g s after the pool sent them SIGTERM, and were sent "
+            "running %g s after the pool was found broken, and were sent "
             "SIGKILL (pid %s). A worker outlives SIGTERM when something in "
             "it handles that signal; a handler a script installs at module "
             "level runs again in every spawned worker.",

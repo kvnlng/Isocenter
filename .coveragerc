@@ -30,8 +30,9 @@
 # handler while the handler holds it. CPython then joins the survivor
 # with no timeout while holding the pool's shutdown lock
 # (python/cpython#158413), which hung the test-map build. Since #796 the
-# package's pools SIGKILL a worker still running 10 s after its pool broke
-# (parallel._BROKEN_POOL_GRACE_S), which costs that worker's data.
+# package's pools SIGKILL a worker still running 10 s after its pool is
+# found broken (parallel._BROKEN_POOL_GRACE_S), which costs that worker's
+# data.
 # Export's recycling pool is not covered by that (#860).
 #
 # `core = ctrace` is load-bearing on 3.14. coverage defaults to the

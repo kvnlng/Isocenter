@@ -1442,8 +1442,9 @@ class DicomSession:
         thread that owns the sqlite connection, and the process pool. A
         session that is never closed leaks its worker subprocesses for the
         life of the process. If the pool is broken, because one of its
-        workers ended outright, a worker of it still running 10 s later is
-        sent `SIGKILL`, and one `WARNING` line names it.
+        workers ended outright, a worker of it still running 10 s after
+        `close()` finds it so is sent `SIGKILL`, and one `WARNING` line
+        names it.
 
         All three steps run even if an earlier one raises. If more than
         one fails, the first failure is raised and the later ones are
@@ -2202,12 +2203,13 @@ class DicomSession:
         too. Files already read are kept, and a death that does not recur
         costs no file and logs one `WARNING` line. When a worker ends, the
         pool's other workers are sent `SIGTERM`; one still running 10 s
-        later, as a worker of a script that handles `SIGTERM` can be, is
-        sent `SIGKILL`, and one `WARNING` line names it. If fresh workers
-        cannot run at all, every file left is rejected as "Not read", with
-        a reason naming the usual causes (a script without the
-        `if __name__ == "__main__":` guard among them), and the call
-        returns. Any other failure of the worker pool raises.
+        after `ingest()` finds the pool broken, as a worker of a script
+        that handles `SIGTERM` can be, is sent `SIGKILL`, and one `WARNING`
+        line names it. If fresh workers cannot run at all, every file left
+        is rejected as "Not read", with a reason naming the usual causes
+        (a script without the `if __name__ == "__main__":` guard among
+        them), and the call returns. Any other failure of the worker pool
+        raises.
 
         **Duplicate SOP Instance UIDs.** A file whose SOP Instance UID an
         instance in this session already holds (ingested earlier in this

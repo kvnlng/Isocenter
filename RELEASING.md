@@ -265,7 +265,7 @@ fixes, never features.
    sent the other workers SIGTERM and waited for each with no timeout,
    and coverage's own SIGTERM handler could keep one of them running for
    good. Since #796 was fixed, a worker still running 10 s after its pool
-   broke is sent SIGKILL. A stall shows as the conftest watchdog's
+   is found broken is sent SIGKILL. A stall shows as the conftest watchdog's
    `ISOCENTER STALL WATCHDOG: nothing has happened for Ns (#250)` banner,
    repeated every 120 s. It never ends the run, so kill only that run's
    processes. faulthandler's `Timeout (0:05:00)!` dump is printed once
