@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A worker outlives SIGTERM when something in it handles the signal:
   - A script's module-level handler does, since spawn runs a script's module-level code again in every worker.
   - So does a handler that calls `sys.exit(0)`, since a worker running a task catches the `SystemExit` as that task's failure.
-  - So does coverage's `sigterm = True` handler, which is not re-entrant: the second SIGTERM re-enters it, and it deadlocks on the collector's lock or raises into the running task. That is what hung the 3.14t test-map build at the 1.0.0rc1 cut and after the 1.0.0rc5 cut.
+  - So does coverage's `sigterm = True` handler, which is not re-entrant. With `thread` in `concurrency`, as the map build has it, it can deadlock on the collector's lock. Re-entered by the second SIGTERM during its save, it can raise into the running task, which records that as the task's failure. That is what hung the 3.14t test-map build at the 1.0.0rc1 cut and after the 1.0.0rc5 cut.
 
   Measured on 3.12.14 and 3.14.7t without coverage: a script with a module-level SIGTERM handler ingested 8 files, one of them fatal. `ingest()` hung in the pool rebuild, and returned the right summary (7 ingested, the fatal file named) only once the surviving worker was killed by hand.
 

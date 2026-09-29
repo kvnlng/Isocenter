@@ -16,19 +16,22 @@
 # stop() and save() at whatever bytecode the worker's main thread is on,
 # then kills the process again. When a ProcessPoolExecutor worker ends
 # outright, CPython sends every other worker SIGTERM twice, and a second
-# SIGTERM during the first handler's save() makes the nested save fail on
-# the half-written data file (`DataError: ... no such table: context`).
+# SIGTERM during the first handler's save() can make the nested save fail
+# on the half-written data file (`DataError: ... no such table: context`).
 # That exception escapes into the running task, which records it as the
-# task's failure, and the worker waits for work for good. With `thread`
-# in `concurrency`, as the test-map build has it, the collector's
-# data_lock is a non-reentrant threading.Lock, and the handler deadlocks
-# on it when it fires while the C tracer holds it or when a second
-# SIGTERM re-enters it. Removing `thread` does not remove the hang.
-# CPython then joins the survivor with no timeout while holding the
-# pool's shutdown lock, which hung the test-map build. Since #796 the
-# package's pools SIGKILL a worker still running 10 s after its pool
-# broke (parallel._BROKEN_POOL_GRACE_S), which costs that worker's data.
-# Export's recycling pool is not covered by that (#860).
+# task's failure, and the worker waits for work for good. Under this
+# file's `concurrency = multiprocessing` that is the only way in: the
+# collector's data_lock is None. With `thread` in `concurrency`, as the
+# test-map build has it, or with `concurrency` unset, data_lock is a
+# non-reentrant threading.Lock that the C tracer takes on every call into
+# a measured file. One SIGTERM whose handler runs while the tracer holds
+# it deadlocks the worker, and so does a second SIGTERM that re-enters the
+# handler while the handler holds it. CPython then joins the survivor with
+# no timeout while holding the pool's shutdown lock, which hung the
+# test-map build. Since #796 the package's pools SIGKILL a worker still
+# running 10 s after its pool broke (parallel._BROKEN_POOL_GRACE_S), which
+# costs that worker's data. Export's recycling pool is not covered by that
+# (#860).
 #
 # `core = ctrace` is load-bearing on 3.14. coverage defaults to the
 # sys.monitoring core there (env.SYSMON_DEFAULT), whose callback holds a
@@ -36,10 +39,10 @@
 # and stop() takes the same lock; a SIGTERM handler that runs while the
 # main thread is inside that region self-deadlocks the worker, and the
 # parent then waits forever in Pool._terminate_pool -> p.join().
-# Measured once in ~460 spawned workers on 3.14.6. The C tracer does not
-# escape this entirely: it takes the collector's data_lock on every call
-# into a measured file, not only while registering a new one, and that is
-# a lock whenever `concurrency` includes `thread` (above).
+# Measured once in ~460 spawned workers on 3.14.6. The C tracer is not
+# free of locks either: it takes the collector's data_lock on every call
+# into a measured file, not only for a new file, and that lock is real
+# whenever `concurrency` includes `thread` or is unset (above).
 #
 # No `patch = subprocess`: with it every spawned child is instrumented
 # twice (the .pth hook at interpreter start and the multiprocessing
