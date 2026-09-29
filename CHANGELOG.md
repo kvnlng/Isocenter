@@ -5,6 +5,55 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`RELEASING.md` gains three rules that the 1.0.0rc4 and 1.0.0rc5 cuts needed (#845, #849).** No package code and no output change.
+  - **One failure or one hang in a release's integration run is rerun before anything is fixed (owner ruling on #845).** The procedure said a failure is fixed on `main` and the cut starts again, and spoke of a hang only in the 3.14t map build (#796). At 1.0.0rc4, 3.12 shard 3 stalled in the watchdog test (#844). That shard alone was killed and rerun in full at the same SHA, green, and the cut went on as a judgment the procedure did not grant (#843). Now it does, for one:
+    - What counts is a failed or errored test, a shard that crashes or exits non-zero with every test passed, or a hang.
+    - A hang is a stall banner naming the same test for 10 minutes with no new test starting (owner ruling on #856). A banner alone is not one: in a loaded run a healthy test stalled the watchdog for more than 5 minutes, drawing two banners, and passed.
+    - The shard is rerun once, at the same SHA. If the rerun is green the cut goes on, with both runs recorded in the release-commit PR and the flake filed.
+    - A red rerun, or a second failure or hang on either interpreter, is still a failure, handled as before. Step 3's text points to the rule, so a patch release reaches it too. A hang of the map build stays #796's case: it counts for nothing, and the plain sharded run that replaces the build has its own allowance of one (owner ruling on #856).
+  - **Runs in one checkout go one after the other, and runs at once each get their own worktree (#849).** The procedure said two runs could overlap unless *both* included `tests/test_packaging_contract.py`. One is enough. Its `built` fixture makes the sdist's release tree, `isocenter-<version>/`, in the repository root and deletes it again, and any other run whose closing root-guard snapshot falls inside that window exits 1 naming the tree, though every test passed. At #847's gate, the four shards of each interpreter ran at once in one worktree; 3.14t shard 3 passed its 158 tests and exited 1, while shard 4, the only one running the packaging test, was building. 1.0.0rc5's integration run gave each shard its own worktree. The procedure now gives the worktree recipe in full:
+    - `PYTHONPATH=<dir> python -m pytest`, never the `pytest` script, which imports the package from the main checkout it was installed from;
+    - a check that `isocenter.__file__` is under the worktree;
+    - a copy of the gitignored `.test-map.json`.
+  - **A release's dates are the UTC date of its PyPI upload (owner ruling on #856).** The procedure named no time zone for the `CHANGELOG.md` heading and `CITATION.cff`. 1.0.0rc5 was uploaded at 23:51 EDT on 2026-09-28 and carries 2026-09-29, the UTC date, which is how PyPI records the upload. Its release-commit PR was opened 78 minutes before the upload, so:
+    - the date allows for the whole wait;
+    - step 5 checks it before tagging;
+    - a slip is corrected by a PR into the release branch that changes only the two dates, with no second rehearsal (owner ruling on #856);
+    - steps 4 and 5 point to the check.
+
+### Fixed
+
+- **A test of ingest's dead-worker retry could reject a good file under load (#851).** `test_a_death_the_held_file_did_not_cause_rejects_no_good_file[a-worker-ends-after-returning-its-file]` failed once on 3.14t, at #848's merge gate, beside seven other shards and a fingerprint check: `03_LATE.dcm` was rejected beside `06_POISON.dcm`.
+  - **The window.** The test's `LATE` file ended its worker 0.15 s after it was read, which assumed the result was sent within that time. Under a load of process spawns it often was not: two thirds of `LATE`'s reads (133 of 198) ended their worker before the send. The worker died holding `LATE`, and so did the fresh worker it was then given alone, so `ingest()` rejected it by its own rule. `ingest()` lost no result and blamed no file wrongly; the test's premise did not happen.
+  - **Now.** `LATE` ends its worker when the worker starts reading another file. A worker sends each result before it takes its next task, so the death comes after `LATE`'s result is sent, with no timing assumed. The test also asserts that `LATE`'s death happened; its old check was satisfied by any death.
+  - **A second window, found in review.** `FLAKY` ended its worker the first time it was read, by a marker the worker wrote as it died. A round-0 worker slow to write it could be ended first by the other worker's `LATE` death, and `FLAKY`'s first read then came in the one-at-a-time round, as the first file, and was rejected. Injected, a 20 ms stall before the marker was enough; with the old 0.15 s timer it took more than 100 ms. `FLAKY` now ends only a worker of a pool that started before any worker ended, which the worker that takes it in round 0 always did, so it is inert in every retry. The test now also asserts that round 0 returned no file from `FLAKY` on, which holds whichever death ends round 0. Without that check, a `FLAKY` inert everywhere still passed: `LATE` then ended its worker in round 0 and met the `LATE` check.
+  - **Measured on 3.14t**, 40 parallel loops of the test, 3 runs each, beside 36 busy processes: 65 of 120 runs failed at `main` be649814, each with `03_LATE` rejected, and 0 of 120 with the fix.
+  - **Output:** none. Only a test changed.
+
+- **A worker process that outlives its broken pool no longer hangs `ingest()`, `close()` or `run_parallel`'s own process pools (#796).** When a pool worker ends outright, CPython sends every other worker SIGTERM, twice, and then waits for each one with no timeout while holding the pool's shutdown lock (python/cpython#158413). `shutdown()` takes that lock first, whatever `wait` says, and so does `submit()`. So a worker that did not end on SIGTERM hung the caller for good:
+  - `ingest()`, in the pool rebuild after the import;
+  - the next `ingest()`, at its first dispatch, when the session's pool had broken while idle (the out-of-memory killer between two calls), or in the retirement of such a pool when `ISOCENTER_MAX_WORKERS` had changed;
+  - `close()`, on such a pool;
+  - a `run_parallel` process pool, at its `with` exit. `audit()` and `redact()` dispatch through these on a GIL build;
+  - a stream left any other way after its pool broke: a reader that stops (`redact()` streams), Ctrl-C, or a task's own exception. `run_parallel`'s own pool hung at its `with` exit, and a caller's pool at its owner's `shutdown()`, as `ingest()` shuts down the retry pools it builds.
+
+  A worker outlives SIGTERM when something in it handles the signal:
+  - A script's module-level handler does, since spawn runs a script's module-level code again in every worker.
+  - So does a handler that calls `sys.exit(0)`, since a worker running a task catches the `SystemExit` as that task's failure.
+  - So does coverage's `sigterm = True` handler, which is not re-entrant (coveragepy/coveragepy#2310). With `thread` in `concurrency`, as the map build has it, it can deadlock on the collector's lock. Re-entered by the second SIGTERM during its save, it can raise into the running task, which records that as the task's failure. That is what hung the 3.14t test-map build at the 1.0.0rc1 cut and after the 1.0.0rc5 cut.
+
+  Measured on 3.12.14 and 3.14.7t without coverage: a script with a module-level SIGTERM handler ingested 8 files, one of them fatal. `ingest()` hung in the pool rebuild, and returned the right summary (7 ingested, the fatal file named) only once the surviving worker was killed by hand.
+
+  Now, once the package finds a pool broken, its workers get `_BROKEN_POOL_GRACE_S` (10 s) from then to end. It finds out at a result that fails, at any other way out of a stream, or when the next dispatch, `close()` or resize reaches a pool that broke while idle. Each one still running is sent SIGKILL, and one `WARNING` line names the pids. It is a log line and not an audit row, as a worker death that costs no file is (#654). A worker with the default SIGTERM behaviour dies within milliseconds, and is waited on no longer than that. A Ctrl-C during those 10 s, when the program looks stalled, sends the SIGKILL at once and then reaches the caller, rather than leaving the workers running for a `shutdown()` or the interpreter's exit to wait on for good. No exception changes.
+  - **What is not covered.** A worker in uninterruptible I/O cannot be ended by any signal. Export's recycling pool still exits through `terminate()`, which can hang the same way (#860). A pool that breaks, or is first seen broken, while its `shutdown()` is already waiting still hangs, because the reap runs before the shutdown and finds the pool healthy. Ctrl-C reaching the workers as well as the parent can do this. Measured on 3.12.14: a reader closed its stream while a task was still running, the task's worker was ended 2 s later, and the close was still waiting 20 s after that.
+  - **`.coveragerc` keeps `sigterm = True`.** Without it the map loses the export workers' records: 152 functions recorded as run in a worker, against 84. Its comment now says how the handler keeps a worker alive, and corrects the claim that the C tracer takes a lock only while registering a new file.
+  - **`RELEASING.md`:** step 1's 3.14t integration run is the map build again. The plain sharded run is kept as the fallback for a build that hangs.
+  - **Output:** none. No exported file changes.
+
 ## [1.0.0rc5] - 2026-09-29
 
 ### Changed
