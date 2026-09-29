@@ -84,24 +84,24 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
     another file, so while it holds whatever it took next; a worker given
     no further file lives on.
 
-    What the case needs from `LATE` and `FLAKY` depends on no timing (#851).
-    `LATE` ended the worker 0.15 s after its read, which assumed its result
-    was sent by then: under a load of process spawns, two thirds of its
-    reads (133 of 198) ended their worker first, and so did the fresh worker
-    `LATE` was then given alone, so `ingest()` rejected it. A worker sends
-    each result before it takes its next task, which `_ingest_results`
-    already relies on, so the next read comes after the send. `FLAKY` ended
-    the worker the first time it was read, by a marker written as it died: a
-    worker slow to write it could be ended first by the other worker's
-    `LATE`, and `FLAKY`'s first read then came in the one-at-a-time round,
-    as the first file, and was rejected (review of #857). Whether the pool
-    started before any death is read once, when the worker starts, as
-    `canary_once` reads it. The worker that takes `FLAKY` in round 0 always
-    started before any death: in the one case that has a `FLAKY` file, every
+    What the one case that uses `LATE` and `FLAKY` needs from them depends
+    on no timing (#851). `LATE` ended the worker 0.15 s after its read,
+    which assumed its result was sent by then: under a load of process
+    spawns, two thirds of its reads (133 of 198) ended their worker first,
+    and so did the fresh worker `LATE` was then given alone, so `ingest()`
+    rejected it. A worker sends each result before it takes its next task,
+    which `_ingest_results` already relies on, so the next read comes after
+    the send. `FLAKY` ended the worker the first time it was read, by a
+    marker written as it died: a worker slow to write it could be ended
+    first by the other worker's `LATE`, and `FLAKY`'s first read then came
+    in the one-at-a-time round, as the first file, and was rejected (review
+    of #857). Whether the pool started before any death is read once, when
+    the worker starts, as `canary_once` reads it. The worker that takes
+    `FLAKY` in round 0 always started before any death: in that case every
     other death needs a later file taken first, and a pool hands its files
     out in order. So round 0 returns no file from `FLAKY` on, whether
-    `FLAKY` ends that worker or another death ends the pool first, which is
-    timing. Then, whatever the file:
+    `FLAKY` ends that worker or another death ends the pool first; which of
+    the two happens is timing. Then, whatever the file:
 
     - `leak`: every worker process ends on its `leak`-th read -- the
       out-of-memory killer after a leak, the accumulation #654 names;
@@ -739,11 +739,11 @@ def test_a_death_the_held_file_did_not_cause_rejects_no_good_file(
         assert os.path.exists(marker_dir / "died-23")
     if "FLAKY" in tags.values():
         # Round 0 returned no file from `FLAKY` on, so the one-at-a-time
-        # round reads `LATE` and the file after it, and `LATE`'s death
-        # there is the one this case is about. That holds whichever death
-        # ended round 0: `FLAKY` is live for the worker that takes it
-        # there, and results come back in order. With `FLAKY` inert the
-        # case still passed: `LATE` ended its worker in round 0, the
+        # round reads `LATE` and the file after it, and `LATE`'s death there
+        # is the one this case is about. That holds whichever death ended
+        # round 0: `FLAKY` is live for the worker that takes it there, and
+        # results come back in order. With `FLAKY` inert everywhere the case
+        # still passed: `LATE` ended its worker in round 0, the
         # one-at-a-time round's death was `POISON`'s own, and the round-0
         # death met the check above (review of #857).
         flaky = min(i for i, tag in tags.items() if tag == "FLAKY")
