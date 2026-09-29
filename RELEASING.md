@@ -214,10 +214,10 @@ fixes, never features.
      exits non-zero with every test passed, or a hang. A **hang** is a
      shard whose stall banner, `ISOCENTER STALL WATCHDOG: nothing has
      happened for Ns (#250)`, names the same test with N at 600 or more:
-     10 minutes with no new test starting (owner ruling, 2026-09-29, on
-     #856). The banner is printed once 120 s pass without a new test
-     starting, and every 120 s after that, so a banner alone is not a
-     hang: in a loaded run a healthy test stalled the watchdog for more
+     10 minutes with no new test starting (owner ruling on #856,
+     2026-09-29). The banner is printed once 120 s pass without a new
+     test starting, and every 120 s after that, so a banner alone is not
+     a hang: in a loaded run a healthy test stalled the watchdog for more
      than 5 minutes, drawing two banners, and passed.
    - **What to do** (owner ruling on #845, 2026-09-29): kill only a hung
      shard's processes; let a shard with a failure finish, so that a
@@ -228,15 +228,16 @@ fixes, never features.
      hung shard (#843, #844) was the first, killed at about 8.5 minutes,
      before this rule set 10.
    - **The ruling covers one.** If the rerun is red, or a second failure
-     or hang turns up in the run, on either interpreter, it is a failure,
-     handled as the procedure you are following says for that run: step
-     1's is fixed on `main` and step 1 starts again; step 3's as step 3
-     says; a later release's as "Later releases on an existing line"
-     says.
+     or hang turns up in the run, on either interpreter, it is a failure
+     (a plain sharded run that replaces a hung map build counts its own,
+     below), handled as the procedure you are following says for that
+     run: step 1's is fixed on `main` and step 1 starts again; step 3's as
+     step 3 says; a later release's as "Later releases on an existing
+     line" says.
    - **A hang of the 3.14t map build** is the #796 case below, not this
-     one (owner ruling, 2026-09-29, on #856): the plain sharded run
-     replaces the build, and the build's hang does not count toward the
-     one.
+     one (owner ruling on #856, 2026-09-29): the plain sharded run
+     replaces the build and has its own allowance of one, apart from the
+     rest of the run's, and the build's hang counts toward neither.
 
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
@@ -313,8 +314,8 @@ fixes, never features.
      section; the file describes the code on the branch. A patch's first
      fix adds one back (see "Patch releases").
 
-     **Both dates are UTC** (owner ruling, 2026-09-29, recorded on
-     #856): `date-released` and the heading's date are the UTC date of
+     **Both dates are UTC** (owner ruling on #856, 2026-09-29):
+     `date-released` and the heading's date are the UTC date of
      step 6's PyPI upload, which is how PyPI records it. 00:00 UTC is
      20:00 EDT and 19:00 EST; `date -u` prints the UTC date. v1.0.0rc5
      was uploaded at 23:51 EDT on 2026-09-28, which was 2026-09-29 in
@@ -334,8 +335,8 @@ fixes, never features.
        two dates. It takes no changelog entry and no forward-port, because
        step 8 carries the dates to `main`. It is gated, reviewed and
        merged like any other PR into the branch (below). Step 5 tags its
-       merge commit without a second rehearsal (owner ruling, 2026-09-29,
-       on #856): TestPyPI refuses the files a green rehearsal already
+       merge commit without a second rehearsal (owner ruling on #856,
+       2026-09-29): TestPyPI refuses the files a green rehearsal already
        uploaded, and step 6's run tests the tag before it uploads. A slip
        found before the release-commit PR merges is corrected the same
        way, after it merges, so that the SHA its integration run was made
