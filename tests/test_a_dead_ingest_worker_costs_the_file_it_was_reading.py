@@ -78,17 +78,27 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
     """Pool initializer for deaths the file a worker holds did not cause.
 
     The file's name picks what reading it does: `POISON` ends the worker
-    every time, `FLAKY` the first time only, `SLOW` takes half a second,
-    and `LATE` returns its result and ends the worker when it starts
-    reading another file, so while it holds whatever it took next; a
-    worker given no further file lives on. `LATE` ended the worker 0.15 s
-    after its read until #851, which assumed the result reached the pipe
-    within that time: under a load of process spawns it did not (90th
-    percentile, 146 ms), the worker died holding `LATE` itself, and so did
-    the fresh worker it was then given alone, so `ingest()` rejected it. A
-    worker sends each result before it takes its next task, which is what
-    `_ingest_results` already relies on, so the next read comes after the
-    send with no timing assumed. Then, whatever the file:
+    every time, `FLAKY` ends a worker of a pool that started before any
+    worker ended (so never a retry's), `SLOW` takes half a second, and
+    `LATE` returns its result and ends the worker when it starts reading
+    another file, so while it holds whatever it took next; a worker given
+    no further file lives on.
+
+    Neither depends on timing (#851). `LATE` ended the worker 0.15 s after
+    its read, which assumed its result was sent by then: under a load of
+    process spawns, two thirds of its reads (133 of 198) ended their
+    worker first, and so did the fresh worker `LATE` was then given alone,
+    so `ingest()` rejected it. A worker sends each result before it takes
+    its next task, which `_ingest_results` already relies on, so the next
+    read comes after the send. `FLAKY` ended the worker the first time it
+    was read, by a marker written as it died: a worker slow to write it
+    could be ended first by the other worker's `LATE`, and `FLAKY`'s first
+    read then came in the one-at-a-time round, as the first file, and was
+    rejected (review of #857). Whether the pool started before any death
+    is read once, when the worker starts, as `canary_once` reads it. The
+    worker that takes `FLAKY` in round 0 always started before any death:
+    every other death here needs a later file taken first, and a pool
+    hands its files out in order. Then, whatever the file:
 
     - `leak`: every worker process ends on its `leak`-th read -- the
       out-of-memory killer after a leak, the accumulation #654 names;
@@ -97,13 +107,14 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
     - `canary_once`: the first worker process to start after any worker
       has ended ends at once, before it runs anything, once.
 
-    Every death leaves a file named `died` in `marker_dir` first, which is
-    how `canary_once` knows a pool is a retry's, and one named
-    `died-<exit code>`, which says which shape ended a worker. A worker
-    process runs its tasks one at a time, so the read counter needs no
-    lock.
+    Every death but the canary's leaves a file named `died` in
+    `marker_dir` first, which is how `canary_once` and `FLAKY` know a pool
+    is a retry's, and one named `died-<exit code>`, which says which exit
+    code ended it (13 is `POISON`'s and `FLAKY`'s). A worker process runs
+    its tasks one at a time, so the read counter needs no lock.
     """
     died = os.path.join(marker_dir, "died")
+    after_a_death = os.path.exists(died)
 
     def end(code):
         for marker in (died, f"{died}-{code}"):
@@ -111,7 +122,7 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
                 pass
         os._exit(code)  # pylint: disable=protected-access
 
-    if canary_once and os.path.exists(died):
+    if canary_once and after_a_death:
         killed = os.path.join(marker_dir, "canary-killed")
         if not os.path.exists(killed):
             with open(killed, "w", encoding="utf-8"):
@@ -135,12 +146,8 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
             end(21)
         if "POISON" in name:
             end(13)
-        if "FLAKY" in name:
-            once = os.path.join(marker_dir, f"flaky-{name}")
-            if not os.path.exists(once):
-                with open(once, "w", encoding="utf-8"):
-                    pass
-                end(13)
+        if "FLAKY" in name and not after_a_death:
+            end(13)
         if "SLOW" in name:
             time.sleep(0.5)
         ds = real(fp, *args, **kwargs)
