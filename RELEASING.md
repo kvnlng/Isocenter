@@ -213,12 +213,12 @@ fixes, never features.
    - **What counts:** a failed or errored test, a shard that crashes or
      exits non-zero with every test passed, or a hang. A **hang** is a
      shard whose stall banner, `ISOCENTER STALL WATCHDOG: nothing has
-     happened for Ns (#250)`, names the same test with N at 900 or more:
-     15 minutes with no new test starting. The banner is printed once
-     120 s pass without a new test starting, and every 120 s after that,
-     so a banner alone is not a hang: in a loaded run a healthy test
-     stalled the watchdog for more than 5 minutes, drawing two banners,
-     and passed.
+     happened for Ns (#250)`, names the same test with N at 600 or more:
+     10 minutes with no new test starting (owner ruling, 2026-09-29, on
+     #856). The banner is printed once 120 s pass without a new test
+     starting, and every 120 s after that, so a banner alone is not a
+     hang: in a loaded run a healthy test stalled the watchdog for more
+     than 5 minutes, drawing two banners, and passed.
    - **What to do** (owner ruling on #845, 2026-09-29): kill only a hung
      shard's processes; let a shard with a failure finish, so that a
      second failure in it is seen. Rerun that shard in full, once, at the
@@ -226,7 +226,7 @@ fixes, never features.
      on, and record both runs -- the failure or hang, and the rerun -- in
      the release-commit PR, with the flake filed as an issue. v1.0.0rc4's
      hung shard (#843, #844) was the first, killed at about 8.5 minutes,
-     before this rule set 15.
+     before this rule set 10.
    - **The ruling covers one.** If the rerun is red, or a second failure
      or hang turns up in the run, on either interpreter, it is a failure,
      handled as the procedure you are following says for that run: step
@@ -234,8 +234,9 @@ fixes, never features.
      says; a later release's as "Later releases on an existing line"
      says.
    - **A hang of the 3.14t map build** is the #796 case below, not this
-     one: the plain sharded run replaces the build, and the build's hang
-     does not count toward the one.
+     one (owner ruling, 2026-09-29, on #856): the plain sharded run
+     replaces the build, and the build's hang does not count toward the
+     one.
 
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
@@ -333,11 +334,12 @@ fixes, never features.
        two dates. It takes no changelog entry and no forward-port, because
        step 8 carries the dates to `main`. It is gated, reviewed and
        merged like any other PR into the branch (below). Step 5 tags its
-       merge commit without a second rehearsal: TestPyPI refuses the files
-       a green rehearsal already uploaded, and step 6's run tests the tag
-       before it uploads. A slip found before the release-commit PR
-       merges is corrected the same way, after it merges, so that the SHA
-       its integration run was made at stands.
+       merge commit without a second rehearsal (owner ruling, 2026-09-29,
+       on #856): TestPyPI refuses the files a green rehearsal already
+       uploaded, and step 6's run tests the tag before it uploads. A slip
+       found before the release-commit PR merges is corrected the same
+       way, after it merges, so that the SHA its integration run was made
+       at stands.
 
      **The section is the release's notes** (step 7 copies it to the
      GitHub Release), and it says what changed since the previous release.
@@ -352,7 +354,8 @@ fixes, never features.
      section is never empty (#826).
 
    Run the full suite on both interpreters at this commit
-   (`tests/test_version_contract.py` checks that the three files agree).
+   (`tests/test_version_contract.py` checks that the three files agree);
+   shards that run at once each get their own worktree, as in step 1.
    For a patch release this run is the integration test, **and the two
    fingerprint comparisons of step 1 are made at this commit**:
    `python -m scripts.output_fingerprint check` on both interpreters, then
