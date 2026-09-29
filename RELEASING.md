@@ -234,10 +234,10 @@ fixes, never features.
      run: step 1's is fixed on `main` and step 1 starts again; step 3's as
      step 3 says; a later release's as "Later releases on an existing
      line" says.
-   - **A hang of the 3.14t map build** is the #796 case below, not this
-     one (owner ruling on #856, 2026-09-29): the plain sharded run
-     replaces the build and has its own allowance of one, apart from the
-     rest of the run's, and the build's hang counts toward neither.
+   - **A hang of the 3.14t map build** is the fallback case below (#796),
+     not this one (owner ruling on #856, 2026-09-29): the plain sharded
+     run replaces the build and has its own allowance of one, apart from
+     the rest of the run's, and the build's hang counts toward neither.
 
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
@@ -253,16 +253,19 @@ fixes, never features.
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
 
-   **While #796 is open**, the map build can hang in the dead-worker
-   tests (`test_a_dead_ingest_worker_costs_the_file_it_was_reading.py`).
-   When a pool breaks, the parent SIGTERMs the other workers, and
-   coverage's own SIGTERM handler can deadlock one of them, which
-   `.coveragerc` already concedes. It hung twice at the v1.0.0rc1 cut, and
-   the owner ruled that step 1's 3.14t run may then be plain `pytest`,
-   without coverage, split into shards: `PYTHON_GIL=0 python -m pytest -v
-   --shard=I/N; echo "exit=$?"` for each I from 1 to N, recording every
-   shard's last test line and `exit=`. Rebuild the map afterwards,
-   outside the release path. A stall shows as the conftest watchdog's
+   **If the map build hangs**, step 1's 3.14t run is plain `pytest`,
+   without coverage, split into shards (owner ruling on #796,
+   2026-09-24): `PYTHON_GIL=0 python -m pytest -v --shard=I/N; echo
+   "exit=$?"` for each I from 1 to N, recording every shard's last test
+   line and `exit=`. Rebuild the map afterwards, outside the release
+   path. The integration runs of v1.0.0rc1 to v1.0.0rc5 were this
+   fallback: the build hung in the dead-worker tests
+   (`test_a_dead_ingest_worker_costs_the_file_it_was_reading.py`) at the
+   rc1 cut and again after the rc5 cut. When a pool worker died, CPython
+   sent the other workers SIGTERM and waited for each with no timeout,
+   and coverage's own SIGTERM handler could keep one of them running for
+   good. Since #796 was fixed, a worker still running 10 s after its pool
+   is found broken is sent SIGKILL. A stall shows as the conftest watchdog's
    `ISOCENTER STALL WATCHDOG: nothing has happened for Ns (#250)` banner,
    repeated every 120 s. It never ends the run, so kill only that run's
    processes. faulthandler's `Timeout (0:05:00)!` dump is printed once
