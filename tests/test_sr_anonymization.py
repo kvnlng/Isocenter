@@ -199,15 +199,16 @@ def test_an_sr_s_free_text_is_not_exported(tmp_path, config):
     """PS3.15 Table E.1-1 codes Content Sequence (0040,A730) `D`. A TEXT
     item's Text Value (0040,A160) is free text and no row of its own, so
     the rows nested inside cannot clean it: `basic@2026c`, and the floor
-    built on it, empty the sequence, as they do Person Identification
-    Code Sequence and Graphic Annotation Sequence, which the table also
-    codes `D` alone. Until 1.0.0rc4 the
-    sequence had no rule, and every TEXT item -- a name, an MRN, an
-    institution -- was exported as written under `(0012,0062) YES`.
+    built on it, remove the sequence, as they do Graphic Annotation
+    Sequence (#848). Removed, not emptied: Content Sequence is Type 1C,
+    "one or more Items", so a zero-item one breaks PS3.3, while without
+    it the SR's root content item is a leaf. Until 1.0.0rc4 the sequence
+    had no rule, and every TEXT item -- a name, an MRN, an institution --
+    was exported as written under `(0012,0062) YES`; 1.0.0rc4 emptied it.
 
-    Kills: `0040,a730` without a rule again, or given `KEEP`; `REMOVE` in
-    place of `EMPTY` (the sequence would be absent, not present with zero
-    items); and the pass declining the finding, which would withhold the
+    Kills: `0040,a730` without a rule again, or given `KEEP`; `EMPTY` in
+    place of `REMOVE` (the sequence would be present with zero items);
+    and the pass declining the finding, which would withhold the
     marker."""
     source = pydicom.dcmread(pydicom.data.get_testdata_file("test-SR.dcm"))
     assert _text_values(source), "fixture drift: test-SR.dcm has no TEXT items"
@@ -220,8 +221,7 @@ def test_an_sr_s_free_text_is_not_exported(tmp_path, config):
                 if part in raw]
     assert exported == []
     out = pydicom.dcmread(path)
-    assert "ContentSequence" in out
-    assert len(out.ContentSequence) == 0
+    assert "ContentSequence" not in out
     assert out.PatientIdentityRemoved == "YES"
 
 

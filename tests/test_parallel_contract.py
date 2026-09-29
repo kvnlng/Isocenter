@@ -1190,13 +1190,6 @@ def test_a_dead_worker_surfaces_as_a_trailing_value_not_a_raise(monkeypatch):
 # the child's own stack.
 
 
-def sleep_past_the_watchdog(value):
-    """Module scope: it has to pickle into a process-pool worker."""
-    import time
-    time.sleep(1.5)
-    return value * 2
-
-
 def test_the_watchdog_env_var_arms_a_picklable_initializer(monkeypatch):
     """The strategy resolves an initializer, and it must cross a spawn.
 
@@ -1256,17 +1249,35 @@ def test_a_stalled_worker_dumps_its_own_stack_and_still_finishes(
     own instrumentation; "simplifying" to exit=True turns every slow
     worker into a lost task). The sleep budget is generous on purpose:
     this test must not be able to become a #250 itself.
+
+    The task is `time.sleep` itself, and must stay a callable every child
+    already has (#844). It was a function in this module, so the child
+    imported the whole test module -- pytest and its dependencies, some
+    hundred modules -- *after* the initializer armed the timer (isocenter
+    itself was loaded before, to unpickle the initializer), and a 0.2 s
+    timer could fire
+    in the middle of that import. In the 1.0.0rc4 integration run the
+    dump never returned: it spun in CPython's `dump_traceback`, the
+    worker's exit waited for it in `_PyFaulthandler_Fini`, and the
+    parent's pool shutdown waited for the worker. `time.sleep` pickles by
+    reference to a module the child has loaded, so the child goes from
+    arming to blocking in C after a dozen Python calls and no imports,
+    and its frames hold still there, and
+    the 0.5 s timer fires inside the first 1.5 s sleep. That removes the
+    window this test opened; why the dump spun is not established.
     """
+    import time
+
     from isocenter import parallel
 
     monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
     monkeypatch.setenv("ISOCENTER_WORKER_FAULTHANDLER", "1")
-    monkeypatch.setattr(parallel, "_WORKER_FAULTHANDLER_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(parallel, "_WORKER_FAULTHANDLER_TIMEOUT_S", 0.5)
 
     results = parallel.run_parallel(
-        sleep_past_the_watchdog, [1, 2], show_progress=False, max_workers=1)
+        time.sleep, [1.5, 1.5], show_progress=False, max_workers=1)
 
-    assert results == [2, 4], (
+    assert results == [None, None], (
         "the watchdog changed the run's outcome; it must only ever dump "
         "(exit=False), never kill the worker (#250)")
 

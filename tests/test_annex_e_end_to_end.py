@@ -79,7 +79,7 @@ SEQUENCE_PROBES = {
     0x00081110: "sequence",               # Referenced Study Sequence (X/Z)
     0x04000561: "sequence",               # Original Attributes Sequence (X)
     0x00101002: "nested in a sequence",   # Other Patient IDs Sequence: nested Patient ID
-    0x0040A730: "sequence",               # Content Sequence (D): emptied, nested DT and PN with it
+    0x0040A730: "sequence",               # Content Sequence (D): removed, nested DT and PN with it
     0x0040A073: "nested in a sequence",   # Verifying Observer Sequence (no rule): nested SQ and PN
 }
 
@@ -298,9 +298,10 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
 
     # Emptied, not removed: a zero-item sequence is present.
     assert (0x0008, 0x1110) in out and len(out[0x0008, 0x1110].value) == 0
-    # Content Sequence's D too: a TEXT item's free text is no row, so
-    # recursion could not clean it (1.0.0rc4).
-    assert (0x0040, 0xA730) in out and len(out[0x0040, 0xA730].value) == 0
+    # Content Sequence's D: a TEXT item's free text is no row, so
+    # recursion could not clean it (1.0.0rc4). Removed, not emptied: it is
+    # Type 1C, and a zero-item one breaks PS3.3 (#848).
+    assert (0x0040, 0xA730) not in out
     for tag in (0x00400275, 0x04000561):
         assert tag not in out, f"{tag:08x} survived"
     # Cleaned by recursion: the container with no rule keeps its item,
