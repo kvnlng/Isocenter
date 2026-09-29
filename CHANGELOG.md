@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`basic@2026c` and the floor remove Content Sequence and Graphic Annotation Sequence, where 1.0.0rc4 emptied them (#848).** 1.0.0rc4 (#840) gave both sequences `EMPTY`, and a zero-item one breaks PS3.3:
+  - Content Sequence `(0040,A730)` is Type 1C in the Document Relationship Macro, which the SR Document Content Module includes: "One or more Items shall be included in this Sequence. Required if the enclosing Content Item has relationships."
+  - Graphic Annotation Sequence `(0070,0001)` is Type 1 in the Graphic Annotation Module: "One or more Items shall be included in this Sequence."
+
+  So an SR or presentation state that held one was exported under `basic` or the floor holding it with no items. An absent one keeps the rule:
+  - An SR's root content item becomes a leaf ("If this Attribute is not present then the enclosing Item is a leaf").
+  - A presentation state that applies no annotations has no Graphic Annotation Module, which the GSPS IOD requires only if annotations are to be applied.
+
+  The table's D asks for a value of non-zero length, so an empty sequence was never its answer either.
+  - **What is exported.** An SR has no Content Sequence, and a presentation state no Graphic Annotation Sequence. The free text #840 kept out of the export stays out. `KEEP` on either key still keeps the whole sequence.
+  - **What removal does not fix.** The rest of the file is not made to fit PS3.3, under either action. Configuration says both of these:
+    - An SR's template can require content items. TID 2010 requires a Key Object Selection's content to reference every instance its Current Requested Procedure Evidence Sequence names.
+    - A presentation state keeps its Graphic Layer Module, which no rule removes. PS3.3 requires that module only while annotations or overlays are applied, and says a conditional module whose condition is not met shall not be present (A.1.3.2).
+  - **Person Identification Code Sequence stays `EMPTY`.** The table codes it D alone as well, but it is Type 1 inside the Person Identification Macro, so removing it would break that rule too.
+  - **A store audited under 1.0.0rc4.** The profile's rules are in the policy fingerprint:
+    - the floor's short hash moves from `v1:cce24de1` to `v1:729f4bbf`;
+    - `basic@2026c`'s moves from `v1:586cf308` to `v1:d04ffd6e`.
+
+    Exported with no new `audit()`, such a store draws the #555 notice: a WARNING row naming both policies, no de-identification markers, and a report that grades `REVIEW_REQUIRED`. Its files hold what 1.0.0rc4's pass wrote, the two sequences present and empty. Run `audit()` and `anonymize()` again before exporting it. The export then drops the sequences and carries its markers. A WARNING row an earlier export wrote stays in the store's audit log, so that store's report still grades `REVIEW_REQUIRED`.
+  - **`CONFIG_VERSION` stays 2.0.** This changes a pinned profile's own rules before the v1.0.0 tag freezes them.
+  - **Output:** `fingerprint/output.json` was retaken on 3.12 and checked clean on 3.14t. `compare --base v1.0.0rc4` reports 956 differences in three groups, all in the five DICOM arms (`A.dicom`, `A.dicom-j2k`, `A.reopened.dicom`, `B.dicom`, `B.dicom-j2k`):
+    - **`0040,a730` SQ removed** in 15 files: the three SR members, `test-SR.dcm`, `reportsi.dcm` and `reportsi_with_empty_number_tags.dcm`, whose Content Sequence was present with zero items.
+    - **`0070,0001` SQ removed** in 5 files: `synthetic:graphic_annotation`, whose Graphic Annotation Sequence was present with zero items.
+    - **`0012,0063` LO changed** in 936 files: 479 among the `pydicom` members, 357 among `pydicom-data` and 100 among `synthetic`. This is the De-identification Method's short hash. It moves because the profile's rules are in the fingerprint:
+      - Configuration A, whose policy is the floor's: `v1:cce24de1` becomes `v1:729f4bbf` (453 files).
+      - Configuration B, which keeps private tags: `v1:17b54c72` becomes `v1:9d04b00a` (298 files).
+      - The other 185 files (111 under A, 74 under B) hold values longer than the text limit, because the source carried a De-identification Method of its own, so they are recorded as a hash. Each was rebuilt from its source, the source's own values first and then ours. Its old and new digests match the same two moves, and its length does not change.
+
+    No path, outcome, accounting row, cohort member or other element changes, and no WFDB file changes.
+
 ### Fixed
 
 - **A test of the worker watchdog could hang the suite (#844).** `test_a_stalled_worker_dumps_its_own_stack_and_still_finishes` never finished in the 1.0.0rc4 integration run on 3.12. The worker's faulthandler dump spun in CPython's `dump_traceback`, the worker's exit waited for it in `_PyFaulthandler_Fini`, and the parent's pool shutdown waited for the worker.

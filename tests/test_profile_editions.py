@@ -49,8 +49,11 @@ PINNED_DIGESTS = {
     # 1.0.0rc4: Content Sequence (0040,a730) and Graphic Annotation
     # Sequence (0070,0001), both coded D, gained EMPTY: free text inside
     # them is no row, so recursion left it (646 -> 648).
-    "basic@2026c": "beb1dadfa9d1553865891cb26992044d3999dba03272afd067c27a3cd49e740d",
-    "floor": "3f6f6a6fb0330489c644aaa411cebfdce75d3133dab9ff1e52e39add65345065",
+    # 1.0.0rc5: both moved from EMPTY to REMOVE (#848): a zero-item one
+    # breaks PS3.3's one-or-more-items rule, which an absent one keeps
+    # (648 rules still).
+    "basic@2026c": "c5b2eb65c741865354ce3f68528543ff956dcce99297b3f42fe17187d8e9b0e4",
+    "floor": "da0b3f3d69785b6ab6db75fbc7c3b56fbb2d778e92d52be5a5362632c44e94fe",
 }
 #: The rules 1.0 ships under each pinned name: `PINNED_DIGESTS` as it
 #: stood when L14 (#26, #527) filled this on `main`, before RELEASING.md's
@@ -60,8 +63,8 @@ PINNED_DIGESTS = {
 #: floor updates **both** dicts in the same PR, and its review checks that
 #: it did; after the tag this one never changes.
 FROZEN_AT_1_0 = {
-    "basic@2026c": "beb1dadfa9d1553865891cb26992044d3999dba03272afd067c27a3cd49e740d",
-    "floor": "3f6f6a6fb0330489c644aaa411cebfdce75d3133dab9ff1e52e39add65345065",
+    "basic@2026c": "c5b2eb65c741865354ce3f68528543ff956dcce99297b3f42fe17187d8e9b0e4",
+    "floor": "da0b3f3d69785b6ab6db75fbc7c3b56fbb2d778e92d52be5a5362632c44e94fe",
 }
 
 #: The one sentence both digest tests end on (owner ruling Q3, 2026-09-21).
