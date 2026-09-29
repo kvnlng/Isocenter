@@ -13,6 +13,7 @@ import logging
 import multiprocessing
 import multiprocessing.connection
 import os
+import re
 import signal
 import sys
 import threading
@@ -1683,16 +1684,23 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
 
     The grace is seconds in which the program looks stalled, which is when
     a user presses Ctrl-C, and its `KeyboardInterrupt` is raised inside the
-    wait. It left the helper with the survivor still running, and reached
-    the caller's `shutdown(wait=True)`: the `with` exit's, `close()`'s, a
-    resize's. That waited on the lock the manager thread holds while it
-    joins the survivor, so the Ctrl-C reached the user only when the
-    survivor died some other way (review of #861). Every caller goes
-    through the helper.
+    wait. It left the helper with the survivor still running. At a `with`
+    exit it reached `shutdown(wait=True)`, which waited on the lock the
+    manager thread holds while it joins the survivor, so the Ctrl-C reached
+    the user only when the survivor died some other way. From `close()`
+    and a resize it reached the caller at once, and the survivor then held
+    up the interpreter's exit (review of #861). Every caller goes through
+    the helper.
+
+    The interrupt comes in the helper's second wait, which is where a real
+    Ctrl-C lands: the first returns the dead worker's sentinel at once, as
+    the pool counted itself broken only on seeing it. Raised in the first,
+    it would leave the dead worker in the wait set, to be named in the
+    WARNING as still running (review of #861, round 3).
 
     Killing mutations: the kill moved out of the `finally`, so it runs only
     after a wait that returns; a `return` in the `finally`, which swallows
-    the interrupt.
+    the interrupt; the grace logged in place of the time measured.
     """
     markers = tmp_path / "markers"
     markers.mkdir()
@@ -1701,14 +1709,19 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
     monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
     real_wait = multiprocessing.connection.wait
     here = threading.get_ident()
+    waits_here = []
 
     def interrupted_here(object_list, timeout=None):
-        """Ctrl-C, in a wait on this thread. `Connection.poll()` reads the
-        module's `wait` too, so any other thread's wait goes on as it was;
-        and the helper is called on this thread, never under `_bounded`."""
-        if threading.get_ident() == here:
-            raise KeyboardInterrupt
-        return real_wait(object_list, timeout)
+        """Ctrl-C, in the second wait on this thread. `Connection.poll()`
+        reads the module's `wait` too, so any other thread's wait goes on
+        as it was; and the helper is called on this thread, never under
+        `_bounded`."""
+        if threading.get_ident() != here:
+            return real_wait(object_list, timeout)
+        waits_here.append(len(object_list))
+        if len(waits_here) == 1:
+            return real_wait(object_list, timeout)
+        raise KeyboardInterrupt
 
     with _two_worker_pool(functools.partial(
             _outlive_sigterm, str(markers))) as pool:
@@ -1728,10 +1741,20 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
         assert not hung, (
             "shutdown(wait=True) after a Ctrl-C during the grace waited on a "
             "worker that outlives SIGTERM (#796)")
+    # The premise: the first wait held both workers and returned the dead
+    # one's sentinel, and the interrupt came in the next, on the survivor's.
+    assert waits_here == [2, 1], waits_here
     records = _sigkill_records(caplog)
     assert len(records) == 1 and records[0].levelno == logging.WARNING, [
         r.getMessage() for r in caplog.records]
-    assert str(survivor) in records[0].getMessage()
+    message = records[0].getMessage()
+    assert message.startswith("1 worker process(es) "), message
+    assert f"(pid {survivor})" in message, message
+    # The time measured since the pool was found broken, not the grace: an
+    # interrupted wait ends early, and the grace would be false.
+    running = re.search(r"still running ([0-9.]+) s after", message)
+    assert running, message
+    assert float(running.group(1)) < parallel._BROKEN_POOL_GRACE_S, message
 
 
 def test_the_pool_internals_the_straggler_helper_reads_are_there():
