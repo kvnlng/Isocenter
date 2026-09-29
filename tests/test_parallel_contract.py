@@ -1252,14 +1252,17 @@ def test_a_stalled_worker_dumps_its_own_stack_and_still_finishes(
 
     The task is `time.sleep` itself, and must stay a callable every child
     already has (#844). It was a function in this module, so the child
-    imported the whole test module -- pytest, isocenter and the rest --
-    *after* the initializer armed the timer, and a 0.2 s timer could fire
+    imported the whole test module -- pytest and its dependencies, some
+    hundred modules -- *after* the initializer armed the timer (isocenter
+    itself was loaded before, to unpickle the initializer), and a 0.2 s
+    timer could fire
     in the middle of that import. In the 1.0.0rc4 integration run the
     dump never returned: it spun in CPython's `dump_traceback`, the
     worker's exit waited for it in `_PyFaulthandler_Fini`, and the
     parent's pool shutdown waited for the worker. `time.sleep` pickles by
     reference to a module the child has loaded, so the child goes from
-    arming straight to blocking in C, where its frames hold still, and
+    arming to blocking in C after a dozen Python calls and no imports,
+    and its frames hold still there, and
     the 0.5 s timer fires inside the first 1.5 s sleep. That removes the
     window this test opened; why the dump spun is not established.
     """
