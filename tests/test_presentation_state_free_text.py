@@ -4,10 +4,13 @@ PS3.15 Table E.1-1 codes Graphic Annotation Sequence (0070,0001) `D`. A
 text or graphic object in it can carry Tracking ID (0062,0020), and a
 compound graphic's major tick a Tick Label (0070,0289): free text the table
 has no row for, so the rows nested inside cannot clean it. `basic@2026c`,
-and the floor built on it, empty the sequence, as they do Content Sequence
-for an SR's TEXT items. Until 1.0.0rc4 it had no rule, and both were
-exported as written under `(0012,0062) YES` with a PASS grade (found in the
-review of #840).
+and the floor built on it, remove the sequence, as they do Content Sequence
+for an SR's TEXT items (#848). Removed, not emptied: the sequence is Type 1
+in the Graphic Annotation Module, so a zero-item one breaks PS3.3, while a
+presentation state needs the module only if annotations are to be applied.
+Until 1.0.0rc4 it had no rule, and both were exported as written under
+`(0012,0062) YES` with a PASS grade (found in the review of #840); 1.0.0rc4
+emptied it.
 """
 import os
 
@@ -85,9 +88,9 @@ def _export(tmp_path, config=None):
                          ids=["floor", "basic"])
 def test_a_presentation_state_s_free_text_is_not_exported(tmp_path, config):
     """Kills: `0070,0001` without a rule again, or given `KEEP` (Tracking ID
-    and Tick Label are exported); `REMOVE` in place of `EMPTY` (the
-    sequence would be absent, not present with zero items); and the pass
-    declining the finding, which would withhold the marker."""
+    and Tick Label are exported); `EMPTY` in place of `REMOVE` (the
+    sequence would be present with zero items); and the pass declining
+    the finding, which would withhold the marker."""
     path = _export(tmp_path, config)
 
     with open(path, "rb") as handle:
@@ -96,8 +99,7 @@ def test_a_presentation_state_s_free_text_is_not_exported(tmp_path, config):
                                   b"QV tick") if part in raw]
     assert exported == []
     out = pydicom.dcmread(path)
-    assert "GraphicAnnotationSequence" in out
-    assert len(out.GraphicAnnotationSequence) == 0
+    assert "GraphicAnnotationSequence" not in out
     assert out.PatientIdentityRemoved == "YES"
 
 
