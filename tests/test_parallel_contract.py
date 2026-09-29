@@ -1434,6 +1434,50 @@ def test_the_straggler_helper_lets_every_other_kind_of_pool_through():
         assert parallel._end_broken_pool_stragglers(threads) == []
 
 
+def test_the_straggler_helper_has_nothing_to_end_on_a_pool_already_shut_down(
+        monkeypatch, caplog):
+    """A broken pool that has been shut down has no workers left to end.
+
+    `shutdown()` sets `_processes` to None and leaves `_broken` set, so
+    such a pool gets past the helper's first guard and stops at the second.
+    `close()` hands it one on a second call, which its docstring promises
+    is safe, when the session's pool broke; a caller's own pool, broken,
+    shut down and then handed in as `executor=`, is another. The helper
+    must return `[]` and kill nothing.
+
+    Killing mutation: the `_processes` guard's `return []` made
+    `return None`.
+    """
+    pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+    try:
+        pid = pool.submit(os.getpid).result(timeout=60)
+        os.kill(pid, signal.SIGKILL)
+        deadline = time.monotonic() + 30
+        while not pool._broken:
+            assert time.monotonic() < deadline, (
+                "the pool never saw its worker die")
+            time.sleep(0.01)
+    finally:
+        pool.shutdown(wait=True)
+    # The case this is for: past the `_broken` guard, stopped at the other.
+    assert pool._broken and pool._processes is None
+    kills = []
+    real_kill = multiprocessing.process.BaseProcess.kill
+
+    def recording_kill(process):
+        kills.append(process.pid)
+        real_kill(process)
+
+    monkeypatch.setattr(multiprocessing.process.BaseProcess, "kill",
+                        recording_kill)
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        assert parallel._end_broken_pool_stragglers(pool) == []
+    assert kills == [], (
+        "the helper killed a process of a pool already shut down")
+    assert _sigkill_records(caplog) == []
+
+
 def test_a_worker_that_ends_within_the_grace_is_waited_for_not_killed(
         tmp_path, monkeypatch, caplog):
     """A worker that ends of the pool's own SIGTERM is not SIGKILLed.

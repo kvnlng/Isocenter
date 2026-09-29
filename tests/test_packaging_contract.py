@@ -1758,20 +1758,21 @@ def test_the_sidecar_gate_deadline_sits_inside_the_timeout_family():
 
 
 def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
-    """`_BROKEN_POOL_GRACE_S < _STALL_S < 300`, and the helper reads it (#796).
+    """`5 <= _BROKEN_POOL_GRACE_S < _STALL_S < 300`, and the helper reads it
+    (#796).
 
     After a pool breaks, its workers get the grace to end before
     `_end_broken_pool_stragglers` SIGKILLs them. Below `_STALL_S`, so a
     teardown that ends in a kill is never reported as a stall, or dumped;
     and below the faulthandler window for the same reason. It holds no
     sqlite handle and no gate, so it has no place among 120 < 180 < 240,
-    which order waits on the database and the sidecar.
+    which order waits on the database and the sidecar. Not below 5 s, the
+    "few seconds" of the constant's comment: a worker that saves its state
+    on SIGTERM must get to finish, and coverage's handler was measured at
+    up to 0.8 s under load. A grace cut tenfold is below that floor.
 
     What this cannot see is the grace grown tenfold, which stays below
-    both. The value is a judgment -- long enough for coverage's SIGTERM
-    handler to write its data file, measured at 0.8 s or less under load
-    -- and no timing assertion here would pin it better than the comment
-    beside it. Read from the conftest source, as
+    both ceilings. Read from the conftest source, as
     `test_the_stall_watchdog_fires_inside_the_run_tests_step` reads it.
     """
     import inspect
@@ -1794,6 +1795,11 @@ def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
         f"_BROKEN_POOL_GRACE_S={grace:g}s outlasts the faulthandler window "
         f"({threshold:g}s): a teardown that ends in SIGKILL would be dumped "
         "as a hang (#796)")
+    assert grace >= 5, (
+        f"_BROKEN_POOL_GRACE_S={grace:g}s is below the few seconds its "
+        "comment sets as the floor: a worker that saves its state on SIGTERM "
+        "must get to finish, and coverage's `sigterm = True` handler takes "
+        "up to 0.8 s under load to write the worker's data file (#796)")
 
     # By AST, as the gate's deadline is read above: the docstring names
     # the constant in prose.
