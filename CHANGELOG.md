@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc5] - 2026-09-29
+
 ### Changed
 
 - **`basic@2026c` and the floor remove Content Sequence and Graphic Annotation Sequence, where 1.0.0rc4 emptied them (#848).** 1.0.0rc4 (#840) gave both sequences `EMPTY`, and a zero-item one breaks PS3.3:
