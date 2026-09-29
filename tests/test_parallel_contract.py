@@ -6,9 +6,18 @@ setup and its own reading of the environment. These tests state the
 behaviour those copies were supposed to share, so the copies can be
 removed.
 """
+import concurrent.futures
+import contextlib
+import functools
 import logging
+import multiprocessing
+import multiprocessing.connection
 import os
+import signal
 import sys
+import threading
+import time
+from concurrent.futures.process import BrokenProcessPool
 
 import pytest
 
@@ -1177,6 +1186,335 @@ def test_a_dead_worker_surfaces_as_a_trailing_value_not_a_raise(monkeypatch):
     assert not any(r == 6 for r in results), (
         "the item queued behind the dead worker cannot have run; if it "
         "did, this fixture is no longer killing anything")
+
+
+# --- #796: a worker that outlives its broken pool's SIGTERM ------------------
+#
+# When a worker of a `ProcessPoolExecutor` ends outright, CPython's manager
+# thread sends every other worker SIGTERM, twice, and then joins each one
+# with no timeout while holding the pool's shutdown lock, which `submit()`
+# and `shutdown()` (whatever `wait` says) take first. A worker that handles
+# SIGTERM hung whichever of them came next, for good.
+# `parallel._end_broken_pool_stragglers` gives the workers
+# `_BROKEN_POOL_GRACE_S` to end and SIGKILLs the rest.
+#
+# The workers here install their handler in a pool initializer and only
+# then write `ready-<pid>`. A worker still starting has SIGTERM's default
+# disposition and simply dies of the pool's SIGTERM, leaving nothing to
+# end, so every death waits for the marker of the worker it leaves behind.
+# Every call that can hang runs under `_bounded`. The helpers are imported
+# by `test_a_dead_ingest_worker_costs_the_file_it_was_reading.py` too.
+
+
+def _ignore_signal(signum, frame):  # pylint: disable=unused-argument
+    """A SIGTERM handler that does nothing, as a graceful-shutdown handler
+    does while it lets the running task finish. Module scope: a pool
+    initializer installs it inside the worker."""
+
+
+def _end_half_a_second_later(signum, frame):  # pylint: disable=unused-argument
+    """A SIGTERM handler that ends its process half a second later, as one
+    that saves its state first does."""
+    time.sleep(0.5)
+    os._exit(0)  # pylint: disable=protected-access
+
+
+def _mark_ready(marker_dir):
+    with open(os.path.join(marker_dir, f"ready-{os.getpid()}"), "w",
+              encoding="utf-8"):
+        pass
+
+
+def _outlive_sigterm(marker_dir):
+    """Pool initializer: this worker outlives SIGTERM, and says so."""
+    signal.signal(signal.SIGTERM, _ignore_signal)
+    _mark_ready(marker_dir)
+
+
+def _end_slowly_on_sigterm(marker_dir):
+    """Pool initializer: SIGTERM ends this worker half a second later."""
+    signal.signal(signal.SIGTERM, _end_half_a_second_later)
+    _mark_ready(marker_dir)
+
+
+def _wait_for_a_ready_sibling(marker_dir):
+    """Block, for at most 30 s, until another worker has marked itself."""
+    mine = f"ready-{os.getpid()}"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if any(name.startswith("ready-") and name != mine
+               for name in os.listdir(marker_dir)):
+            return
+        time.sleep(0.01)
+
+
+def _double_or_die_after_a_ready_sibling(args):
+    """`double_or_die`, once another worker has installed its handler."""
+    value, marker_dir = args
+    if value < 0:
+        _wait_for_a_ready_sibling(marker_dir)
+        os._exit(13)  # pylint: disable=protected-access
+    return value * 2
+
+
+def _bounded(call, seconds):
+    """Run `call()` on a thread, and say whether it hung.
+
+    A call still running after `seconds` is freed by SIGKILLing every child
+    process of this one, which is what ends a hang of #796's shape, and is
+    given a minute more to finish. A red test then reports the hang instead
+    of hanging the run.
+
+    Returns:
+        tuple: `(hung, value)`. What `call()` raised is raised here, unless
+        it hung.
+    """
+    outcome = {}
+
+    def run():
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # pylint: disable=broad-exception-caught
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    hung = worker.is_alive()
+    if hung:
+        for child in multiprocessing.active_children():
+            child.kill()
+        worker.join(60)
+    elif "error" in outcome:
+        raise outcome["error"]
+    return hung, outcome.get("value")
+
+
+def _start_two_workers(pool):
+    """Spawn both workers of a two-worker `pool`.
+
+    Each `submit()` spawns a worker while none is idle, and the second comes
+    long before the first worker has started, so two submits start two.
+    """
+    for future in [pool.submit(os.getpid) for _ in range(2)]:
+        future.result(timeout=60)
+
+
+def _break_while_idle(pool, marker_dir):
+    """SIGKILL one idle worker of a two-worker `pool`, as the out-of-memory
+    killer would between two tasks, and wait until the pool has seen it.
+
+    Waits first for both workers' markers, so the other one outlives the
+    pool's SIGTERM however its handler treats it.
+
+    Returns:
+        int: The pid of the worker left running.
+    """
+    deadline = time.monotonic() + 60
+    pids = sorted(pool._processes)
+    assert len(pids) == 2, (
+        f"the pool has {len(pids)} worker(s); this needs one to kill and "
+        "one to outlive the pool's SIGTERM")
+    while not all(os.path.exists(os.path.join(marker_dir, f"ready-{pid}"))
+                  for pid in pids):
+        assert time.monotonic() < deadline, (
+            "a worker never installed its SIGTERM handler")
+        time.sleep(0.01)
+    victim, survivor = pids
+    os.kill(victim, signal.SIGKILL)
+    while not pool._broken:
+        assert time.monotonic() < deadline, (
+            "the pool never saw its worker die")
+        time.sleep(0.01)
+    return survivor
+
+
+@contextlib.contextmanager
+def _two_worker_pool(initializer):
+    """A spawned two-worker pool whose workers are gone when the block exits.
+
+    However it exits: a red test must not leave a worker that ignores
+    SIGTERM behind, or its `shutdown()` hangs the run.
+    """
+    pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=2, mp_context=multiprocessing.get_context("spawn"),
+        initializer=initializer)
+    try:
+        yield pool
+    finally:
+        for process in list((pool._processes or {}).values()):
+            try:
+                process.kill()
+            except (OSError, ValueError):
+                pass
+        pool.shutdown(wait=True)
+
+
+def _sigkill_records(caplog):
+    return [r for r in caplog.records if "SIGKILL" in r.getMessage()]
+
+
+def test_run_parallels_own_pool_ends_a_worker_that_outlives_its_break(
+        tmp_path, monkeypatch, caplog):
+    """`run_parallel`'s own process pool returns though a sibling of the
+    dead worker handles SIGTERM.
+
+    Its `with` exit is `shutdown(wait=True)`, which waited on the manager
+    thread's lock for good, so the trailing `BrokenProcessPool` that
+    `yield_exceptions=True` promises never arrived: `audit()` and
+    `redact()` dispatch through this pool.
+
+    Killing mutation: the `_end_broken_pool_stragglers` call in
+    `_run_on_new_executor` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    # raising=False: on a tree without the constant this goes red for the
+    # hang it exists for, not on an AttributeError here.
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0, raising=False)
+    initializer = functools.partial(_outlive_sigterm, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+    items = [(value, str(markers)) for value in (1, -2, 3, 4)]
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        hung, results = _bounded(lambda: parallel.run_parallel(
+            _double_or_die_after_a_ready_sibling, items, max_workers=2,
+            show_progress=False, yield_exceptions=True), 60)
+
+    assert not hung, (
+        "run_parallel() did not return: its own pool's `with` exit waited "
+        "on a worker that outlives SIGTERM (#796)")
+    assert isinstance(results[-1], BrokenProcessPool), results
+    assert multiprocessing.active_children() == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+def test_the_straggler_helper_leaves_a_healthy_pool_alone(monkeypatch):
+    """A pool that is not broken is none of its business.
+
+    It is called before every dispatch on a shared pool, so on a healthy
+    one it must return at once and touch nothing.
+
+    Killing mutation: the `_broken` guard deleted or inverted; the helper
+    then waits out the grace on a live worker and kills it.
+    """
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0, raising=False)
+    pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+    try:
+        pid = pool.submit(os.getpid).result(timeout=60)
+        assert parallel._end_broken_pool_stragglers(pool) == []
+        assert pool.submit(os.getpid).result(timeout=60) == pid, (
+            "the helper ended a worker of a pool that was not broken")
+    finally:
+        pool.shutdown(wait=True)
+
+
+def test_a_worker_that_ends_within_the_grace_is_waited_for_not_killed(
+        tmp_path, monkeypatch, caplog):
+    """A worker that ends of the pool's own SIGTERM is not SIGKILLed.
+
+    Its handler takes half a second, as one that saves its state does:
+    coverage's `sigterm = True` handler was measured at up to 0.8 s under
+    load, and a worker killed before it finishes loses its data. The dead
+    worker's sentinel is ready at once, so the wait must go on until the
+    deadline or the last sentinel, not stop at the first.
+
+    Killing mutations: the wait skipped, or stopped at the first ready
+    sentinel.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0, raising=False)
+    with _two_worker_pool(functools.partial(
+            _end_slowly_on_sigterm, str(markers))) as pool:
+        _start_two_workers(pool)
+        processes = dict(pool._processes)
+        survivor = _break_while_idle(pool, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            killed = parallel._end_broken_pool_stragglers(pool)
+        # After the manager thread has joined every worker, so the exit
+        # code below is the one it recorded.
+        hung, _ = _bounded(lambda: pool.shutdown(wait=True), 60)
+        assert not hung
+    assert killed == []
+    assert processes[survivor].exitcode == 0, (
+        "the helper killed a worker that was ending of the pool's SIGTERM")
+    assert _sigkill_records(caplog) == []
+
+
+def test_a_worker_that_outlives_the_grace_is_killed_and_named(
+        tmp_path, monkeypatch, caplog):
+    """A worker still running at the deadline is SIGKILLed, and named once.
+
+    Then the pool's shutdown lock is free: `shutdown(wait=False)`, which
+    waited behind it for good, returns at once.
+
+    Killing mutations: the `kill()` deleted, or turned into `terminate()`,
+    a third SIGTERM the handler ignores too; the WARNING deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0, raising=False)
+    with _two_worker_pool(functools.partial(
+            _outlive_sigterm, str(markers))) as pool:
+        _start_two_workers(pool)
+        processes = dict(pool._processes)
+        survivor = _break_while_idle(pool, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            killed = parallel._end_broken_pool_stragglers(pool)
+        hung, _ = _bounded(lambda: pool.shutdown(wait=False), 30)
+        assert not hung, (
+            "shutdown(wait=False) still waited on the pool's lock: the "
+            "worker that ignored SIGTERM was not ended")
+    assert killed == [survivor]
+    assert multiprocessing.connection.wait(
+        [processes[survivor].sentinel], timeout=30)
+    records = _sigkill_records(caplog)
+    assert len(records) == 1 and records[0].levelno == logging.WARNING, [
+        r.getMessage() for r in caplog.records]
+    message = records[0].getMessage()
+    assert str(survivor) in message
+    # Other tests count the dead-worker retry's lines and the recycling
+    # override's by these phrases; this line must not be counted as either.
+    assert "worker process ended" not in message
+    assert "was set, but worker recycling" not in message
+
+
+def test_the_pool_internals_the_straggler_helper_reads_are_there():
+    """`_processes` and `_broken`, pinned on each interpreter the gate runs.
+
+    Both are private to `concurrent.futures.process`, and 3.12 offers no
+    public way to reach a pool's workers (3.14's `kill_workers()` takes the
+    very lock this is about). The helper reads them with `getattr` defaults
+    so that another kind of pool passes through, so a CPython that renamed
+    either would make it a silent no-op and bring the hang back. This is
+    what goes red instead.
+    """
+    pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+    try:
+        pid = pool.submit(os.getpid).result(timeout=60)
+        assert pool._broken is False
+        assert isinstance(pool._processes, dict)
+        assert list(pool._processes) == [pid]
+        process = pool._processes[pid]
+        assert isinstance(process, multiprocessing.process.BaseProcess)
+        assert isinstance(process.sentinel, int)
+        os.kill(pid, signal.SIGKILL)
+        deadline = time.monotonic() + 30
+        while not pool._broken:
+            assert time.monotonic() < deadline, (
+                "the pool never saw its worker die")
+            time.sleep(0.01)
+        # Still listed once the pool is broken, which is when it is read.
+        assert pool._processes[pid] is process
+        assert multiprocessing.connection.wait([process.sentinel], timeout=30)
+    finally:
+        pool.shutdown(wait=True)
 
 
 # --- #250: the child-side watchdog ------------------------------------------
