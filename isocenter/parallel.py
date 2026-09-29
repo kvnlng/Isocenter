@@ -592,10 +592,11 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
     for each one with no timeout while holding the pool's shutdown lock.
     `submit()` and `shutdown()`, whatever `wait` says, take that lock first,
     so a worker that outlives SIGTERM hangs whichever of them comes next,
-    for good (#796). A worker outlives SIGTERM when something in it handles
-    the signal: a script's module-level handler, which spawn runs again in
-    every worker; a handler that calls `sys.exit()`, which a worker running
-    a task catches as that task's failure; coverage's `sigterm = True`.
+    for good (#796; upstream, python/cpython#158413). A worker outlives
+    SIGTERM when something in it handles the signal: a script's
+    module-level handler, which spawn runs again in every worker; a handler
+    that calls `sys.exit()`, which a worker running a task catches as that
+    task's failure; coverage's `sigterm = True`.
 
     Does nothing unless `executor` is a broken process pool. Otherwise gives
     its workers `_BROKEN_POOL_GRACE_S` from now to end, SIGKILLs each one

@@ -12,26 +12,27 @@
 # (#796): 152 functions recorded as run in a worker with it, 84 without,
 # and every export-worker function lost.
 #
-# The handler is not re-entrant, and it can keep a worker alive. It runs
-# stop() and save() at whatever bytecode the worker's main thread is on,
-# then kills the process again. When a ProcessPoolExecutor worker ends
-# outright, CPython sends every other worker SIGTERM twice, and a second
-# SIGTERM during the first handler's save() can make the nested save fail
-# on the half-written data file (`DataError: ... no such table: context`).
-# That exception escapes into the running task, which records it as the
-# task's failure, and the worker waits for work for good. Under this
-# file's `concurrency = multiprocessing` that is the only way in: the
+# The handler is not re-entrant (coveragepy/coveragepy#2310), and it can
+# keep a worker alive. It runs stop() and save() at whatever bytecode the
+# worker's main thread is on, then kills the process again. When a
+# ProcessPoolExecutor worker ends outright, CPython sends every other
+# worker SIGTERM twice, and a second SIGTERM during the first handler's
+# save() can make the nested save fail on the half-written data file
+# (`DataError: ... no such table: context`). That exception escapes into
+# the running task, which records it as the task's failure, and the
+# worker waits for work for good. Under this file's
+# `concurrency = multiprocessing` that is the only way in: the
 # collector's data_lock is None. With `thread` in `concurrency`, as the
 # test-map build has it, or with `concurrency` unset, data_lock is a
 # non-reentrant threading.Lock that the C tracer takes on every call into
 # a measured file. One SIGTERM whose handler runs while the tracer holds
 # it deadlocks the worker, and so does a second SIGTERM that re-enters the
-# handler while the handler holds it. CPython then joins the survivor with
-# no timeout while holding the pool's shutdown lock, which hung the
-# test-map build. Since #796 the package's pools SIGKILL a worker still
-# running 10 s after its pool broke (parallel._BROKEN_POOL_GRACE_S), which
-# costs that worker's data. Export's recycling pool is not covered by that
-# (#860).
+# handler while the handler holds it. CPython then joins the survivor
+# with no timeout while holding the pool's shutdown lock
+# (python/cpython#158413), which hung the test-map build. Since #796 the
+# package's pools SIGKILL a worker still running 10 s after its pool broke
+# (parallel._BROKEN_POOL_GRACE_S), which costs that worker's data.
+# Export's recycling pool is not covered by that (#860).
 #
 # `core = ctrace` is load-bearing on 3.14. coverage defaults to the
 # sys.monitoring core there (env.SYSMON_DEFAULT), whose callback holds a
