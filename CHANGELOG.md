@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc6] - 2026-09-29
+
 ### Changed
 
 - **`RELEASING.md` gains three rules that the 1.0.0rc4 and 1.0.0rc5 cuts needed (#845, #849).** No package code and no output change.

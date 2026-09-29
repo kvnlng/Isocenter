@@ -10,4 +10,4 @@ from it. CITATION.cff and CHANGELOG.md restate it and must be changed
 with it.
 """
 
-__version__ = "1.0.0rc5"
+__version__ = "1.0.0rc6"
