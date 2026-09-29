@@ -10,6 +10,9 @@ import functools
 import os
 import sys
 import multiprocessing
+import multiprocessing.connection
+import time
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
                     Optional, TypeVar)
@@ -564,6 +567,103 @@ def _tracked(iterator, items, strategy) -> Iterator:
                     desc=strategy.desc)
 
 
+#: How long the workers of a broken process pool get to end before
+#: `_end_broken_pool_stragglers` sends SIGKILL to each one still running
+#: (#796). No environment variable: tests patch it.
+#:
+#: The bottom of the timeout family, 10 < 120 < 180 < 240 < 300. Below
+#: conftest's `_STALL_S` (120 s), so a pool teardown that ends in a kill is
+#: never reported as a stall or dumped; `test_packaging_contract.py` pins
+#: that. It has no order to keep with the sqlite busy timeout or the
+#: sidecar gate: it holds no sqlite handle and no gate, and the only lock
+#: around it is the shared pass-lock of `ingest()` and `redact()`, which
+#: `compact()` refuses on rather than waits for. Not below a few seconds: a
+#: worker that saves its state on SIGTERM must get to finish, and coverage's
+#: `sigterm = True` handler takes up to 0.8 s under load to write the
+#: worker's data file.
+_BROKEN_POOL_GRACE_S = 10.0
+
+
+def _end_broken_pool_stragglers(executor) -> list[int]:
+    """SIGKILL the workers a broken process pool's SIGTERM left running.
+
+    When a worker of a `ProcessPoolExecutor` ends outright, the pool's
+    manager thread sends every other worker SIGTERM, twice, and then waits
+    for each one with no timeout while holding the pool's shutdown lock.
+    `submit()` and `shutdown()`, whatever `wait` says, take that lock first,
+    so a worker that outlives SIGTERM hangs whichever of them comes next,
+    for good (#796). A worker outlives SIGTERM when something in it handles
+    the signal: a script's module-level handler, which spawn runs again in
+    every worker; a handler that calls `sys.exit()`, which a worker running
+    a task catches as that task's failure; coverage's `sigterm = True`.
+
+    Does nothing unless `executor` is a broken process pool. Otherwise gives
+    its workers `_BROKEN_POOL_GRACE_S` from now to end, SIGKILLs each one
+    still running, and logs one WARNING naming them. Takes no lock. A worker
+    in uninterruptible I/O cannot be ended by any signal.
+
+    Args:
+        executor: Any executor or pool. Only a `ProcessPoolExecutor` that is
+            broken is acted on.
+
+    Returns:
+        list[int]: The pids it sent SIGKILL, or `[]`.
+    """
+    # `_broken` is CPython's own verdict, set before the futures are failed,
+    # and `_processes` its list of the workers, which nothing clears before
+    # `shutdown()`. Both are private. There is no public way in: 3.14's
+    # `kill_workers()` and `terminate_workers()` take the shutdown lock
+    # first, and 3.12 has neither. The `getattr` defaults let every other
+    # kind of pool through, so a rename would make this a silent no-op;
+    # `test_parallel_contract.py` pins both on each interpreter instead.
+    if not getattr(executor, "_broken", False):
+        return []
+    processes = getattr(executor, "_processes", None)
+    if not processes:
+        return []
+    waiting = {}
+    for process in list(processes.values()):
+        try:
+            waiting[process.sentinel] = process
+        except ValueError:  # a closed process object; nothing to end
+            continue
+    # The sentinels, never `join()` or `is_alive()`: those reap the child
+    # with `waitpid`, racing the manager thread's own `join()` of it. A
+    # worker whose sentinel is ready has ended and is the manager's to reap.
+    deadline = time.monotonic() + _BROKEN_POOL_GRACE_S
+    while waiting:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        try:
+            ready = multiprocessing.connection.wait(list(waiting),
+                                                    timeout=left)
+        except (OSError, ValueError):
+            break
+        for sentinel in ready:
+            del waiting[sentinel]
+    killed = []
+    for process in waiting.values():
+        try:
+            process.kill()
+        except (OSError, ValueError):
+            continue
+        killed.append(process.pid)
+    if killed:
+        # Two `ingest()` calls on one broken pool can both get here and both
+        # kill: `kill()` skips a worker already reaped and swallows one
+        # already gone, so the cost is a second line naming the same pids.
+        get_logger().warning(
+            "%d worker process(es) of a broken process pool were still "
+            "running %g s after the pool sent them SIGTERM, and were sent "
+            "SIGKILL (pid %s). A worker outlives SIGTERM when something in "
+            "it handles that signal; a handler a script installs at module "
+            "level runs again in every spawned worker.",
+            len(killed), _BROKEN_POOL_GRACE_S,
+            ", ".join(str(pid) for pid in killed))
+    return killed
+
+
 def _run_on_shared_executor(executor, func, items, strategy):
     """Uses an executor the caller owns, and does not shut it down.
 
@@ -580,8 +680,24 @@ def _run_on_shared_executor(executor, func, items, strategy):
     # `imap` where offered: a `multiprocessing.Pool`'s `map` would collect
     # every result first and give up the memory ceiling streaming holds.
     mapper = executor.imap if hasattr(executor, 'imap') else executor.map
-    iterator = mapper(func, items, chunksize=strategy.chunksize)
-    yield from _tracked(iterator, items, strategy)
+    # First, for a pool that broke while idle: the out-of-memory killer on a
+    # worker between two `ingest()` calls. `submit()` would wait on the lock
+    # its manager thread holds until every worker has ended, and nothing
+    # would be raised to reap on (#796).
+    _end_broken_pool_stragglers(executor)
+    try:
+        # The dispatch is inside: `map` submits every item before it
+        # returns, and `submit()` raises on a pool that broke meanwhile.
+        # One that breaks during those submits while a worker outlives its
+        # SIGTERM blocks the next submit instead, and nothing on this
+        # thread can end that worker.
+        iterator = mapper(func, items, chunksize=strategy.chunksize)
+        yield from _tracked(iterator, items, strategy)
+    except BrokenProcessPool:
+        # Before the caller hears of it: the caller retires the pool, and
+        # `shutdown()` takes the same lock.
+        _end_broken_pool_stragglers(executor)
+        raise
 
 
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
@@ -657,8 +773,15 @@ def _run_on_new_executor(func, items, strategy):
         kwargs['initializer'] = initializer
 
     with executor_class(**kwargs) as executor:
-        iterator = executor.map(func, items, chunksize=strategy.chunksize)
-        yield from _tracked(iterator, items, strategy)
+        try:
+            iterator = executor.map(func, items, chunksize=strategy.chunksize)
+            yield from _tracked(iterator, items, strategy)
+        except BrokenProcessPool:
+            # Inside the `with`: its exit is `shutdown(wait=True)`, which
+            # would wait for good on a worker that outlived the pool's
+            # SIGTERM before `_trailing_exception` ever saw this (#796).
+            _end_broken_pool_stragglers(executor)
+            raise
 
 
 def run_parallel(

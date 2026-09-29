@@ -51,7 +51,7 @@ from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
-                       progress_bar)
+                       progress_bar, _end_broken_pool_stragglers)
 from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
                             _scan_policy_for, _deid_method_value)
 from ._version import __version__
@@ -1441,7 +1441,9 @@ class DicomSession:
         Shut the session down: the persistence-manager thread, the audit
         thread that owns the sqlite connection, and the process pool. A
         session that is never closed leaks its worker subprocesses for the
-        life of the process.
+        life of the process. If the pool is broken, because one of its
+        workers ended outright, a worker of it still running 10 s later is
+        sent `SIGKILL`, and one `WARNING` line names it.
 
         All three steps run even if an earlier one raises. If more than
         one fails, the first failure is raised and the later ones are
@@ -1485,6 +1487,10 @@ class DicomSession:
 
         if hasattr(self, '_executor'):
             print("Shutting down process pool...")
+            # For a pool that broke while idle: `shutdown()` takes the lock
+            # its manager thread holds until every worker has ended (#796).
+            # A step of its own, so that a raise cannot skip the shutdown.
+            _run_step(lambda: _end_broken_pool_stragglers(self._executor))
             _run_step(lambda: self._executor.shutdown(wait=True))
 
         if first_exception is not None:
@@ -1634,7 +1640,11 @@ class DicomSession:
         get_logger().warning(f"Restarting ProcessPoolExecutor (max_workers={max_workers})...")
         if retired:
             try:
-                # Force kill old processes if they are stuck/broken
+                # This kills nothing, and waits for the shutdown lock, which
+                # a broken pool's manager thread holds until every worker has
+                # ended. `run_parallel` SIGKILLed any worker that outlived
+                # the pool's SIGTERM before `ingest()` heard of the break
+                # (`_end_broken_pool_stragglers`, #796).
                 retired.shutdown(wait=False, cancel_futures=True)
             except (RuntimeError, OSError) as exc:
                 # The executor is being replaced regardless; a failure to
@@ -1754,6 +1764,9 @@ class DicomSession:
         if not executor:
             return
         try:
+            # For a pool that broke while idle: `shutdown()` takes the lock
+            # its manager thread holds until every worker has ended (#796).
+            _end_broken_pool_stragglers(executor)
             executor.shutdown(wait=True)
         except (RuntimeError, OSError) as exc:
             # The pool has been replaced regardless; a failure to shut
@@ -2187,9 +2200,12 @@ class DicomSession:
         out-of-memory killer, a decoder crash, `SIGKILL`) is read again
         alone on a fresh worker, and rejected only if it ends that worker
         too. Files already read are kept, and a death that does not recur
-        costs no file and logs one `WARNING` line. If fresh workers cannot
-        run at all, every file left is rejected as "Not read", with a
-        reason naming the usual causes (a script without the
+        costs no file and logs one `WARNING` line. When a worker ends, the
+        pool's other workers are sent `SIGTERM`; one still running 10 s
+        later, as a worker of a script that handles `SIGTERM` can be, is
+        sent `SIGKILL`, and one `WARNING` line names it. If fresh workers
+        cannot run at all, every file left is rejected as "Not read", with
+        a reason naming the usual causes (a script without the
         `if __name__ == "__main__":` guard among them), and the call
         returns. Any other failure of the worker pool raises.
 

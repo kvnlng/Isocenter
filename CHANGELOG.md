@@ -34,6 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Measured on 3.14t**, 40 parallel loops of the test, 3 runs each, beside 36 busy processes: 65 of 120 runs failed at `main` be649814, each with `03_LATE` rejected, and 0 of 120 with the fix.
   - **Output:** none. Only a test changed.
 
+- **A worker process that outlives its broken pool no longer hangs `ingest()`, `close()` or `run_parallel`'s own process pools (#796).** When a pool worker ends outright, CPython sends every other worker SIGTERM, twice, and then waits for each one with no timeout while holding the pool's shutdown lock. `shutdown()` takes that lock first, whatever `wait` says, and so does `submit()`. So a worker that did not end on SIGTERM hung the caller for good:
+  - `ingest()`, in the pool rebuild after the import;
+  - the next `ingest()`, at its first dispatch, when the session's pool had broken while idle (the out-of-memory killer between two calls), or in the retirement of such a pool when `ISOCENTER_MAX_WORKERS` had changed;
+  - `close()`, on such a pool;
+  - a `run_parallel` process pool, at its `with` exit. `audit()` and `redact()` dispatch through these on a GIL build.
+
+  A worker outlives SIGTERM when something in it handles the signal:
+  - A script's module-level handler does, since spawn runs a script's module-level code again in every worker.
+  - So does a handler that calls `sys.exit(0)`, since a worker running a task catches the `SystemExit` as that task's failure.
+  - So does coverage's `sigterm = True` handler, which is not re-entrant: the second SIGTERM re-enters it, and it deadlocks on the collector's lock or raises into the running task. That is what hung the 3.14t test-map build at the 1.0.0rc1 cut and after the 1.0.0rc5 cut.
+
+  Measured on 3.12.14 and 3.14.7t without coverage: a script with a module-level SIGTERM handler ingested 8 files, one of them fatal. `ingest()` hung in the pool rebuild, and returned the right summary (7 ingested, the fatal file named) only once the surviving worker was killed by hand.
+
+  Now, once a pool is broken, its workers get `_BROKEN_POOL_GRACE_S` (10 s) to end. Each one still running is sent SIGKILL, and one `WARNING` line names the pids. It is a log line and not an audit row, as a worker death that costs no file is (#654). A worker with the default SIGTERM behaviour dies within milliseconds and is never waited on. No exception changes.
+  - **What is not covered.** A worker in uninterruptible I/O cannot be ended by any signal. Export's recycling pool still exits through `terminate()`, which can hang the same way (#860).
+  - **`.coveragerc` keeps `sigterm = True`.** Without it the map loses the export workers' records: 152 functions recorded as run in a worker, against 84. Its comment now says how the handler keeps a worker alive, and corrects the claim that the C tracer takes a lock only while registering a new file.
+  - **`RELEASING.md`:** step 1's 3.14t integration run is the map build again. The plain sharded run is kept as the fallback for a build that hangs.
+  - **Output:** none. No exported file changes.
 
 ## [1.0.0rc5] - 2026-09-29
 
