@@ -81,15 +81,27 @@ existing line").
 
    Both interpreters must pass. A selection that is the whole suite may be
    run as shards, `pytest -v --changed --shard=I/N` for I in 1..N, so each
-   run is short enough to watch; record every shard's line. Each test runs in its own
-   directory (#707), so the two runs may overlap in one checkout -- unless
-   both include `tests/test_packaging_contract.py`, which builds the
-   distributions in the repository root (setuptools' `build/` and
-   `isocenter.egg-info/`); run those one after the other. That is nearly
-   every run: the packaging test reads every `*.py`, so any change to a
-   `.py` file anywhere in the repository selects it (#744). Plan on running
-   the two interpreters one after the other unless the change touches no
-   Python file. Paste each
+   run is short enough to watch; record every shard's line.
+
+   **Runs in one checkout go one after the other** (#849). Each test runs
+   in its own directory (#707), but two runs in one checkout still meet
+   in its root: `tests/test_packaging_contract.py`'s `built` fixture
+   builds the distributions there, and the sdist makes and then deletes
+   a release tree, `isocenter-<version>/`. Another run whose closing
+   root-guard snapshot falls inside that window exits 1 naming the tree,
+   though every test passed (seen at #847's gate). The packaging test is
+   in nearly every selection: it reads every `*.py` (#744) and names
+   files such as `RELEASING.md`. To run shards or both interpreters at
+   once, give each run its own worktree: `git worktree add --detach <dir>
+   <sha>`, then `cp .test-map.json <dir>/` if the checkout has a map (it
+   is gitignored, and without it `--changed` falls back to `TARGETS`
+   rows). **Any run in a worktree**, made for this or because the branch
+   lives in one, is run from `<dir>` as `PYTHONPATH=<dir> python -m
+   pytest …`, never the `pytest` script, after `PYTHONPATH=<dir> python
+   -c 'import isocenter; print(isocenter.__file__)'`, which must print a
+   path under `<dir>`. The package is installed editable from the main
+   checkout, and the script imports it from there, so the run would test
+   the main checkout's code under the worktree's SHA. Paste each
    run's command, its SHA, its last line and its exit status
    (`…; echo "exit=$?"`) into the PR body, and keep the body current: it
    describes the SHA to be merged, not the first one pushed. A run that
@@ -189,10 +201,43 @@ fixes, never features.
    commits merged after it then reach the new branch by picks, before the
    release commit, as "Later releases on an existing line" describes (its
    first paragraph says what changes for a first cut). Run the full suite on
-   3.12 and 3.14t at that SHA. **This is the integration test**, and the
+   3.12 and 3.14t at that SHA; shards that run at once, on either
+   interpreter, each get their own worktree ("Changes land on `main`",
+   step 3). **This is the integration test**, and the
    first time this code meets the whole suite. A failure is fixed on `main`
    by the procedure above, and step 1 starts again at the new commit. (A
    patch release skips this step; its integration test is step 3's run.)
+
+   **One failure or one hang in this run, or in step 3's, is rerun
+   before anything is fixed.**
+   - **What counts:** a failed or errored test, a shard that crashes or
+     exits non-zero with every test passed, or a hang. A **hang** is a
+     shard whose stall banner, `ISOCENTER STALL WATCHDOG: nothing has
+     happened for Ns (#250)`, names the same test with N at 600 or more:
+     10 minutes with no new test starting (owner ruling on #856,
+     2026-09-29). The banner is printed once 120 s pass without a new
+     test starting, and every 120 s after that, so a banner alone is not
+     a hang: in a loaded run a healthy test stalled the watchdog for more
+     than 5 minutes, drawing two banners, and passed.
+   - **What to do** (owner ruling on #845, 2026-09-29): kill only a hung
+     shard's processes; let a shard with a failure finish, so that a
+     second failure in it is seen. Rerun that shard in full, once, at the
+     same SHA. An unsharded run is one shard. If the rerun is green, go
+     on, and record both runs -- the failure or hang, and the rerun -- in
+     the release-commit PR, with the flake filed as an issue. v1.0.0rc4's
+     hung shard (#843, #844) was the first, killed at about 8.5 minutes,
+     before this rule set 10.
+   - **The ruling covers one.** If the rerun is red, or a second failure
+     or hang turns up in the run, on either interpreter, it is a failure
+     (a plain sharded run that replaces a hung map build counts its own,
+     below), handled as the procedure you are following says for that
+     run: step 1's is fixed on `main` and step 1 starts again; step 3's as
+     step 3 says; a later release's as "Later releases on an existing
+     line" says.
+   - **A hang of the 3.14t map build** is the fallback case below (#796),
+     not this one (owner ruling on #856, 2026-09-29): the plain sharded
+     run replaces the build and has its own allowance of one, apart from
+     the rest of the run's, and the build's hang counts toward neither.
 
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
@@ -208,16 +253,19 @@ fixes, never features.
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
 
-   **While #796 is open**, the map build can hang in the dead-worker
-   tests (`test_a_dead_ingest_worker_costs_the_file_it_was_reading.py`).
-   When a pool breaks, the parent SIGTERMs the other workers, and
-   coverage's own SIGTERM handler can deadlock one of them, which
-   `.coveragerc` already concedes. It hung twice at the v1.0.0rc1 cut, and
-   the owner ruled that step 1's 3.14t run may then be plain `pytest`,
-   without coverage, split into shards: `PYTHON_GIL=0 python -m pytest -v
-   --shard=I/N; echo "exit=$?"` for each I from 1 to N, recording every
-   shard's last test line and `exit=`. Rebuild the map afterwards,
-   outside the release path. A stall shows as the conftest watchdog's
+   **If the map build hangs**, step 1's 3.14t run is plain `pytest`,
+   without coverage, split into shards (owner ruling on #796,
+   2026-09-24): `PYTHON_GIL=0 python -m pytest -v --shard=I/N; echo
+   "exit=$?"` for each I from 1 to N, recording every shard's last test
+   line and `exit=`. Rebuild the map afterwards, outside the release
+   path. The integration runs of v1.0.0rc1 to v1.0.0rc5 were this
+   fallback: the build hung in the dead-worker tests
+   (`test_a_dead_ingest_worker_costs_the_file_it_was_reading.py`) at the
+   rc1 cut and again after the rc5 cut. When a pool worker died, CPython
+   sent the other workers SIGTERM and waited for each with no timeout,
+   and coverage's own SIGTERM handler could keep one of them running for
+   good. Since #796 was fixed, a worker still running 10 s after its pool
+   is found broken is sent SIGKILL. A stall shows as the conftest watchdog's
    `ISOCENTER STALL WATCHDOG: nothing has happened for Ns (#250)` banner,
    repeated every 120 s. It never ends the run, so kill only that run's
    processes. faulthandler's `Timeout (0:05:00)!` dump is printed once
@@ -269,6 +317,34 @@ fixes, never features.
      section; the file describes the code on the branch. A patch's first
      fix adds one back (see "Patch releases").
 
+     **Both dates are UTC** (owner ruling on #856, 2026-09-29):
+     `date-released` and the heading's date are the UTC date of
+     step 6's PyPI upload, which is how PyPI records it. 00:00 UTC is
+     20:00 EDT and 19:00 EST; `date -u` prints the UTC date. v1.0.0rc5
+     was uploaded at 23:51 EDT on 2026-09-28, which was 2026-09-29 in
+     UTC, and carries 2026-09-29.
+     - **Write the UTC date the upload will happen on,** allowing for
+       everything between this commit and the upload: this step's run
+       and review, step 4's rehearsal, and step 6's own run, which
+       uploads at its end. v1.0.0rc5's release-commit PR was opened at
+       02:33 UTC and the upload came at 03:51; its rehearsal and its
+       publish run took about 20 minutes each.
+     - **At step 5, before tagging,** check that step 6's upload, about
+       20 minutes after its dispatch, will fall on the written date when
+       step 6 is dispatched at once. If it would come before that date,
+       wait. If the date has passed, correct both dates first; the
+       version is not spent.
+     - **A correction** is a PR into `release/X.Y` that changes only the
+       two dates. It takes no changelog entry and no forward-port, because
+       step 8 carries the dates to `main`. It is gated, reviewed and
+       merged like any other PR into the branch (below). Step 5 tags its
+       merge commit without a second rehearsal (owner ruling on #856,
+       2026-09-29): TestPyPI refuses the files a green rehearsal already
+       uploaded, and step 6's run tests the tag before it uploads. A slip
+       found before the release-commit PR merges is corrected the same
+       way, after it merges, so that the SHA its integration run was made
+       at stands.
+
      **The section is the release's notes** (step 7 copies it to the
      GitHub Release), and it says what changed since the previous release.
      Its entries do that for a candidate, a patch, or a final that had no
@@ -282,7 +358,8 @@ fixes, never features.
      section is never empty (#826).
 
    Run the full suite on both interpreters at this commit
-   (`tests/test_version_contract.py` checks that the three files agree).
+   (`tests/test_version_contract.py` checks that the three files agree);
+   shards that run at once each get their own worktree, as in step 1.
    For a patch release this run is the integration test, **and the two
    fingerprint comparisons of step 1 are made at this commit**:
    `python -m scripts.output_fingerprint check` on both interpreters, then
@@ -290,7 +367,8 @@ fixes, never features.
    `python -m scripts.output_fingerprint previous-tag --line X.Y` prints.
    The fingerprint is not rewritten at release:
    `git show vX.Y.Z:fingerprint/output.json` is the release's fingerprint.
-   A failure here, before the release-commit PR merges, is fixed on
+   One failure or one hang in this run first goes through step 1's rerun
+   rule. A failure here, before the release-commit PR merges, is fixed on
    `release/X.Y` by the patch procedure below -- and forward-ported --
    and the release commit is made again on top of the fix.
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
@@ -317,9 +395,13 @@ fixes, never features.
    release. Rerun a red job to learn whether it is deterministic, not to
    make it go away. A rehearsal consumes the version number on TestPyPI
    only, so a second rehearsal of the same version cannot upload; its
-   build gates and test matrix still run.
+   build gates and test matrix still run. A date correction (step 3,
+   "Both dates are UTC") is not rehearsed again.
 5. **Tag** the release commit, or the last fix merged after it (step 3)
-   (an admin step): `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
+   (an admin step). First make step 3's date check ("Both dates are
+   UTC"): tag only if step 6, dispatched at once, will upload on the
+   written UTC date. A date correction's merge commit is tagged without
+   a second rehearsal. Then: `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
    `release/X.Y`, then `git push origin vX.Y.Z`. **Pushing the tag deploys
    the documentation** for vX.Y.Z (see below), before the version is on
    PyPI; nothing else runs. That window is why step 4 must pass first.

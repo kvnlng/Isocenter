@@ -1757,6 +1757,60 @@ def test_the_sidecar_gate_deadline_sits_inside_the_timeout_family():
         "re-inlined literal is exactly how 900.0 went unquestioned (#368)")
 
 
+def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
+    """`5 <= _BROKEN_POOL_GRACE_S < _STALL_S`, below the faulthandler window
+    too, and the helper reads it (#796).
+
+    After a pool breaks, its workers get the grace to end before
+    `_end_broken_pool_stragglers` SIGKILLs them. Below `_STALL_S`, so a
+    teardown that ends in a kill is never reported as a stall, or dumped;
+    and below the faulthandler window for the same reason. It holds no
+    sqlite handle and no gate, so it has no place among 120 < 180 < 240,
+    which order waits on the database and the sidecar. Not below 5 s, the
+    "few seconds" of the constant's comment: a worker that saves its state
+    on SIGTERM must get to finish, and coverage's handler was measured at
+    up to 0.8 s under load. A grace cut tenfold is below that floor.
+
+    What this cannot see is the grace grown tenfold, which stays below
+    both ceilings. Read from the conftest source, as
+    `test_the_stall_watchdog_fires_inside_the_run_tests_step` reads it.
+    """
+    import inspect
+    import textwrap
+
+    from isocenter import parallel
+
+    threshold, _step_seconds, _ = _faulthandler_threshold_and_step_seconds()
+    source = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    match = re.search(r"^_STALL_S = ([0-9.]+)$", source, re.MULTILINE)
+    assert match, "tests/conftest.py no longer defines _STALL_S (#250)"
+    stall_s = float(match.group(1))
+    grace = parallel._BROKEN_POOL_GRACE_S
+
+    assert grace < stall_s, (
+        f"_BROKEN_POOL_GRACE_S={grace:g}s is not below the stall watchdog's "
+        f"{stall_s:g}s: a pool teardown that ends in SIGKILL would be "
+        "reported as a stall (#796)")
+    assert grace < threshold, (
+        f"_BROKEN_POOL_GRACE_S={grace:g}s outlasts the faulthandler window "
+        f"({threshold:g}s): a teardown that ends in SIGKILL would be dumped "
+        "as a hang (#796)")
+    assert grace >= 5, (
+        f"_BROKEN_POOL_GRACE_S={grace:g}s is below the few seconds its "
+        "comment sets as the floor: a worker that saves its state on SIGTERM "
+        "must get to finish, and coverage's `sigterm = True` handler takes "
+        "up to 0.8 s under load to write the worker's data file (#796)")
+
+    # By AST, as the gate's deadline is read above: the docstring names
+    # the constant in prose.
+    helper = inspect.getsource(parallel._end_broken_pool_stragglers)
+    names = {node.id for node in ast.walk(ast.parse(textwrap.dedent(helper)))
+             if isinstance(node, ast.Name)}
+    assert "_BROKEN_POOL_GRACE_S" in names, (
+        "_end_broken_pool_stragglers no longer reads _BROKEN_POOL_GRACE_S; "
+        "a re-inlined literal is what this family exists to stop (#368)")
+
+
 # ---------------------------------------------------------------------------
 # The documentation deploy (#635) -- the one workflow that publishes to a
 # live site, and until this test nothing in the suite read it at all

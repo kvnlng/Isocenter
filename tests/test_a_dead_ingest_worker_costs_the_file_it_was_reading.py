@@ -51,6 +51,11 @@ from isocenter.io_handlers import DicomImporter
 from isocenter.session import DicomSession
 from isocenter.store import DicomStore
 
+from test_parallel_contract import (_bounded, _break_while_idle,
+                                    _outlive_sigterm, _sigkill_records,
+                                    _start_two_workers,
+                                    _wait_for_a_ready_sibling)
+
 
 def _die_reading(marker, how, once_marker=None):
     """Pool initializer: reading a path containing `marker` ends the worker.
@@ -78,9 +83,30 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
     """Pool initializer for deaths the file a worker holds did not cause.
 
     The file's name picks what reading it does: `POISON` ends the worker
-    every time, `FLAKY` the first time only, `SLOW` takes half a second,
-    and `LATE` returns its result and ends the worker 0.15 s later, while
-    it holds whatever it took next. Then, whatever the file:
+    every time, `FLAKY` ends a worker of a pool that started before any
+    worker ended (so never a retry's), `SLOW` takes half a second, and
+    `LATE` returns its result and ends the worker when it starts reading
+    another file, so while it holds whatever it took next; a worker given
+    no further file lives on.
+
+    What the one case that uses `LATE` and `FLAKY` needs from them depends
+    on no timing (#851). `LATE` ended the worker 0.15 s after its read,
+    which assumed its result was sent by then: under a load of process
+    spawns, two thirds of its reads (133 of 198) ended their worker first,
+    and so did the fresh worker `LATE` was then given alone, so `ingest()`
+    rejected it. A worker sends each result before it takes its next task,
+    which `_ingest_results` already relies on, so the next read comes after
+    the send. `FLAKY` ended the worker the first time it was read, by a
+    marker written as it died: a worker slow to write it could be ended
+    first by the other worker's `LATE`, and `FLAKY`'s first read then came
+    in the one-at-a-time round, as the first file, and was rejected (review
+    of #857). Whether the pool started before any death is read once, when
+    the worker starts, as `canary_once` reads it. The worker that takes
+    `FLAKY` in round 0 always started before any death: in that case every
+    other death needs a later file taken first, and a pool hands its files
+    out in order. So round 0 returns no file from `FLAKY` on, whether
+    `FLAKY` ends that worker or another death ends the pool first; which of
+    the two happens is timing. Then, whatever the file:
 
     - `leak`: every worker process ends on its `leak`-th read -- the
       out-of-memory killer after a leak, the accumulation #654 names;
@@ -89,18 +115,23 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
     - `canary_once`: the first worker process to start after any worker
       has ended ends at once, before it runs anything, once.
 
-    Every death leaves a file named `died` in `marker_dir` first, which is
-    how `canary_once` knows a pool is a retry's. A worker process runs its
-    tasks one at a time, so the read counter needs no lock.
+    Every death but the canary's leaves a file named `died` in
+    `marker_dir` first, which is how `canary_once` and `FLAKY` know a pool
+    is a retry's, and one named `died-<exit code>`, which says which exit
+    code ended it (13 is `POISON`'s and 29 is `FLAKY`'s, so a failed run's
+    markers tell the two apart). A worker process runs its tasks one at a
+    time, so the read counter needs no lock.
     """
     died = os.path.join(marker_dir, "died")
+    after_a_death = os.path.exists(died)
 
     def end(code):
-        with open(died, "a", encoding="utf-8"):
-            pass
+        for marker in (died, f"{died}-{code}"):
+            with open(marker, "a", encoding="utf-8"):
+                pass
         os._exit(code)  # pylint: disable=protected-access
 
-    if canary_once and os.path.exists(died):
+    if canary_once and after_a_death:
         killed = os.path.join(marker_dir, "canary-killed")
         if not os.path.exists(killed):
             with open(killed, "w", encoding="utf-8"):
@@ -111,26 +142,26 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
                          daemon=True).start()
     real = pydicom.dcmread
     reads = [0]
+    late = [None]  # the `LATE` file this worker has read, if any
 
     def dcmread(fp, *args, **kwargs):
         name = os.path.basename(str(fp))
+        # Another file, not the next call: a second read of `LATE` itself
+        # would end the worker before its result was sent (#851).
+        if late[0] is not None and name != late[0]:
+            end(23)
         reads[0] += 1
         if leak is not None and reads[0] >= leak:
             end(21)
         if "POISON" in name:
             end(13)
-        if "FLAKY" in name:
-            once = os.path.join(marker_dir, f"flaky-{name}")
-            if not os.path.exists(once):
-                with open(once, "w", encoding="utf-8"):
-                    pass
-                end(13)
+        if "FLAKY" in name and not after_a_death:
+            end(29)
         if "SLOW" in name:
             time.sleep(0.5)
         ds = real(fp, *args, **kwargs)
         if "LATE" in name:
-            threading.Thread(target=lambda: (time.sleep(0.15), end(23)),
-                             daemon=True).start()
+            late[0] = name
         return ds
     pydicom.dcmread = dcmread
 
@@ -688,6 +719,17 @@ def test_a_death_the_held_file_did_not_cause_rejects_no_good_file(
     marker_dir.mkdir()
     _poison_pools(monkeypatch, initializer=functools.partial(
         _shapes, str(marker_dir), **shape))
+    rounds = []  # what each round's `run_parallel` returned, in order
+    real_run = io_handlers.run_parallel
+
+    def recording(func, items, **kwargs):
+        seen = []
+        rounds.append(seen)
+        for result in real_run(func, items, **kwargs):
+            seen.append(result)
+            yield result
+
+    monkeypatch.setattr(io_handlers, "run_parallel", recording)
     src, paths = _folder(tmp_path, n, tags=tags)
     poison = [paths[i] for i, tag in tags.items() if tag == "POISON"]
     db = str(tmp_path / "s.db")
@@ -695,6 +737,24 @@ def test_a_death_the_held_file_did_not_cause_rejects_no_good_file(
         sidecar = session.store_backend.sidecar.filepath
         summary = session.ingest(str(src))
     assert os.path.exists(marker_dir / "died")
+    if "LATE" in tags.values():
+        # The shape happened: a worker ended after returning `LATE`. Every
+        # other death here leaves `died` too, so that alone would pass
+        # with `LATE` ending nothing.
+        assert os.path.exists(marker_dir / "died-23")
+    if "FLAKY" in tags.values():
+        # Round 0 returned no file from `FLAKY` on, so the one-at-a-time
+        # round reads `LATE` and the file after it, and `LATE`'s death there
+        # is the one this case is about. That holds whichever death ended
+        # round 0: `FLAKY` is live for the worker that takes it there, and
+        # results come back in order. With `FLAKY` inert everywhere the case
+        # still passed: `LATE` ended its worker in round 0, the
+        # one-at-a-time round's death was `POISON`'s own, and the round-0
+        # death met the check above (review of #857).
+        flaky = min(i for i, tag in tags.items() if tag == "FLAKY")
+        returned = [r for r in rounds[0] if not isinstance(r, Exception)]
+        assert len(returned) <= flaky
+        assert isinstance(rounds[0][-1], BrokenProcessPool)
     assert [p for p, _ in summary.failures] == poison
     assert summary.failures[0][1].startswith(io_handlers._WORKER_ENDED_READING)
     assert summary.ingested == n - 1
@@ -797,3 +857,187 @@ def test_a_fresh_worker_that_ends_once_at_start_gets_one_more_pool(
     assert [p for p, _ in summary.failures] == [paths[3]]
     assert summary.failures[0][1].startswith(io_handlers._WORKER_ENDED_READING)
     assert summary.ingested == 7
+
+
+# --- #796: a worker that outlives its broken pool's SIGTERM ------------------
+#
+# When a worker ends outright, CPython sends every other worker of the pool
+# SIGTERM and then waits for each with no timeout, holding the pool's
+# shutdown lock, which `submit()` and `shutdown()` take first. So a worker
+# that handles SIGTERM hung `ingest()` for good: in the pool rebuild after
+# the import, or in the next call's first dispatch when the pool broke
+# while idle, or in `close()`. The product shape is a script that installs
+# a graceful-shutdown handler at module level, which spawn runs again in
+# every worker. The helpers and the handshake are `test_parallel_contract`'s.
+
+
+def _die_reading_outliving_sigterm(marker_dir):
+    """Pool initializer: every worker outlives SIGTERM, and reading a
+    POISON path ends the worker once a sibling has installed its handler.
+
+    The handshake orders the death after the sibling's handler: a sibling
+    still starting has SIGTERM's default disposition, dies of the pool's
+    SIGTERM, and leaves nothing to end.
+    """
+    _outlive_sigterm(marker_dir)
+    real = pydicom.dcmread
+
+    def dcmread(fp, *args, **kwargs):
+        if "POISON" in str(fp):
+            _wait_for_a_ready_sibling(marker_dir)
+            os._exit(13)  # pylint: disable=protected-access
+        return real(fp, *args, **kwargs)
+    pydicom.dcmread = dcmread
+
+
+@pytest.fixture
+def _a_second_of_grace(monkeypatch):
+    """`_BROKEN_POOL_GRACE_S` at one second, so a kill costs one.
+
+    `raising=False`: on a tree without the constant these tests go red for
+    the hang they exist for, not on an `AttributeError` here.
+    """
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0, raising=False)
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_a_worker_that_outlives_its_broken_pool_is_ended_and_ingest_returns(
+        tmp_path, monkeypatch, caplog):
+    """The dead worker's sibling ignores SIGTERM, and `ingest()` returns.
+
+    It hung in the pool rebuild after the import:
+    `_restart_executor`'s `shutdown(wait=False)` waited for the lock the
+    manager thread held while it waited on the sibling. Killed, the sibling
+    frees it, and the summary is the one a dead worker always gives.
+
+    Killing mutations: the reap on `BrokenProcessPool` in
+    `_run_on_shared_executor` deleted; its `kill()` deleted, or turned into
+    `terminate()`.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _die_reading_outliving_sigterm, str(markers)))
+    src, paths = _folder(tmp_path, 8, poison_at=(3,))
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(src)), 60)
+        assert not hung, (
+            "ingest() did not return: a worker that outlives the broken "
+            "pool's SIGTERM hangs it (#796)")
+        assert multiprocessing.active_children() == []
+    assert summary.ingested == 7
+    assert [p for p, _ in summary.failures] == [paths[3]]
+    ended = _sigkill_records(caplog)
+    assert len(ended) == 1 and ended[0].levelno == logging.WARNING, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_the_next_ingest_ends_a_worker_that_outlived_an_idle_break(
+        tmp_path, monkeypatch, caplog):
+    """The shared pool broke between two `ingest()` calls, and the second
+    one returns.
+
+    The out-of-memory killer on an idle worker. The second call's first
+    `submit()` waited for the lock the manager thread held while it
+    waited on the sibling, so nothing raised and nothing reaped: the
+    sibling has to be ended before the dispatch.
+
+    Killing mutation: the call before the dispatch in
+    `_run_on_shared_executor` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    first, _ = _folder(tmp_path / "a", 2)
+    second, _ = _folder(tmp_path / "b", 3)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        assert session.ingest(str(first)).ingested == 2
+        _break_while_idle(session._executor, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(second)), 60)
+        assert not hung, (
+            "ingest() did not return: dispatching on a pool that broke "
+            "while idle waits behind the worker that outlived it (#796)")
+        assert multiprocessing.active_children() == []
+    assert summary.ingested == 3 and summary.failures == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_close_ends_a_worker_that_outlived_an_idle_break(
+        tmp_path, monkeypatch, caplog):
+    """`close()` returns though its pool broke while idle.
+
+    Its `shutdown(wait=True)` takes the same lock, so it hung behind the
+    worker that outlived the pool's SIGTERM, with no `ingest()` after the
+    break to end it.
+
+    Killing mutation: the call before the shutdown in `close()` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    session = DicomSession(str(tmp_path / "s.db"))
+    closed = False
+    try:
+        pool = session._executor
+        _start_two_workers(pool)
+        processes = list(pool._processes.values())
+        _break_while_idle(pool, str(markers))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, _ = _bounded(session.close, 60)
+        closed = True
+    finally:
+        if not closed:
+            for child in multiprocessing.active_children():
+                child.kill()
+            session.close()
+    assert not hung, (
+        "close() did not return: its pool broke while idle, and a worker "
+        "that outlived the pool's SIGTERM held the pool's lock (#796)")
+    assert not any(p.is_alive() for p in processes)
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.usefixtures("_a_second_of_grace")
+def test_a_resize_retires_a_pool_that_broke_while_idle(
+        tmp_path, monkeypatch, caplog):
+    """An `ingest()` that resizes the shared pool returns though the pool it
+    retires broke while idle.
+
+    `_retire_shared_executor` shuts the old pool down with `wait=True`,
+    which hung behind the worker that outlived the pool's SIGTERM.
+
+    Killing mutation: the call before the shutdown in
+    `_retire_shared_executor` deleted.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    _poison_pools(monkeypatch, initializer=functools.partial(
+        _outlive_sigterm, str(markers)))
+    src, _ = _folder(tmp_path, 3)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        pool = session._executor
+        _start_two_workers(pool)
+        processes = list(pool._processes.values())
+        _break_while_idle(pool, str(markers))
+        monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "1")
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            hung, summary = _bounded(lambda: session.ingest(str(src)), 60)
+        assert not hung, (
+            "ingest() did not return: the resize's retirement of a pool "
+            "that broke while idle waited behind the worker that outlived "
+            "it (#796)")
+        assert session._executor is not pool
+        assert not any(p.is_alive() for p in processes)
+    assert summary.ingested == 3 and summary.failures == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
