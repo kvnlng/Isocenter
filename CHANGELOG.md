@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`RELEASING.md` gains three rules that the 1.0.0rc4 and 1.0.0rc5 cuts needed (#845, #849).** No package code and no output change.
+  - **One failure or one hang in a release's integration run is rerun before anything is fixed (owner ruling on #845).** The procedure said a failure is fixed on `main` and the cut starts again, and spoke of a hang only in the 3.14t map build (#796). At 1.0.0rc4, 3.12 shard 3 stalled in the watchdog test (#844). That shard alone was killed and rerun in full at the same SHA, green, and the cut went on as a judgment the procedure did not grant (#843). Now it does, for one:
+    - What counts is a failed or errored test, a shard that crashes or exits non-zero with every test passed, or a hang.
+    - A hang is a stall banner naming the same test for 10 minutes with no new test starting (owner ruling on #856). A banner alone is not one: in a loaded run a healthy test stalled the watchdog for more than 5 minutes, drawing two banners, and passed.
+    - The shard is rerun once, at the same SHA. If the rerun is green the cut goes on, with both runs recorded in the release-commit PR and the flake filed.
+    - A red rerun, or a second failure or hang on either interpreter, is still a failure, handled as before. Step 3's text points to the rule, so a patch release reaches it too. A hang of the map build stays #796's case: it counts for nothing, and the plain sharded run that replaces the build has its own allowance of one (owner ruling on #856).
+  - **Runs in one checkout go one after the other, and runs at once each get their own worktree (#849).** The procedure said two runs could overlap unless *both* included `tests/test_packaging_contract.py`. One is enough. Its `built` fixture makes the sdist's release tree, `isocenter-<version>/`, in the repository root and deletes it again, and any other run whose closing root-guard snapshot falls inside that window exits 1 naming the tree, though every test passed. At #847's gate, the four shards of each interpreter ran at once in one worktree; 3.14t shard 3 passed its 158 tests and exited 1, while shard 4, the only one running the packaging test, was building. 1.0.0rc5's integration run gave each shard its own worktree. The procedure now gives the worktree recipe in full:
+    - `PYTHONPATH=<dir> python -m pytest`, never the `pytest` script, which imports the package from the main checkout it was installed from;
+    - a check that `isocenter.__file__` is under the worktree;
+    - a copy of the gitignored `.test-map.json`.
+  - **A release's dates are the UTC date of its PyPI upload (owner ruling on #856).** The procedure named no time zone for the `CHANGELOG.md` heading and `CITATION.cff`. 1.0.0rc5 was uploaded at 23:51 EDT on 2026-09-28 and carries 2026-09-29, the UTC date, which is how PyPI records the upload. Its release-commit PR was opened 78 minutes before the upload, so:
+    - the date allows for the whole wait;
+    - step 5 checks it before tagging;
+    - a slip is corrected by a PR into the release branch that changes only the two dates, with no second rehearsal (owner ruling on #856);
+    - steps 4 and 5 point to the check.
+
 ## [1.0.0rc5] - 2026-09-29
 
 ### Changed
