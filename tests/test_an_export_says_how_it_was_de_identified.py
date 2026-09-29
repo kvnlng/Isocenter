@@ -74,7 +74,7 @@ REPO = Path(__file__).resolve().parents[1]
 VERSION = re.search(r'__version__ = "([^"]+)"',
                     (REPO / "isocenter" / "_version.py").read_text()).group(1)
 
-#: Measured at f54deaa1, re-measured for #762 and at 1.0.0rc4 (see the module docstring).
+#: Measured at f54deaa1, re-measured for #762, at 1.0.0rc4 and for #848 (see the module docstring).
 FLOOR = ("floor over basic@2026c", "v1:729f4bbf")
 BASIC = ("basic@2026c", "v1:d04ffd6e")
 NONE = ("none", "v1:7182a219")
@@ -505,7 +505,7 @@ def test_an_external_profile_is_named_not_located(tmp_path):
 
 
 #: The floor with one override is its own policy. Each prefix measured at
-#: f54deaa1 and re-measured for #762 and at 1.0.0rc4 (see the module docstring); the label is the floor's, since the file names no profile.
+#: f54deaa1 and re-measured for #762, at 1.0.0rc4 and for #848 (see the module docstring); the label is the floor's, since the file names no profile.
 @pytest.mark.parametrize("rule, expected", [
     ({"0012,0063": {"action": "REMOVE"}},
      {"removed": "YES", "method": None}),

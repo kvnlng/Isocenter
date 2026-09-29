@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Content Sequence `(0040,A730)` is Type 1C in the Document Relationship Macro, which the SR Document Content Module includes: "One or more Items shall be included in this Sequence. Required if the enclosing Content Item has relationships."
   - Graphic Annotation Sequence `(0070,0001)` is Type 1 in the Graphic Annotation Module: "One or more Items shall be included in this Sequence."
 
-  So every SR or presentation state exported under `basic` or the floor carried a sequence with no items. An absent one keeps the rule:
+  So an SR or presentation state that held one was exported under `basic` or the floor holding it with no items. An absent one keeps the rule:
   - An SR's root content item becomes a leaf ("If this Attribute is not present then the enclosing Item is a leaf").
   - A presentation state that applies no annotations has no Graphic Annotation Module, which the GSPS IOD requires only if annotations are to be applied.
 
@@ -22,12 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What removal does not fix.** The rest of the file is not made to fit PS3.3, under either action. Configuration says both of these:
     - An SR's template can require content items. TID 2010 requires a Key Object Selection's content to reference every instance its Current Requested Procedure Evidence Sequence names.
     - A presentation state keeps its Graphic Layer Module, which no rule removes. PS3.3 requires that module only while annotations or overlays are applied, and says a conditional module whose condition is not met shall not be present (A.1.3.2).
-  - **Person Identification Code Sequence stays `EMPTY`.** It is the other sequence the table codes D alone. It is Type 1 inside the Person Identification Macro, so removing it breaks that rule too.
-  - **A store audited before this release.** The profile's rules are in the policy fingerprint:
+  - **Person Identification Code Sequence stays `EMPTY`.** The table codes it D alone as well, but it is Type 1 inside the Person Identification Macro, so removing it would break that rule too.
+  - **A store audited under 1.0.0rc4.** The profile's rules are in the policy fingerprint:
     - the floor's short hash moves from `v1:cce24de1` to `v1:729f4bbf`;
     - `basic@2026c`'s moves from `v1:586cf308` to `v1:d04ffd6e`.
 
-    A store audited under 1.0.0rc4's rules draws the #555 notice at `export()`. Its report grades `REVIEW_REQUIRED` until `audit()` and `anonymize()` run again.
+    Exported with no new `audit()`, such a store draws the #555 notice: a WARNING row naming both policies, no de-identification markers, and a report that grades `REVIEW_REQUIRED`. Its files hold what 1.0.0rc4's pass wrote, the two sequences present and empty. Run `audit()` and `anonymize()` again before exporting it. The export then drops the sequences and carries its markers. A WARNING row an earlier export wrote stays in the store's audit log, so that store's report still grades `REVIEW_REQUIRED`.
   - **`CONFIG_VERSION` stays 2.0.** This changes a pinned profile's own rules before the v1.0.0 tag freezes them.
   - **Output:** `fingerprint/output.json` was retaken on 3.12 and checked clean on 3.14t. `compare --base v1.0.0rc4` reports 956 differences in three groups, all in the five DICOM arms (`A.dicom`, `A.dicom-j2k`, `A.reopened.dicom`, `B.dicom`, `B.dicom-j2k`):
     - **`0040,a730` SQ removed** in 15 files: the three SR members, `test-SR.dcm`, `reportsi.dcm` and `reportsi_with_empty_number_tags.dcm`, whose Content Sequence was present with zero items.
