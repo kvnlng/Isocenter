@@ -1668,6 +1668,64 @@ def test_a_worker_that_outlives_the_grace_is_killed_and_named(
     assert "was set, but worker recycling" not in message
 
 
+def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
+        tmp_path, monkeypatch, caplog):
+    """An interrupted wait kills the workers it was waiting on, and the
+    interrupt goes on.
+
+    The grace is seconds in which the program looks stalled, which is when
+    a user presses Ctrl-C, and its `KeyboardInterrupt` is raised inside the
+    wait. It left the helper with the survivor still running, and reached
+    the caller's `shutdown(wait=True)`: the `with` exit's, `close()`'s, a
+    resize's. That waited on the lock the manager thread holds while it
+    joins the survivor, so the Ctrl-C reached the user only when the
+    survivor died some other way (review of #861). Every caller goes
+    through the helper.
+
+    Killing mutations: the kill moved out of the `finally`, so it runs only
+    after a wait that returns; a `return` in the `finally`, which swallows
+    the interrupt.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    # Far beyond this test's run, so a kill seen here is the interrupt's
+    # and not the deadline's.
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
+    real_wait = multiprocessing.connection.wait
+    here = threading.get_ident()
+
+    def interrupted_here(object_list, timeout=None):
+        """Ctrl-C, in a wait on this thread. `Connection.poll()` reads the
+        module's `wait` too, so any other thread's wait goes on as it was;
+        and the helper is called on this thread, never under `_bounded`."""
+        if threading.get_ident() == here:
+            raise KeyboardInterrupt
+        return real_wait(object_list, timeout)
+
+    with _two_worker_pool(functools.partial(
+            _outlive_sigterm, str(markers))) as pool:
+        _start_two_workers(pool)
+        processes = dict(pool._processes)
+        survivor = _break_while_idle(pool, str(markers))
+        with monkeypatch.context() as interrupt, caplog.at_level(
+                logging.WARNING, logger="isocenter"):
+            interrupt.setattr(multiprocessing.connection, "wait",
+                              interrupted_here)
+            with pytest.raises(KeyboardInterrupt):
+                parallel._end_broken_pool_stragglers(pool)
+        assert multiprocessing.connection.wait(
+            [processes[survivor].sentinel], timeout=30), (
+            "the worker the interrupted wait was waiting on is still running")
+        hung, _ = _bounded(lambda: pool.shutdown(wait=True), 30)
+        assert not hung, (
+            "shutdown(wait=True) after a Ctrl-C during the grace waited on a "
+            "worker that outlives SIGTERM (#796)")
+    records = _sigkill_records(caplog)
+    assert len(records) == 1 and records[0].levelno == logging.WARNING, [
+        r.getMessage() for r in caplog.records]
+    assert str(survivor) in records[0].getMessage()
+
+
 def test_the_pool_internals_the_straggler_helper_reads_are_there():
     """`_processes` and `_broken`, pinned on each interpreter the gate runs.
 

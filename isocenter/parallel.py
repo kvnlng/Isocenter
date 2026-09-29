@@ -599,8 +599,10 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
 
     Does nothing unless `executor` is a broken process pool. Otherwise gives
     its workers `_BROKEN_POOL_GRACE_S` from now to end, SIGKILLs each one
-    still running, and logs one WARNING naming them. Takes no lock. A worker
-    in uninterruptible I/O cannot be ended by any signal.
+    still running, and logs one WARNING naming them. An interrupt during
+    that wait, such as Ctrl-C, sends the SIGKILL and logs the line at once,
+    and then goes on. Takes no lock. A worker in uninterruptible I/O cannot
+    be ended by any signal.
 
     Args:
         executor: Any executor or pool. Only a `ProcessPoolExecutor` that is
@@ -630,37 +632,50 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
     # The sentinels, never `join()` or `is_alive()`: those reap the child
     # with `waitpid`, racing the manager thread's own `join()` of it. A
     # worker whose sentinel is ready has ended and is the manager's to reap.
-    deadline = time.monotonic() + _BROKEN_POOL_GRACE_S
-    while waiting:
-        left = deadline - time.monotonic()
-        if left <= 0:
-            break
-        try:
-            ready = multiprocessing.connection.wait(list(waiting),
-                                                    timeout=left)
-        except (OSError, ValueError):
-            break
-        for sentinel in ready:
-            del waiting[sentinel]
-    killed = []
-    for process in waiting.values():
-        try:
-            process.kill()
-        except (OSError, ValueError):
-            continue
-        killed.append(process.pid)
-    if killed:
-        # Two `ingest()` calls on one broken pool can both get here and both
-        # kill: `kill()` skips a worker already reaped and swallows one
-        # already gone, so the cost is a second line naming the same pids.
-        get_logger().warning(
-            "%d worker process(es) of a broken process pool were still "
-            "running %g s after the pool was found broken, and were sent "
-            "SIGKILL (pid %s). A worker outlives SIGTERM when something in "
-            "it handles that signal; a handler a script installs at module "
-            "level runs again in every spawned worker.",
-            len(killed), _BROKEN_POOL_GRACE_S,
-            ", ".join(str(pid) for pid in killed))
+    found_broken = time.monotonic()
+    deadline = found_broken + _BROKEN_POOL_GRACE_S
+    try:
+        while waiting:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            try:
+                ready = multiprocessing.connection.wait(list(waiting),
+                                                        timeout=left)
+            except (OSError, ValueError):
+                break
+            for sentinel in ready:
+                del waiting[sentinel]
+    finally:
+        # On every way out of the wait, and Ctrl-C is one: the grace is
+        # seconds in which the program looks stalled, which is when a user
+        # presses it, and its `KeyboardInterrupt` is raised inside `wait()`.
+        # Let out with the workers still running, it reached the caller's
+        # `shutdown()`, which then waited on them for good (review of
+        # #861). A `finally` and not an `except`, so nothing is swallowed,
+        # and never a `return` in it, which would swallow the interrupt.
+        killed = []
+        for process in waiting.values():
+            try:
+                process.kill()
+            except (OSError, ValueError):
+                continue
+            killed.append(process.pid)
+        if killed:
+            # Two `ingest()` calls on one broken pool can both get here and
+            # both kill: `kill()` skips a worker already reaped and swallows
+            # one already gone, so the cost is a second line naming the
+            # same pids. The time is measured, not the grace: an interrupt
+            # ends the wait early.
+            get_logger().warning(
+                "%d worker process(es) of a broken process pool were still "
+                "running %.1f s after the pool was found broken, and were "
+                "sent SIGKILL (pid %s). A worker outlives SIGTERM when "
+                "something in it handles that signal; a handler a script "
+                "installs at module level runs again in every spawned "
+                "worker.",
+                len(killed), time.monotonic() - found_broken,
+                ", ".join(str(pid) for pid in killed))
     return killed
 
 
@@ -690,11 +705,12 @@ def _run_on_shared_executor(executor, func, items, strategy):
         # leaves nothing to reap: `submit()` raises `BrokenProcessPool`
         # only once it holds the shutdown lock, which the manager thread
         # gives up only after it has joined every worker. A death during
-        # the submits is seen after them, all but always: the manager
-        # thread counts a pool broken only when neither a submit's wakeup
-        # nor a result is waiting. Seen between two submits, it would block
-        # the next one behind a worker that outlived SIGTERM, which nothing
-        # on this thread could end.
+        # the submits was seen after them in every run measured, on 3.12
+        # and 3.14t, with tasks of 5 ms, of 50 ms and of next to nothing,
+        # up to a million items: the manager thread counts a pool broken
+        # only when neither a submit's wakeup nor a result is waiting. Seen
+        # between two submits, it would block the next one behind a worker
+        # that outlived SIGTERM, which nothing on this thread could end.
         iterator = mapper(func, items, chunksize=strategy.chunksize)
         yield from _tracked(iterator, items, strategy)
     finally:
