@@ -12,7 +12,6 @@ import sys
 import multiprocessing
 import multiprocessing.connection
 import time
-from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
                     Optional, TypeVar)
@@ -687,20 +686,26 @@ def _run_on_shared_executor(executor, func, items, strategy):
     # would be raised to reap on (#796).
     _end_broken_pool_stragglers(executor)
     try:
-        # The dispatch is inside: `map` submits every item before it
-        # returns, and `submit()` raises on a pool already broken. A death
-        # during the submits is seen after them, all but always: the
-        # manager thread counts a pool broken only when neither a submit's
-        # wakeup nor a result is waiting. Seen between two submits, it
-        # would block the next one behind a worker that outlived SIGTERM,
-        # which nothing on this thread could end.
+        # `map` is inside the `try` with the rest, though its own raise
+        # leaves nothing to reap: `submit()` raises `BrokenProcessPool`
+        # only once it holds the shutdown lock, which the manager thread
+        # gives up only after it has joined every worker. A death during
+        # the submits is seen after them, all but always: the manager
+        # thread counts a pool broken only when neither a submit's wakeup
+        # nor a result is waiting. Seen between two submits, it would block
+        # the next one behind a worker that outlived SIGTERM, which nothing
+        # on this thread could end.
         iterator = mapper(func, items, chunksize=strategy.chunksize)
         yield from _tracked(iterator, items, strategy)
-    except BrokenProcessPool:
-        # Before the caller hears of it: the caller retires the pool, and
-        # `shutdown()` takes the same lock.
+    finally:
+        # On every way out, before the owner hears of it: the owner shuts
+        # the pool down or retires it, and `shutdown()` takes the lock the
+        # manager thread holds while it joins the workers. A future's
+        # `BrokenProcessPool` is one way out of a broken pool; a reader
+        # that stops (`GeneratorExit`), Ctrl-C and a task's own exception
+        # are others, and `ingest()` shuts its own retry pools down after
+        # any of them. On a pool that is not broken this costs a `getattr`.
         _end_broken_pool_stragglers(executor)
-        raise
 
 
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
@@ -779,12 +784,16 @@ def _run_on_new_executor(func, items, strategy):
         try:
             iterator = executor.map(func, items, chunksize=strategy.chunksize)
             yield from _tracked(iterator, items, strategy)
-        except BrokenProcessPool:
-            # Inside the `with`: its exit is `shutdown(wait=True)`, which
-            # would wait for good on a worker that outlived the pool's
-            # SIGTERM before `_trailing_exception` ever saw this (#796).
+        finally:
+            # Inside the `with`, and on every way out of it: its exit is
+            # `shutdown(wait=True)`, which would wait for good on a worker
+            # that outlived a broken pool's SIGTERM (#796). A future's
+            # `BrokenProcessPool` is one way out of a broken pool, which
+            # `_trailing_exception` sees only after the `with` exit; a
+            # reader that stops (`GeneratorExit`: `redact()` streams),
+            # Ctrl-C and a task's own exception are others. On a pool that
+            # is not broken, or a thread pool, this costs a `getattr` or two.
             _end_broken_pool_stragglers(executor)
-            raise
 
 
 def run_parallel(

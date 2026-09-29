@@ -1257,6 +1257,32 @@ def _double_or_die_after_a_ready_sibling(args):
     return value * 2
 
 
+def _double_or_die_when_told(args):
+    """`double_or_die`, once another worker is ready and `go` exists.
+
+    The test reads a result first and only then writes `go`, so the worker
+    ends while the stream is open and nothing is reading it. Bounded: after
+    30 s without `go` it ends anyway.
+    """
+    value, marker_dir = args
+    if value < 0:
+        _wait_for_a_ready_sibling(marker_dir)
+        go = os.path.join(marker_dir, "go")
+        deadline = time.monotonic() + 30
+        while not os.path.exists(go) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        os._exit(13)  # pylint: disable=protected-access
+    return value * 2
+
+
+def _wait_until_broken(pool):
+    """Block, for at most 60 s, until `pool` has seen a worker of it die."""
+    deadline = time.monotonic() + 60
+    while not pool._broken:
+        assert time.monotonic() < deadline, "the pool never saw its worker die"
+        time.sleep(0.01)
+
+
 def _bounded(call, seconds):
     """Run `call()` on a thread, and say whether it hung.
 
@@ -1388,6 +1414,99 @@ def test_run_parallels_own_pool_ends_a_worker_that_outlives_its_break(
         "on a worker that outlives SIGTERM (#796)")
     assert isinstance(results[-1], BrokenProcessPool), results
     assert multiprocessing.active_children() == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+def test_run_parallels_own_pool_is_reaped_when_its_reader_stops(
+        tmp_path, monkeypatch, caplog):
+    """A stream closed after its pool broke returns, on `run_parallel`'s
+    own process pool.
+
+    The pool's own `BrokenProcessPool` is one way out of a broken pool. A
+    reader that stops is another (`GeneratorExit`; `redact()` streams),
+    and so are Ctrl-C and a task's own exception. Each reached the `with`
+    exit's `shutdown(wait=True)` unreaped, which waited for good behind a
+    worker that outlived the pool's SIGTERM (review of #861).
+
+    Killing mutation: the reap's `finally` narrowed back to
+    `except BrokenProcessPool`.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    initializer = functools.partial(_outlive_sigterm, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+    pools = []
+
+    class _Recorded(concurrent.futures.ProcessPoolExecutor):
+        """The pool `run_parallel` builds, kept so the test can wait on it."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            pools.append(self)
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _Recorded)
+    items = [(1, str(markers)), (-1, str(markers))]
+    stream = parallel.run_parallel(
+        _double_or_die_when_told, items, max_workers=2,
+        show_progress=False, return_generator=True)
+    assert next(stream) == 2
+    assert len(pools) == 1
+    (markers / "go").touch()
+    _wait_until_broken(pools[0])
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        hung, _ = _bounded(stream.close, 60)
+
+    assert not hung, (
+        "closing run_parallel()'s stream did not return: its pool had "
+        "broken, and the `with` exit waited on a worker that outlives "
+        "SIGTERM (#796)")
+    assert multiprocessing.active_children() == []
+    assert len(_sigkill_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+
+
+def test_a_callers_pool_is_reaped_before_its_owner_shuts_it_down(
+        tmp_path, monkeypatch, caplog):
+    """A stream closed after a caller's pool broke leaves that pool fit to
+    shut down.
+
+    `_run_on_shared_executor` never shuts a pool down, so closing its
+    stream returned at once; the owner's `shutdown()` then waited for good
+    on the lock the manager thread holds while it joins a worker that
+    outlived SIGTERM. `ingest()` builds its retry pools itself and shuts
+    each one down in a `finally` (`io_handlers._ingest_results`), so a
+    reader that stopped after one broke hung there (review of #861).
+
+    Killing mutation: the reap's `finally` narrowed back to
+    `except BrokenProcessPool`.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    items = [(1, str(markers)), (-1, str(markers))]
+    with _two_worker_pool(functools.partial(
+            _outlive_sigterm, str(markers))) as pool:
+        stream = parallel.run_parallel(
+            _double_or_die_when_told, items, executor=pool,
+            show_progress=False, return_generator=True)
+        assert next(stream) == 2
+        (markers / "go").touch()
+        _wait_until_broken(pool)
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            close_hung, _ = _bounded(stream.close, 60)
+            # As `_ingest_results` shuts its own retry pools down.
+            hung, _ = _bounded(
+                lambda: pool.shutdown(wait=True, cancel_futures=True), 60)
+
+    assert not close_hung
+    assert not hung, (
+        "the owner's shutdown() of a pool whose stream was closed after it "
+        "broke waited on a worker that outlives SIGTERM (#796)")
     assert len(_sigkill_records(caplog)) == 1, [
         r.getMessage() for r in caplog.records]
 

@@ -38,7 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ingest()`, in the pool rebuild after the import;
   - the next `ingest()`, at its first dispatch, when the session's pool had broken while idle (the out-of-memory killer between two calls), or in the retirement of such a pool when `ISOCENTER_MAX_WORKERS` had changed;
   - `close()`, on such a pool;
-  - a `run_parallel` process pool, at its `with` exit. `audit()` and `redact()` dispatch through these on a GIL build.
+  - a `run_parallel` process pool, at its `with` exit. `audit()` and `redact()` dispatch through these on a GIL build;
+  - a stream left any other way after its pool broke: a reader that stops (`redact()` streams), Ctrl-C, or a task's own exception. `run_parallel`'s own pool hung at its `with` exit, and a caller's pool at its owner's `shutdown()`, as `ingest()` shuts down the retry pools it builds.
 
   A worker outlives SIGTERM when something in it handles the signal:
   - A script's module-level handler does, since spawn runs a script's module-level code again in every worker.
@@ -48,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Measured on 3.12.14 and 3.14.7t without coverage: a script with a module-level SIGTERM handler ingested 8 files, one of them fatal. `ingest()` hung in the pool rebuild, and returned the right summary (7 ingested, the fatal file named) only once the surviving worker was killed by hand.
 
   Now, once a pool is broken, its workers get `_BROKEN_POOL_GRACE_S` (10 s) to end. Each one still running is sent SIGKILL, and one `WARNING` line names the pids. It is a log line and not an audit row, as a worker death that costs no file is (#654). A worker with the default SIGTERM behaviour dies within milliseconds and is never waited on. No exception changes.
-  - **What is not covered.** A worker in uninterruptible I/O cannot be ended by any signal. Export's recycling pool still exits through `terminate()`, which can hang the same way (#860).
+  - **What is not covered.** A worker in uninterruptible I/O cannot be ended by any signal. Export's recycling pool still exits through `terminate()`, which can hang the same way (#860). A pool that breaks, or is first seen broken, while its `shutdown()` is already waiting still hangs, because the reap runs before the shutdown and finds the pool healthy. Ctrl-C reaching the workers as well as the parent can do this. Measured on 3.12.14: a reader closed its stream while a task was still running, the task's worker was ended 2 s later, and the close was still waiting 20 s after that.
   - **`.coveragerc` keeps `sigterm = True`.** Without it the map loses the export workers' records: 152 functions recorded as run in a worker, against 84. Its comment now says how the handler keeps a worker alive, and corrects the claim that the C tracer takes a lock only while registering a new file.
   - **`RELEASING.md`:** step 1's 3.14t integration run is the map build again. The plain sharded run is kept as the fallback for a build that hangs.
   - **Output:** none. No exported file changes.
