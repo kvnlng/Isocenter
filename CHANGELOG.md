@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`RELEASING.md` gains three rules that the 1.0.0rc4 and 1.0.0rc5 cuts needed (#845, #849).** No library behaviour changes.
+  - **One failed test or one hang in a release's integration run is rerun, not fixed first (owner ruling on #845).** The procedure said a failure is fixed on `main` and the cut starts again, and spoke of a hang only in the 3.14t map build (#796). At v1.0.0rc4, 3.12 shard 3 stalled in the watchdog test (#844). That shard alone was killed and rerun in full at the same SHA, green, and the cut went on as a judgment the procedure did not grant (#843). Now it does, for one: kill only the shard it is in, rerun that shard once, and go on if the rerun is green, recording both runs in the release-commit PR and filing the flake. A red rerun, or a second failure or hang in the run, is still a failure fixed on `main`.
+  - **A run that includes `tests/test_packaging_contract.py` overlaps no other run in the same checkout (#849).** The procedure said two runs could overlap unless *both* included it. One is enough: its `built` fixture makes the sdist's release tree, `isocenter-<version>/`, in the repository root and deletes it again, and any other run whose closing root-guard snapshot falls inside that window exits 1 naming the tree, though every test passed. At #847's gate, the four shards of each interpreter ran at once in one worktree; 3.14t shard 3 passed its 158 tests and exited 1, while shard 4, the only one running the packaging test, was building. Runs that go at once now each get their own worktree (`git worktree add --detach`); otherwise they run one after the other. v1.0.0rc5's integration run was made that way.
+  - **A release's dates are the UTC date of its PyPI upload (owner ruling, 2026-09-29).** The procedure named no time zone for the `CHANGELOG.md` heading and `CITATION.cff`. v1.0.0rc5 was uploaded at 23:51 EDT on 2026-09-28 and carries 2026-09-29, the UTC date, which is the one PyPI and the GitHub Release show.
+
 ## [1.0.0rc5] - 2026-09-29
 
 ### Changed

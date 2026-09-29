@@ -82,14 +82,20 @@ existing line").
    Both interpreters must pass. A selection that is the whole suite may be
    run as shards, `pytest -v --changed --shard=I/N` for I in 1..N, so each
    run is short enough to watch; record every shard's line. Each test runs in its own
-   directory (#707), so the two runs may overlap in one checkout -- unless
-   both include `tests/test_packaging_contract.py`, which builds the
-   distributions in the repository root (setuptools' `build/` and
-   `isocenter.egg-info/`); run those one after the other. That is nearly
-   every run: the packaging test reads every `*.py`, so any change to a
-   `.py` file anywhere in the repository selects it (#744). Plan on running
-   the two interpreters one after the other unless the change touches no
-   Python file. Paste each
+   directory (#707), but two runs in one checkout still meet in its root
+   when either includes `tests/test_packaging_contract.py`. That file's
+   `built` fixture builds the distributions there: setuptools leaves
+   `build/` and `isocenter.egg-info/`, and the sdist makes and then
+   deletes a release tree, `isocenter-<version>/`. A run whose closing
+   root-guard snapshot falls inside that window exits 1 naming the tree,
+   though every test passed (#849, seen at #847's gate). So a run that
+   includes the packaging test overlaps no other run in the same
+   checkout, whatever that run selects. That is nearly every run: the
+   packaging test reads every `*.py`, so any change to a `.py` file
+   anywhere in the repository selects it (#744). To run shards or both
+   interpreters at once, give each run its own worktree (`git worktree
+   add --detach <dir> <sha>`) and run it there; runs in different
+   worktrees never meet. Otherwise run them one after the other. Paste each
    run's command, its SHA, its last line and its exit status
    (`…; echo "exit=$?"`) into the PR body, and keep the body current: it
    describes the SHA to be merged, not the first one pushed. A run that
@@ -194,6 +200,16 @@ fixes, never features.
    by the procedure above, and step 1 starts again at the new commit. (A
    patch release skips this step; its integration test is step 3's run.)
 
+   **One failed test or one hang** (owner ruling on #845, 2026-09-29),
+   in this run or in step 3's: kill only the shard it is in (a hang
+   shows as the stall banner described below), and rerun that shard in
+   full, once, at the same SHA. If the rerun is green, go on, and record
+   both runs -- the failure or hang, and the rerun -- in the
+   release-commit PR, with the flake filed as an issue. v1.0.0rc4's hung
+   shard (#843, #844) was the first. The ruling covers one: if the rerun
+   is red, or a second failure or hang turns up in the run, it is a
+   failure, fixed on `main` as above.
+
    **On 3.14t the full run is the map build** (#707):
    `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
    clean checkout at that SHA (it needs the `dev` extra for `coverage`).
@@ -268,6 +284,17 @@ fixes, never features.
      Right after a release commit a release branch has no `[Unreleased]`
      section; the file describes the code on the branch. A patch's first
      fix adds one back (see "Patch releases").
+
+     **Both dates are UTC** (owner ruling, 2026-09-29): `date-released`
+     and the heading's date are the UTC date of step 6's PyPI upload,
+     which is how PyPI and the GitHub Release record it. v1.0.0rc5 was
+     uploaded at 23:51 EDT on 2026-09-28, which was 2026-09-29 in UTC,
+     and carries 2026-09-29. Write the UTC date the upload will happen
+     on, allowing for step 4's rehearsal (about 20 minutes at
+     v1.0.0rc5). If the upload moves to another UTC date before the tag,
+     correct both dates first, by a PR into `release/X.Y` as for a
+     failure found after the release-commit PR has merged (below); the
+     version is not spent.
 
      **The section is the release's notes** (step 7 copies it to the
      GitHub Release), and it says what changed since the previous release.
