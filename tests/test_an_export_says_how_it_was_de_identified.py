@@ -36,11 +36,12 @@ the pipeline.
 f54deaa1, after L10's U rows moved `basic@2026c`'s canonical form, and
 re-measured for #762, which put `CONFIG_VERSION` ("2.0") in it, and
 again when Content Sequence and Graphic Annotation Sequence gained their
-rules in `basic@2026c` (1.0.0rc4).
+rules in `basic@2026c` (1.0.0rc4), and when those rules became REMOVE
+(#848, 1.0.0rc5).
 A minor bump, or a change to a profile's rules, moves them, and each is
 re-measured then:
-`floor over basic@2026c` is `v1:cce24de1`, `basic@2026c` is
-`v1:586cf308`, `none` is `v1:7182a219`. The version is read from
+`floor over basic@2026c` is `v1:729f4bbf`, `basic@2026c` is
+`v1:d04ffd6e`, `none` is `v1:7182a219`. The version is read from
 `isocenter/_version.py` as text, never from `isocenter`, so a release bump
 moves nothing here and a formatter that spelled the tool differently (the
 fingerprint's N2 substitution reads exactly `isocenter/<version>`) is red.
@@ -74,8 +75,8 @@ VERSION = re.search(r'__version__ = "([^"]+)"',
                     (REPO / "isocenter" / "_version.py").read_text()).group(1)
 
 #: Measured at f54deaa1, re-measured for #762 and at 1.0.0rc4 (see the module docstring).
-FLOOR = ("floor over basic@2026c", "v1:cce24de1")
-BASIC = ("basic@2026c", "v1:586cf308")
+FLOOR = ("floor over basic@2026c", "v1:729f4bbf")
+BASIC = ("basic@2026c", "v1:d04ffd6e")
 NONE = ("none", "v1:7182a219")
 
 REMOVED_TAG, METHOD, CODES, TEMPORAL = (0x00120062, 0x00120063, 0x00120064,
@@ -509,11 +510,11 @@ def test_an_external_profile_is_named_not_located(tmp_path):
     ({"0012,0063": {"action": "REMOVE"}},
      {"removed": "YES", "method": None}),
     ({"0012,0062": {"action": "EMPTY"}},
-     {"removed": "", "method": "v1:ab298266"}),
+     {"removed": "", "method": "v1:e0c93bcc"}),
     ({"0012,0062": {"action": "KEEP"}},
-     {"removed": "NO", "method": "v1:05053cd6"}),
+     {"removed": "NO", "method": "v1:63834fc8"}),
     ({"0028,0303": {"action": "KEEP"}},
-     {"removed": "YES", "method": "v1:58ef36b7", "temporal": None}),
+     {"removed": "YES", "method": "v1:32e31f46", "temporal": None}),
 ], ids=["remove_method", "empty_removed", "keep_a_source_no", "keep_temporal"])
 def test_a_rule_on_a_marker_tag_decides(tmp_path, rule, expected):
     """M7. The user's configuration decides: any rule on a marker tag, KEEP

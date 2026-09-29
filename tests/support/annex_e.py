@@ -168,18 +168,29 @@ DEVIATIONS = {
     # Text Value (0040,a160), and a text or graphic object's Tracking ID
     # (0062,0020) and a major tick's Tick Label (0070,0289), are free text
     # the table has no row for, so recursion cannot clean them (NO_ENTRY's
-    # claim is false for these two), and they go the way the four above do.
+    # claim is false for these two). They are removed, as Operator
+    # Identification Sequence is, not emptied as the other three are
+    # (#848): each must hold one or more items when present -- Content
+    # Sequence is Type 1C in the SR Document Content Module, Graphic
+    # Annotation Sequence Type 1 in its module -- so a zero-item one breaks
+    # PS3.3, while its absence conforms: the SR's root content item is a
+    # leaf, and a presentation state needs the Graphic Annotation Module
+    # only if annotations are to be applied. 1.0.0rc4 emptied both. Person
+    # Identification Code Sequence stays emptied: it is Type 1 inside the
+    # Person Identification Macro, so removing it would not conform either.
     "0040,a730": {
-        "action": "EMPTY", "authority": "#557",
+        "action": "REMOVE", "authority": "#848",
         "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
-                  "and a TEXT item's Text Value (0040,a160) is free text "
-                  "that no row reaches"},
+                  "a TEXT item's Text Value (0040,a160) is free text that "
+                  "no row reaches, and a zero-item Content Sequence breaks "
+                  "PS3.3 (Type 1C) where its absence conforms (#848)"},
     "0070,0001": {
-        "action": "EMPTY", "authority": "#557",
+        "action": "REMOVE", "authority": "#848",
         "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
-                  "and a text or graphic object's Tracking ID (0062,0020) "
-                  "and a major tick's Tick Label (0070,0289) are free text "
-                  "that no row reaches"},
+                  "a text or graphic object's Tracking ID (0062,0020) and a "
+                  "major tick's Tick Label (0070,0289) are free text that no "
+                  "row reaches, and a zero-item Graphic Annotation Sequence "
+                  "breaks PS3.3 (Type 1) where its absence conforms (#848)"},
     # Folded into the `60xx,xxxx` group rule (#556). With them beside it,
     # `"60xx,xxxx": {action: KEEP}` would still remove Overlay Data
     # through the more specific key and leave the invalid module the
@@ -258,16 +269,18 @@ LITERAL_COMMENTS = {
         "by the Patient, as Patient ID below (Z/D, the keyed pseudonym): #537.",
     ],
     "0040,a730": [
-        "D in the table, EMPTY here as for the other D-arm sequences (#557): a",
-        "TEXT item's Text Value (0040,a160) is free text that no row reaches,",
-        "so the rows nested here cannot clean it. Without this rule a",
-        "Structured Report's text was exported as written, until 1.0.0rc4.",
+        "D in the table, REMOVE here (#848): a TEXT item's Text Value",
+        "(0040,a160) is free text that no row reaches, so the rows nested",
+        "here cannot clean it, and a zero-item Content Sequence breaks PS3.3",
+        "(Type 1C) where its absence conforms. No rule until 1.0.0rc4, which",
+        "exported an SR's text as written; EMPTY in 1.0.0rc4; REMOVE since.",
     ],
     "0070,0001": [
-        "D in the table, EMPTY here as for Content Sequence above: a text or",
-        "graphic object's Tracking ID (0062,0020) and a major tick's Tick",
-        "Label (0070,0289) are free text that no row reaches. Without this",
-        "rule a presentation state's annotations kept them, until 1.0.0rc4.",
+        "D in the table, REMOVE here as Content Sequence above (#848): a text",
+        "or graphic object's Tracking ID (0062,0020) and a major tick's Tick",
+        "Label (0070,0289) are free text that no row reaches, and a zero-item",
+        "Graphic Annotation Sequence breaks PS3.3 (Type 1). No rule until",
+        "1.0.0rc4; EMPTY in 1.0.0rc4; REMOVE since.",
     ],
     "0070,0006": [
         "Free-text annotation commentary. Reaches annotations.json `note`",

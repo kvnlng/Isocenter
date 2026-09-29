@@ -517,11 +517,12 @@ BASIC_PROFILE = {
     "0040,a354": {"action": "REMOVE", "name": "Telephone Number (Trial)"},  # X
     "0040,a358": {"action": "REMOVE", "name": "Verbal Source Identifier Code Sequence (Trial)"},  # X
     "0040,a402": {"action": "REPLACE", "name": "Observation Subject UID (Trial)"},  # U
-    # D in the table, EMPTY here as for the other D-arm sequences (#557): a
-    # TEXT item's Text Value (0040,a160) is free text that no row reaches,
-    # so the rows nested here cannot clean it. Without this rule a
-    # Structured Report's text was exported as written, until 1.0.0rc4.
-    "0040,a730": {"action": "EMPTY", "name": "Content Sequence"},  # D
+    # D in the table, REMOVE here (#848): a TEXT item's Text Value
+    # (0040,a160) is free text that no row reaches, so the rows nested
+    # here cannot clean it, and a zero-item Content Sequence breaks PS3.3
+    # (Type 1C) where its absence conforms. No rule until 1.0.0rc4, which
+    # exported an SR's text as written; EMPTY in 1.0.0rc4; REMOVE since.
+    "0040,a730": {"action": "REMOVE", "name": "Content Sequence"},  # D
     "0040,b034": {"action": "REMOVE", "name": "Annotation DateTime"},  # X
     "0040,b036": {"action": "REMOVE", "name": "Segment Definition DateTime"},  # X
     "0040,b03b": {"action": "REMOVE", "name": "Montage Name"},  # X
@@ -550,11 +551,12 @@ BASIC_PROFILE = {
     "006a,0003": {"action": "REPLACE", "name": "Annotation Group UID"},  # D
     "006a,0005": {"action": "REPLACE", "name": "Annotation Group Label"},  # D
     "006a,0006": {"action": "REMOVE", "name": "Annotation Group Description"},  # X
-    # D in the table, EMPTY here as for Content Sequence above: a text or
-    # graphic object's Tracking ID (0062,0020) and a major tick's Tick
-    # Label (0070,0289) are free text that no row reaches. Without this
-    # rule a presentation state's annotations kept them, until 1.0.0rc4.
-    "0070,0001": {"action": "EMPTY", "name": "Graphic Annotation Sequence"},  # D
+    # D in the table, REMOVE here as Content Sequence above (#848): a text
+    # or graphic object's Tracking ID (0062,0020) and a major tick's Tick
+    # Label (0070,0289) are free text that no row reaches, and a zero-item
+    # Graphic Annotation Sequence breaks PS3.3 (Type 1). No rule until
+    # 1.0.0rc4; EMPTY in 1.0.0rc4; REMOVE since.
+    "0070,0001": {"action": "REMOVE", "name": "Graphic Annotation Sequence"},  # D
     # Free-text annotation commentary. Reaches annotations.json `note`
     # when a caller opts in via include_annotation_text; remediated here
     # so that opting in still does not surface raw text.
