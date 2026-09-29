@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - a slip is corrected by a PR into the release branch that changes only the two dates, with no second rehearsal (owner ruling on #856);
     - steps 4 and 5 point to the check.
 
+### Fixed
+
+- **A test of ingest's dead-worker retry could reject a good file under load (#851).** `test_a_death_the_held_file_did_not_cause_rejects_no_good_file[a-worker-ends-after-returning-its-file]` failed once on 3.14t, at #848's merge gate, beside seven other shards and a fingerprint check: `03_LATE.dcm` was rejected beside `06_POISON.dcm`.
+  - **The window.** The test's `LATE` file ended its worker 0.15 s after it was read, which assumed the result was sent within that time. Under a load of process spawns it was not (90th percentile of read-to-send, 146 ms): the worker died holding `LATE`, and so did the fresh worker it was then given alone, so `ingest()` rejected it by its own rule. `ingest()` lost no result and blamed no file wrongly; the test's premise did not happen.
+  - **Now.** `LATE` ends its worker when the worker starts reading another file. A worker sends each result before it takes its next task, so the death comes after `LATE`'s result is sent, with no timing assumed. The test also asserts that `LATE`'s death happened; its old check was satisfied by any death.
+  - **Measured on 3.14t**, 40 parallel loops of the test, 3 runs each, beside 36 busy processes: 65 of 120 runs failed at `main` be649814, each with `03_LATE` rejected, and 0 of 120 with the fix.
+  - **Output:** none. Only a test changed.
+
+
 ## [1.0.0rc5] - 2026-09-29
 
 ### Changed
