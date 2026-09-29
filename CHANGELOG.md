@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A test of the worker watchdog could hang the suite (#844).** `test_a_stalled_worker_dumps_its_own_stack_and_still_finishes` never finished in the 1.0.0rc4 integration run on 3.12. The worker's faulthandler dump spun in CPython's `dump_traceback`, the worker's exit waited for it in `_PyFaulthandler_Fini`, and the parent's pool shutdown waited for the worker.
+  - **The window.** The test's task was a function in the test module, so the child imported that whole module after the 0.2 s timer was armed, and the dump could fire in the middle of the import.
+  - **Now.** The task is `time.sleep`, which the child has without importing anything, and the timer fires at 0.5 s, inside the first 1.5 s sleep.
+  - **Not established:** why the dump spun.
+  - **Still possible:** with `ISOCENTER_WORKER_FAULTHANDLER=1`, which `tests.yml` sets for the whole suite, a worker still alive at 240 s dumps once, busy or stalled, so the same spin can happen there.
+  - **Output:** none. Only a test changed.
+
 ## [1.0.0rc4] - 2026-09-28
 
 ### Added
