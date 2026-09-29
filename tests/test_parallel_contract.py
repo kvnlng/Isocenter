@@ -1261,15 +1261,23 @@ def _double_or_die_when_told(args):
     """`double_or_die`, once another worker is ready and `go` exists.
 
     The test reads a result first and only then writes `go`, so the worker
-    ends while the stream is open and nothing is reading it. Bounded: after
-    30 s without `go` it ends anyway.
+    ends while the stream is open and nothing is reading it.
+
+    Without `go` in 30 s it returns instead, and never ends its worker. A
+    test that fails before it writes `go` leaves its stream open, and the
+    pool is shut down whenever the stream is collected, as late as pytest's
+    exit. A worker that ended then would break the pool while that
+    `shutdown(wait=True)` waits, which nothing reaps, behind a sibling that
+    outlives SIGTERM: the run would never end (review of #861).
     """
     value, marker_dir = args
     if value < 0:
         _wait_for_a_ready_sibling(marker_dir)
         go = os.path.join(marker_dir, "go")
         deadline = time.monotonic() + 30
-        while not os.path.exists(go) and time.monotonic() < deadline:
+        while not os.path.exists(go):
+            if time.monotonic() >= deadline:
+                return value * 2
             time.sleep(0.01)
         os._exit(13)  # pylint: disable=protected-access
     return value * 2
