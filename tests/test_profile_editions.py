@@ -50,7 +50,8 @@ PINNED_DIGESTS = {
     # Sequence (0070,0001), both coded D, gained EMPTY: free text inside
     # them is no row, so recursion left it (646 -> 648).
     # 1.0.0rc5: both moved from EMPTY to REMOVE (#848): a zero-item one
-    # breaks PS3.3, where its absence conforms (648 rules still).
+    # breaks PS3.3's one-or-more-items rule, which an absent one keeps
+    # (648 rules still).
     "basic@2026c": "c5b2eb65c741865354ce3f68528543ff956dcce99297b3f42fe17187d8e9b0e4",
     "floor": "da0b3f3d69785b6ab6db75fbc7c3b56fbb2d778e92d52be5a5362632c44e94fe",
 }

@@ -520,8 +520,9 @@ BASIC_PROFILE = {
     # D in the table, REMOVE here (#848): a TEXT item's Text Value
     # (0040,a160) is free text that no row reaches, so the rows nested
     # here cannot clean it, and a zero-item Content Sequence breaks PS3.3
-    # (Type 1C) where its absence conforms. No rule until 1.0.0rc4, which
-    # exported an SR's text as written; EMPTY in 1.0.0rc4; REMOVE since.
+    # (Type 1C), where an absent one makes the content item a leaf. No
+    # rule until 1.0.0rc4, which exported an SR's text as written; EMPTY
+    # in 1.0.0rc4; REMOVE since.
     "0040,a730": {"action": "REMOVE", "name": "Content Sequence"},  # D
     "0040,b034": {"action": "REMOVE", "name": "Annotation DateTime"},  # X
     "0040,b036": {"action": "REMOVE", "name": "Segment Definition DateTime"},  # X
