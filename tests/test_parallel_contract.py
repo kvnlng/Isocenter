@@ -1413,6 +1413,27 @@ def test_the_straggler_helper_leaves_a_healthy_pool_alone(monkeypatch):
         pool.shutdown(wait=True)
 
 
+def test_the_straggler_helper_lets_every_other_kind_of_pool_through():
+    """A `multiprocessing.Pool` or a thread pool handed in as `executor=`.
+
+    `_run_on_shared_executor` accepts both, and calls the helper before
+    every dispatch, so neither may trip it. A `Pool` has no `_broken`, but
+    it does have `_processes`: the worker count, an int. It is the `False`
+    default of the `_broken` read that lets it through.
+
+    Killing mutation: that default made `True`, which fails every dispatch
+    on a `Pool` with `AttributeError: 'int' object has no attribute
+    'values'`.
+    """
+    with multiprocessing.get_context("spawn").Pool(1) as pool:
+        assert parallel._end_broken_pool_stragglers(pool) == []
+        assert parallel.run_parallel(
+            double_or_raise, [1, 2], executor=pool,
+            show_progress=False) == [2, 4]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as threads:
+        assert parallel._end_broken_pool_stragglers(threads) == []
+
+
 def test_a_worker_that_ends_within_the_grace_is_waited_for_not_killed(
         tmp_path, monkeypatch, caplog):
     """A worker that ends of the pool's own SIGTERM is not SIGKILLed.
