@@ -79,8 +79,16 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
 
     The file's name picks what reading it does: `POISON` ends the worker
     every time, `FLAKY` the first time only, `SLOW` takes half a second,
-    and `LATE` returns its result and ends the worker 0.15 s later, while
-    it holds whatever it took next. Then, whatever the file:
+    and `LATE` returns its result and ends the worker when it starts
+    reading another file, so while it holds whatever it took next; a
+    worker given no further file lives on. `LATE` ended the worker 0.15 s
+    after its read until #851, which assumed the result reached the pipe
+    within that time: under a load of process spawns it did not (90th
+    percentile, 146 ms), the worker died holding `LATE` itself, and so did
+    the fresh worker it was then given alone, so `ingest()` rejected it. A
+    worker sends each result before it takes its next task, which is what
+    `_ingest_results` already relies on, so the next read comes after the
+    send with no timing assumed. Then, whatever the file:
 
     - `leak`: every worker process ends on its `leak`-th read -- the
       out-of-memory killer after a leak, the accumulation #654 names;
@@ -90,14 +98,17 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
       has ended ends at once, before it runs anything, once.
 
     Every death leaves a file named `died` in `marker_dir` first, which is
-    how `canary_once` knows a pool is a retry's. A worker process runs its
-    tasks one at a time, so the read counter needs no lock.
+    how `canary_once` knows a pool is a retry's, and one named
+    `died-<exit code>`, which says which shape ended a worker. A worker
+    process runs its tasks one at a time, so the read counter needs no
+    lock.
     """
     died = os.path.join(marker_dir, "died")
 
     def end(code):
-        with open(died, "a", encoding="utf-8"):
-            pass
+        for marker in (died, f"{died}-{code}"):
+            with open(marker, "a", encoding="utf-8"):
+                pass
         os._exit(code)  # pylint: disable=protected-access
 
     if canary_once and os.path.exists(died):
@@ -111,9 +122,14 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
                          daemon=True).start()
     real = pydicom.dcmread
     reads = [0]
+    late = [None]  # the `LATE` file this worker has read, if any
 
     def dcmread(fp, *args, **kwargs):
         name = os.path.basename(str(fp))
+        # Another file, not the next call: a second read of `LATE` itself
+        # would end the worker before its result was sent (#851).
+        if late[0] is not None and name != late[0]:
+            end(23)
         reads[0] += 1
         if leak is not None and reads[0] >= leak:
             end(21)
@@ -129,8 +145,7 @@ def _shapes(marker_dir, leak=None, start_late=None, canary_once=False):
             time.sleep(0.5)
         ds = real(fp, *args, **kwargs)
         if "LATE" in name:
-            threading.Thread(target=lambda: (time.sleep(0.15), end(23)),
-                             daemon=True).start()
+            late[0] = name
         return ds
     pydicom.dcmread = dcmread
 
@@ -695,6 +710,11 @@ def test_a_death_the_held_file_did_not_cause_rejects_no_good_file(
         sidecar = session.store_backend.sidecar.filepath
         summary = session.ingest(str(src))
     assert os.path.exists(marker_dir / "died")
+    if "LATE" in tags.values():
+        # The shape happened: a worker ended after returning `LATE`. Every
+        # other death here leaves `died` too, so that alone would pass
+        # with `LATE` ending nothing.
+        assert os.path.exists(marker_dir / "died-23")
     assert [p for p, _ in summary.failures] == poison
     assert summary.failures[0][1].startswith(io_handlers._WORKER_ENDED_READING)
     assert summary.ingested == n - 1
