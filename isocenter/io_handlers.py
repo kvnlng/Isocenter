@@ -4048,6 +4048,47 @@ def _linkage_keys(ds) -> dict:
             'generated_series': generated_series}
 
 
+#: The range an IS value can hold (PS3.5 Table 6.2-1).
+_IS_MIN, _IS_MAX = -(2 ** 31), 2 ** 31 - 1
+
+
+def _instance_number_of(ds) -> int:
+    """The file's Instance Number (0020,0013) as an int, or 0 (#810).
+
+    Read for `Instance.instance_number`, which the WFDB record name, the
+    store's `instance_number` column and the scan worker's clone take. The
+    attribute `0020,0013` is populated from the element separately and is
+    not touched by this.
+
+    A value that is not one IS integer -- absent, empty, multi-valued, a
+    fraction (pydicom reads `4.5` as `ISfloat`), text pydicom cannot
+    convert, or outside IS's range -- reads as 0, the value a file with no
+    Instance Number gets. An ill-formed Instance Number is not a reason to
+    refuse the file. The range check is also what keeps a long malformed
+    value out of the store's INTEGER column, which would overflow on save.
+
+    Args:
+        ds: The pydicom Dataset read from the file.
+
+    Returns:
+        int: A plain `int`, never pydicom's `IS`, so the field pickles and
+            binds to sqlite as the builtin.
+    """
+    try:
+        value = ds.get("InstanceNumber")
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    # `IS` is an `int` subclass; an unconverted value arrives as `str`. A
+    # `MultiValue`, `ISfloat` or None is none of these and reads as 0.
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return 0
+    try:
+        number = int(value) if isinstance(value, int) else int(value.strip())
+    except ValueError:
+        return 0
+    return number if _IS_MIN <= number <= _IS_MAX else 0
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4100,7 +4141,12 @@ def ingest_worker(fp: str) -> Tuple:
         meta.update(_linkage_keys(ds))
 
         # Construct Instance (Metadata Only)
-        inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
+        # The file's Instance Number, not 0 (#810). `__post_init__` sets
+        # `0020,0013` from it, and `populate_attrs` below then writes the
+        # file's own element over that whenever the file has one, so the
+        # attribute is exactly what it was before #810 in every case.
+        inst = Instance(meta['sop'], meta['sop_class'],
+                        _instance_number_of(ds), file_path=fp)
         # Losses ride `meta` rather than a ninth tuple slot, as the
         # multiplex-group loss does. This worker may be in a subprocess
         # with no store handle, so the loss travels and the parent
