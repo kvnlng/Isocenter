@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`RELEASING.md` has a path for a security fix under embargo (#838).** `.github/SECURITY.md` promises that a confirmed problem is fixed in a release, with a GitHub Security Advisory published with that release. Every path in the procedure put a change on a public branch and in a public PR before any release carried it, so a fix made by it disclosed the problem before users could install the fix. No package code and no output change.
+  - **Private until release.** The report is triaged in its advisory, and the owner decides whether to embargo it. The fix is developed in a local worktree whose only remote is the advisory's temporary private fork. The release's whole integration run is made before anything is public: the full suite on 3.12, 3.14t, 3.13 and 3.14, in place of the public TestPyPI rehearsal, and the fingerprint check and comparison. It is reviewed at one SHA, and the approval is recorded on the advisory.
+  - **One public window, one publish run long.** The fix and the release commit land on `release/X.Y` as one squash, by the pinned admin merge. The tree is checked against the approved SHA, then tagged and published. The advisory is published only once the upload has succeeded. GHSA-phg9-vcvc-j4r7 (0.9.7) was public for 41 minutes before its upload. `publish.yml` cannot run from the fork: no workflow runs there, and Trusted Publishing matches this repository.
+  - Each GitHub fact the section relies on is cited to GitHub's documentation, read on 2026-09-30.
+
 ## [1.0.0rc6] - 2026-09-29
 
 ### Changed
