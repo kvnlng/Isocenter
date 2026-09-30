@@ -155,3 +155,18 @@ def test_the_missing_pixel_check_judges_by_the_source_modality(tmp_path):
     assert os.path.exists(str(tmp_path / "sr.dcm"))
     # And the judged value did not come to rest on the graph.
     assert "0008,0060" not in sr_inst.attributes
+
+
+def test_a_context_with_no_source_judges_an_empty_modality_as_an_image(
+        tmp_path):
+    """A context built by hand, with no `source_modality`, falls back to the
+    written Modality, and an empty one reads as `OT`: an empty Modality
+    says nothing about what the instance is, so it must not wave a
+    pixel-less file through as non-image (review of #873, delta nit).
+    Kills: the fallback reading `''` as a modality."""
+    inst = Instance("1.2.3.4.503", SC, 1)
+    inst.set_attr("0008,0060", "")
+    outcome = _export_instance_worker(
+        _ctx(inst, str(tmp_path / "empty.dcm"), source_modality=None))
+    assert outcome.ok is False
+    assert "Pixels missing for Image Modality OT" in str(outcome.error)

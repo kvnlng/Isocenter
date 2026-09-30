@@ -6938,7 +6938,9 @@ def _guard_modality(ctx, ds) -> str:
     already hold beside every instance; `Series.modality` keeps the source
     value under M1, and a user who assigns it is judged by what they set.
     A context built by hand with no source falls back to the written
-    value, `OT` when there is none.
+    value, and to `OT` (an image modality) when that is absent or empty:
+    an empty Modality says nothing about what the instance is, so it must
+    not read as non-image and wave a pixel-less file through.
 
     Args:
         ctx (ExportContext): The instance's context.
@@ -6949,7 +6951,7 @@ def _guard_modality(ctx, ds) -> str:
     """
     if ctx.source_modality:
         return str(ctx.source_modality)
-    return str(ds.get("Modality", "OT"))
+    return str(ds.get("Modality") or "OT")
 
 
 def _modality_warning(ds) -> Optional[str]:

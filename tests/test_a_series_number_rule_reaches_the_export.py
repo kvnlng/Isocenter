@@ -638,6 +638,27 @@ def test_a_ct_with_unreachable_pixels_is_refused_whatever_the_modality_rule(
     assert any("Pixels missing for Image Modality CT" in e for e in errors), errors
 
 
+
+def test_write_tree_refuses_a_ct_with_unreachable_pixels_under_a_replaced_modality(
+        tmp_path):
+    """The same guard on the other door (review of #873, delta finding 1):
+    `DicomExporter.write_tree()` builds its own contexts, and must carry
+    the source's Modality on them too. The graph is the one a REPLACE `XX`
+    leaves: the instance says `XX`, the series says CT. Judged by the
+    written `XX`, which is not an image modality, the CT Image Storage
+    file would be written with no Pixel Data. Kills: the `write_tree`
+    builder not setting `source_modality`."""
+    patient = _ct_with_unreachable_pixels(tmp_path)
+    [inst] = patient.studies[0].series[0].instances
+    inst.set_attr("0008,0060", "XX")
+    out = tmp_path / "tree"
+    # `write_tree` raises a plain RuntimeError naming the first failure.
+    with pytest.raises(RuntimeError,
+                       match="Pixels missing for Image Modality CT"):
+        DicomExporter.write_tree(patient, str(out), show_progress=False)
+    assert not out.exists() or _dicoms(out) == []
+
+
 def test_the_builder_writes_a_series_numbered_zero():
     """`0` is a Series Number (IS), not an absent one: the builder writes
     it. Kills: the builder testing the number's truth instead of None."""
