@@ -7144,7 +7144,10 @@ class DicomSession:
                             drop_foreign_icons=drop_foreign,
                             verify_readback=options.verify_readback,
                             deid_markers=deid_markers(patient, study,
-                                                      instance, stamps)))
+                                                      instance, stamps),
+                            # For the missing-pixel guard only: the
+                            # source's, which no rule sets (#869).
+                            source_modality=series.modality))
 
         return tasks, patient_count, withheld
 

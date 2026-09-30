@@ -2640,8 +2640,14 @@ class Series(TrackedEntity):
 
     Attributes:
         series_instance_uid (str): The unique identifier for the series.
-        modality (str): The modality type (e.g., 'CT', 'MR').
-        series_number (int): The series number.
+        modality (str): The source's Modality as ingested (e.g., 'CT',
+            'MR'). The export writes each instance's own `0008,0060`, after
+            the configuration's rules, not this (#869).
+        series_number (int): The source's Series Number as ingested. The
+            export writes each instance's own `0020,0011`, after the
+            configuration's rules, not this, and the folder and WFDB record
+            names read the same attribute (#869); assigning it changes no
+            file and does not mark the instances edited.
         equipment (Optional[Equipment]): The equipment used for this series.
         instances (List[Instance]): List of instances belonging to this series.
     """
@@ -2651,12 +2657,25 @@ class Series(TrackedEntity):
     equipment: Optional[Equipment] = None
     instances: List[Instance] = field(default_factory=list)
 
-    #: The fields an assignment of which is a change: what the
-    #: export writes from the series, what a scan reads on it, and its
-    #: equipment, which the save writes and redaction matches on.
+    #: The fields an assignment of which is a change: the fields the save
+    #: writes to the series row. That is the Series UID, which the export
+    #: stamps and the scan reads; `modality` and `series_number`, the
+    #: source's values; and its equipment, which redaction matches on.
     #: Structure (`instances`) is not a value.
     _TRACKED_FIELDS: ClassVar[frozenset] = frozenset({
         "series_instance_uid", "modality", "series_number", "equipment"})
+
+    #: The tracked fields whose change also marks every instance of the
+    #: series modified (`_assign_tracked_field`). Not `series_number`
+    #: (#869, owner ruling Q2): since the export writes each instance's
+    #: own `0020,0011`, an edit of the Series' number changes nothing in
+    #: any file and nothing a scan read, so staling the instances would
+    #: send a run to REVIEW_REQUIRED (grade condition 8) over nothing.
+    #: `modality` stays, although the export no longer writes it either
+    #: (owner ruling M1 on #869); `equipment` stays because redaction
+    #: matches on it.
+    _CASCADING_FIELDS: ClassVar[frozenset] = frozenset({
+        "series_instance_uid", "modality", "equipment"})
 
     def __setattr__(self, name, value):
         # `object.__setattr__`, never zero-argument `super()`: see
@@ -2935,13 +2954,12 @@ class Patient(TrackedEntity):
 def _assign_tracked_field(entity, name, value) -> None:
     """Assign a tracked field, and record the change when it is one.
 
-    `Patient`, `Study` and `Series` route the fields the export writes
-    from them, or the scan reads on them, through here (their
-    `_TRACKED_FIELDS`), and `Instance` its `sop_instance_uid`. A change
-    advances `_revision`, so a PHI status recorded before it goes stale
-    and the next save writes the row. A change to a `Series` field also
-    marks each of its instances modified, except while `PASS_WRITING` is
-    set. The first assignment into an empty slot, and an assignment of
+    `Patient`, `Study` and `Series` route the fields the save writes for
+    them through here (their `_TRACKED_FIELDS`), and `Instance` its
+    `sop_instance_uid`. A change advances `_revision`, so a PHI status
+    recorded before it goes stale and the next save writes the row. A
+    change to a field in `Series._CASCADING_FIELDS` also marks each of the
+    series' instances modified, except while `PASS_WRITING` is set. The first assignment into an empty slot, and an assignment of
     the value already held, are not changes.
 
     Args:
@@ -2968,14 +2986,16 @@ def _assign_tracked_field(entity, name, value) -> None:
     if old != value:
         entity.mark_modified()
         # A Series holds no PHI status of its own that survives a reopen,
-        # and the export writes its fields into every instance of it: those
-        # are what a scan read, and what an edit here makes stale.
-        # Patient and Study hold their own status and grade on it. Not
-        # while a pass writes (`PASS_WRITING`): the pass records what it
-        # wrote in each instance itself, and a cascade from its own Series
-        # write would stale instances it had already stamped, tripping
-        # grade condition 8.
-        if isinstance(entity, Series) and not PASS_WRITING.get():
+        # and its instances bear it: an edit of a field in
+        # `Series._CASCADING_FIELDS` makes their status stale. Not
+        # `series_number`, which no file carries since #869 (see
+        # `_CASCADING_FIELDS`). Patient and Study hold their own status and
+        # grade on it. Not while a pass writes (`PASS_WRITING`): the pass
+        # records what it wrote in each instance itself, and a cascade from
+        # its own Series write would stale instances it had already
+        # stamped, tripping grade condition 8.
+        if (isinstance(entity, Series) and name in Series._CASCADING_FIELDS
+                and not PASS_WRITING.get()):
             for instance in entity.instances:
                 instance.mark_modified()
 
