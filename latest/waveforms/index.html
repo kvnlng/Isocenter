@@ -1,0 +1,2335 @@
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.">
+      
+      
+      
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/1.0/waveforms/">
+      
+      
+        <link rel="prev" href="../ocr/">
+      
+      
+        <link rel="next" href="../codecs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Waveforms & WFDB - Isocenter</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#waveforms-and-wfdb-export" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  This is the documentation for a version other than the latest release.
+  <a href="../.."><strong>Go to the latest release.</strong></a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Isocenter" class="md-header__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Isocenter
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Waveforms & WFDB
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Get started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../migration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading from 0.9.x
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/stability/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../for-institutions/" class="md-tabs__link">
+          
+  
+  
+  About
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Isocenter" class="md-nav__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Isocenter
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify a cohort and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reversible anonymization: keep a way back
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/redact-burned-in-pixels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redact burned-in text for one machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/write-an-exporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write your own export format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare your own ECGs for a PhysioNet Challenge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics & Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What the export writes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Burned-in text (OCR)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Waveforms & WFDB
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Waveforms & WFDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-exported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is exported
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is exported">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lead-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lead names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-and-isnt-de-identified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is and isn't de-identified
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dicom-to-dicom-round-trips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DICOM to DICOM round trips
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codecs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codec support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ctp-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import CTP rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.9.x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/stability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results and errors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit trail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../for-institutions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For institutions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-exported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is exported
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is exported">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lead-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lead names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-and-isnt-de-identified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is and isn't de-identified
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dicom-to-dicom-round-trips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DICOM to DICOM round trips
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href=".." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../configuration/" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Guides
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="waveforms-and-wfdb-export">Waveforms and WFDB Export</h1>
+<p>Isocenter ingests any DICOM instance carrying a Waveform Sequence
+<code>(5400,0100)</code> — 12-Lead ECG, General ECG, Hemodynamic, and similar
+Waveform Storage IODs — alongside image data, and exports them as
+PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
+as WFDB, for tools like <a href="https://github.com/kvnlng/Murmur">Murmur Studio</a>
+to read. Isocenter does not read WFDB back in.</p>
+<h2 id="quick-start">Quick start</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">with</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"ecg_study.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"ecg"</span><span class="p">)</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="c1"># Write and load a configuration before auditing. An unconfigured</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="c1"># session applies the floor policy (see below); the configuration</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="c1"># is where you record the policy you actually want.</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">sync</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p><a href="../tutorials/physionet-challenge-ecgs/">Prepare your own ECGs for a PhysioNet Challenge</a>
+walks this path end to end, and then shapes each header the way the
+Challenge's code reads it.</p>
+<p>Run it as a script: the <code>if __name__ == "__main__":</code> guard is required,
+because ingest starts worker processes that re-import the script. A WFDB
+export does not save the session (a DICOM export does), so call
+<code>save(sync=True)</code> before the block ends if you want the de-identified graph
+kept in the store; otherwise <code>close()</code> warns that the edits were not saved.</p>
+<p>Each waveform instance becomes one WFDB record, written into the same
+directory tree the DICOM exporter uses, so a record's <code>.hea</code>/<code>.dat</code> files
+sit alongside that series' <code>.dcm</code> files if you also export
+<code>format="dicom"</code> into the same folder. For the <code>waveform_ecg.dcm</code> file
+bundled with pydicom (<code>pydicom.data.get_testdata_file("waveform_ecg.dcm")</code>),
+copied into <code>ecg/</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>out/Subject_ANON_afd45d1d36f4892754cd8246/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>└─ Study_2012-07-23__39467/
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   └─ Series_NoNumber_ECG_Series_47942/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_0.hea               header
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_0.dat               format-16 samples
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      └─ ANON_afd45d1d36f4892754cd8246_0_0.annotations.json  cart findings, when present
+</code></pre></div>
+<p>The folder names are <code>Subject_&lt;Patient ID&gt;</code>, <code>Study_&lt;date&gt;_&lt;description&gt;_&lt;last
+5 characters of the Study UID&gt;</code> and <code>Series_&lt;number&gt;_&lt;modality&gt;_&lt;description&gt;_&lt;last 5
+characters of the Series UID&gt;</code>, each read from the exported values; a
+missing value becomes a placeholder such as <code>NoNumber</code> or <code>Series</code>. A
+record name starts with the exported Patient ID and the Series Number (<code>0</code>
+when there is none); when two records in one folder would share a name,
+the later ones get <code>_2</code>, <code>_3</code>, and so on. The pseudonym, the shifted date
+and the UID suffixes differ in your run: all three are derived from a secret
+generated for each store. That file carries two multiplex groups, so ingest
+also warns that it kept group 0 and discarded 1 (see
+<a href="#limitations">Limitations</a>).</p>
+<p><code>export(format="wfdb")</code> returns the path of each record's <code>.hea</code> file. Each
+record that fails is logged, written to the audit log as an <code>ERROR</code> row
+naming the instance, and counted in that export's <code>EXPORT</code> row, so the
+compliance report lists it and grades the run <code>REVIEW_REQUIRED</code>. A partial
+export returns the records that did reach disk. When at least one record
+was attempted and none was written, the call raises
+<code>io_handlers.ExportError</code> after those rows, as a DICOM export does; its
+<code>.failures</code> names each record. A store with no
+waveform instances, or only waveforms with no samples (each of which gets
+its own <code>DATA_LOSS</code> row), attempted nothing and returns <code>[]</code>.</p>
+<h2 id="what-is-exported">What is exported</h2>
+<table>
+<thead>
+<tr>
+<th>WFDB field</th>
+<th>DICOM source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fs</code></td>
+<td>Sampling Frequency <code>(003A,001A)</code></td>
+</tr>
+<tr>
+<td><code>gain</code></td>
+<td>Derived from Channel Sensitivity <code>(003A,0210)</code> and its correction factor</td>
+</tr>
+<tr>
+<td><code>units</code></td>
+<td>Channel Sensitivity Units Sequence <code>(003A,0211)</code></td>
+</tr>
+<tr>
+<td>signal description</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>: the lead's name (<code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>, <code>aVL</code>, <code>aVF</code>, <code>V1</code>...<code>V6</code>; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
+</tr>
+</tbody>
+</table>
+<p>Signals are written as WFDB format 16 (16-bit, little-endian,
+channel-interleaved) -- the same layout DICOM already stores them in,
+so no sample transcoding happens. The gain field is written in
+spec-conformant <code>header(5)</code> form, <code>gain(baseline)/units</code>. If a
+downstream tool mis-parses that field, check the tool's parser first.</p>
+<h3 id="lead-names">Lead names</h3>
+<p>A lead whose Channel Source is coded in DICOM's ECG lead context group,
+CID 3001, is named as PhysioNet records name it: <code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>,
+<code>aVL</code>, <code>aVF</code>, <code>V1</code> to <code>V9</code>, <code>V3R</code>, <code>V4R</code>, <code>V5R</code>, <code>X</code>, <code>Y</code>, <code>Z</code>, and, in
+MDC only, <code>MCL1</code>, <code>MCL6</code>, <code>ES</code>, <code>AS</code> and <code>AI</code>. Both schemes the context
+group has used are read: IEEE 11073 <code>MDC</code> (<code>2:1</code> is lead I) and the
+SCP-ECG codes it used before, <code>SCPECG</code> (<code>5.6.3-9-1</code> is lead I), which
+carts still write. The Coding Scheme Designator is compared ignoring
+case. Any other code, in any scheme, is written as its Code Value: a
+derived or Frank lead, a calibration lead, a lead with no conventional
+short name (<code>-aVR</code>, <code>V2R</code>, <code>V6R</code> to <code>V9R</code>), a code under a local <code>99</code>
+scheme, and a source that is not a lead (a pressure or respiration
+waveform).</p>
+<p>When present, Waveform Annotation Sequence <code>(0040,B020)</code> items --
+cart-generated findings such as rhythm calls -- are exported as
+<code>&lt;record&gt;.annotations.json</code>, in the schema
+<a href="https://github.com/kvnlng/Murmur">Murmur Studio</a> expects.</p>
+<h2 id="what-is-and-isnt-de-identified">What is and isn't de-identified</h2>
+<p>Isocenter's PHI scan is <strong>tag-gated, not content-based</strong>: a tag is
+flagged only if your policy names it -- explicit <code>phi_tags</code> entries, or a
+privacy profile expanded into them. A tag outside that set is never
+inspected for what it contains, however identifying the text inside it is.
+Private (odd-group) tags are removed whenever <code>remove_private_tags</code> is
+<code>True</code>, the default, whatever <code>phi_tags</code> says. Setting it <code>False</code> does not
+keep every private value: large private binary values, which cart vendors
+use routinely, are dropped at ingest (see
+<a href="../configuration/#private-tags">Private Tags</a>).</p>
+<p>Which policy runs depends on the configuration:</p>
+<ul>
+<li><strong>A bare <code>Session()</code>, never <code>load_config()</code>-ed</strong>, applies the floor
+  policy: the basic profile plus three research defaults.</li>
+<li><strong>The Quick Start above</strong> loads <code>privacy_profile: basic@2026c</code>, the Basic
+  Profile column of DICOM PS3.15 Annex E Table E.1-1 (2026c): <strong>648 tags, 648
+  effective</strong>, every one reachable by the scan, including those inside
+  sequences. The scaffold <code>create_config()</code> writes carries the same three
+  research defaults, so it applies the same 648 rules as a bare session.</li>
+<li><strong>Your own configuration</strong> is layered on the floor, on a profile, or,
+  with <code>privacy_profile: none</code>, is the whole policy. Your explicit tags win
+  over the base, and <code>action: KEEP</code> opts a tag out.</li>
+</ul>
+<p><a href="../configuration/#privacy-profile">Privacy Profile</a> lists the floor's
+research defaults and the profile's departures from the table.</p>
+<p>The basic profile empties Series Description <code>(0008,103E)</code> and
+Study Description. That matters for waveform export because the series
+description becomes a <strong>directory name</strong>: every <code>.hea</code>, <code>.dat</code> and
+<code>.annotations.json</code> file lives inside it.</p>
+<p><strong>The exporter itself handles the three free-text surfaces specific to
+waveform export, whatever the profile says.</strong> The
+PHI scan is tag-gated (see above), so a profile entry alone protects
+only a session whose policy carries it, and <code>privacy_profile: none</code>
+applies nothing. All three are handled whichever configuration you run:</p>
+<ul>
+<li><strong>Channel Label <code>(003A,0203)</code></strong> -- reaches the <code>.hea</code> signal-line
+  description and the <code>annotations.json</code> <code>lead</code> field <strong>only</strong> when it
+  is a recognisable signal name, such as a standard ECG lead name.
+  Anything else --
+  including genuinely operator-typed text -- is replaced with a
+  positional <code>ch&lt;N&gt;</code> token instead of being written verbatim. <code>N</code> is
+  the <strong>zero-based</strong> channel index, not DICOM's 1-based ChannelNumber
+  -- <code>ch1</code> is the <em>second</em> channel. Channel Label is also removed by the
+  basic profile (PS3.15 Table E.1-1 gives it <code>X</code>), so on a
+  configured or bare session a channel with no coded Channel Source is
+  named <code>ch&lt;N&gt;</code> even when its label was a known lead name. Give
+  <code>(003A,0203)</code> <code>action: KEEP</code> to keep recognisable lead names.</li>
+<li>
+<p><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- is omitted from the
+  <code>note</code> field of <code>annotations.json</code> by default. It routinely holds
+  free-text clinical commentary, so exporting it is opt-in: pass
+  <code>session.export(folder, format="wfdb", include_annotation_text=True)</code>
+  to restore it. <code>(0070,0006)</code> is also in the basic profile, so a
+  configured session that passes <code>include_annotation_text=True</code> exports
+  the profile's remediated value: the text dummy <code>ANONYMIZED</code> in the
+  exported DICOM, as Table E.1-1's <code>D</code> asks. The bridge reads the dummy as
+  no text, so the finding carries no <code>note</code>, exactly as when the value was
+  emptied.</p>
+</li>
+<li>
+<p><strong>Concept Name <code>(0040,A043)</code></strong> -- the annotation's Code Meaning
+  reaches <code>annotations.json</code> as <code>label</code>, and its scheme-qualified Code
+  Value as <code>category</code>, <strong>only when the Coding Scheme Designator
+  <code>(0008,0102)</code> names a published vocabulary</strong> such as SNOMED CT, LOINC,
+  DICOM's own <code>DCM</code>, IEEE 11073 <code>MDC</code> or SCP-ECG (<code>SCPECG</code>, which ECG
+  carts use for measurements such as QRS Onset). A
+  coded finding is
+  unaffected: <code>SCT:164889003</code> still arrives with its label
+  <code>"Atrial fibrillation"</code>, because SNOMED defined that term, not an
+  operator.</p>
+</li>
+</ul>
+<p>For a site-defined scheme the cart populates Code Meaning with typed
+  text instead, so <code>label</code> is omitted and <code>category</code> collapses to
+  <code>uncoded</code>. The finding itself survives -- kind, sample positions and
+  lead are untouched -- because a reviewer seeing fewer marks than the
+  record carried, with nothing saying any were withheld, is a worse
+  failure than seeing them unnamed. What is lost is the name and the
+  ability to group two site-defined annotation types apart from each
+  other.</p>
+<p>DICOM reserves designators beginning <code>99</code> for locally defined schemes,
+  so a <code>99...</code> value is never recognised, however conformant it looks.</p>
+<p><code>include_annotation_text=True</code> restores both fields, exactly as it
+  does for <code>note</code>. That flag is the protocol's voice here: a study whose
+  auditor has determined that site-defined annotation labels may be
+  released says so by passing it.</p>
+<p>All three are safe by default: no PHI tag configuration is required to
+get this behaviour, and it applies even to a bare <code>Session()</code>.</p>
+<p><code>annotations.json</code>'s <code>source</code> field is producer provenance only: the
+running Isocenter version plus Manufacturer <code>(0008,0070)</code>, for example
+<code>isocenter/1.0.0 (Mortara Instrument, Inc.)</code>. It does not read Device Serial Number
+<code>(0018,1000)</code> or any other equipment identifier.</p>
+<p><strong>Record timing</strong> in the <code>.hea</code> file combines two independently
+sourced parts. The <em>date</em> comes from <code>study.study_date</code>, which <em>is</em>
+shifted by <code>anonymize()</code> (the same per-patient date shift applied to
+every date tag under a <code>SHIFT</code> or <code>JITTER</code> rule). The <em>time-of-day</em> comes from the
+instance's own timestamp tags -- Acquisition DateTime <code>(0008,002A)</code>
+when present, else Study Time <code>(0008,0030)</code> -- and the date shift
+never changes it. This is deliberate: time-of-day alone is not a
+Safe Harbor identifier. If you export without running <code>anonymize()</code> at
+all, the date is real too -- exactly like every other un-remediated
+field in Isocenter.</p>
+<p>On the documented Quick Start path, both instance-level timestamp tags
+above are in the Basic profile (<code>(0008,002A)</code> and <code>(0008,0030)</code>), so a
+configured, anonymized session has no real time-of-day left to write.
+Isocenter does <strong>not</strong> substitute a fake <code>00:00:00</code> in that case: when
+<code>study.study_date</code> is real but no real time-of-day is available, the
+record line's start time/date fields are omitted entirely. This is a
+deliberate limitation, not an oversight -- <code>header(5)</code> does not support
+a date-only start time (PhysioNet's own spec, and <code>wfdb-python</code>'s
+reference reader/writer, both treat <code>base_date</code> as depending on
+<code>base_time</code> being present), so the record line's choice is between
+omitting both fields and fabricating a time; Isocenter omits both.</p>
+<p>The date is not lost, though, because it is useful for ordering records
+within a cohort. It is written instead as a single comment line, in the
+same <code>DD/MM/YYYY</code> format the record line's own date field would have
+used: <code># de-identified start date: DD/MM/YYYY</code> when <code>anonymize()</code> shifted
+the study date, or <code># start date: DD/MM/YYYY</code> when it was not shifted
+(an export without <code>anonymize()</code>, or a date the policy keeps). That
+second form is the real date. The comment follows the signal lines, where
+<code>wfdb</code>'s own writer puts comments, so a reader that takes lines
+<code>1..n_sig</code> as the signal lines (the Moody Challenge's helper code does)
+reads the signals and nothing else. A consumer reading the record line alone
+sees no timing at all; a consumer that also reads comments gets the
+date, labelled by whether it was shifted.</p>
+<p>Beyond content, the export path itself avoids two structural PHI
+paths a WFDB writer could otherwise open:</p>
+<ul>
+<li><strong>No <code>#</code> comment lines are written, except the start date.</strong> WFDB
+  readers render header comments verbatim, and MIT-BIH convention
+  places age, sex, and diagnosis there; Isocenter never writes one for
+  content. The one exception is the start-date line described above
+  (<code># de-identified start date:</code> or <code># start date:</code>), a computed
+  <code>DD/MM/YYYY</code> string written through the same sanitizer as every
+  other field, never operator-typed text.</li>
+<li><strong>Record names are built from the exported Patient ID, series number
+  and instance number</strong>: the pseudonym once <code>anonymize()</code> has run (the
+  source Patient ID before it, or under a <code>KEEP</code> rule on Patient ID),
+  and never the patient's name or other free text. Lead identity in
+  the header prefers the
+  coded channel source over the free-text label wherever a coded
+  source exists. That preference is a likelihood argument, not a
+  filter: a conformant coded source is far less likely to carry
+  operator-typed text than a free-text label, but a coded value other
+  than a CID 3001 lead code is written as it stands, <strong>not</strong> run
+  through the lead-name allowlist or any content check --
+  a non-conformant source can still put arbitrary text there. Both the
+  <code>.hea</code> writer and the Murmur <code>annotations.json</code> bridge strip
+  line-break characters out of it regardless, so it can't forge a
+  <code>.hea</code> comment line, but the text itself is trusted, not filtered.</li>
+</ul>
+<h2 id="dicom-to-dicom-round-trips">DICOM to DICOM round trips</h2>
+<p>Exporting with <code>format="dicom"</code> writes the waveform samples back. The
+bytes are copied from the sidecar <strong>verbatim</strong> rather than re-encoded
+from the decoded array, so a round trip is byte-exact and the exported
+<code>Waveform Sample Interpretation (5400,1006)</code> cannot disagree with the
+samples it labels.</p>
+<p>That verbatim copy is deliberate. Isocenter decodes <code>US</code>/<code>SB</code>/<code>UB</code> to
+int16 internally, rebasing <code>US</code> by 32768; re-encoding from that array
+while leaving <code>(5400,1006)</code> saying <code>US</code> would shift every value by 32768
+without anything raising. Nothing in the pipeline mutates waveform
+samples -- unlike pixels, which redaction burns into -- so there is
+nothing a re-encode could add, and the mismatch is made structurally
+impossible instead of merely tested against. De-identification is
+unaffected: waveform PHI lives in tags (channel labels, annotation
+concepts), which are remediated in the object graph and rebuilt into the
+exported dataset as usual.</p>
+<p>Because no decode happens on this path, companded audio (<code>MB</code>/<code>AB</code>)
+round-trips through DICOM export even though WFDB export refuses it.</p>
+<p><strong>Byte order.</strong> Ingest converts a big-endian source's samples to
+little-endian, by the Waveform Bits Allocated it declares, and both exports
+write them under a little-endian transfer syntax. So the round trip is
+exact against the samples as stored, not against the source file's bytes. A
+value whose byte order ingest could not settle whole is kept as read, with a
+<code>WARNING</code> row naming the tag.</p>
+<p>If an instance carries a Waveform Sequence but no samples reached the
+sidecar, the export logs a warning rather than writing a
+structurally-plausible empty record in silence.</p>
+<h2 id="limitations">Limitations</h2>
+<p>Format 16 only. The exporter also does not support: WFDB ingest,
+<code>.atr</code> annotation output, or mu-law/A-law companded audio sample
+interpretations.</p>
+<p><strong>Multi-rate records are truncated at ingest, not at export.</strong> Each
+Waveform Sequence <code>(5400,0100)</code> item is a multiplex group with its own
+sampling frequency and channel set -- how DICOM carries ECG at 500 Hz
+alongside respiration at 25 Hz. Isocenter reads group 0 and discards the
+rest, so groups 1..n never enter the object graph: neither their samples
+nor their sequence items are in the session, in the sidecar, or reachable
+by any export format or API. What is written is a conformant single-group
+record. The discard is announced: a warning naming the number of groups
+dropped, plus a <code>DATA_LOSS</code> entry in the audit log. Multi-group support is
+not yet available (<a href="https://github.com/kvnlng/Isocenter/issues/277">#277</a>).
+A store written before 0.9.1 can still hold the discarded groups' items;
+see <a href="../migration/#hollow-waveform-multiplex-items">Upgrading from 0.9.x</a>.</p>
+<p>That entry is scoped <code>SIGNAL</code>, and it <strong>does</strong> move Validation Status:
+a session that discarded a multiplex group grades <code>REVIEW_REQUIRED</code>,
+not <code>PASS</code>. The tag is standard -- Waveform Sequence <code>(5400,0100)</code> is an
+even group -- but what was discarded is acquired signal that was in the
+source and is not in the export, which is not routine the way a dropped
+overlay is. Routine standard-group losses keep the <code>STANDARD</code> scope and
+keep grading <code>PASS</code>.</p>
+<p><strong>Annotations naming a discarded group are dropped, not re-pointed.</strong>
+Referenced Waveform Channels <code>(0040,A0B0)</code> identifies a mark by a
+<code>(multiplex group, channel)</code> pair, and DICOM numbers both from 1. PS3.3
+C.10.10.1.1 "Referenced Channels" defines the first value of each pair as
+the ordinal of the Waveform Sequence <code>(5400,0100)</code> Item, and its worked
+example writes an annotation covering the entire first multiplex group
+plus channels 2 and 3 of the third as <code>0001 0000 0003 0002 0003 0003</code>.
+Ordinal 1 is therefore the group Isocenter keeps. (The <code>0000</code> in that
+example is the same section's rule that a channel number of 0 means every
+channel in the group; Isocenter honours it by emitting the mark with no
+<code>lead</code>.) A mark that names any other group has no place in the exported
+record: its sample positions index that group's samples, and its lead is
+that group's channel. It is left out of <code>annotations.json</code> rather than
+resolved against the surviving group, which would give a plausible lead
+name at a plausible sample position, both belonging to a signal that is
+not in the record.</p>
+<p>The same filtering happens on the object graph at ingest, so a <strong>DICOM</strong>
+export does not carry a Waveform Annotation Sequence <code>(0040,B020)</code> item
+whose reference names a group that is not in the file. The filter works
+on <code>(group, channel)</code> pairs before it drops items: an annotation naming
+all of group 1 plus a channel of group 3 keeps its surviving pairs, and an
+item goes only when every pair it named is gone. Surviving ordinals are
+<strong>never renumbered</strong>: the ordinal is positional, so renumbering after a
+discard would make the file internally consistent and wrong relative to
+the source, with no way to tell afterwards. An annotation with no
+<code>(0040,A0B0)</code> at all is untouched: the attribute is Type 1C, and its
+absence means the mark applies to the whole waveform.</p>
+<p>That drop is announced the same way the group discard is: a warning, and
+one <code>DATA_LOSS</code> entry per instance naming how many annotations were
+dropped and which groups they referenced -- one row, not one per mark,
+so a cart that marks forty beats on a discarded group does not fill the
+report's Data Loss section with forty near-identical lines. It is scoped
+<code>STANDARD</code>, although the group discard itself is scoped <code>SIGNAL</code>: an
+annotation is a mark <em>about</em> the signal, the loss of the samples already
+moves Validation Status through the group's own row, and grading the
+marks too would count one loss twice. A record with two <code>DATA_LOSS</code> rows
+-- one for the groups discarded, one for the marks that referenced them --
+is the expected shape: they report different losses. Both rows are
+written at ingest; the WFDB export repeats the drop, with its own row, only
+for a graph that never passed through ingest.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../ocr/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Burned-in text (OCR)">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Burned-in text (OCR)
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../codecs/" class="md-footer__link md-footer__link--next" aria-label="Next: Codec support">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Codec support
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 Kevin Long
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="mailto:support@isocenter.net" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
