@@ -752,9 +752,11 @@ prints `ghsa` before any bare `git push`. Never push the branch to
    **If a release is already in progress on the same line, the
    security fix goes first. The in-progress release pauses, rebases onto
    the security patch, and restarts its gate** (owner ruling on #867,
-   2026-09-30). In progress means any stage, from picks being prepared
-   locally to a tag not yet published. Which number the security
-   release takes depends on how far the paused release got:
+   2026-09-30). In progress means any stage before its tag is pushed,
+   from picks being prepared locally to a release commit merged and not
+   yet tagged. A release whose tag is already pushed does not pause and
+   is not rebased (the last case below). Which number the security
+   release takes depends on how far the other release got:
    - **No release commit merged yet** (picks being prepared, or its pick
      or release-commit PR open): the security release takes the next
      number, and the paused release's number moves up by one. When it
@@ -772,8 +774,9 @@ prints `ghsa` before any bare `git push`. Never push the branch to
      branch's head. Any of its PRs still open (a rehearsal fix, say)
      pause, and rebase afterwards.
    - **A tag already pushed:** a pushed tag is never moved (owner
-     ruling on #867, 2026-09-30). The tagged version is published as it
-     is, and the security fix takes the next number, on top of that tag.
+     ruling on #867, 2026-09-30). That release does not pause. It is
+     published first, as it is, and the security release follows it,
+     taking the next number, on top of that tag.
 
    **Nothing public says why a release paused:** no comment, label,
    title or description on its PRs names a security release. The reason
@@ -898,7 +901,8 @@ An admin does these steps in one sitting, without pausing between them.
    2026-09-30). If it is still red, the fix goes forward in the same
    sitting. It takes "The private fix" steps 2 to 6 (the tests, the runs
    and the review), though nothing about it is private any more, then
-   these steps again from step 2. The pushed tag is never moved (see "The
+   these steps again from step 1, so that the UTC date check runs
+   again. The pushed tag is never moved (see "The
    private fix", step 1), so the forward fix takes the next number: its
    branch moves the version files and the `CHANGELOG.md` heading to it,
    and the advisory's patched version moves with them. The version that
