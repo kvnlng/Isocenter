@@ -139,7 +139,7 @@ def test_an_infinite_instance_number_still_refuses_the_file(tmp_path, text):
     pydicom reads these as a float it then cannot make an int of, and its
     `OverflowError` escapes `ds.get()` under its default reading mode. The
     file is refused, exactly as it was before #810 (`populate_attrs` fails
-    on the same element); filed separately, not changed here.
+    on the same element); filed as #870, not changed here.
     """
     marker = "000000097531"
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
