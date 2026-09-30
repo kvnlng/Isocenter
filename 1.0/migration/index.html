@@ -1,0 +1,2466 @@
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.">
+      
+      
+      
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/1.0/migration/">
+      
+      
+        <link rel="prev" href="../environment/">
+      
+      
+        <link rel="next" href="../api/stability/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Upgrading from 0.9.x - Isocenter</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#upgrading-from-09x" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  This is the documentation for a version other than the latest release.
+  <a href="../.."><strong>Go to the latest release.</strong></a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Isocenter" class="md-header__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Isocenter
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Upgrading from 0.9.x
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Get started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading from 0.9.x
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/stability/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../for-institutions/" class="md-tabs__link">
+          
+  
+  
+  About
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Isocenter" class="md-nav__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Isocenter
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify a cohort and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reversible anonymization: keep a way back
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/redact-burned-in-pixels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redact burned-in text for one machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/write-an-exporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write your own export format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare your own ECGs for a PhysioNet Challenge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics & Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What the export writes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Burned-in text (OCR)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../waveforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Waveforms & WFDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codecs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codec support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ctp-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import CTP rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.9.x
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.9.x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration calls
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-store-anonymized-under-097s-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A store anonymized under 0.9.7's profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-basic-profiles-d-codes-write-a-dummy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Basic Profile's D codes write a dummy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export_to_parquet-is-gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_to_parquet is gone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phi-statuses-recorded-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PHI statuses recorded before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uids-in-stores-and-exports-from-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UIDs in stores and exports from before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-tokens-locked-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity tokens locked before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-project-secret-stays-in-its-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A project secret stays in its store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files-with-no-patient-id-grouped-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files with no Patient ID, grouped before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stores de-identified before 0.9.7 (GHSA-phg9-vcvc-j4r7)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dates-shifted-before-096" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dates shifted before 0.9.6
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stores-written-before-091" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stores written before 0.9.1
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stores written before 0.9.1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resurrected-private-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resurrected private tags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#corrupted-pixel-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corrupted pixel geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hollow-waveform-multiplex-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hollow waveform multiplex items
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redacted-on-090-or-earlier-with-a-multi-zone-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redacted on 0.9.0 or earlier with a multi-zone rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/stability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results and errors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit trail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../for-institutions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For institutions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration calls
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-store-anonymized-under-097s-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A store anonymized under 0.9.7's profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-basic-profiles-d-codes-write-a-dummy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Basic Profile's D codes write a dummy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export_to_parquet-is-gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_to_parquet is gone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phi-statuses-recorded-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PHI statuses recorded before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uids-in-stores-and-exports-from-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UIDs in stores and exports from before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-tokens-locked-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity tokens locked before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-project-secret-stays-in-its-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A project secret stays in its store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files-with-no-patient-id-grouped-before-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files with no Patient ID, grouped before 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stores de-identified before 0.9.7 (GHSA-phg9-vcvc-j4r7)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dates-shifted-before-096" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dates shifted before 0.9.6
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stores-written-before-091" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stores written before 0.9.1
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stores written before 0.9.1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resurrected-private-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resurrected private tags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#corrupted-pixel-geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corrupted pixel geometry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hollow-waveform-multiplex-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hollow waveform multiplex items
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#redacted-on-090-or-earlier-with-a-multi-zone-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redacted on 0.9.0 or earlier with a multi-zone rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="upgrading-from-09x">Upgrading from 0.9.x</h1>
+<p>The code in a new release is fixed; the data an old release wrote is not.
+This page lists what changes when a configuration, a store or an export
+written by an earlier release meets 1.0, in the order you are likely to meet
+it: the configuration first (<code>load_config()</code>), then what the profile and
+the API changed, then the store (opening it,
+<code>audit()</code>, <code>export()</code>), then identity tokens, the project secret and files
+with no Patient ID. Last come stores written by releases before 0.9.7,
+newest first.</p>
+<p>Each change is handled the way its information allows: healed where the
+store itself proves what is wrong, reported where it cannot be repaired, and
+left to an explicit call where only your site knows the answer. Several of
+them write a <code>WARNING</code> audit row on every open, so every compliance report
+over that store grades <code>REVIEW_REQUIRED</code>. A row once written stays in the
+store's audit log: acting stops further rows but does not bring that
+store's reports back to <code>PASS</code>; only a new store does. Where the fix is
+"re-ingest the source files into a new store", that is the only way to give
+the data 1.0's guarantees.</p>
+<p><strong>Nothing from before 1.0 is read by a second path or migrated.</strong> A layout
+1.0 does not read is refused with an error naming the cause.</p>
+<h2 id="configuration-files">Configuration files</h2>
+<p>From 1.0 a configuration is read as exactly what it says: a key the schema
+does not have, a value of the wrong type, or a <code>version</code> this library does
+not read raises <code>ValueError</code> naming it, where 0.9.x loaded the file and
+ignored or misread the part it did not understand
+(<a href="../configuration/#schema-version-2">Configuration</a> has the schema).</p>
+<p><strong>Files Isocenter wrote load unchanged.</strong> Every file <code>create_config()</code> or
+an auto-save wrote in 0.9.x loads, and so does every configuration in this
+documentation. A file with no <code>version</code> line is version 2.0. A file saying
+<code>privacy_profile: basic</code> means <code>basic@2026c</code>, the profile name pinned to
+its PS3.15 edition, and loads the same rules; <code>configuration.privacy_profile</code>
+then reads <code>"basic@2026c"</code>, and <code>save()</code> and <code>create_config()</code> write that.</p>
+<p><strong>What is refused, and the fix.</strong> Apart from the first two, each of these
+loaded in 0.9.x without meaning what it said:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">0.9.x file</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>version: "1.0"</code> (the label before version 2)</td>
+<td style="text-align: left;">write <code>version: "2.0"</code>; the content loads as before</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>version: 2.0</code> (unquoted: a YAML number)</td>
+<td style="text-align: left;">quote it: <code>version: "2.0"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">a misspelt key at any level (<code>remove_private_tag</code>, <code>redaction_zone</code>, <code>actoin</code>)</td>
+<td style="text-align: left;">the refusal names it and, usually, the key you meant</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>machine_rules:</code></td>
+<td style="text-align: left;">rename it <code>machines:</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">an unquoted numeric serial, <code>serial_number: 0123</code> (loaded as 83)</td>
+<td style="text-align: left;">quote it: <code>serial_number: "0123"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>remove_private_tags: "false"</code>, or a bare <code>remove_private_tags:</code></td>
+<td style="text-align: left;">write <code>true</code> or <code>false</code>, unquoted</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>date_jitter: -5</code></td>
+<td style="text-align: left;">write <code>date_jitter: {min_days: -5, max_days: -5}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>date_jitter</code> with <code>min_days</code> greater than <code>max_days</code></td>
+<td style="text-align: left;">put the bounds the right way round</td>
+</tr>
+<tr>
+<td style="text-align: left;">an external profile file carrying anything but <code>phi_tags</code> and <code>version</code></td>
+<td style="text-align: left;">move the other keys into the configuration that names the profile</td>
+</tr>
+<tr>
+<td style="text-align: left;">a CTP rule list (<code>rules:</code> at the top level)</td>
+<td style="text-align: left;">copy the rules into <code>machines:</code>; see <a href="../ctp-import/">Import CTP rules</a></td>
+</tr>
+</tbody>
+</table>
+<p>A refusal changes nothing: the session's configuration is what it was
+before the call.</p>
+<p>Three more readings changed in 1.0:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">0.9.x file</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>version: "2.00"</code> or <code>"02.0"</code></td>
+<td style="text-align: left;">write <code>version: "2.0"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">a blank <code>serial_number: "  "</code> (matched no machine)</td>
+<td style="text-align: left;">give the machine's serial</td>
+</tr>
+<tr>
+<td style="text-align: left;">a bare <code>privacy_profile:</code> line</td>
+<td style="text-align: left;">nothing to do unless you meant <code>none</code>: it now means the floor, as leaving the line out does, where 0.9.x read it as <code>none</code> and applied no base; write <code>privacy_profile: none</code> to keep that</td>
+</tr>
+</tbody>
+</table>
+<p>A phi rule's <code>value: null</code> and <code>name: null</code> read as absent, as before.
+<code>REPLACE</code> with <code>value: null</code> is <code>REPLACE</code> with no value, which writes the
+VR's dummy (see <a href="../configuration/#phi-tags">PHI Tags</a>), and the finding is
+named <code>Unknown Tag</code>.</p>
+<h3 id="configuration-calls">Configuration calls</h3>
+<ul>
+<li><strong>Auto-save is off.</strong> In 0.9.x, <code>add_rule()</code>, <code>update_rule()</code>,
+  <code>delete_rule()</code> and <code>set_phi_tag()</code> rewrote the loaded file. They now
+  change memory only, and print a line saying the file is unchanged.
+  Call <code>session.configuration.save()</code>, or set
+  <code>session.configuration.auto_save = True</code> once per session. A file
+  0.9.x's auto-save wrote loads unchanged, and saving it again rewrites
+  it without the inlined profile.</li>
+<li><strong>One loader.</strong> <code>ConfigLoader.load_redaction_rules()</code> and
+  <code>ConfigLoader.load_phi_config()</code> are gone and raise <code>AttributeError</code>;
+  <code>PhiInspector(config_path=...)</code> raises <code>TypeError</code>. Read a file
+  with <code>session.load_config(path)</code> or
+  <code>ConfigLoader.load_unified_config(path)</code>, and hand <code>PhiInspector</code> the
+  policy (<code>config_tags=</code>).</li>
+<li><strong>Three keywords renamed.</strong> Each old keyword raises <code>TypeError</code>;
+  positional calls are unchanged.
+  <code>add_rule(model=, zones=)</code> is <code>add_rule(model_name=, redaction_zones=)</code>,
+  the keys a <code>machines:</code> rule has in the file;
+  <code>set_phi_tag(replacement=)</code> is <code>set_phi_tag(value=)</code>, the key a phi rule
+  has; and <code>Builder.start_patient(id=)</code> is <code>start_patient(patient_id=)</code>.</li>
+<li><strong>One spelling per format.</strong> <code>generate_report(format=)</code> takes
+  <code>'markdown'</code> only, and <code>generate_manifest(format=)</code> <code>'html'</code> or
+  <code>'json'</code> only; <code>'md'</code> and case variants such as <code>'HTML'</code> raise
+  <code>ValueError</code>.</li>
+</ul>
+<h2 id="a-store-anonymized-under-097s-profile">A store anonymized under 0.9.7's profile</h2>
+<p>0.9.7's <code>basic</code> profile had 35 rules. Its statuses carry no policy, so an export from such a store writes a <code>WARNING</code> row (see <a href="#phi-statuses-recorded-before-10">PHI statuses recorded before 1.0</a>). Load your configuration, run <code>audit()</code> and then <code>anonymize()</code> before exporting again. That removes what <code>basic@2026c</code> removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source files restores them.</p>
+<h2 id="the-basic-profiles-d-codes-write-a-dummy">The Basic Profile's D codes write a dummy</h2>
+<p>Before 1.0 a <code>D</code> code emptied the attribute and an <code>X/D</code> code removed it, so a Type 1 attribute was written zero-length or dropped. From 1.0 every code with a D arm writes a dummy value for the attribute's VR (<a href="../configuration/#what-basic2026c-contains">What basic@2026c contains</a>). An export of the same data under 1.0 therefore carries attributes a 0.9.x export did not, each holding its dummy.</p>
+<h2 id="export_to_parquet-is-gone"><code>export_to_parquet</code> is gone</h2>
+<p><code>session.export_to_parquet(...)</code> raises <code>AttributeError</code>. Use <code>session.export_dataframe("cohort.parquet")</code>, which writes Parquet for a <code>.parquet</code> path. The columns differ: <code>export_to_parquet</code> wrote SQL column names (<code>patient_id</code>, <code>sop_instance_uid</code>), and <code>export_dataframe</code> writes keywords (<code>PatientID</code>, <code>SOPInstanceUID</code>) for its base columns, so code that reads the old files needs its column names changed as well as its call.</p>
+<h2 id="phi-statuses-recorded-before-10">PHI statuses recorded before 1.0</h2>
+<p>A store records what the last scan concluded about each patient, study and instance (<code>phi_status</code>). From 1.0 it also records the policy that scan ran under (<code>phi_status_policy</code>: a fingerprint of the tag rules, <code>remove_private_tags</code> and the configuration schema version, and a readable base such as <code>basic@2026c</code>). The schema version is in it because a release that changes what an unchanged configuration detects raises that version's minor: a store's statuses from before such a release then read as recorded under another policy, and the export says so as below.</p>
+<p>A store written by 0.9.x never recorded which configuration ran, so opening one adds the two columns empty and fills nothing in: each status keeps its value (<code>REMEDIATED</code> stays <code>REMEDIATED</code>) with no policy, and each open logs one warning counting them. The first <code>export()</code> that writes such instances writes one <code>WARNING</code> audit row saying so, and its report grades <code>REVIEW_REQUIRED</code>. Run <code>audit()</code> (and <code>anonymize()</code>, if it finds anything) under the configuration you mean, then <code>save()</code>: the statuses then carry that policy and no further row is written. The row already written stays, so later reports of this store still grade <code>REVIEW_REQUIRED</code>.</p>
+<p><strong>Never save into a 1.0 store from 0.9.x.</strong> A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute, and cannot export it (it reads the stored DS/IS values as dicts). 0.9.x does not know the policy columns either, so a status it records is left beside the policy of the last 1.0 scan -- a pairing no scan concluded, which the export cannot tell from a true one. If that has happened, run <code>audit()</code> under your configuration before trusting any status. Keep a copy of the 0.9.x store if you may need to go back, and go back to that copy, not into the 1.0 store.</p>
+<h2 id="uids-in-stores-and-exports-from-before-10">UIDs in stores and exports from before 1.0</h2>
+<p>Before 1.0 Isocenter exported Study, Series, SOP Instance and every other UID as it was ingested, except that redaction gave a redacted instance a random SOP Instance UID under pydicom's root. From 1.0 the floor and <code>basic@2026c</code> replace each UID the PS3.15 table codes <code>U</code> with one derived from the store's project secret (see <a href="../configuration/#what-basic2026c-contains">What basic@2026c contains</a>).</p>
+<p>Opening an older store changes nothing by itself. Its instances still hold their source UIDs, so the next <code>audit()</code> raises a finding on each, and <code>anonymize()</code> replaces them. A redacted instance's random UID is replaced like any other, and is stable from then on.</p>
+<p>Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data carry replacements, so the two do not link by UID. That is inherent: it is what replacing them means. A study exported in part before 1.0 and in part after is two studies to anything that groups by Study Instance UID. To keep a project's exports linkable across the upgrade, keep the UIDs: <code>KEEP</code> on the <code>U</code> rows (<a href="../configuration/#keeping-uids">Keeping UIDs</a>).</p>
+<p>A configuration that gave a UI attribute <code>REPLACE</code> with no value failed to load before 1.0 and now means UID replacement. <code>REPLACE</code> with a <code>value:</code> on a UI attribute writes that value, as before.</p>
+<h2 id="identity-tokens-locked-before-10">Identity tokens locked before 1.0</h2>
+<p>Every release before 1.0 wrote the reversible-anonymization token into <code>(0400,0510)</code> and the transfer syntax UID into <code>(0400,0520)</code>. DICOM defines those two elements the other way round: <code>(0400,0510)</code> is the Encrypted Content Transfer Syntax UID and <code>(0400,0520)</code> is the Encrypted Content. From 1.0 the token goes into <code>(0400,0520)</code>, and 1.x reads only that layout.</p>
+<p>A token in the earlier layout is recognised but not read. Whether it comes from an old store or from an old export ingested into a new one, <code>recover_patient_identity()</code> raises <code>RuntimeError</code> naming the layout and restores nothing, for the whole patient. <code>lock_identities()</code> refuses rather than replacing it. Recover such identities with Isocenter 0.9.x and the key they were locked with.</p>
+<p>Exporting such a patient from 1.x writes the item as it is, and 0.9.x can still recover it. The export also writes a <code>WARNING</code> audit row counting those instances, so the compliance report grades <code>REVIEW_REQUIRED</code>.</p>
+<h2 id="a-project-secret-stays-in-its-store">A project secret stays in its store</h2>
+<p>In 0.9.7 and 0.9.8, <code>store_backend.write_project_secret(path)</code> and <code>load_project_secret(path)</code> copied a store's project secret into a fresh store. Both are gone and raise <code>AttributeError</code>: a secret belongs to the store it was generated in (see <a href="../configuration/#what-to-keep">What to keep</a>). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.</p>
+<p>A store that loaded a secret it could not verify, under 0.9.7 or 0.9.8, still warns at every <code>audit()</code> and still grades <code>REVIEW_REQUIRED</code>. The reason it warns is recorded in the store, and removing the load does not remove it.</p>
+<p>A store that holds shifted dates, or UIDs replaced since 1.0, but has lost its secret refuses <code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code> rather than generate a second offset or a second UID for each instance. Nothing in Isocenter deletes the secret, so this is a store whose <code>project_secret</code> row was deleted by hand, and the secret cannot be restored from outside it: re-ingest the source files into a new store.</p>
+<p><strong>Starting a new project over another project's export.</strong> A fresh store that ingests an export from another project generates its own secret and writes a <code>WARNING</code> row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. If the data belongs to an existing project, ingest it into that project's store.</p>
+<h2 id="files-with-no-patient-id-grouped-before-10">Files with no Patient ID, grouped before 1.0</h2>
+<p>Before 1.0 ingest grouped every file whose Patient ID was <strong>empty</strong> under one patient <code>''</code>, and every file <strong>without</strong> one under one patient <code>UnknownPatient</code>, across the whole store, so either may hold several subjects. From 1.0 a file with no Patient ID belongs to the patient holding its study, or to a new patient of that study alone, and a subject with no Patient ID exports an empty one.</p>
+<p>Opening an older store splits nothing, because splitting would give dates already shifted under the group's offset a second one. So:</p>
+<ul>
+<li>New ID-less files ingested into an old store get patients of their own; the old grouping stays as it was.</li>
+<li>A <code>''</code> patient's date shift is still declined on every pass ("could not resolve a PatientID"), as before: loud and fail-closed.</li>
+<li>An <code>UnknownPatient</code> patient keeps its one pseudonym and one offset for every subject in it.</li>
+<li>Every open of a store holding either writes one <code>WARNING</code> audit row, counts only: "N patients were grouped by a release before 1.0 from files with no Patient ID and may be more than one subject". A real Patient ID <code>UnknownPatient</code> is counted too. Reports over the store grade <code>REVIEW_REQUIRED</code>.</li>
+</ul>
+<p>To separate the subjects, re-ingest their <strong>source</strong> files into a new store.</p>
+<h2 id="stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7">Stores de-identified before 0.9.7 (GHSA-phg9-vcvc-j4r7)</h2>
+<p>Before 0.9.7 the <code>ANON_</code> pseudonym was the first 12 hex characters of an unsalted SHA-256 of the original Patient ID, and the date offset was read from the same digest. Anyone holding an exported file and the date-jitter range could undo the date shift, and could recover the original ID by hashing candidates. From 0.9.7 both are derived with HMAC-SHA256 under a per-project secret kept in the store, and the pseudonym is <code>ANON_</code> plus 24 hex characters.</p>
+<p>Opening an older store classifies each patient once. A patient that was already de-identified (an ID of exactly the old <code>ANON_</code> shape, or any shifted date) keeps the old scheme, because giving them a new offset would put two offsets on one patient's dates. New studies for that patient are shifted by the old, recoverable offset. Every other patient, and every patient added later, uses the keyed scheme. While any old-scheme patient remains, each open logs a warning and writes one <code>WARNING</code> audit row naming how many, so compliance reports over the store grade <code>REVIEW_REQUIRED</code>.</p>
+<p>Files already exported by an older release stay recoverable, and nothing Isocenter does now changes that. To give those patients the keyed scheme, re-ingest their <strong>source</strong> files into a new store. Re-ingesting an old <em>export</em> does not help: an ID that is already <code>ANON_</code> is never replaced, so its unkeyed digest is exported unchanged (the load notice and <code>audit()</code> count these too). Ingesting raw files for a patient an older release already de-identified, into that same store, makes a second subject: the new data is keyed, its earlier studies keep the old pseudonym and offset, and <code>audit()</code> writes a <code>WARNING</code> row saying so.</p>
+<h2 id="dates-shifted-before-096">Dates shifted before 0.9.6</h2>
+<p>From 0.9.6 Isocenter records, per value, which dates its own shift
+produced: a date under a <code>SHIFT</code>/<code>JITTER</code> rule that the pipeline never
+shifted is raised and shifted on a later pass, and a shifted one is never
+shifted twice. A store written earlier has no such record. For instances
+under a study whose date was already shifted, Isocenter keeps the
+pre-0.9.6 rule: their <code>SHIFT</code>/<code>JITTER</code> values are not re-examined, so a
+date first named in a later policy can survive. Nothing is shifted twice.</p>
+<p>Opening such a store logs a warning and writes one <code>WARNING</code> audit row
+naming how many instances and studies are affected -- <strong>on every open</strong>,
+because nothing in the store can change their status. That row appears
+under <em>Exceptions &amp; Errors</em>, so every compliance report generated over the
+store grades <code>REVIEW_REQUIRED</code>. Re-ingesting the source files into a new
+store gives them the full guarantee and a clean audit log. A pre-0.9.6
+store with no shifted study writes nothing.</p>
+<p><code>Instance.date_shifted</code> was removed in the same release.</p>
+<h2 id="stores-written-before-091">Stores written before 0.9.1</h2>
+<h3 id="resurrected-private-tags">Resurrected private tags</h3>
+<p>Before 0.9.1, private (odd-group) tags written to the store's
+<code>instance_attributes</code> table were never read back, and the writer did not
+mirror deletions: a session that ran <code>remove_private_tags: true</code>,
+anonymized, and saved deleted the vendor block from the graph but left
+every row of it in the store. Those rows were inert until 0.9.1 began
+reading the table, which is what makes <code>remove_private_tags: false</code>
+survive a reload. The first open of such a store after upgrading therefore
+puts the stripped rows back on the graph, and an export taken from that
+session carries them.</p>
+<p>The library cannot decide this for you: a stale row and a legitimate
+one are byte-identical, and nothing in the database records which
+private tags were deleted from the graph. What the store does record is
+what every earlier session actually saw -- the core <code>attributes_json</code>,
+which was the whole graph before the table was readable. So the repair
+is explicit and opt-in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">with</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"store.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">dropped</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">reconcile_private_tags</span><span class="p">()</span>
+</code></pre></div>
+<p><code>reconcile_private_tags()</code> drops every <code>instance_attributes</code> row whose
+tag is absent from the instance's core stored attributes, removes the
+same tags from the live graph (undoing the resurrection this session's
+open performed), and writes one <code>RECONCILE_PRIVATE</code> audit row per
+affected instance so the repair is in the compliance trail. It returns
+the number of rows dropped.</p>
+<p><strong>Call it only if you know your store was de-identified before the
+upgrade.</strong> For that store the core attributes are the complete answer,
+and everything the call drops is a row an earlier export never
+carried. For a store that legitimately keeps its vendor block
+(<code>remove_private_tags: false</code>), the table <em>is</em> the private data and this
+call deletes it -- the same grain as <code>redact(force=True)</code>: the repair
+exists in the API, nothing changes silently, and the caller is choosing
+its cost. A site that does not know its history should re-run the
+privacy pipeline over the store instead, which re-strips the graph and
+mirrors the deletions into the table on save.</p>
+<h3 id="corrupted-pixel-geometry">Corrupted pixel geometry</h3>
+<p>Releases before 0.9.1 could persist a guessed geometry --
+<code>SamplesPerPixel=3</code>, <code>PhotometricInterpretation=RGB</code>, swapped axes --
+for a multi-frame grayscale instance whose Columns was 3 or 4. A store
+carrying those descriptors exports garbage while grading <code>PASS</code>: every
+step downstream behaves correctly on descriptors that are already
+wrong.</p>
+<p>Opening a session over such a store runs an arithmetic check --
+does Rows x Columns x SamplesPerPixel x NumberOfFrames x
+bytes-per-sample equal the stored sidecar frame length? -- and logs a
+warning naming each instance it flags. The same result reaches the
+compliance report as a <code>COMPLIANCE_CHECK</code> exception, so a session
+holding detected damage grades <code>REVIEW_REQUIRED</code> rather than <code>PASS</code>.
+The check is exact for frames stored uncompressed; a zlib-stored
+frame's length is post-compression, so damage behind one is caught
+where the bytes are decoded instead: <code>export(verify_readback=True)</code>
+decodes every written file and compares every pixel sample
+with what it meant to write, failing the mismatch at delivery.</p>
+<p>There is deliberately no automatic repair. The sidecar's bytes are
+shape-free, so a migration would be a best-effort guess, and a
+best-effort repair that silently half-works is worse than a detector.
+The remedy is to re-ingest the affected instances from their source
+files.</p>
+<h3 id="hollow-waveform-multiplex-items">Hollow waveform multiplex items</h3>
+<p>Isocenter keeps the first multiplex group of a multi-group waveform and
+discards the rest (see <a href="../waveforms/#limitations">Waveforms</a>). A store that
+ingested such a waveform with 0.8.2 to 0.9.0 dropped the other groups'
+samples but kept their Waveform Sequence items, so it holds one item per
+group with samples behind item 0 only, and exported a file declaring
+Waveform Data it did not carry.</p>
+<p>Opening such a store heals that shape in memory: it prunes the sample-less
+items, and with them any annotations referencing the pruned groups, exactly
+as ingest does now, and logs a warning naming the instance and why. The
+export is then a conformant single-group record. The store itself is
+unchanged until the session saves, and the warning repeats on every open
+until it does. The discarded samples are not recoverable from the store --
+the original discard happened in the session that ingested, and its
+<code>DATA_LOSS</code> entry is in the same store's audit log -- so re-ingesting the
+source files into a new store is the only way to get them back. A graph
+built by hand and written with <code>DicomExporter.write_tree()</code> is not touched:
+the serializer never passes through ingest or hydration.</p>
+<h2 id="redacted-on-090-or-earlier-with-a-multi-zone-rule">Redacted on 0.9.0 or earlier with a multi-zone rule</h2>
+<p>Releases up to and including 0.9.0 applied only the last applicable zone of a multi-zone rule to an instance loaded from a saved store, and still recorded a full redaction. That record is a hash of the <em>configuration</em>, not of the pixels, so the current code agrees with it and skips the instance: <code>session.redact()</code> returns <code>0</code> and the burned-in identifier stays where it is.</p>
+<p>If you redacted with a rule carrying two or more zones, against a store that had been saved and reopened, on 0.9.0 or earlier, repair the store with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">session</span><span class="o">.</span><span class="n">redact</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+</code></pre></div>
+<p>No source file is needed: the identifier is still in the store's own pixels. Every instance the rules match is redacted again, and each takes a new SOP Instance UID, derived under the store's secret from the UID it was read under and the zones, in place of the random one the earlier release gave it. Its exported filename changes, and it stops matching the source file it was ingested from.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../environment/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Environment Variables">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Environment Variables
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../api/stability/" class="md-footer__link md-footer__link--next" aria-label="Next: API stability">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                API stability
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 Kevin Long
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="mailto:support@isocenter.net" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

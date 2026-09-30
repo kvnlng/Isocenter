@@ -1,0 +1,2738 @@
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.">
+      
+      
+      
+        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/1.0/api/stability/">
+      
+      
+        <link rel="prev" href="../../migration/">
+      
+      
+        <link rel="next" href="../session/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>API stability - Isocenter</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-stability" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  This is the documentation for a version other than the latest release.
+  <a href="../../.."><strong>Go to the latest release.</strong></a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../.."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Isocenter" class="md-header__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Isocenter
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API stability
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../installation/" class="md-tabs__link">
+          
+  
+  
+  Get started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../configuration/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../migration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Upgrading from 0.9.x
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../for-institutions/" class="md-tabs__link">
+          
+  
+  
+  About
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Isocenter" class="md-nav__button md-logo" aria-label="Isocenter" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Isocenter
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    kvnlng/Isocenter
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify a cohort and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reversible anonymization: keep a way back
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/redact-burned-in-pixels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redact burned-in text for one machine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/write-an-exporter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write your own export format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare your own ECGs for a PhysioNet Challenge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics & Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../export-output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What the export writes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Burned-in text (OCR)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../waveforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Waveforms & WFDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../codecs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codec support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ctp-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import CTP rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.9.x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API stability
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API stability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-10-promises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What 1.0 promises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frozen-at-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frozen at 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documented-but-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documented but internal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documented but internal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-exporter-registry-provisional-until-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The exporter registry: provisional until 1.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#private" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../session/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Session
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Results and errors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../persistence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit trail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-institutions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For institutions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-10-promises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What 1.0 promises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frozen-at-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frozen at 1.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documented-but-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documented but internal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documented but internal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-exporter-registry-provisional-until-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The exporter registry: provisional until 1.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#private" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="./" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-stability">API stability</h1>
+<p>What the 1.0 tag promises, in three tiers. The facade is what gets
+frozen; the internal seams behind it are not.</p>
+<ul>
+<li><strong>Frozen (tier 1)</strong> names keep their spelling, their parameter names,
+  their return shapes and their documented behaviour for every 1.x
+  release; a change is a 2.0.</li>
+<li><strong>Documented but internal (tier 2)</strong> names are listed on this page,
+  and rendered in the API reference or named by a guide where a reader
+  needs them. They are safe to call, and may change in a 1.x release with
+  a CHANGELOG entry that names the old spelling and the new one. They exist so a
+  reader can see the seams, not so a program can lean on them.</li>
+<li><strong>Private (tier 3)</strong> names — everything with a leading underscore, and
+  every module not listed below — may change without notice.</li>
+</ul>
+<p>Optional extras (<code>ocr</code>, <code>nlp</code>) degrade to the documented fallback; the
+fallback is frozen, the extra's internals are not. How each method
+behaves is on its own page — start at <a href="../session/">Session</a> — and how a
+behaviour came to be is in the
+<a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md">changelog</a>.</p>
+<h2 id="what-10-promises">What 1.0 promises</h2>
+<ul>
+<li><strong>The facade.</strong> <code>Session</code>, its 28 methods and their parameters, the
+  shapes they return, and the other callables the frozen tables list
+  keep their spelling and behaviour for every 1.x
+  (<a href="#frozen-at-10">Frozen at 1.0</a>).</li>
+<li><strong>The output.</strong> For the same input, configuration and project secret,
+  a 1.x exports what the previous release exported, or its changelog
+  says what changed (<a href="#frozen-at-10">Data promises</a>). The grade's
+  values and the audit words keep their spelling, and no condition that
+  grades a run is removed or narrowed; a 1.x may add words and
+  conditions, with a changelog entry.</li>
+<li><strong>The configuration.</strong> A file 1.0 loads, every 1.x loads, and a 1.x
+  that applies an unchanged file differently raises the schema's minor
+  version (<a href="#frozen-at-10">Data promises</a>).</li>
+<li><strong>Plugins, provisionally.</strong> The exporter registry is usable and
+  provisional until 1.1, which may replace it rather than extend it; a
+  plugin written against 1.0 should pin <code>isocenter&gt;=1.0,&lt;1.1</code>, and in
+  1.0 no third-party export grades <code>PASS</code>
+  (<a href="#the-exporter-registry-provisional-until-11">The exporter registry</a>).</li>
+</ul>
+<h2 id="frozen-at-10">Frozen at 1.0</h2>
+<p><strong>Package.</strong> <code>isocenter.Session</code>, <code>isocenter.Builder</code>,
+<code>isocenter.Equipment</code>, <code>isocenter.RedactionError</code>,
+<code>isocenter.ExportError</code> — the five names in <code>__all__</code> — and
+<code>isocenter.__version__</code>.</p>
+<p><strong><code>Session</code> construction and lifetime.</strong> <code>Session(persistence_file=None)</code>,
+<code>None</code> meaning <code>ISOCENTER_DB_PATH</code> then <code>isocenter.db</code>; <code>":memory:"</code> is
+accepted. <code>with Session(...) as s:</code> (<code>__enter__</code> returns the session,
+<code>__exit__</code> closes); <code>close()</code> is idempotent and releases the executor
+and both threads. When a file named <code>isocenter.key</code> exists in the
+current working directory at construction, <code>Session()</code> calls
+<code>enable_reversible_anonymization()</code> with it, resolved to an absolute
+path then, so a later change of directory does not move it; a key
+beside the store in another directory is not looked for. With no such
+file, reversible anonymization stays off and no key is created. A
+malformed one makes <code>Session()</code> raise its <code>ValueError</code>. Keeping the key
+in the directory you run from, beside the store and the exported data,
+is not advised: whoever holds the key and an export can read the
+identities it carries.</p>
+<p><strong><code>Session</code> methods — all 28 public names, with their parameters.</strong>
+<code>self</code> is omitted, <code>*</code> marks the keyword-only boundary, and a parameter
+moved across it is a different call.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Parameters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ingest</code></td>
+<td><code>directory</code></td>
+</tr>
+<tr>
+<td><code>save</code></td>
+<td><code>sync=False</code></td>
+</tr>
+<tr>
+<td><code>close</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>examine</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>create_config</code></td>
+<td><code>output_path</code></td>
+</tr>
+<tr>
+<td><code>load_config</code></td>
+<td><code>config_file</code></td>
+</tr>
+<tr>
+<td><code>preview_config</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>audit</code></td>
+<td><code>config_path=None</code></td>
+</tr>
+<tr>
+<td><code>auto_remediate_config</code></td>
+<td><code>report</code></td>
+</tr>
+<tr>
+<td><code>anonymize</code></td>
+<td><code>findings=None</code></td>
+</tr>
+<tr>
+<td><code>enable_reversible_anonymization</code></td>
+<td><code>key_path='isocenter.key'</code></td>
+</tr>
+<tr>
+<td><code>lock_identities</code></td>
+<td><code>patient_id, persist=False, *, verbose=True, tags_to_lock=None</code></td>
+</tr>
+<tr>
+<td><code>lock_identities_batch</code></td>
+<td><code>patient_ids, auto_persist_chunk_size=0, tags_to_lock=None, *, persist=False, verbose=True</code></td>
+</tr>
+<tr>
+<td><code>recover_patient_identity</code></td>
+<td><code>patient_id, restore=True</code></td>
+</tr>
+<tr>
+<td><code>redact</code></td>
+<td><code>show_progress=True, force=False</code></td>
+</tr>
+<tr>
+<td><code>redact_by_machine</code></td>
+<td><code>serial_number, roi</code></td>
+</tr>
+<tr>
+<td><code>scan_pixel_content</code></td>
+<td><code>serial_number=None</code></td>
+</tr>
+<tr>
+<td><code>discover_redaction_zones</code></td>
+<td><code>serial_number, sample_size=50, min_confidence=80.0</code></td>
+</tr>
+<tr>
+<td><code>reconcile_private_tags</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>export</code></td>
+<td><code>folder, format='dicom', **options</code></td>
+</tr>
+<tr>
+<td><code>export_dataframe</code></td>
+<td><code>output_path='export_metadata.csv', expand_metadata=False, patient_ids=None</code></td>
+</tr>
+<tr>
+<td><code>get_cohort_report</code></td>
+<td><code>expand_metadata=False, patient_ids=None</code></td>
+</tr>
+<tr>
+<td><code>phi_status_summary</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>generate_report</code></td>
+<td><code>output_path, format='markdown'</code></td>
+</tr>
+<tr>
+<td><code>generate_manifest</code></td>
+<td><code>output_path, format='html'</code></td>
+</tr>
+<tr>
+<td><code>save_analysis</code></td>
+<td><code>report</code></td>
+</tr>
+<tr>
+<td><code>compact</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>release_memory</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Other frozen callables, with their parameters.</strong> Spelled as the
+Session table spells them, and each qualified by the class (or module)
+that defines it. The classes' fields and the rules each method follows
+are in the paragraphs below.</p>
+<table>
+<thead>
+<tr>
+<th>Callable</th>
+<th>Parameters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Session.__init__</code></td>
+<td><code>persistence_file=None</code></td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.save</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.add_rule</code></td>
+<td><code>serial_number, manufacturer='Unknown', model_name='Unknown', redaction_zones=None</code></td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.update_rule</code></td>
+<td><code>serial_number, updates</code></td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.delete_rule</code></td>
+<td><code>serial_number</code></td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.set_phi_tag</code></td>
+<td><code>tag, action, value=None</code></td>
+</tr>
+<tr>
+<td><code>IsocenterConfiguration.get_rule</code></td>
+<td><code>serial_number</code></td>
+</tr>
+<tr>
+<td><code>DicomItem.set_attr</code></td>
+<td><code>tag, value</code></td>
+</tr>
+<tr>
+<td><code>Instance.set_attr</code></td>
+<td><code>tag, value</code></td>
+</tr>
+<tr>
+<td><code>Instance.get_pixel_data</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>Instance.set_pixel_data</code></td>
+<td><code>array</code></td>
+</tr>
+<tr>
+<td><code>Instance.unload_pixel_data</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>Instance.discard_pixel_data</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>Instance.get_waveform_data</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>Builder.start_patient</code></td>
+<td><code>patient_id, name</code></td>
+</tr>
+<tr>
+<td><code>PhiReport.__init__</code></td>
+<td><code>findings, failures=None</code></td>
+</tr>
+<tr>
+<td><code>PhiReport.to_dataframe</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>DiscoveryResult.filter</code></td>
+<td><code>predicate=0.0</code></td>
+</tr>
+<tr>
+<td><code>DiscoveryResult.to_zones</code></td>
+<td><code>pad_x=20, pad_y=10, min_occurrence=0.1</code></td>
+</tr>
+<tr>
+<td><code>DiscoveryResult.to_dataframe</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>entities.is_synthetic_patient_id</code></td>
+<td><code>value</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>DiscoveryResult.filter(predicate=)</code> takes either a minimum confidence
+(a number, <code>0.0</code> by default) or a callable given each candidate, and
+keeps what passes; both forms are frozen.</p>
+<p><strong>Module-level names.</strong> <code>entities.NO_PATIENT_ID_PREFIX</code>
+(<code>"\\no-patient-id\\"</code>) and <code>entities.is_synthetic_patient_id()</code>: the
+key a subject with no Patient ID is held under, and the test for it
+(below).</p>
+<p><code>export(format=)</code> accepts <code>'dicom'</code> and <code>'wfdb'</code>, and the option names
+are frozen with the method. The <code>dicom</code> options are
+<code>use_compression=True, check_burned_in=False,
+check_reversibility=True, patient_ids=None, show_progress=True,
+subset=None, verify_readback=False</code>; the <code>wfdb</code> options are
+<code>patient_ids</code> and <code>include_annotation_text</code>. An option name the format
+does not recognise raises <code>TypeError</code>, and nothing is written. The two
+formats do not accept the same options, so a caller forwarding one
+options dict to both must split it per format.</p>
+<p><code>patient_ids</code> means the same thing on every method that takes it:
+<code>export</code> (both formats), <code>get_cohort_report</code>, <code>export_dataframe</code> and
+<code>lock_identities_batch</code>. <code>lock_identities</code> sends any argument that is
+not a <code>str</code> to <code>lock_identities_batch</code>. Only <code>None</code> means every patient,
+and neither lock method accepts <code>None</code>. An empty iterable selects
+nobody, and an iterator is read once. A bare <code>str</code>, a bytes-like value,
+a non-iterable, or an element that is not a <code>str</code> raises <code>TypeError</code>
+before anything is written, with one exception: the two lock methods
+also take a <code>PhiReport</code>, and <code>PhiFinding</code> elements mixed with IDs, and
+lock the patients those findings name. The report <code>audit()</code> returns
+locks every patient with at least one finding, by the Patient ID the
+finding holds. After <code>anonymize()</code> has replaced a patient's ID, the
+report no longer names that patient; lock before <code>anonymize()</code>. A
+report with no findings locks nobody. A patient is selected by its <code>patient_id</code>
+exactly: after <code>anonymize()</code> that is its replacement Patient ID, and a
+subject whose files carried no Patient ID is selected by the key
+<code>get_cohort_report</code> shows in its <code>PatientID</code> column, not by <code>""</code>. An ID
+that no patient in the session holds selects nothing and is counted,
+never named. <code>export</code>, <code>get_cohort_report</code> and <code>export_dataframe</code> log
+one <code>WARNING</code> line for it. <code>export</code> also writes one <code>WARNING</code> audit row,
+which grades the report <code>REVIEW_REQUIRED</code>. The lock methods log the
+count as an error.</p>
+<p><code>export(subset=)</code> (the <code>dicom</code> format) takes a pandas query string, a
+DataFrame, or any other iterable of UIDs, and reads that iterable the
+way <code>patient_ids</code> is read: only <code>None</code> means no filter, an empty one
+selects nothing, and a bytes-like value, a non-iterable, or an element
+that is not a <code>str</code> raises <code>TypeError</code> before anything is written. A
+DataFrame is read by the first of <code>SOPInstanceUID</code>,
+<code>SeriesInstanceUID</code>, <code>StudyInstanceUID</code> and <code>PatientID</code> it carries,
+and one with none of them raises <code>ValueError</code>. A UID matches at any of
+the four levels. A Study, Series or SOP Instance UID taken before
+<code>anonymize()</code> or <code>redact()</code> still names its entity, except a SOP
+Instance UID that is none of these three: the one the first move of the
+instance's UID (by <code>anonymize()</code>, <code>redact()</code> or
+<code>Instance.regenerate_uid()</code>) left, which is the ingested one unless
+<code>sop_instance_uid</code> was assigned before it; that UID's <code>anonymize()</code>
+replacement; and the current one. A UID taken between a first redaction
+and a <code>force=True</code> second, or between two <code>Instance.regenerate_uid()</code>
+calls, is such a UID. A value that names nothing in the
+session is counted, never named, in one <code>WARNING</code> line and one
+<code>WARNING</code> audit row, which grades the report <code>REVIEW_REQUIRED</code>.</p>
+<p><code>generate_report(format=)</code> accepts <code>'markdown'</code> only, and
+<code>generate_manifest(format=)</code> <code>'html'</code> and <code>'json'</code>; any other spelling
+raises <code>ValueError</code>, a case variant included. On
+<code>lock_identities</code> and <code>lock_identities_batch</code>, <code>persist</code> and <code>verbose</code>
+reach every patient.</p>
+<p><strong><code>Session</code> attributes.</strong> <code>store</code> (a <code>DicomStore</code> whose <code>.patients</code> is
+the <code>List[Patient]</code> the quickstart indexes), <code>configuration</code> (an
+<code>IsocenterConfiguration</code>), <code>persistence_file</code>. <code>audit()</code>, <code>anonymize()</code>
+and <code>recover_patient_identity()</code> merge two patients that end up with the
+same Patient ID into the one that was in the session first, removing the
+other from <code>store.patients</code>; <code>audit()</code> runs inside
+<code>export(check_burned_in=True)</code>, so that merges too.</p>
+<p><strong>Shapes the frozen methods return</strong> (attribute names; each is
+rendered on <a href="../results/">Results and errors</a>, except <code>DiscoveryResult</code>,
+on <a href="../ocr/">OCR API</a>).
+<code>IngestSummary(ingested, failures, declined, skipped)</code> plus <code>failed</code>;
+<code>ExportSummary(written_uids, failures)</code> plus <code>written</code>, <code>failed</code>;
+<code>written_uids</code> holds the SOP Instance UID of each written instance and
+nothing else: an instance with no UID is not written and is in
+<code>failures</code>;
+<code>PhiReport(findings, failures)</code> with <code>__len__</code>, <code>__iter__</code>, <code>__getitem__</code>,
+<code>to_dataframe()</code>; <code>PhiFinding(entity_uid, entity_type, field_name,
+value, reason, tag, patient_id, entity, remediation_proposal, metadata,
+entity_path)</code>; <code>DiscoveryResult.filter(...)</code>, <code>.to_zones()</code>,
+<code>.to_dataframe()</code>; <code>LockingResult</code> (a <code>list</code> of <code>Instance</code>);
+<code>recover_patient_identity()</code> → <code>Dict[str, Dict[str, Any]]</code>, mapping the
+SOP Instance UID of each instance that carries an identity token of ours
+to a copy of the values that token holds, in graph order, from both
+<code>restore=False</code> and <code>restore=True</code>;
+<code>export(format='dicom')</code> → <code>ExportSummary</code>, and
+<code>export(format='wfdb')</code> → <code>List[str]</code>, the paths written, empty
+when nothing was attempted;
+<code>get_cohort_report()</code> → <code>pandas.DataFrame</code>; <code>phi_status_summary()</code> →
+<code>Dict[str, Counter]</code>; <code>redact()</code>, <code>reconcile_private_tags()</code>,
+<code>auto_remediate_config()</code> → <code>int</code>.</p>
+<p><code>PhiFinding.entity</code>, on the findings <code>audit()</code> and
+<code>scan_pixel_content()</code> return, is the live object in <code>session.store</code>
+that the finding names — the same object whether the pass ran in
+threads or in processes — or <code>None</code> when that object cannot be found;
+it is never a worker's copy. The object is found by its UID.
+<code>ingest()</code> does not admit a second instance with an SOP Instance UID the
+graph already holds, so only a graph built or edited by hand can carry
+one UID on more than one instance, and findings on such a UID all
+resolve to a single one of those instances.</p>
+<p><code>anonymize(findings)</code> never writes to an object outside <code>session.store</code>
+and does not modify the findings passed. A finding whose <code>entity</code> is
+itself in the graph is acted on as it is; any other is resolved against
+the live graph at its <code>entity_uid</code> and <code>entity_path</code> and acts on the
+object found there, or declines when the address names no single
+object. A removal of a value already gone from the object at the
+finding's address is satisfied. A Patient ID is written, and a date
+shifted, only with a value that belongs to the live patient holding it.</p>
+<p><code>PhiReport.failures</code> is a list of <code>(entity_uid, reason)</code>, one per
+instance <code>scan_pixel_content()</code> could not read in full, and is always a
+list; <code>audit()</code>'s is always empty, because a failure in its workers
+raises. Each instance <code>scan_pixel_content()</code> or
+<code>discover_redaction_zones()</code> could not read also writes one audit
+warning naming it and the reason, before any raise, so a run with a
+scan failure does not grade as passing.</p>
+<p><strong>Entities, as reached from <code>session.store</code>.</strong> The graph is <code>Patient</code>
+→ <code>Study</code> → <code>Series</code> → <code>Instance</code>. Fields, in dataclass order (which is
+the positional constructor order, except where marked <code>init=False</code>):
+<code>Patient</code>: <code>patient_id, patient_name, studies</code>. <code>Study</code>:
+<code>study_instance_uid, study_date, series, date_shifted, study_time</code>.
+<code>Series</code>: <code>series_instance_uid, modality, series_number, equipment,
+instances</code>. <code>Instance</code>: <code>attributes, sequences, attribute_vrs</code> (inherited
+from <code>DicomItem</code>, <code>init=False</code>), then <code>sop_instance_uid, sop_class_uid,
+instance_number, file_path, source_path</code> (<code>pixel_array</code> and
+<code>waveform_array</code> follow and are tier 2). <code>Instance</code> carried a
+<code>date_shifted</code> field until 0.9.6; it is gone, and reading it raises
+<code>AttributeError</code>. <code>Equipment</code>: <code>manufacturer, model_name,
+device_serial_number</code>.</p>
+<p>A subject whose files carry no Patient ID (absent, empty or blank) is a
+<code>Patient</code> per study, whose <code>patient_id</code> is
+<code>entities.NO_PATIENT_ID_PREFIX + &lt;its source Study Instance UID&gt;</code>
+(<code>"\\no-patient-id\\1.2.3..."</code>); <code>entities.is_synthetic_patient_id()</code>
+is the test for it. No single-valued Patient ID read from a file
+can take that form, because the backslash is DICOM's value delimiter. The
+key is never exported: such a subject's exported Patient ID is empty
+under <code>KEEP</code> and <code>REPLACE</code> alike, and its folder is
+<code>Subject_UnknownPatient</code>.</p>
+<p><code>attributes</code> is keyed by lowercase <code>"gggg,eeee"</code> strings. On <code>Instance</code>:
+<code>get_pixel_data()</code>, <code>set_pixel_data()</code>, <code>unload_pixel_data()</code>,
+<code>discard_pixel_data()</code>, <code>get_waveform_data()</code>, and the
+two-names-two-behaviours rule between <code>unload</code> and <code>discard</code> (<code>unload</code>
+refuses an unsaved replacement; <code>discard</code> throws it away, with the
+descriptors <code>set_pixel_data()</code> wrote for it — and a <code>set_attr()</code> edit
+to any of those descriptors made since the set). On <code>DicomItem</code>:
+<code>set_attr()</code>. On <code>Instance</code> it also keeps resident pixels reading as a
+pixel-descriptor edit declares, and raises <code>ValueError</code> for an edit that
+pixels set through <code>set_pixel_data()</code> and not yet saved cannot be read
+under. <code>get_pixel_data()</code> reads an instance's samples under its pixel
+descriptors — Rows, Columns, SamplesPerPixel, NumberOfFrames,
+BitsAllocated and PixelRepresentation — whether the samples are in the
+store or in the file an <code>Instance(file_path=...)</code> names, and raises
+<code>RuntimeError</code> for descriptors the samples cannot be read under.</p>
+<p><strong><code>Builder</code>.</strong> The name, <code>Builder.start_patient()</code>, and <code>Equipment</code>'s
+three fields. The rest of the fluent chain is tier 2.</p>
+<p><strong><code>IsocenterConfiguration</code></strong> as <code>session.configuration</code>: <code>save()</code>,
+<code>add_rule()</code>, <code>update_rule()</code>, <code>delete_rule()</code>, <code>set_phi_tag()</code>,
+<code>get_rule()</code>, and the fields <code>rules</code>, <code>phi_tags</code>, <code>date_jitter</code>,
+<code>remove_private_tags</code>, <code>privacy_profile</code>, <code>config_path</code>, <code>auto_save</code>. On a session that has loaded
+no configuration, <code>phi_tags</code> is a copy of the floor policy
+(<code>basic@2026c</code> with the three research defaults, below; the name it is
+held under is tier 2), and <code>audit()</code>/<code>anonymize()</code> apply it; a config
+with no <code>privacy_profile</code> line, or a null one, extends it, and one with
+<code>privacy_profile: none</code> opts out of it. <code>set_phi_tag()</code> stores lowercase
+keys, stores its <code>value</code> argument as the rule's <code>value</code>, and raises
+<code>ValueError</code>, leaving the policy and its file unchanged, for an unknown
+action or a rule <code>load_config</code> would refuse. <code>add_rule()</code> and
+<code>update_rule()</code> raise <code>ValueError</code>, leaving the rules and the file
+unchanged, for a machine rule <code>load_config</code> would refuse. The four
+methods that change the configuration write <code>config_path</code> only when
+<code>auto_save</code> is true (default false). With auto-save on, a change whose
+write fails is undone and the error raised. <code>save()</code> raises
+<code>ValueError</code> when <code>config_path</code> is unset, raises the error of a failed
+write, and writes the profile by name with only the <code>phi_tags</code> that
+differ from it, never the profile's rules. A file <code>save()</code> writes loads
+to the configuration it was written from. A built-in
+profile's name is pinned to the PS3.15 edition its table was taken from,
+and what a pinned name contains is frozen: <code>basic@2026c</code> holds the rules
+1.0 shipped under it in every 1.x. A bare <code>basic</code> means <code>basic@2026c</code>,
+and the floor policy is <code>basic@2026c</code> with the three research defaults,
+in every 1.x. A later edition arrives in a minor release as a new name,
+never as a new meaning for an existing one. The one exception: a 1.x may
+correct a row of <code>basic@2026c</code> that the published 2026c standard shows
+was transcribed wrongly, as a Breaking changelog entry quoting the
+standard's row. <code>configuration.privacy_profile</code> holds the pinned name of
+the built-in profile that was loaded, even when the file said <code>basic</code>.</p>
+<p><strong>Exceptions.</strong> Each is raised before any work is done unless it says
+otherwise.</p>
+<ul>
+<li><code>RedactionError(failures, attempted)</code>, a <code>RuntimeError</code> with
+  <code>.failures</code> (a list of <code>(entity_uid, details)</code>) and <code>.attempted</code>,
+  raised after the whole pass.</li>
+<li><code>ExportError(failures, attempted, folder=None)</code>, a <code>RuntimeError</code>,
+  raised last and only when zero of N reached disk, by both formats.</li>
+<li><code>compact()</code>: <code>RuntimeError</code> while a pass is open (below).</li>
+<li><code>redact()</code>: <code>RuntimeError</code> on a <code>:memory:</code> store when the environment
+  asks for worker recycling.</li>
+<li><code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code>:
+  <code>RuntimeError</code> on a store holding dates shifted, or UIDs replaced,
+  under a project secret it no longer has (on a store with no secret
+  yet, each generates one and commits it); and, with <code>recover_patient_identity(restore=True)</code>,
+  <code>RuntimeError</code> when patients sharing a Patient ID were de-identified
+  under different date-offset schemes, which <code>audit()</code> raises before it
+  creates a project secret.</li>
+<li><code>scan_pixel_content()</code> and <code>discover_redaction_zones()</code>:
+  <code>RuntimeError</code> when the <code>ocr</code> extra or the <code>tesseract</code> binary is
+  unavailable to the calling process; and <code>RuntimeError</code> after the pass
+  when at least one instance failed and none could be read. A scan that
+  read some instances returns its report with the others in <code>failures</code>.</li>
+<li><code>generate_report()</code> and <code>generate_manifest()</code>: <code>ValueError</code> for a
+  <code>format</code> other than the spellings above, naming them; no file is
+  written.</li>
+<li><code>IsocenterConfiguration.save()</code>: <code>ValueError</code> with no <code>config_path</code>,
+  or when <code>phi_tags</code> lacks a rule its <code>privacy_profile</code> (or the floor)
+  supplies; the <code>OSError</code> of a failed write. With <code>auto_save</code> on,
+  <code>add_rule()</code>, <code>update_rule()</code>, <code>delete_rule()</code> and <code>set_phi_tag()</code>
+  raise the same, and leave the configuration as it was.</li>
+<li><code>load_config(config_file)</code> and <code>audit(config_path=)</code>: <code>ValueError</code>
+  when the file fails validation — its extension, YAML syntax or shape,
+  a <code>version</code> this library does not read, a key the schema does not
+  have, a value of the wrong type, an unknown <code>privacy_profile</code>
+  (including an edition this version does not ship) or <code>action</code>, or a
+  rule Isocenter cannot honour
+  (<a href="../../configuration/">Configuration</a> lists them) — and
+  <code>FileNotFoundError</code> when it does not exist; after either, the
+  configuration is exactly what it was. <code>audit()</code> without <code>config_path</code>
+  raises the same <code>ValueError</code> for such a rule in
+  <code>session.configuration.phi_tags</code>. Both are raised before a project
+  secret is created.</li>
+<li><code>recover_patient_identity()</code>: <code>FileNotFoundError</code> when no key file
+  exists at the path <code>enable_reversible_anonymization()</code> was given,
+  without creating one; <code>ValueError</code> when no patient holds the ID;
+  <code>RuntimeError</code> when the patient has no instances or no identity token,
+  the key does not decrypt it, or it holds no identity record this
+  library writes, or the token is in the layout releases before 1.0
+  wrote, in which case nothing on the patient is restored. It
+  prints nothing, and no message names a Patient ID.
+  It returns the identity rather than printing it.</li>
+<li><code>enable_reversible_anonymization()</code>: <code>ValueError</code> for a malformed key
+  file, creating none. The first <code>lock_identities()</code> creates the key,
+  exclusively and with mode 0600, unless the session holds an identity
+  token this library wrote that no key here opens, in which case it
+  raises <code>RuntimeError</code> and creates none.</li>
+<li><code>lock_identities()</code> refusals name no patient: a batch refusal numbers
+  each refused patient by its place among the patients found, in Patient
+  ID order. A patient any of whose instances holds no value in any tag
+  <code>tags_to_lock</code> names is refused.</li>
+<li><code>lock_identities(persist=True)</code> and <code>lock_identities_batch()</code> raise
+  the <code>sqlite3.Error</code> of a store write that fails, and <code>RuntimeError</code>
+  for a write that finds no store row for one of its instances. Both are
+  raised <strong>after the tokens are embedded in memory</strong> (marked modified,
+  so a later <code>save()</code> stores them), and after one audit error row.
+  Neither stores any of that write's instances. Writes before it are not
+  rolled back.</li>
+</ul>
+<p><strong>Environment.</strong> Every <code>ISOCENTER_*</code> name in
+<a href="../../environment/">Environment Variables</a>, its default and its
+documented semantics — including the order the three
+threads-or-processes levers resolve in, which paths each reaches, and
+that a value below a variable's floor is reported and replaced by the
+default.</p>
+<p><strong>Data promises.</strong></p>
+<ul>
+<li>For the same input, configuration and project secret, a 1.x release
+  exports what the previous release exported, or its changelog says
+  what changed.</li>
+<li>A store written by 1.0 opens under every 1.x. The sidecar and schema
+  <em>layout</em> are not frozen; their forward compatibility is.</li>
+<li>A DICOM file exported with reversible anonymization by 1.0 is
+  recoverable by every 1.x with its key. Frozen: the Encrypted
+  Attributes Sequence <code>(0400,0500)</code>, whose item carries the identity
+  token in Encrypted Content <code>(0400,0520)</code> (OB) and <code>1.2.840.10008.1.2</code>
+  in Encrypted Content Transfer Syntax UID <code>(0400,0510)</code> (UI), as PS3.6
+  lays the item out; and the key file's format (raw Fernet key bytes).
+  The token is Isocenter's own Fernet token over a JSON record, not a
+  CMS envelope, so only Isocenter reads it; the transfer syntax UID is
+  a label. Releases before 1.0 wrote the two item elements the other
+  way round (the token in <code>(0400,0510)</code>). 1.x does not read that
+  layout: recovering such a file, or locking over it, raises an error
+  naming the layout, and 0.9.x recovers it with its key.</li>
+<li>An identity token holds exactly the locked values captured from each
+  instance that carries it: a lock writes one token per distinct set of
+  values, and a restore gives each instance the values of the token it
+  carries. Since 1.0 a token's encrypted content says so
+  (<code>"__isocenter_token__": 2</code>, never returned as a tag), so this holds in
+  any store it reaches. The exception is a token written before 1.0 that
+  carries no such mark and no stamp from this store, is shared across
+  studies, and holds a non-blank value outside group 0010. It is
+  restored in full only on the first study carrying it, and as its
+  group 0010 on the others. A file carries no stamp, so this also applies
+  to a 0.9.8 export ingested elsewhere whose studies' locked values were
+  equal. The promise runs forward only: a release before 1.0 reads the
+  mark as one more value, so recovering a 1.0 token needs 1.0 or later,
+  and a token naming a scheme this release does not know is refused.</li>
+<li>An exported DICOM file whose policy was applied in full carries
+  Patient Identity Removed <code>(0012,0062)</code> <code>YES</code> and one De-identification
+  Method <code>(0012,0063)</code> value naming the release and the policy, and,
+  where its dates determine it, Longitudinal Temporal Information
+  Modified <code>(0028,0303)</code>. <code>YES</code> reflects the attribute policy and no
+  declared burned-in text: it is held back from a file whose Burned In
+  Annotation <code>(0028,0301)</code> says <code>YES</code>, and the pixels themselves are not
+  read. The fields and the condition are what is promised
+  (<a href="../../configuration/#what-an-exported-file-says-about-itself">What an exported file says about itself</a>);
+  the value's exact text moves with the release and the policy's
+  fingerprint.</li>
+<li>Date jitter and the <code>ANON_</code> pseudonym are deterministic per patient
+  within a store: the same patient under the same <code>date_jitter</code> range
+  gets the same offset and pseudonym every time that store derives
+  them, and in every copy of its file. So is a replacement UID: the same
+  source UID gets the same replacement, and a redaction with the same
+  zones the same SOP Instance UID. Pseudonyms, date offsets and
+  replacement UIDs are derived from the store's project secret, which
+  the store generates and never exports. The same configuration over a
+  different store gives different ones.
+  A patient a store classed as de-identified before 0.9.7 keeps that
+  store's offset.</li>
+<li>A configuration file determines the policy, not the pseudonyms or
+  offsets. The three things a de-identification depends on, and what is
+  lost with each, are listed in
+  <a href="../../configuration/#what-to-keep">What to keep</a>.</li>
+<li>The offset is not derivable from the exported pseudonym, or from any
+  other value its derivation uses, without the secret. That is not a
+  promise that no exported date is recoverable: a date tag no rule names
+  is exported as ingested, and a UID the configuration keeps can embed
+  one.</li>
+<li>A configuration file that 1.0 loads, every 1.x loads unchanged. Its
+  schema is version 2, and a 1.x never raises the major. A 1.x raises
+  the 2.x minor when it adds keys or values, and when it applies an
+  unchanged file differently. A 1.x never changes how a file is
+  applied without raising the minor. The minor is part of the policy
+  each PHI status records, so a store scanned under an older minor is
+  asked to re-audit. Its next <code>export()</code> writes a <code>WARNING</code> row saying
+  the statuses were recorded under another policy, and the report
+  grades <code>REVIEW_REQUIRED</code>. An <code>audit()</code> under the new release stops
+  further rows; the row already written stays in the store's audit log.</li>
+</ul>
+<p><strong>Output vocabularies.</strong> Five separate vocabularies, not one list.</p>
+<ul>
+<li>The <strong>grade</strong>: <code>PASS</code>, <code>REVIEW_REQUIRED</code>. There is no <code>FAIL</code>. The
+  conditions that decide it are listed in
+  <a href="../../analytics/#how-the-grade-is-decided">How the grade is decided</a>,
+  and they are a promise about the conditions: no condition is removed
+  or narrowed in 1.x, and one may be added with a CHANGELOG entry. It
+  is not a promise about which way a grade can move: a 1.x fix that
+  stops writing a wrong row can move a run from REVIEW_REQUIRED to
+  PASS, and the CHANGELOG entry for that fix says so. The report's
+  layout and the wording of each Grade Basis line are tier 2.</li>
+<li>The <strong>audit <code>action_type</code> strings</strong>, written to the audit table and
+  counted by type in section 2 of the report: <code>DATA_LOSS</code>, <code>ERROR</code>,
+  <code>EXPORT</code>, <code>RECONCILE_PRIVATE</code>, <code>REDACTION</code>, <code>REVERSIBLE_EXPORT</code>,
+  <code>RISK</code>, <code>SCAN_GAP</code>, <code>WARNING</code>; and the four a remediation writes,
+  <code>REMEDIATION_REPLACE</code>, <code>REMEDIATION_SHIFT_DATE</code> and
+  <code>REMEDIATION_REMOVE</code> when it acts on a proposal and
+  <code>REMEDIATION_DECLINED</code> when it declines to, or fails to.</li>
+<li>The <strong>remediation-proposal <code>action_type</code> strings</strong>, carried on
+  <code>PhiFinding.remediation_proposal</code>: <code>REMOVE_TAG</code>, <code>REPLACE_TAG</code>,
+  <code>SHIFT_DATE</code>. These say what a proposal <em>will</em> do and are never an
+  audit row.</li>
+<li>The <strong>report exception categories</strong> <code>COMPLIANCE_CHECK</code> and
+  <code>AUDIT_DROP</code>, synthesised into the report's <code>exceptions</code> list at
+  report time and never written to the audit table. The second says
+  audit rows failed to write and were dropped; either one costs the run
+  its passing grade.</li>
+<li>The <strong><code>loss_scope</code> strings</strong>: <code>STANDARD</code>, <code>PRIVATE</code>, <code>SIGNAL</code>. The
+  third is acquired content that was in the source and is not in the
+  export.</li>
+</ul>
+<p>An existing string is never renamed or removed in 1.x; new strings may
+be added with a CHANGELOG entry. The <em>method</em> that returns the rows
+(<code>store_backend.get_audit_losses()</code>) is tier 2: the words are frozen,
+the access path is not.</p>
+<p><strong>Behaviours.</strong> The call order the README documents and its
+consequences (a report generated before any export carries a boundary
+note; export-time <code>DATA_LOSS</code> rows are in a report generated after it);
+<code>audit()</code> and <code>redact()</code> drain the persistence manager on entry;
+until <code>export()</code>, the session writes only the store, <code>isocenter.log</code>
+and files you ask for (a configuration, a key, a report, a manifest or
+a cohort table); source files are never
+modified; <code>redact()</code> on a <code>:memory:</code> store runs in threads on every
+interpreter; and the two below.</p>
+<ol>
+<li><strong><code>compact()</code> raises <code>RuntimeError</code> while a <code>redact()</code> or <code>ingest()</code>
+   pass is open on the same store, from any thread of this session, and
+   has done nothing when it does.</strong> Frozen: the class, the timing
+   (before its leading save), and "has done nothing". Not frozen: the
+   message text and the lock file's name.</li>
+<li><strong><code>redact()</code> and <code>ingest()</code> block while a <code>compact()</code> is saving or
+   rewriting, bounded, and then proceed.</strong> Frozen: that they wait and
+   then proceed, and that the wait is bounded and its expiry is a
+   <code>RuntimeError</code> raised before any worker is dispatched or UID
+   regenerated. Not frozen: the bound itself.</li>
+</ol>
+<h2 id="documented-but-internal">Documented but internal</h2>
+<p>Listed here, rendered in the API reference or named by a guide where a
+reader needs them, safe to call, and changeable in a 1.x release with a
+CHANGELOG entry naming both spellings:</p>
+<ul>
+<li><strong><code>DicomSession</code></strong>, the class's own name. <code>isocenter.Session</code> is the
+  frozen spelling.</li>
+<li><strong><code>session.store_backend</code> and <code>SqliteStore</code></strong> — the methods
+  <a href="../persistence/">Audit trail</a> renders: <code>get_audit_summary()</code>,
+  <code>get_audit_errors()</code>, <code>get_audit_losses()</code>, <code>get_audit_declines()</code>,
+  <code>get_audit_scan_gaps()</code>, <code>get_audit_drops()</code> and
+  <code>get_flattened_instances()</code>. The store's <em>forward compatibility</em> is
+  frozen; its API is not, and its other methods are private.</li>
+<li><strong><code>session.key_manager</code>, <code>session.persistence_manager</code>,
+  <code>session.reversibility_service</code></strong> — attributes that expose services.</li>
+<li><strong><code>TrackedEntity</code> bookkeeping</strong>: <code>has_unsaved_changes</code>, <code>phi_status</code>,
+  <code>phi_status_policy</code>, <code>mark_modified()</code>, <code>mark_persisted()</code>,
+  <code>mark_subtree_persisted()</code>, <code>record_phi_status()</code>; <code>PhiStatus</code>;
+  <code>ScanPolicy</code>, the policy a status was recorded under, which the store
+  keeps beside it; <code>DicomItem.add_sequence()</code> and
+  <code>add_sequence_item()</code>, <code>record_attr_vr()</code>; <code>DicomSequence</code>;
+  <code>Instance.regenerate_uid()</code>, <code>get_waveform_bytes()</code>,
+  <code>unload_waveform_data()</code>, <code>pixel_array</code>, <code>waveform_array</code>;
+  <code>Equipment.from_parts()</code>.</li>
+<li><strong>The recording helpers</strong> the scan, remediation and the reversible
+  lock call on an entity: <code>Instance.record_remediation()</code>,
+  <code>remediation_vouches_for()</code>, <code>record_identity_token()</code>,
+  <code>identity_token_is_this_stores()</code>; <code>DicomItem.record_date_shift()</code>,
+  <code>date_shift_vouches_for()</code>, <code>clear_sequence_items()</code>; and <code>Study</code>'s
+  own <code>record_date_shift()</code> and <code>date_shift_vouches_for()</code>. Every other
+  public name on a class tier 1 names is listed on this page, in one
+  tier or the other.</li>
+<li><strong><code>DicomStore</code>'s methods</strong> <code>get_unique_equipment()</code>,
+  <code>get_ingested_paths()</code>, <code>get_superseded_uids()</code>, <code>save_state()</code> and
+  <code>load_state()</code>. Its <code>patients</code> list is frozen (above); what else the
+  store object offers is not.</li>
+<li><strong><code>profiles.FLOOR_POLICY</code></strong>, the name the floor policy is held under.
+  What the floor <em>contains</em> is frozen (above); the name is not.</li>
+<li><strong><code>entities</code> helpers</strong> <code>clone_sequences</code>, <code>exported_patient_id</code>,
+  <code>iter_item_tree</code>, <code>normalize_study_date</code>, <code>resolve_item_path</code>, and the
+  constant <code>SOURCE_SOP_UID_ATTR</code>, the <code>attributes</code> key under which an
+  instance keeps the SOP Instance UID it held before its UID first
+  changed (the ingested one, unless <code>sop_instance_uid</code> was assigned first).
+  <code>exported_patient_id</code> is on the registry's provisional terms (below).</li>
+<li><strong>The <a href="../ocr/">OCR API</a> page</strong>: <code>DiscoveryCandidate</code>,
+  <code>ZoneDiscoverer.group_boxes</code>,
+  <code>RedactionVerifier</code> (<code>__init__</code>, <code>get_matching_rule</code>, <code>is_covered</code>,
+  <code>verify_instance</code>), <code>ConfigAutomator.suggest_config_updates</code>,
+  <code>pixel_analysis.analyze_pixels</code>, <code>pixel_analysis.detect_text_regions</code>,
+  <code>pixel_analysis.TextRegion</code>, <code>pixel_analysis.HAS_OCR</code>,
+  <code>pixel_analysis.OcrUnavailableError</code>, <code>pixel_analysis.PixelScanError</code>;
+  <code>DiscoveryResult.get_density_matrix</code>, <code>visualize_heatmap</code>,
+  <code>analyze_temporal_stability</code>, <code>inspect_clusters</code>, and its attributes
+  <code>candidates</code> and <code>n_sources</code>.</li>
+<li><strong><code>DicomExporter.write_tree()</code></strong> (the serializer alone) and the
+  exporter registry <code>Exporter</code>, <code>register()</code>, <code>get_exporter()</code>,
+  <code>available_formats()</code>, which is provisional (below).</li>
+<li><strong><code>RedactionService.apply_redaction_to_array</code></strong> (static).</li>
+<li><strong><code>PhiRemediation</code></strong>, the proposal a <code>PhiFinding</code> carries in
+  <code>remediation_proposal</code>. Its <code>action_type</code> words are frozen (above);
+  the class is not.</li>
+<li><strong><code>Builder</code>'s fluent chain beyond <code>start_patient()</code>.</strong></li>
+<li><strong><code>ComplianceReport</code>'s fields</strong> and the report's section layout and
+  wording; log messages and <code>print</code> lines; the manifest's HTML.</li>
+<li><strong>The JSON manifest's item keys</strong> (<code>generate_manifest(format="json")</code>).
+  An item's <code>anonymized</code> is <code>true</code> when the last tag-policy PHI scan
+  left no identifier unremediated on that instance's patient, study or
+  instance and none of the three has been edited since. It is not
+  "<code>anonymize()</code> ran", and it says nothing about burned-in pixel text.</li>
+<li><strong>The <code>.pass.lock</code> / <code>.lock</code> file names</strong>, the sidecar's <code>_pixels.bin</code>
+  suffix, the audit table's columns, the schema's table names.</li>
+</ul>
+<h3 id="the-exporter-registry-provisional-until-11">The exporter registry: provisional until 1.1</h3>
+<p><code>Exporter</code>, <code>register()</code>, <code>get_exporter()</code> and <code>available_formats()</code> are
+<strong>provisional</strong>. A real plugin API is planned for 1.1, and 1.1 may
+replace these four names rather than extend them; the change will be a
+CHANGELOG entry naming both spellings, as for anything in this section.
+A plugin written against 1.0 should pin <code>isocenter&gt;=1.0,&lt;1.1</code>.
+<code>entities.exported_patient_id()</code>, which the
+<a href="../exporters/">exporter registry</a> page tells plugin authors to call, is
+documented but internal on the same terms.</p>
+<p>Every export gate lives inside the two built-in formats, so a
+third-party exporter receives the graph with none of them applied. Each
+of its runs writes one <code>WARNING</code> audit row, and <strong>in 1.0 no third-party
+export grades <code>PASS</code></strong>. <a href="../exporters/">Exporter registry</a> lists what
+does not run for it and the rules for its author; running the gates
+above dispatch is <a href="https://github.com/kvnlng/Isocenter/issues/783">#783</a>.</p>
+<p>There is no read-side seam: ingest reads through pydicom and the
+library's own codec dispatch, and a reader or codec plugin point is 1.1
+or later.</p>
+<h2 id="private">Private</h2>
+<p>Every leading-underscore name, and wholesale: <code>parallel.py</code>
+(<code>run_parallel</code> included — the environment registry is the contract,
+the function is not), <code>io_handlers.py</code> except <code>DicomExporter.write_tree</code>,
+the two summaries and <code>ExportError</code>, <code>privacy.py</code> except <code>PhiFinding</code>,
+<code>PhiReport</code> and <code>PhiRemediation</code> (tier 2), <code>persistence.py</code> except the
+<code>SqliteStore</code> methods named above, <code>remediation.py</code>, <code>services.py</code> except <code>RedactionError</code> and
+<code>apply_redaction_to_array</code>, <code>crypto.py</code>, <code>reversibility.py</code>,
+<code>sidecar.py</code>, <code>persistence_manager.py</code>, <code>pixel_geometry.py</code>,
+<code>murmur.py</code>, <code>reporting.py</code> except <code>ComplianceReport</code>, <code>discovery.py</code>
+except <code>DiscoveryResult</code>, <code>DiscoveryCandidate</code> and
+<code>ZoneDiscoverer.group_boxes</code>,
+<code>verification.py</code> except <code>RedactionVerifier</code>, <code>automation.py</code> except
+<code>ConfigAutomator.suggest_config_updates</code>, <code>config_manager.py</code>,
+<code>profiles.py</code> except <code>FLOOR_POLICY</code> (tier 2),
+<code>builders.py</code> internals, <code>utils/</code>, <code>logger.py</code>, <code>_version.py</code>'s module
+(the <code>__version__</code> string is frozen, its module is not).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../../migration/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Upgrading from 0.9.x">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Upgrading from 0.9.x
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../session/" class="md-footer__link md-footer__link--next" aria-label="Next: Session">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Session
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 Kevin Long
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="mailto:support@isocenter.net" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
