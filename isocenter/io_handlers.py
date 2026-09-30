@@ -4065,7 +4065,11 @@ def _instance_number_of(ds) -> int:
     cannot convert, which it leaves as a `str` -- reads as 0, the value a
     file with no Instance Number gets, and so does an integer outside IS's
     range. An ill-formed Instance Number is not a reason to refuse the
-    file. What pydicom does read as one integer is taken as it reads it,
+    file, with one exception that predates #810 and is not changed here:
+    an infinite value (`inf`, `-inf`, `1e400`) makes pydicom's own read
+    raise `OverflowError`, even in its default reading mode, and the file
+    is refused, as it was when only `populate_attrs` read the element.
+    What pydicom does read as one integer is taken as it reads it,
     including spellings a conformant IS string would not use: `1e3` and
     `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
     long malformed value out of the store's INTEGER column, which would
@@ -4082,8 +4086,10 @@ def _instance_number_of(ds) -> int:
     # `str` pydicom leaves unconverted are not, and read as 0. No `str`
     # arm: pydicom leaves text unconverted only when `float()` refused it,
     # and `int()` refuses everything `float()` does. No `try` around the
-    # read either: it raises only under pydicom's process-wide RAISE
-    # reading mode, where `populate_attrs` would refuse the file anyway.
+    # read either: what it raises -- `OverflowError` for an infinite value
+    # in pydicom's default mode, any invalid value under its RAISE mode --
+    # `populate_attrs` raises on the same element, so the file is refused
+    # either way, as it was before #810. A `try` here would not keep it.
     value = ds.get("InstanceNumber")
     if not isinstance(value, int):
         return 0

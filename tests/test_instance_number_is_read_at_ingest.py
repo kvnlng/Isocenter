@@ -11,7 +11,10 @@ The owner's ruling: read InstanceNumber at ingest, 0 when the file has
 none. A value pydicom does not read as one integer -- empty,
 multi-valued, a fraction, not a number -- or one outside IS's range is
 read as none, and ingest goes on:
-an ill-formed Instance Number is not a reason to refuse the file. The
+an ill-formed Instance Number is not a reason to refuse the file. The one
+exception predates #810 and is only pinned here: an infinite value
+(`inf`, `-inf`, `1e400`) raises `OverflowError` inside pydicom and the file
+is refused, as it was before. The
 attribute is the file's element either way and is not touched by this.
 """
 import os
@@ -126,6 +129,31 @@ def test_the_is_range_bounds_what_is_read(tmp_path, text, expected):
         f.write(data.replace(marker.encode(), text.ljust(len(marker)).encode()))
     inst = _ingested(path)
     assert inst.instance_number == expected
+
+
+@pytest.mark.parametrize("text", ["inf", "-inf", "1e400"])
+def test_an_infinite_instance_number_still_refuses_the_file(tmp_path, text):
+    """The limit of "an ill-formed value does not refuse the file", pinned
+    so the prose that states it stays true.
+
+    pydicom reads these as a float it then cannot make an int of, and its
+    `OverflowError` escapes `ds.get()` under its default reading mode. The
+    file is refused, exactly as it was before #810 (`populate_attrs` fails
+    on the same element); filed separately, not changed here.
+    """
+    marker = "000000097531"
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.InstanceNumber = marker
+    path = tmp_path / "a.dcm"
+    ds.save_as(path)
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data.count(marker.encode()) == 1
+    with open(path, "wb") as f:
+        f.write(data.replace(marker.encode(), text.ljust(len(marker)).encode()))
+    _meta, inst, *_rest, error = ingest_worker(str(path))
+    assert inst is None
+    assert error is not None and "OverflowError" in error, error
 
 
 def test_the_store_column_holds_the_files_instance_number(tmp_path):
