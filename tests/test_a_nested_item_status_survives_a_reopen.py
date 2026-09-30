@@ -160,7 +160,7 @@ def test_the_status_key_is_not_a_tag(tmp_path, config):
         for item in _every_item(inst):
             assert "__phi__" not in item.attributes
         assert "__phi__" not in inst.attributes
-        frame = session.export_dataframe(expand_metadata=True)
+        frame = session.export_dataframe("export_metadata.csv", expand_metadata=True)
         assert not [c for c in frame.columns if "__phi__" in str(c)]
         session.export(str(tmp_path / "out"))
     [path] = list(pathlib.Path(tmp_path / "out").rglob("*.dcm"))

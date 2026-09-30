@@ -4,7 +4,6 @@ Module for analyzing OCR findings and suggesting configuration updates.
 from typing import List, Dict, Any
 from collections import defaultdict
 from isocenter.privacy import PhiReport
-from isocenter.configuration import IsocenterConfiguration
 
 class ConfigAutomator:
     """
@@ -12,7 +11,7 @@ class ConfigAutomator:
     """
 
     @staticmethod
-    def suggest_config_updates(report: PhiReport, _current_config: IsocenterConfiguration) -> List[Dict[str, Any]]:
+    def suggest_config_updates(report: PhiReport) -> List[Dict[str, Any]]:
         """Generates a list of suggested configuration changes.
 
         A `NEW_LEAK` finding suggests its text box as a new zone; a

@@ -711,10 +711,13 @@ class SqliteStore:
     #: (one rowid seek plus `page_size` primary-key joins) disappears into
     #: the noise.
     #:
-    #: The *default*, not a knob: `get_flattened_instances` takes it as a
-    #: default argument, which Python evaluates once when the `def` runs,
-    #: so rebinding this attribute -- on the class or on a subclass --
-    #: changes nothing. `page_size=` is the one spelling for the behaviour.
+    #: The *default*, not a knob: `get_flattened_instances` writes it as
+    #: the literal `page_size=500` (#815), so the rendered signature shows
+    #: the number rather than this private name, and rebinding this
+    #: attribute -- on the class or on a subclass -- changes nothing.
+    #: `page_size=` is the one spelling for the behaviour. The two must
+    #: stay equal; `test_the_page_size_default_is_written_as_the_number_it_is`
+    #: goes red when they drift.
     _FLATTENED_PAGE_SIZE = 500
 
     SCHEMA = """
@@ -4769,7 +4772,7 @@ class SqliteStore:
     def get_flattened_instances(self,
                                 patient_ids: List[str] = None,
                                 instance_uids: List[str] = None,
-                                page_size: int = _FLATTENED_PAGE_SIZE):
+                                page_size: int = 500):
         """An iterator of one flat dictionary per stored instance.
 
         For streaming exports or analysis without loading the entire graph

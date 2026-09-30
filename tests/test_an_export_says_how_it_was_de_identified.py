@@ -561,11 +561,15 @@ def test_the_worker_writes_the_same_markers_under_both_executors(
 #: `FIXED_A`, with `isocenter/<version>` read as `isocenter/<V>`: (bytes,
 #: sha256), measured at f54deaa1, before this change. `.hea` re-measured
 #: for #828, which moved its start-date comment below the signal lines
-#: (same bytes, reordered; the length is unchanged).
+#: (same bytes, reordered; the length is unchanged), and again for #810,
+#: which names the record by the file's Instance Number, 1: `_1_1` where
+#: it was `_1_0`, in the record line and each signal line's `.dat` name
+#: (the fingerprint's `synthetic:ecg` member shows only those lines move;
+#: the length is unchanged).
 WFDB_AT_BASE = {
     ".annotations.json": (445, "beb221a1f838d8412861b49a5bf8ee94439f23374b1e769f55aa61d8f1de7551"),
     ".dat": (16000, "d645e12558109f881b09380b5284a9736a30179a7ceb7e074f873350882f9017"),
-    ".hea": (745, "3a62bf21747e56db54c7ec316a4a0e078adade160dc09ffe936464188290467f"),
+    ".hea": (745, "afd56a69b1ac68e223e49a5d6c31066b47a5446fb7dd97b27ee0359cfa16850f"),
 }
 
 

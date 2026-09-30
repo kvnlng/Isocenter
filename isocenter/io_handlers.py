@@ -4048,6 +4048,55 @@ def _linkage_keys(ds) -> dict:
             'generated_series': generated_series}
 
 
+#: The range an IS value can hold (PS3.5 Table 6.2-1).
+_IS_MIN, _IS_MAX = -(2 ** 31), 2 ** 31 - 1
+
+
+def _instance_number_of(ds) -> int:
+    """The file's Instance Number (0020,0013) as an int, or 0 (#810).
+
+    Read for `Instance.instance_number`, which the WFDB record name, the
+    store's `instance_number` column and the scan worker's clone take. The
+    attribute `0020,0013` is populated from the element separately and is
+    not touched by this.
+
+    A value pydicom does not read as a single integer -- absent, empty,
+    multi-valued, a fraction (pydicom reads `4.5` as `ISfloat`), or text it
+    cannot convert, which it leaves as a `str` -- reads as 0, the value a
+    file with no Instance Number gets, and so does an integer outside IS's
+    range. An ill-formed Instance Number is not a reason to refuse the
+    file, with one exception that predates #810 and is not changed here:
+    an infinite value (`inf`, `-inf`, `1e400`) makes pydicom's own read
+    raise `OverflowError`, even in its default reading mode, and the file
+    is refused, as it was when only `populate_attrs` read the element.
+    What pydicom does read as one integer is taken as it reads it,
+    including spellings a conformant IS string would not use: `1e3` and
+    `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
+    long malformed value out of the store's INTEGER column, which would
+    overflow on save.
+
+    Args:
+        ds: The pydicom Dataset read from the file.
+
+    Returns:
+        int: A plain `int`, never pydicom's `IS`, so the field pickles and
+            binds to sqlite as the builtin.
+    """
+    # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
+    # `str` pydicom leaves unconverted are not, and read as 0. No `str`
+    # arm: pydicom leaves text unconverted only when `float()` refused it,
+    # and `int()` refuses everything `float()` does. No `try` around the
+    # read either: what it raises -- `OverflowError` for an infinite value
+    # in pydicom's default mode, any invalid value under its RAISE mode --
+    # `populate_attrs` raises on the same element, so the file is refused
+    # either way, as it was before #810. A `try` here would not keep it.
+    value = ds.get("InstanceNumber")
+    if not isinstance(value, int):
+        return 0
+    number = int(value)
+    return number if _IS_MIN <= number <= _IS_MAX else 0
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4100,7 +4149,12 @@ def ingest_worker(fp: str) -> Tuple:
         meta.update(_linkage_keys(ds))
 
         # Construct Instance (Metadata Only)
-        inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
+        # The file's Instance Number, not 0 (#810). `__post_init__` sets
+        # `0020,0013` from it, and `populate_attrs` below then writes the
+        # file's own element over that whenever the file has one, so the
+        # attribute is exactly what it was before #810 in every case.
+        inst = Instance(meta['sop'], meta['sop_class'],
+                        _instance_number_of(ds), file_path=fp)
         # Losses ride `meta` rather than a ninth tuple slot, as the
         # multiplex-group loss does. This worker may be in a subprocess
         # with no store handle, so the loss travels and the parent

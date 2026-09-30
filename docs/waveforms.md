@@ -49,17 +49,17 @@ copied into `ecg/`:
 out/Subject_ANON_afd45d1d36f4892754cd8246/
 └─ Study_2012-07-23__39467/
    └─ Series_NoNumber_ECG_Series_47942/
-      ├─ ANON_afd45d1d36f4892754cd8246_0_0.hea               header
-      ├─ ANON_afd45d1d36f4892754cd8246_0_0.dat               format-16 samples
-      └─ ANON_afd45d1d36f4892754cd8246_0_0.annotations.json  cart findings, when present
+      ├─ ANON_afd45d1d36f4892754cd8246_0_1.hea               header
+      ├─ ANON_afd45d1d36f4892754cd8246_0_1.dat               format-16 samples
+      └─ ANON_afd45d1d36f4892754cd8246_0_1.annotations.json  cart findings, when present
 ```
 
 The folder names are `Subject_<Patient ID>`, `Study_<date>_<description>_<last
 5 characters of the Study UID>` and `Series_<number>_<modality>_<description>_<last 5
 characters of the Series UID>`, each read from the exported values; a
 missing value becomes a placeholder such as `NoNumber` or `Series`. A
-record name starts with the exported Patient ID and the Series Number (`0`
-when there is none); when two records in one folder would share a name,
+record name is the exported Patient ID, the Series Number and the file's
+Instance Number, joined by `_` (each `0` when the file has none); when two records in one folder would share a name,
 the later ones get `_2`, `_3`, and so on. The pseudonym, the shifted date
 and the UID suffixes differ in your run: all three are derived from a secret
 generated for each store. That file carries two multiplex groups, so ingest

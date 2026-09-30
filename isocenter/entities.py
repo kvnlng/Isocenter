@@ -323,9 +323,13 @@ class TrackedEntity:
         Args:
             status (PhiStatus): What the scan concluded.
             policy (Optional[ScanPolicy]): The policy the status is recorded
-                under. Omitted, the entity keeps the policy it was last
-                recorded under, even when that status has gone stale. Only a
-                scan, hydration and the patient merge pass one.
+                under; omit to keep the policy already recorded, even when
+                that status has gone stale. `None` is a value, not an
+                omission: it records "no policy". The default is a private
+                sentinel because `None` is taken (#815). Four callers pass
+                one: a scan, hydration, the patient merge, and a pass that
+                settles its statuses against a report carried from another
+                session, which records the report's policy.
         """
         if policy is _KEEP:
             policy = self._phi_status_policy
