@@ -3,8 +3,9 @@
 `main` is the development branch. Releases are cut from it onto a release
 branch, frozen there, tagged, and published by hand. Nothing publishes
 itself: no push, tag or GitHub Release uploads to PyPI or deploys the
-documentation site on its own, except that pushing the newest release tag
-deploys that release's documentation.
+documentation site on its own, except that pushing a release tag deploys
+that release's documentation into its line's folder (see "Documentation
+site").
 
 ## Names
 
@@ -21,6 +22,13 @@ and non-fast-forward pushes; only the repository admin role bypasses it.
 Every step below that creates, moves or deletes a `v*` tag is an admin's
 step. Pushing one also deploys the documentation (see "Documentation
 site"), so the restriction covers that too.
+
+The documentation has two ways in that are **not** admin-gated: anyone with
+write access can dispatch `docs.yml` from `release/X.Y`, which rewrites the
+live `X.Y/` folder (and `latest/`, when X.Y is the line `latest` copies), or
+from `main`, which rewrites the hidden `dev/` folder. The content is still
+reviewed content, since `release/*` is locked and `main` is reviewed; what
+is open is who decides when it goes live. This was accepted (#866, Q8).
 
 There is one branch per minor line, not per version. `release/0.9` holds
 `v0.9.8` and every `0.9.z` patch after it. A branch name and a tag name
@@ -403,8 +411,11 @@ fixes, never features.
    written UTC date. A date correction's merge commit is tagged without
    a second rehearsal. Then: `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
    `release/X.Y`, then `git push origin vX.Y.Z`. **Pushing the tag deploys
-   the documentation** for vX.Y.Z (see below), before the version is on
-   PyPI; nothing else runs. That window is why step 4 must pass first.
+   the documentation** for vX.Y.Z into `X.Y/` (see "Documentation site"),
+   before the version is on PyPI; nothing else runs. That window is why
+   step 4 must pass first. A final that is the highest final release also
+   moves `latest` to `X.Y/`. A candidate deploys only while X.Y has no
+   final, so a patch candidate (`vX.Y.Z+1rc1`) deploys nothing.
 6. **Publish** from the tag:
    `gh workflow run publish.yml --ref vX.Y.Z -f target=pypi`. The build job
    refuses the run unless the ref is a `v*` tag and the tag, the built
@@ -430,8 +441,8 @@ fixes, never features.
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
 and dispatch again (deleting and re-pushing a `v*` tag needs the admin
-bypass, see "Names"). The docs deployed from the first tag stay live until
-the new tag's push redeploys them. Once the upload has succeeded, the
+bypass, see "Names"). The `X.Y/` folder deployed from the first tag stays
+live until the new tag's push redeploys it. Once the upload has succeeded, the
 version is spent forever. A defect found then is a patch release, never
 a re-tag.
 
@@ -464,7 +475,9 @@ a re-tag.
 4. Release it by following "Cutting a release" from step 3, with version
    `X.Y.Z+1`. The branch already exists, so steps 1 and 2 do not apply.
    Step 3 renames the branch's `[Unreleased]` to `[X.Y.Z+1]`, and step 8
-   copies that section to `main`.
+   copies that section to `main`. The patch's tag rewrites `X.Y/`, and moves
+   `latest` only if X.Y is the newest released line; a patch candidate
+   (`vX.Y.Z+1rcN`) deploys no documentation.
 
 A fix that applies only to `main` (already gone from the release line) is an
 ordinary change to `main`.
@@ -638,34 +651,155 @@ cut this way (#818, #821, #822).
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
+   - **Documentation.** A candidate of a line with no final deploys into
+     `X.Y/` when its tag is pushed; before 1.0.0 that folder is also
+     `latest`. Final needs no docs step beyond its tag, which moves
+     `latest` when it is the highest final release.
 
 ## Documentation site
 
-The site follows the **latest release tag**, not `main`. `docs.yml` runs on
-a pushed `v*` tag and on manual dispatch. Its `guard` job refuses anything
-but the highest `v*` tag by version order, and the `deploy` job runs only
-after the guard passes. As a result:
+The site is versioned with [mike](https://github.com/jimporter/mike) (#866).
+Everything lives on the `gh-pages` branch, which GitHub Pages serves under
+the `github-pages` environment (its deployment-branch policy admits only
+`gh-pages`):
 
-- Pushing the tag for the newest release deploys its documentation. That
-  happens when the tag is pushed, before the version is published (step 5).
-- A patch tag on an older line, such as `v0.9.9` after `v0.10.0`, deploys
-  nothing. A refused run is outside the deploy's concurrency group, so it
-  cannot cancel a deploy in progress either. The newer release's site
-  stays.
-- A manual run from a branch deploys nothing. To redeploy the current
-  release, dispatch from its tag: `gh workflow run docs.yml --ref vX.Y.Z`.
-- Pre-releases: `a`, `b` and `rc` suffixes sort below their release
-  (`v1.0.0rc1` < `v1.0.0`), so a candidate's tag does not block its
-  release. A pre-release of a **later** version does outrank the current
-  release (`v1.0.1rc1` > `v1.0.0`) and blocks the current release's deploy
-  until the later version is released or the pre-release tag is deleted.
+| Folder | Holds | Written by |
+|---|---|---|
+| `X.Y/` (`1.0/`, `1.1/`, …) | The newest release of line X.Y: its highest final `vX.Y.Z`, or its highest pre-release while it has no final. Titled with that version | A tag push, or a dispatch from `release/X.Y` |
+| `latest/` | A copy of the folder of the highest final release (a copy, not a symlink or redirect, so its URLs stay put at the next minor) | Moved only by the tag of the highest final release |
+| `dev/` | `main`, hidden from the version selector | A dispatch from `main` |
+| root `index.html` | A redirect to `latest/` | By hand, once (the cutover below) |
+| root page stubs and `404.html` | Redirects from the pre-versioning URLs to the same page under `latest/` | By hand, once; frozen, and never touched by mike |
 
-The deploy pushes the built site to the `gh-pages` branch. GitHub Pages
-serves it from there, under the `github-pages` environment, whose
-deployment-branch policy admits only `gh-pages`.
+Lines below 1.0 are not published. The root redirects to `latest/`, so the
+default site is always the latest release, never unreleased `main`; every
+folder but `latest/` carries a banner linking to it.
 
-To preview unreleased documentation, run `mkdocs serve` locally (it needs
-the `docs` extra).
+`docs.yml` runs on a pushed `v*` tag and on manual dispatch. Its `guard`
+job decides which folder the ref may write, and the `deploy` job runs only
+after it passes:
+
+| Ref | Writes | Moves `latest` |
+|---|---|---|
+| tag `vX.Y.Z` (final) that is X.Y's highest final | `X.Y/`, titled `X.Y.Z` | only if it is the highest final release of all |
+| tag `vX.Y.Z{a,b,rc}N` that is X.Y's highest pre-release, while X.Y has no final | `X.Y/` | no |
+| branch `release/X.Y`, by dispatch, containing X.Y's newest tag, with nothing under `isocenter/` changed since it | `X.Y/`, titled with that tag's version | no (a folder that already holds `latest` refreshes its copy) |
+| branch `main`, by dispatch | `dev/`, hidden | no |
+| anything else | nothing: the run fails, naming why | |
+
+So an older tag on a line (`v1.0.0` after `v1.0.1`) deploys nothing, a patch
+to an older line (`v1.0.4` after `v1.1.0`) rewrites `1.0/` and leaves
+`latest` on 1.1, and a patch candidate never reaches a folder a final
+holds. Version order is git's `version:refname`, so `v1.0.10` is above
+`v1.0.9`.
+
+- **A docs-only change on a released line** (the MIDI-B results page, say)
+  goes live without a tag: merge it to `release/X.Y`, then run
+  `gh workflow run docs.yml --ref release/X.Y`. If anything under
+  `isocenter/` changed since the line's newest tag, the run refuses and names
+  the files, because the API reference is rendered from those docstrings and
+  would describe code no release installs. Ship the page with the next
+  patch.
+- **`dev`:** `gh workflow run docs.yml --ref main`. Nothing deploys `main`
+  on push.
+- **To redeploy line X.Y** (after a failed or cancelled run), dispatch from
+  `release/X.Y` if it is docs-only since its newest tag, or from that tag if
+  the tag was cut after #866.
+- **Never "Re-run" a failed docs run; dispatch it again from its ref.** A
+  re-run reuses the old run's guard decision, which a newer tag may have
+  overtaken (a `latest` that belongs to a newer line, a patch that is no
+  longer its line's newest). The deploy job decides again from the tags just
+  before `mike deploy` and fails on any difference, so a re-run of a stale
+  run fails rather than deploying, but only a fresh dispatch deploys the
+  right thing. The same check stops a tag's deploy that queued behind a
+  newer tag's; dispatch that one again too, if its folder still needs it.
+- **Never dispatch `docs.yml` from a tag cut before #866** (`v1.0.0rc6` and
+  every earlier tag). A dispatch runs the workflow file *at that ref*,
+  which is the old `mkdocs gh-deploy`. While such a tag is the highest `v*`
+  tag, its old guard admits it, and gh-deploy commits a tree holding only its
+  root site, deleting every version folder, `versions.json` and the stubs.
+  Once a later tag exists every old tag fails its own old guard, but do not
+  rely on that. If it happens, `git revert` that commit on `gh-pages` and
+  push; neither tool force-pushes, so the history is intact.
+- **Concurrency.** Deploys queue in one group and never cancel one in
+  progress: each writes its own folder, and a cancelled `1.0/` deploy would
+  lose 1.0's update silently. GitHub keeps one run pending per group, so a
+  third deploy in flight cancels the pending one; that shows as a cancelled
+  run, and is re-dispatched from its ref (a deploy is idempotent per
+  folder). A refused run is outside the group and cancels nothing.
+- **Previews.** `mkdocs serve` previews one tree (it needs the `docs`
+  extra). `mike serve` shows the version selector against your local
+  `gh-pages` branch. Both write into the checkout's root (`site/`, and
+  mike's temporary `mike-mkdocs*.yml`), so never run them inside a test or
+  beside a concurrent pytest run.
+
+### Rollback
+
+Everything is ordinary history on `gh-pages`, and neither mike nor the
+workflow rewrites it. mike pushes without force and refuses a diverged
+local `gh-pages`; never pass `--ignore-remote-status` or `--force`. Run the
+hand commands in a clean checkout of the line's branch with the `docs`
+extra and `origin/gh-pages` fetched, so that `mkdocs.yml`'s
+`alias_type: copy` applies (a tree without it makes a symlink alias).
+
+- **Bad content in a folder:** re-dispatch that folder's ref, after
+  reverting the bad change on `release/X.Y` if that is where it came from.
+  By hand,
+  `mike deploy --push --title X.Y.Z X.Y` works only from a checkout that
+  carries #866's `mkdocs.yml`: a checkout of `release/X.Y` at the good
+  commit, or a tag cut after #866. From an older tree, such as
+  `v1.0.0rc6`, the build has no version selector and mike falls back to
+  its default alias type, so `latest` becomes a git symlink (ruled out,
+  Q7). **Until a tag cut after #866 exists, the rollback for `1.0/` is a
+  re-dispatch of `release/1.0`**; the tag-based form is valid for 1.0 from
+  the first tag cut after #866 (the next 1.0 candidate or `v1.0.0`) on.
+- **Wrong `latest`:** `mike alias --push --update-aliases X.Y latest`.
+- **Unwanted `dev`:** `mike delete --push dev`.
+- **Abandon versioning** (before or after 1.0.0): revert the #866 change on
+  `main` and on `release/1.0`; on `gh-pages`, restore the tree of
+  `dd5c7409` (the last root site) as a new commit (`git checkout dd5c7409
+  -- .`, `git rm` what that tree lacks, commit, push without force); the
+  next tag then deploys a root site through the old workflow. Only the
+  `latest/` links published since the cutover break.
+
+### The cutover to the versioned site (one time, #866)
+
+None of the tags up to `v1.0.0rc6` carries the versioned `docs.yml`, so the
+first versioned build comes from `release/1.0` (owner ruling Q1: now, by
+hand, not with a tag). Steps 3 to 6 are an admin's; steps 4 to 6 edit
+`gh-pages` by hand, and each is pushed without force. Until step 4, the
+old root site keeps serving and nothing is broken; the README's `latest/`
+links are dead from the merge of #866 until step 4, so keep that short.
+
+1. Merge the #866 change to `main` under the usual gate.
+2. Pick it onto `release/1.0` ("Later releases on an existing line", step 2).
+3. `gh workflow run docs.yml --ref release/1.0`. The guard takes
+   `v1.0.0rc6` as 1.0's head; the branch must have no `isocenter/` change
+   since it, or the run refuses and the cutover waits for the next tag. The
+   run deploys `1.0/` titled `1.0.0rc6`. Check `/Isocenter/1.0/`.
+4. In a clean checkout of `release/1.0` after the pick, with the `docs`
+   extra installed and `git fetch origin gh-pages` done:
+   `mike alias --push 1.0 latest`.
+5. `mike set-default --push latest`: the root `index.html` becomes a
+   redirect to `latest/`.
+6. One hand-made commit on `gh-pages`, from a checkout of it: each of the 29
+   page paths of `dd5c7409` becomes a redirect stub to the same path under
+   `latest/` (depth-adjusted); the root `404.html` is replaced by a static
+   page that sends any path whose first segment is not in `versions.json`
+   to `latest/`; and the old root `assets/`, `search/`, `stylesheets/`,
+   `images/`, `sitemap.xml`, `sitemap.xml.gz` and `objects.inv` are deleted
+   (ruling Q5: a stale inventory is worse than none). The shell loop and
+   the 404 page are in the pull request that closed #866, verbatim. The
+   commit message names #866 and `dd5c7409`.
+7. Optionally, `gh workflow run docs.yml --ref main` for `dev/`.
+8. Check, and record in #866: `curl -sI` a few old URLs; in a browser,
+   `/Isocenter/configuration/#privacy-profile`, `/Isocenter/`,
+   `/Isocenter/latest/`, `/Isocenter/1.0/` and a bogus path; the selector
+   shows `1.0.0rc6 latest` and not `dev`; no banner on `latest/` or `1.0/`.
+
+After the cutover, the next candidate and then `v1.0.0` deploy into `1.0/`
+from their tags, and `latest/` follows (mike refreshes every alias of the
+folder it deploys).
 
 ## What cannot be undone
 
