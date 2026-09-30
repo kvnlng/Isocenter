@@ -1946,6 +1946,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.296537288147849184594899857023188582701",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.296537288147849184594899857023188582701",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.296537288147849184594899857023188582701",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -1958,14 +1979,12 @@
           "0008,0018": "UI/implicit '2.25.296537288147849184594899857023188582701'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2004,14 +2023,12 @@
           "0008,0018": "UI '2.25.296537288147849184594899857023188582701'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI '2.25.291335229807378616725209041676934935357'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -2050,14 +2067,12 @@
           "0008,0018": "UI/implicit '2.25.296537288147849184594899857023188582701'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2145,6 +2160,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.296537288147849184594899857023188582701",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.296537288147849184594899857023188582701",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -2157,14 +2186,12 @@
           "0008,0018": "UI/implicit '2.25.296537288147849184594899857023188582701'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2203,14 +2230,12 @@
           "0008,0018": "UI '2.25.296537288147849184594899857023188582701'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI '2.25.291335229807378616725209041676934935357'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -2319,6 +2344,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.154962089140441820208678553376770755013",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.154962089140441820208678553376770755013",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.154962089140441820208678553376770755013",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -2331,14 +2377,12 @@
           "0008,0018": "UI/implicit '2.25.154962089140441820208678553376770755013'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2378,14 +2422,12 @@
           "0008,0018": "UI '2.25.154962089140441820208678553376770755013'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI '2.25.248960922551121475208531727793057208230'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -2425,14 +2467,12 @@
           "0008,0018": "UI/implicit '2.25.154962089140441820208678553376770755013'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2528,6 +2568,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.154962089140441820208678553376770755013",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.154962089140441820208678553376770755013",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -2540,14 +2594,12 @@
           "0008,0018": "UI/implicit '2.25.154962089140441820208678553376770755013'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -2587,14 +2639,12 @@
           "0008,0018": "UI '2.25.154962089140441820208678553376770755013'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI '2.25.248960922551121475208531727793057208230'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -2697,6 +2747,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.20694494126931827539921371089679903426",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.20694494126931827539921371089679903426",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.20694494126931827539921371089679903426",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -2709,14 +2780,12 @@
           "0008,0018": "UI/implicit '2.25.20694494126931827539921371089679903426'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -2754,14 +2823,12 @@
           "0008,0018": "UI '2.25.20694494126931827539921371089679903426'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI '2.25.179993520496940927358596955971438368858'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -2799,14 +2866,12 @@
           "0008,0018": "UI/implicit '2.25.20694494126931827539921371089679903426'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -2893,6 +2958,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.20694494126931827539921371089679903426",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.20694494126931827539921371089679903426",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -2905,14 +2984,12 @@
           "0008,0018": "UI/implicit '2.25.20694494126931827539921371089679903426'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -2950,14 +3027,12 @@
           "0008,0018": "UI '2.25.20694494126931827539921371089679903426'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI '2.25.179993520496940927358596955971438368858'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -3058,6 +3133,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.221306729166877288017668955272508768775",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.221306729166877288017668955272508768775",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.221306729166877288017668955272508768775",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -3070,14 +3166,12 @@
           "0008,0018": "UI/implicit '2.25.221306729166877288017668955272508768775'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -3115,14 +3209,12 @@
           "0008,0018": "UI '2.25.221306729166877288017668955272508768775'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI '2.25.162641998833467617755830957270735679433'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -3160,14 +3252,12 @@
           "0008,0018": "UI/implicit '2.25.221306729166877288017668955272508768775'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -3254,6 +3344,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.221306729166877288017668955272508768775",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.221306729166877288017668955272508768775",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -3266,14 +3370,12 @@
           "0008,0018": "UI/implicit '2.25.221306729166877288017668955272508768775'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -3311,14 +3413,12 @@
           "0008,0018": "UI '2.25.221306729166877288017668955272508768775'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI '2.25.162641998833467617755830957270735679433'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -43776,7 +43876,7 @@
       },
       "A.reopened.dicom": {
        "files": {
-        "Subject_ANON_d3bba027d3d9e26515476268/Study_2000-06-07__92756/Series_4_OT__20806/2.25.152991031412092966678826759982515018645.dcm": {
+        "Subject_ANON_d3bba027d3d9e26515476268/Study_2000-06-07__92756/Series_04_OT__20806/2.25.152991031412092966678826759982515018645.dcm": {
          "elements": {
           "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
           "0008,0018": "UI/implicit '2.25.152991031412092966678826759982515018645'",
@@ -43799,7 +43899,7 @@
           "0020,000d": "UI/implicit '2.25.136629673567169550679555049149096992756'",
           "0020,000e": "UI/implicit '2.25.15916438566859594773618540895890720806'",
           "0020,0010": "SH/implicit ''",
-          "0020,0011": "IS/implicit '4'",
+          "0020,0011": "IS/implicit '04'",
           "0020,0013": "IS/implicit '01'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -46791,6 +46891,27 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.124888579181989699077724531572878263263",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.124888579181989699077724531572878263263",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.124888579181989699077724531572878263263",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -46805,14 +46926,12 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0033": "TM/implicit '000000'",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -46853,14 +46972,12 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0033": "TM '000000'",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI '2.25.310508164927388238977918745982593899273'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -46901,14 +47018,12 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0033": "TM/implicit '000000'",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -46982,6 +47097,20 @@
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.124888579181989699077724531572878263263",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.124888579181989699077724531572878263263",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -46996,14 +47125,12 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0033": "TM/implicit '000000'",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -47044,14 +47171,12 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0033": "TM '000000'",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI '2.25.310508164927388238977918745982593899273'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -49521,6 +49646,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.103837146309005490762011989858988683276",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.103837146309005490762011989858988683276",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.103837146309005490762011989858988683276",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -49533,14 +49679,12 @@
           "0008,0018": "UI/implicit '2.25.103837146309005490762011989858988683276'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -49579,14 +49723,12 @@
           "0008,0018": "UI '2.25.103837146309005490762011989858988683276'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI '2.25.317059928404542492382929200468973645508'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -49625,14 +49767,12 @@
           "0008,0018": "UI/implicit '2.25.103837146309005490762011989858988683276'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -49727,6 +49867,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.103837146309005490762011989858988683276",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.103837146309005490762011989858988683276",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -49739,14 +49893,12 @@
           "0008,0018": "UI/implicit '2.25.103837146309005490762011989858988683276'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -49785,14 +49937,12 @@
           "0008,0018": "UI '2.25.103837146309005490762011989858988683276'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI '2.25.317059928404542492382929200468973645508'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -49901,6 +50051,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.288152074111688004000127493067763897139",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.288152074111688004000127493067763897139",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.288152074111688004000127493067763897139",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -49913,14 +50084,12 @@
           "0008,0018": "UI/implicit '2.25.288152074111688004000127493067763897139'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -49959,14 +50128,12 @@
           "0008,0018": "UI '2.25.288152074111688004000127493067763897139'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI '2.25.227182294489441497089851006594117732077'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -50005,14 +50172,12 @@
           "0008,0018": "UI/implicit '2.25.288152074111688004000127493067763897139'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -50107,6 +50272,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.288152074111688004000127493067763897139",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.288152074111688004000127493067763897139",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -50119,14 +50298,12 @@
           "0008,0018": "UI/implicit '2.25.288152074111688004000127493067763897139'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
@@ -50165,14 +50342,12 @@
           "0008,0018": "UI '2.25.288152074111688004000127493067763897139'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI '2.25.227182294489441497089851006594117732077'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
@@ -55792,6 +55967,27 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.33090999612205933464720218594710645098",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.33090999612205933464720218594710645098",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.33090999612205933464720218594710645098",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -55806,7 +56002,6 @@
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -55862,7 +56057,6 @@
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -55918,7 +56112,6 @@
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -56007,6 +56200,20 @@
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.33090999612205933464720218594710645098",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.33090999612205933464720218594710645098",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -56021,7 +56228,6 @@
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -56077,7 +56283,6 @@
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -56180,6 +56385,27 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -56195,7 +56421,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -56252,7 +56477,6 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -56309,7 +56533,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -56398,6 +56621,20 @@
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -56413,7 +56650,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -56470,7 +56706,6 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -60015,6 +60250,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.299509681954118834874207200899881441382",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.299509681954118834874207200899881441382",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.299509681954118834874207200899881441382",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -60027,14 +60283,12 @@
           "0008,0018": "UI/implicit '2.25.299509681954118834874207200899881441382'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60074,14 +60328,12 @@
           "0008,0018": "UI '2.25.299509681954118834874207200899881441382'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI '2.25.127328168497235663585352668020579007762'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -60121,14 +60373,12 @@
           "0008,0018": "UI/implicit '2.25.299509681954118834874207200899881441382'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60224,6 +60474,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.299509681954118834874207200899881441382",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.299509681954118834874207200899881441382",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -60236,14 +60500,12 @@
           "0008,0018": "UI/implicit '2.25.299509681954118834874207200899881441382'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60283,14 +60545,12 @@
           "0008,0018": "UI '2.25.299509681954118834874207200899881441382'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI '2.25.127328168497235663585352668020579007762'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -60400,6 +60660,27 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.171656719273324359950792095761155953026",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.171656719273324359950792095761155953026",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.171656719273324359950792095761155953026",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -60412,14 +60693,12 @@
           "0008,0018": "UI/implicit '2.25.171656719273324359950792095761155953026'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60459,14 +60738,12 @@
           "0008,0018": "UI '2.25.171656719273324359950792095761155953026'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI '2.25.314220933897190562966998231169467117031'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -60506,14 +60783,12 @@
           "0008,0018": "UI/implicit '2.25.171656719273324359950792095761155953026'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60609,6 +60884,20 @@
         "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.171656719273324359950792095761155953026",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.171656719273324359950792095761155953026",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -60621,14 +60910,12 @@
           "0008,0018": "UI/implicit '2.25.171656719273324359950792095761155953026'",
           "0008,0020": "DA/implicit ''",
           "0008,0030": "TM/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0010,0010": "PN/implicit 'Unknown'",
           "0010,0020": "LO/implicit ''",
           "0012,0062": "CS/implicit 'YES'",
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0011": "IS/implicit '0'",
           "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
@@ -60668,14 +60955,12 @@
           "0008,0018": "UI '2.25.171656719273324359950792095761155953026'",
           "0008,0020": "DA ''",
           "0008,0030": "TM ''",
-          "0008,0060": "CS 'OT'",
           "0010,0010": "PN 'Unknown'",
           "0010,0020": "LO ''",
           "0012,0062": "CS 'YES'",
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI '2.25.314220933897190562966998231169467117031'",
-          "0020,0011": "IS '0'",
           "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
@@ -61167,6 +61452,27 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -61182,7 +61488,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -61239,7 +61544,6 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -61296,7 +61600,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -61385,6 +61688,20 @@
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.206143779211165004014309517321411199454",
+        "Modality (0008,0060) is absent in this file: it is Type 1, so the file is not conformant to its IOD. It was written as the graph holds it: the configuration removed or emptied it, or the source carried none.",
+        null,
+        null
        ]
       ]
      },
@@ -61400,7 +61717,6 @@
           "0008,0023": "DA/implicit '19000101'",
           "0008,0030": "TM/implicit ''",
           "0008,0050": "SH/implicit ''",
-          "0008,0060": "CS/implicit 'OT'",
           "0008,0064": "CS/implicit 'WSD'",
           "0008,0090": "PN/implicit ''",
           "0010,0010": "PN/implicit ''",
@@ -61457,7 +61773,6 @@
           "0008,0023": "DA '19000101'",
           "0008,0030": "TM ''",
           "0008,0050": "SH ''",
-          "0008,0060": "CS 'OT'",
           "0008,0064": "CS 'WSD'",
           "0008,0090": "PN ''",
           "0010,0010": "PN ''",
@@ -124476,14 +124791,14 @@
   }
  },
  "provenance": {
-  "dirty": false,
+  "dirty": true,
   "gil": true,
-  "git_sha": "af67ad462ae2c96f90655ccf4cfe71be45bf743e",
+  "git_sha": "94b08cfcbf42a6b2f9dd9f53c7b727ec2d56e19f",
   "isocenter_version": "1.0.0rc6",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 385
+  "seconds": 510
  },
  "schema": 1,
  "toolchain": {
