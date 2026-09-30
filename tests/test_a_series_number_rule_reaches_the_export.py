@@ -21,7 +21,8 @@ non-conformant (Modality is Type 1), is written with one `WARNING` row per
 file saying so.
 
 4242 and 31337 occur nowhere else in the fixtures, so a path or a header that
-holds either one holds the source value.
+holds either one as a whole token holds the source value (`_holds_number`: a
+keyed UID can hold the digits by chance).
 """
 import ast
 import datetime
@@ -116,9 +117,20 @@ def _relpaths(root):
                   if p.is_file())
 
 
+def _holds_number(text, number):
+    """Whether `text` holds `number` as a whole token. Bounded by anything
+    but a letter or a digit: a keyed UID or a pseudonym is derived from a
+    fresh secret per store, and holds `4242` as a run of its digits about
+    one run in ten, which a plain substring test read as the source value
+    (a flake, measured)."""
+    return re.search(rf"(?<![0-9A-Za-z]){number}(?![0-9A-Za-z])",
+                     text) is not None
+
+
 def _assert_no_source_numbers(root):
     for rel in _relpaths(root):
-        assert SERIES not in rel and str(INSTANCE) not in rel, rel
+        assert not _holds_number(rel, SERIES), rel
+        assert not _holds_number(rel, INSTANCE), rel
 
 
 def _series_folder(root):
@@ -296,7 +308,8 @@ def test_the_wfdb_record_name_follows_both_rules(tmp_path, rules, suffix):
         _assert_no_source_numbers(out)
         for hea in out.rglob("*.hea"):
             text = hea.read_text(encoding="utf-8", errors="replace")
-            assert SERIES not in text and str(INSTANCE) not in text
+            assert not _holds_number(text, SERIES), text
+            assert not _holds_number(text, INSTANCE), text
 
 
 def test_a_series_collapsed_to_zero_writes_every_record(tmp_path):
@@ -459,7 +472,8 @@ def test_a_removed_series_number_grades_pass_over_a_file_without_it(tmp_path):
     written = pydicom.dcmread(str(path))
     assert written.PatientIdentityRemoved == "YES"
     assert "SeriesNumber" not in written
-    assert SERIES.encode() not in path.read_bytes()
+    assert not [e for e in written.iterall()
+                if str(e.value).strip() == SERIES], "the source number is written"
 
 
 # ---------------------------------------------------------------------------
