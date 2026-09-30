@@ -42,7 +42,7 @@ Release candidates: `pip install --pre isocenter`.
 python -c "import isocenter; print(isocenter.__version__)"
 ```
 
-The OCR and NLP extras, and what each needs, are on the [installation page](https://kvnlng.github.io/Isocenter/installation/).
+The OCR and NLP extras, and what each needs, are on the [installation page](https://kvnlng.github.io/Isocenter/latest/installation/).
 
 ## Example
 
@@ -62,11 +62,11 @@ if __name__ == "__main__":
         session.generate_report("compliance_report.md")
 ```
 
-With no configuration loaded, the default policy is the Basic Profile table (648 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient written. An image the default lossless JPEG 2000 cannot hold (32-bit samples, for example) is not written: its `ERROR` row says so and names `use_compression=False`. The Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
+With no configuration loaded, the default policy is the Basic Profile table (648 tag rules), with Study Date jittered, Patient's Sex and Age kept, and private tags removed. `export_clean/` holds one `Subject_ANON_…` folder per patient written. An image the default lossless JPEG 2000 cannot hold (32-bit samples, for example) is not written: its `ERROR` row says so and names `use_compression=False`. The Executive Summary of `compliance_report.md` opens with the grade. The [Quick Start](https://kvnlng.github.io/Isocenter/latest/quickstart/) adds a configuration, redaction, reversible anonymization and a verify step, and the [tutorials](https://kvnlng.github.io/Isocenter/latest/tutorials/deidentify-and-read-the-grade/) run each step on files bundled with pydicom.
 
 ## Burned-in text
 
-Machines burn identifiers into the pixels, and the same model tends to burn them in the same place every time. Isocenter finds that text by OCR and blanks it with redaction zones you write per device. The [OCR guide](https://kvnlng.github.io/Isocenter/ocr/) covers both.
+Machines burn identifiers into the pixels, and the same model tends to burn them in the same place every time. Isocenter finds that text by OCR and blanks it with redaction zones you write per device. The [OCR guide](https://kvnlng.github.io/Isocenter/latest/ocr/) covers both.
 
 ### 5b. Zone Discovery
 
@@ -97,7 +97,7 @@ for zone in result.to_zones(min_occurrence=0.25):
 [{'zone': [8, 20, 10, 70], 'type': 'LIKELY_NAME', 'occurrence': 0.5, 'confidence': 92.0, 'examples': ['SMITH^JOHN']}, {'zone': [180, 190, 200, 250], 'type': 'PROPER_NOUN', 'occurrence': 0.5, 'confidence': 88.0, 'examples': ['MERCY GENERAL']}]
 ```
 
-`filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x; `get_density_matrix()` is documented but internal ([API stability](https://kvnlng.github.io/Isocenter/api/stability/)). **`get_density_matrix()` is not an image-space heatmap.** It bins each box's centre into a grid normalised by the largest box origin among the candidates, not by the image's Rows and Columns, so two scans are not comparable to each other or to the image. Take coordinates from `to_zones()` or from each candidate's `box`.
+`filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x; `get_density_matrix()` is documented but internal ([API stability](https://kvnlng.github.io/Isocenter/latest/api/stability/)). **`get_density_matrix()` is not an image-space heatmap.** It bins each box's centre into a grid normalised by the largest box origin among the candidates, not by the image's Rows and Columns, so two scans are not comparable to each other or to the image. Take coordinates from `to_zones()` or from each candidate's `box`.
 
 ### Writing the zones
 
@@ -113,15 +113,15 @@ machines:
 
 ## Documentation
 
-- [Installation](https://kvnlng.github.io/Isocenter/installation/) and [Quick Start](https://kvnlng.github.io/Isocenter/quickstart/)
-- [Tutorials](https://kvnlng.github.io/Isocenter/tutorials/deidentify-and-read-the-grade/): de-identify and read the grade, select part of a cohort, reversible anonymization, redaction, a custom export format
-- [Configuration](https://kvnlng.github.io/Isocenter/configuration/), [Analytics & Reporting](https://kvnlng.github.io/Isocenter/analytics/) and [how the grade is decided](https://kvnlng.github.io/Isocenter/analytics/#how-the-grade-is-decided)
-- [What the export writes](https://kvnlng.github.io/Isocenter/export-output/) and [Codec support](https://kvnlng.github.io/Isocenter/codecs/)
-- [Import CTP rules](https://kvnlng.github.io/Isocenter/ctp-import/), for a CTP `DicomPixelAnonymizer.script`
-- [Upgrading from 0.9.x](https://kvnlng.github.io/Isocenter/migration/)
-- [API reference](https://kvnlng.github.io/Isocenter/api/session/) and [API stability](https://kvnlng.github.io/Isocenter/api/stability/)
-- [Architecture](https://kvnlng.github.io/Isocenter/architecture/) and [Performance](https://kvnlng.github.io/Isocenter/performance/)
-- [For institutions](https://kvnlng.github.io/Isocenter/for-institutions/) and the [changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md)
+- [Installation](https://kvnlng.github.io/Isocenter/latest/installation/) and [Quick Start](https://kvnlng.github.io/Isocenter/latest/quickstart/)
+- [Tutorials](https://kvnlng.github.io/Isocenter/latest/tutorials/deidentify-and-read-the-grade/): de-identify and read the grade, select part of a cohort, reversible anonymization, redaction, a custom export format
+- [Configuration](https://kvnlng.github.io/Isocenter/latest/configuration/), [Analytics & Reporting](https://kvnlng.github.io/Isocenter/latest/analytics/) and [how the grade is decided](https://kvnlng.github.io/Isocenter/latest/analytics/#how-the-grade-is-decided)
+- [What the export writes](https://kvnlng.github.io/Isocenter/latest/export-output/) and [Codec support](https://kvnlng.github.io/Isocenter/latest/codecs/)
+- [Import CTP rules](https://kvnlng.github.io/Isocenter/latest/ctp-import/), for a CTP `DicomPixelAnonymizer.script`
+- [Upgrading from 0.9.x](https://kvnlng.github.io/Isocenter/latest/migration/)
+- [API reference](https://kvnlng.github.io/Isocenter/latest/api/session/) and [API stability](https://kvnlng.github.io/Isocenter/latest/api/stability/)
+- [Architecture](https://kvnlng.github.io/Isocenter/latest/architecture/) and [Performance](https://kvnlng.github.io/Isocenter/latest/performance/)
+- [For institutions](https://kvnlng.github.io/Isocenter/latest/for-institutions/) and the [changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md)
 
 ## Citing Isocenter
 

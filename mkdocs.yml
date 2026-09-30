@@ -34,6 +34,16 @@ theme:
     repo: fontawesome/brands/github
 
 extra:
+  # The versioned site (#866). Material draws the version selector from
+  # mike's `versions.json`; `default: latest` is the alias whose pages
+  # carry no outdated banner, so every other folder -- an older line,
+  # a pre-release line, `dev` -- shows the banner from
+  # docs/overrides/main.html. `alias: true` shows "1.0.0 latest" in the
+  # selector (ruling Q4).
+  version:
+    provider: mike
+    default: latest
+    alias: true
   social:
     - icon: fontawesome/solid/paper-plane
       link: mailto:support@isocenter.net
@@ -42,6 +52,15 @@ copyright: Copyright &copy; 2026 Kevin Long
 
 plugins:
   - search
+  # In the config rather than on a command line so that every hand-run
+  # `mike alias`/`mike deploy` (the bootstrap, a rollback) gets it too:
+  # without it mike's default makes `latest` a git symlink, and whether
+  # GitHub Pages' branch build serves one is unverified. A copy costs one
+  # more copy of the site (#866, ruling Q7). `canonical_version` is NOT
+  # set: it rewrites every version's `site_url` to one folder, and
+  # Material's stay-on-page version switch reads `site_url`.
+  - mike:
+      alias_type: copy
   - awesome-pages
   - mkdocstrings:
       handlers:
