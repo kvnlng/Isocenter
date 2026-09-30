@@ -206,14 +206,19 @@ def test_both_public_export_paths_write_the_same_headers(tmp_path):
         compare(session, "hand_built")
 
 
-def test_both_doors_agree_under_a_rule_on_series_number(tmp_path):
+@pytest.mark.parametrize("tag, action, value, folder, element", [
+    ("0020,0011", "REMOVE", None, "Series_0_CT_", None),
+    ("0008,0060", "REPLACE", "MR", "Series_4242_MR_", "MR"),
+], ids=["series-number-removed", "modality-replaced"])
+def test_both_doors_agree_under_a_rule_on_a_formerly_stamped_tag(
+        tmp_path, tag, action, value, folder, element):
     """The same agreement where the stamp is decided: CT_small with Series
-    Number 4242, a configuration that removes `(0020,0011)`, and
-    `anonymize()`. Both doors write one tree, `Series_0_...`, and the same
-    headers (the #554 markers excepted, as above), and neither file
-    carries a Series Number (#869). Killing mutation: the `0020,0011`
-    stamp restored in `export_stamp_attributes` (both files carry 4242
-    under `Series_4242_...`)."""
+    Number 4242, a configuration that removes `(0020,0011)` or replaces
+    `(0008,0060)` with `MR`, and `anonymize()`. Both doors write one tree,
+    named from the rule's result, and the same headers (the #554 markers
+    excepted, as above), and the element is what the rule left (#869).
+    Killing mutations: either stamp restored in `export_stamp_attributes`
+    (both files carry 4242 or CT, under `Series_4242_CT_...`)."""
     import pydicom
     from pydicom.data import get_testdata_file
     from isocenter.io_handlers import DicomExporter
@@ -231,7 +236,7 @@ def test_both_doors_agree_under_a_rule_on_series_number(tmp_path):
         config = str(tmp_path / "config.yaml")
         session.create_config(config)
         session.load_config(config)
-        session.configuration.set_phi_tag("0020,0011", "REMOVE")
+        session.configuration.set_phi_tag(tag, action, value)
         session.anonymize(session.audit())
         session.export(str(via_session), use_compression=False,
                        show_progress=False)
@@ -244,12 +249,16 @@ def test_both_doors_agree_under_a_rule_on_series_number(tmp_path):
                         for p in via_tree.rglob("*.dcm"))
     assert len(session_files) == 1 and session_files == tree_files
     [name] = session_files
-    assert name.parent.name.startswith("Series_0_"), str(name)
+    assert name.parent.name.startswith(folder), str(name)
     session_headers = [h for h in _headers(via_session / name)
                        if h[0] not in _DEID_MARKERS]
     tree_headers = _headers(via_tree / name)
     assert session_headers == tree_headers
-    assert not [h for h in tree_headers if h[0] == "(0020,0011)"]
+    held = [h for h in tree_headers if h[0] == f"({tag.upper()})"]
+    if element is None:
+        assert not held, held
+    else:
+        assert len(held) == 1 and repr(element) in held[0][-1], held
 
 
 def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():

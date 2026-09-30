@@ -5683,6 +5683,15 @@ class ExportContext:
     #: builder never sets it, and neither does the plan for an instance
     #: whose policy was not applied in full.
     deid_markers: Optional[DeidMarkers] = None
+    #: The source's Modality, `Series.modality` as ingested (#869), for
+    #: the worker's "Pixels missing for Image Modality" guard and nothing
+    #: else: never merged into the file. The guard must not read the
+    #: Modality the file will carry, because a configuration's rule sets
+    #: that one: an EMPTY or a REPLACE with a non-image code let a CT
+    #: Image Storage instance with unreachable pixels be written with no
+    #: Pixel Data (review of #873). Both context builders set it. None,
+    #: for a context built by hand, falls back to the written value.
+    source_modality: Optional[str] = None
 
     def __post_init__(self):
         # The worker asks again: a dataclass can be edited after this runs.
@@ -6916,6 +6925,33 @@ class _ReVr:
 _RE_VR_NAMED = 10
 
 
+def _guard_modality(ctx, ds) -> str:
+    """The Modality the worker's image guards judge an instance by.
+
+    `ctx.source_modality`, the source's (`Series.modality` as ingested),
+    which no configuration rule reaches (#869). Not the Modality the file
+    will carry: since #869 that is the instance's own after the rules, and
+    an EMPTY (`''`) or a REPLACE with a code outside `_IMAGE_MODALITIES`
+    (`'XX'`) turned "Pixels missing for Image Modality CT" into a CT Image
+    Storage file written with no Pixel Data (review of #873). Chosen over
+    the instance's attribute because the Series field is what both doors
+    already hold beside every instance; `Series.modality` keeps the source
+    value under M1, and a user who assigns it is judged by what they set.
+    A context built by hand with no source falls back to the written
+    value, `OT` when there is none.
+
+    Args:
+        ctx (ExportContext): The instance's context.
+        ds (pydicom.Dataset): The dataset as merged.
+
+    Returns:
+        str: The Modality to judge by.
+    """
+    if ctx.source_modality:
+        return str(ctx.source_modality)
+    return str(ds.get("Modality", "OT"))
+
+
 def _modality_warning(ds) -> Optional[str]:
     """The `WARNING` sentence for a file written with no Modality, or with
     an empty one; None when it carries one.
@@ -7155,11 +7191,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Image implementations MUST have pixels.
                 # Non-image (SR, PR, KO, DOC) can proceed without.
                 #
-                # From `ds`, the merged view the file is written from.
-                # Since #869 the export stamps no Modality from the
-                # series, so this is the instance's own value after the
-                # rules; a file with none reads `OT` here.
-                mod = str(ds.get("Modality", "OT"))
+                # The source's Modality, never the one the file will
+                # carry: a rule sets that (`_guard_modality`).
+                mod = _guard_modality(ctx, ds)
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
                 if mod in _IMAGE_MODALITIES:
@@ -7323,9 +7357,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 ds.BitsAllocated = 64
                 written_pixels = arr
             else:
-                # `ds`, not `inst.attributes` -- same reason as the
+                # The source's Modality -- same reason as the
                 # missing-pixels check above.
-                mod = str(ds.get("Modality", "OT"))
+                mod = _guard_modality(ctx, ds)
                 if mod in _IMAGE_MODALITIES:
                     raise RuntimeError(
                         f"Pixels missing for Image Modality {mod}: a "
@@ -9246,10 +9280,11 @@ def export_stamp_attributes(patient, study, series):
         # the synthetic key or the placeholder `UnknownPatient`.
         "0010,0020": exported_patient_id(patient),
     }
-    if getattr(patient, 'birth_date', None):
-        patient_attributes["0010,0030"] = patient.birth_date
-    if getattr(patient, 'sex', None):
-        patient_attributes["0010,0040"] = patient.sex
+    # No `getattr` arms for fields no entity has (`birth_date`, `sex`,
+    # `accession_number`, `series_description`; removed in #869): they
+    # never fired, and a stamp the inventory test cannot see is how #869
+    # hid. A field added later is stamped here by name, where
+    # `test_every_stamped_tag_has_an_owner_arm_or_a_reason` reads it.
 
     study_attributes = {
         "0020,000d": study.study_instance_uid,
@@ -9259,8 +9294,6 @@ def export_stamp_attributes(patient, study, series):
     }
     if getattr(study, 'study_time', None):
         study_attributes["0008,0030"] = study.study_time
-    if getattr(study, 'accession_number', None):
-        study_attributes["0008,0050"] = study.accession_number
 
     # No Series Number and no Modality (#869): each file carries its own
     # instance's `0020,0011` and `0008,0060`, the elements `anonymize()`
@@ -9274,8 +9307,6 @@ def export_stamp_attributes(patient, study, series):
     series_attributes = {
         "0020,000e": series.series_instance_uid,
     }
-    if getattr(series, 'series_description', None):
-        series_attributes["0008,103e"] = series.series_description
     return patient_attributes, study_attributes, series_attributes
 
 
@@ -9890,6 +9921,7 @@ class DicomExporter:
                         pixel_length=sc_length,
                         pixel_alg=sc_alg,
                         drop_foreign_icons=drop_foreign_icons,
+                        source_modality=se.modality,
                     )
                     contexts.append(ctx)
         return contexts
@@ -10578,8 +10610,8 @@ class DicomExporter:
                 # sentence.
                 #
                 # The dedupe is needed because the merges overlap by tag
-                # -- (0010,0010), (0008,0020), (0020,000d), (0020,000e),
-                # (0008,0060) are all in `inst.attributes` *and* in the
+                # -- (0010,0010), (0008,0020), (0020,000d), (0020,000e)
+                # are all in `inst.attributes` *and* in the
                 # patient/study/series mapping stamped over it -- and the
                 # message is deterministic, so one malformed value present
                 # at two levels lands here twice and section 3 of the

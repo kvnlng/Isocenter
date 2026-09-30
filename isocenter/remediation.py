@@ -1496,10 +1496,10 @@ class RemediationService:
 
     #: The `Patient`/`Study`/`Series` fields the exporter stamps onto every
     #: exported instance from the entity, with the tag each is the value
-    #: of (`io_handlers.export_stamp_attributes`). That helper also reads
-    #: `birth_date`, `sex` and `accession_number` through `getattr`, and
-    #: no slots dataclass has such a field, so those arms never fire and
-    #: are not listed.
+    #: of (`io_handlers.export_stamp_attributes`). That helper also read
+    #: `birth_date`, `sex` and `accession_number` through `getattr` until
+    #: #869 removed those arms: no slots dataclass has such a field, so
+    #: none ever fired. A field added later stamps there, where T11 sees it.
     #:
     #: Keyed on the field, not on `PhiFinding.tag`: a hand-built finding
     #: can carry a tag that disagrees with the field its proposal writes,

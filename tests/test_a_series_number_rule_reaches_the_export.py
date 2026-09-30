@@ -38,12 +38,14 @@ from pydicom.multival import MultiValue
 from pydicom.valuerep import IS, ISfloat
 
 from isocenter import Builder, Session
-from isocenter.entities import Patient, Series, Study
+from isocenter.entities import Instance, Patient, Series, Study
 from isocenter import io_handlers
-from isocenter.io_handlers import DicomExporter, export_stamp_attributes
+from isocenter.io_handlers import (DicomExporter, ExportError,
+                                   export_stamp_attributes)
 from isocenter.remediation import RemediationService
 
 OT_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
+CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
 SERIES = "4242"
 INSTANCE = 31337
 NON_CONFORMANT = "Modality (0008,0060)"
@@ -571,3 +573,76 @@ def test_a_source_with_no_modality_is_written_without_one_and_reported(
     assert "_OT_" in path.parent.name
     rows = _modality_rows(warnings)
     assert len(rows) == 1 and "absent" in rows[0], warnings
+
+
+# ---------------------------------------------------------------------------
+# The missing-pixel guard decides on the source's Modality (review of #873)
+# ---------------------------------------------------------------------------
+
+def _ct_with_unreachable_pixels(tmp_path):
+    """A CT Image Storage instance whose pixels cannot be read: none
+    resident, no loader, and a `file_path` that was never written, so
+    `get_pixel_data()` raises `FileNotFoundError` in the worker. The CT
+    Type 1 attributes are present, so only the guard can refuse it."""
+    inst = Instance("1.2.826.0.1.3680043.10.869.900", CT_STORAGE, 1)
+    inst.file_path = str(tmp_path / "never-written.dcm")
+    for tag, value in (("0008,0060", "CT"), ("0008,0020", "20230102"),
+                       ("0010,0010", "Doe^Jane"), ("0010,0020", "PAT869"),
+                       ("0018,0050", "1.0"), ("0018,0060", "120"),
+                       ("0020,0032", ["0", "0", "0"]),
+                       ("0020,0037", ["1", "0", "0", "0", "1", "0"]),
+                       ("0028,0030", ["0.5", "0.5"])):
+        inst.set_attr(tag, value)
+    patient = Patient("PAT869", "Doe^Jane")
+    study = Study("1.2.826.0.1.3680043.10.869.901", datetime.date(2023, 1, 2))
+    series = Series("1.2.826.0.1.3680043.10.869.902", "CT", 1)
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+    return patient
+
+
+@pytest.mark.parametrize("rule, written", [
+    (None, "CT"),
+    (("REMOVE", None), None),
+    (("EMPTY", None), ""),
+    (("REPLACE", "XX"), "XX"),
+], ids=["no-rule", "remove", "empty", "replace"])
+def test_a_ct_with_unreachable_pixels_is_refused_whatever_the_modality_rule(
+        tmp_path, rule, written):
+    """The worker's "Pixels missing for Image Modality" guard refuses to
+    write an image with no Pixel Data. It read the Modality the file would
+    carry, which since #869 is the instance's after the rules: an EMPTY
+    rule (`''`) or a REPLACE with a non-image code (`XX`) let a CT Image
+    Storage file be written with no pixels (measured by the reviewer of
+    #873 at 38485bef). The guard now decides on the source's Modality, and
+    a CT is refused under every rule, as before #869. Through
+    `session.export()`, the door that builds the context. Kills: the
+    guard reading the written Modality."""
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.store.patients.append(_ct_with_unreachable_pixels(tmp_path))
+        session.save(sync=True)
+        _configured(session, tmp_path, {"0008,0060": rule} if rule else {})
+        session.anonymize(session.audit())
+        [inst] = session.store.patients[0].studies[0].series[0].instances
+        assert inst.attributes.get("0008,0060") == written, "setup: the rule"
+        with pytest.raises(ExportError):
+            session.export(str(out), use_compression=False,
+                           show_progress=False)
+        errors = [details for _, action, details
+                  in session.store_backend.get_audit_errors()
+                  if action == "ERROR"]
+
+    assert not out.exists() or _dicoms(out) == []
+    assert any("Pixels missing for Image Modality CT" in e for e in errors), errors
+
+
+def test_the_builder_writes_a_series_numbered_zero():
+    """`0` is a Series Number (IS), not an absent one: the builder writes
+    it. Kills: the builder testing the number's truth instead of None."""
+    series = (Builder.start_patient("PAT872", "Doe^Jane")
+              .add_study("1.2.826.0.2.872", "20230102")
+              .add_series("1.2.826.0.3.872", "OT", 0))
+    inst = series.add_instance("1.2.826.0.1.872.1", OT_STORAGE, 1).instance
+    assert inst.attributes["0020,0011"] == "0"

@@ -33,6 +33,7 @@ class IODValidator:
             # present and empty is conformant. The basic profile empties
             # it, and under '1' the Type-1 arm below would reject every
             # CT file on the documented anonymize -> export path.
+            '0008,0030': '2',
             # No Modality (0008,0060), though it is Type 1: a configuration
             # that removes or empties it is honoured (#869, owner ruling
             # Q6), and the export worker writes the file with one
@@ -40,7 +41,7 @@ class IODValidator:
             # (`io_handlers._modality_warning`), for every SOP class
             # rather than the one this table knows. Listed here, it would
             # refuse the file the rule asked for.
-            '0008,0030': '2', '0020,000e': '1',
+            '0020,000e': '1',
         },
         'CTImage': {
             '0018,0050': '2', '0018,0060': '2',  # SliceThickness, KVP

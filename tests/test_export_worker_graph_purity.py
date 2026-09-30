@@ -25,9 +25,11 @@ hand-built pixel instance with a sequence, an ingested CT with a
 sequence and a private tag, and an ingested ECG waveform. Its one live
 effect was indirect -- the worker's two later
 `inst.attributes.get("0008,0060")` reads saw the *merged* modality via
-the writeback -- and those reads now ask the assembled dataset
-directly, which carries the same merged view without touching the
-graph. The modality tests below pin that behaviour on both sides.
+the writeback -- and those reads asked the assembled dataset
+directly, which carried the same merged view without touching the
+graph. Since #869 no Modality is stamped from the series, and the guard
+judges by `ExportContext.source_modality`, the source's; the modality
+test below pins that on both sides.
 """
 import os
 
@@ -58,16 +60,18 @@ def _pixel_instance():
     return inst
 
 
-def _ctx(inst, out, series_modality="CT"):
+def _ctx(inst, out, source_modality="CT"):
+    # The shape both doors build since #869: no Modality and no Series
+    # Number in the series stamp, and the source's Modality on its own
+    # field for the missing-pixel guard.
     return ExportContext(
         instance=inst,
         output_path=out,
         patient_attributes={"0010,0010": "DOE^J", "0010,0020": "P1"},
         study_attributes={"0020,000d": "1.2.3"},
-        series_attributes={"0020,000e": "1.2.4",
-                           "0008,0060": series_modality,
-                           "0020,0011": "1"},
-        compression=None)
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None,
+        source_modality=source_modality)
 
 
 def test_an_in_process_export_leaves_the_graph_exactly_as_it_found_it(
@@ -124,32 +128,29 @@ def test_repeated_exports_write_byte_identical_files(tmp_path):
     assert len(exported[0x0040A730].value) == 1
 
 
-def test_a_series_level_modality_still_reaches_the_missing_pixel_check(
-        tmp_path):
-    """The one thing the writeback did that mattered, kept without it.
+def test_the_missing_pixel_check_judges_by_the_source_modality(tmp_path):
+    """The worker's "Pixels missing for Image Modality" refusal judges by
+    the source's Modality (`ExportContext.source_modality`), never by the
+    one the file will carry, which a configuration's rule sets (#869,
+    review of #873). Both directions:
 
-    The worker's "Pixels missing for Image Modality" refusal reads the
-    modality *after* the levels are merged, so an instance whose
-    modality lives only on its series -- a hand-built graph, the
-    write_tree() population -- must still be judged by the series value.
-    The writeback used to smuggle that value into `inst.attributes`;
-    the read now asks the assembled dataset. Both directions:
-
-    - series says CT, no pixels anywhere: refused, naming CT;
-    - series says SR, no pixels: written, because SR legitimately has
-      none -- under the old default this instance would have been
-      judged as "OT", which is in `_IMAGE_MODALITIES`, and refused.
+    - source CT, no pixels anywhere, and the instance's own Modality
+      emptied by a rule: refused, naming CT;
+    - source SR, no pixels: written, because SR legitimately has none.
+      Judged as "OT", the default for a file with no Modality, it would be
+      refused.
     """
     ct_inst = Instance("1.2.3.4.501", SC, 1)
+    ct_inst.set_attr("0008,0060", "")
     outcome = _export_instance_worker(
-        _ctx(ct_inst, str(tmp_path / "ct.dcm"), series_modality="CT"))
+        _ctx(ct_inst, str(tmp_path / "ct.dcm"), source_modality="CT"))
     assert outcome.ok is False
     assert "Pixels missing for Image Modality CT" in str(outcome.error)
     assert not os.path.exists(str(tmp_path / "ct.dcm"))
 
     sr_inst = Instance("1.2.3.4.502", SR, 1)
     outcome = _export_instance_worker(
-        _ctx(sr_inst, str(tmp_path / "sr.dcm"), series_modality="SR"))
+        _ctx(sr_inst, str(tmp_path / "sr.dcm"), source_modality="SR"))
     assert outcome.ok, outcome.error
     assert os.path.exists(str(tmp_path / "sr.dcm"))
     # And the judged value did not come to rest on the graph.
