@@ -445,6 +445,14 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 
 Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as `LO`.
 
+#### A rule the export refuses
+
+Some rules load and are applied, but their result is not written. On a CT image (CT Image Storage), a `REMOVE` or `EMPTY` on Image Position (Patient) `(0020,0032)`, Image Orientation (Patient) `(0020,0037)` or Pixel Spacing `(0028,0030)` leaves the file without a Type 1 element, and `export()` withholds that instance, with an `ERROR` row naming the missing tag. So does one on SOP Class UID `(0008,0016)` or SOP Instance UID `(0008,0018)`. `load_config()`, `set_phi_tag()`, `audit()` and `anonymize()` do not refuse the rule; `anonymize()` applies it to the instance, and only the export stops. [What the export changes on the way out](export-output.md#what-the-export-changes-on-the-way-out) says what the refusal looks like and how it grades.
+
+A `REMOVE` or `EMPTY` on Modality `(0008,0060)`, also Type 1, is honoured instead: the file is written without it, with one `WARNING` row saying it is not conformant. The difference is deliberate ([#874](https://github.com/kvnlng/Isocenter/issues/874)). Modality is metadata you may choose to hide; the geometry is what makes the pixels usable, and a CT file without it is not written.
+
+Only CT Image Storage is checked. For any other SOP class, an MR image for example, a rule that removes or empties the three geometry elements is applied and the file is written without them, with no row, and the run can grade `PASS`.
+
 #### Repeating groups
 
 PS3.15 Table E.1-1 spells the retired Curve module and the Overlay Plane module as repeating groups, and `phi_tags` accepts those spellings as keys:
