@@ -3056,7 +3056,7 @@ class DicomSession:
         """
         get_logger().info("Analyzing report for auto-remediation...")
 
-        suggestions = ConfigAutomator.suggest_config_updates(report, self.configuration)
+        suggestions = ConfigAutomator.suggest_config_updates(report)
 
         if not suggestions:
             print("No configuration updates suggested.")

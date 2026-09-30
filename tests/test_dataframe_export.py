@@ -842,3 +842,28 @@ def test_the_page_size_default_is_not_a_public_knob():
         "the public name is back; it advertises a knob that a default "
         "argument evaluated at import cannot provide (#202)")
     assert SqliteStore._FLATTENED_PAGE_SIZE == 500
+
+
+def test_the_page_size_default_is_written_as_the_number_it_is():
+    """`page_size=500`, not `page_size=_FLATTENED_PAGE_SIZE` (#815).
+
+    The rendered signature showed the private name as the default, which
+    tells a reader of the API reference nothing and names something they
+    are not to touch. The default is now the literal, and the constant
+    stays beside it for the comment that explains the number -- so the two
+    can drift, which is what this pins: the literal is a literal, and it
+    is the constant's value.
+    """
+    import ast
+    import inspect
+    import textwrap
+    from isocenter.persistence import SqliteStore
+
+    source = textwrap.dedent(inspect.getsource(SqliteStore.get_flattened_instances))
+    func = ast.parse(source).body[0]
+    names = [a.arg for a in func.args.args]
+    default = func.args.defaults[names[len(names) - len(func.args.defaults):].index("page_size")]
+    assert isinstance(default, ast.Constant), (
+        f"page_size's default is spelled {ast.unparse(default)!r}, not a literal")
+    assert (inspect.signature(SqliteStore.get_flattened_instances)
+            .parameters["page_size"].default == SqliteStore._FLATTENED_PAGE_SIZE)

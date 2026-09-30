@@ -63,7 +63,7 @@ class TestAutomationIntegration(unittest.TestCase):
         })
         report = PhiReport([f])
 
-        suggestions = ConfigAutomator.suggest_config_updates(report, session.configuration)
+        suggestions = ConfigAutomator.suggest_config_updates(report)
         self.assertEqual(len(suggestions), 1)
         self.assertEqual(suggestions[0]['action'], "EXPAND_ZONE")
         self.assertEqual(suggestions[0]['new_zone'], [0, 125, 0, 125])
@@ -98,7 +98,7 @@ class TestAutomationZoneConvention(unittest.TestCase):
             "rule_serial": "SN-AUTO"
         })])
 
-        suggestions = ConfigAutomator.suggest_config_updates(report, session.configuration)
+        suggestions = ConfigAutomator.suggest_config_updates(report)
         self.assertEqual(len(suggestions), 1)
         self.assertEqual(suggestions[0]['action'], "ADD_ZONE")
 
@@ -126,7 +126,7 @@ class TestAutomationZoneConvention(unittest.TestCase):
             "rule_serial": "SN-AUTO"
         })])
 
-        suggestions = ConfigAutomator.suggest_config_updates(report, session.configuration)
+        suggestions = ConfigAutomator.suggest_config_updates(report)
         self.assertEqual(len(suggestions), 1)
         self.assertEqual(suggestions[0]['action'], "EXPAND_ZONE")
 
@@ -141,6 +141,21 @@ class TestAutomationZoneConvention(unittest.TestCase):
         self.assertTrue(
             (arr[0:20, 0:60] == 0).all(),
             "the expanded zone no longer covers the original zone")
+
+
+def test_suggest_config_updates_takes_the_report_alone():
+    """The configuration it never read is not a parameter (#815).
+
+    `suggest_config_updates(report, _current_config)` took the session's
+    configuration and never read it: the suggestions come from the
+    findings' own metadata, and `apply_suggestions` reads the
+    configuration. A dead argument is deleted pre-1.0, not deprecated, and
+    a leading underscore in a published signature says "do not pass this"
+    to a caller who must.
+    """
+    import inspect
+    assert list(inspect.signature(
+        ConfigAutomator.suggest_config_updates).parameters) == ["report"]
 
 
 if __name__ == '__main__':
