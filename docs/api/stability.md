@@ -89,7 +89,7 @@ moved across it is a different call.
 | `discover_redaction_zones` | `serial_number, sample_size=50, min_confidence=80.0` |
 | `reconcile_private_tags` | — |
 | `export` | `folder, format='dicom', **options` |
-| `export_dataframe` | `output_path='export_metadata.csv', expand_metadata=False, patient_ids=None` |
+| `export_dataframe` | `output_path, expand_metadata=False, patient_ids=None` |
 | `get_cohort_report` | `expand_metadata=False, patient_ids=None` |
 | `phi_status_summary` | — |
 | `generate_report` | `output_path, format='markdown'` |

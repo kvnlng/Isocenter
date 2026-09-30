@@ -36,8 +36,30 @@ def session_with_data(tmp_path):
     yield session
     session.close()
 
-def test_export_dataframe_basic(session_with_data):
-    df = session_with_data.export_dataframe()
+def test_export_dataframe_has_no_default_path(session_with_data, tmp_path):
+    """`output_path` is required (#812).
+
+    It defaulted to `export_metadata.csv`, so a call with no path wrote a
+    file that can hold the source identifiers -- before `anonymize()` it
+    does -- into whatever the working directory was, with nothing at the
+    call site saying a file was written or where. Now that call raises
+    `TypeError` before anything is written.
+    """
+    import inspect
+    param = inspect.signature(DicomSession.export_dataframe).parameters["output_path"]
+    assert param.default is inspect.Parameter.empty
+    # The working directory is `tmp_path` (conftest's per-test chdir), so
+    # the old default would land beside the store.
+    assert os.path.samefile(os.getcwd(), tmp_path)
+    with pytest.raises(TypeError, match="output_path"):
+        session_with_data.export_dataframe()
+    with pytest.raises(TypeError, match="output_path"):
+        session_with_data.export_dataframe(expand_metadata=True)
+    assert not os.path.exists(tmp_path / "export_metadata.csv")
+
+
+def test_export_dataframe_basic(session_with_data, tmp_path):
+    df = session_with_data.export_dataframe(str(tmp_path / "meta.csv"))
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 1
     assert df.iloc[0]['PatientID'] == "P1"
@@ -58,10 +80,10 @@ def test_export_dataframe_parquet(session_with_data, tmp_path):
     assert len(df_read) == 1
     assert df_read.iloc[0]['PatientID'] == "P1"
 
-def test_export_dataframe_expand_metadata(session_with_data):
+def test_export_dataframe_expand_metadata(session_with_data, tmp_path):
     # This requires us to modify the implementation to actually parse the JSON if expand_metadata=True
     # For now, let's assume we implement it or at least call it.
-    df = session_with_data.export_dataframe(expand_metadata=True)
+    df = session_with_data.export_dataframe(str(tmp_path / "meta.csv"), expand_metadata=True)
 
     # If expansion works, we should see "SliceThickness" as a column or at least check logic
     # The current plan is to implement it, so let's assert it.
@@ -209,7 +231,7 @@ def test_an_empty_cohort_keeps_its_columns(session_with_two_patients, tmp_path):
 def test_expand_metadata_still_adds_columns_beyond_the_fixed_set(session_with_data):
     """The fixed column list must not become a whitelist that clips
     expanded attributes back out."""
-    df = session_with_data.export_dataframe(expand_metadata=True)
+    df = session_with_data.export_dataframe("export_metadata.csv", expand_metadata=True)
 
     assert "SliceThickness" in df.columns
     assert "PatientID" in df.columns

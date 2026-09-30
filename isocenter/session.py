@@ -7262,7 +7262,7 @@ class DicomSession:
 
     def export_dataframe(
             self,
-            output_path: str = "export_metadata.csv",
+            output_path: str,
             expand_metadata: bool = False,
             patient_ids: Optional[List[str]] = None):
         """
@@ -7271,11 +7271,17 @@ class DicomSession:
         The format is chosen from the extension: ``.parquet`` writes
         Parquet, anything else writes CSV.
 
+        `output_path` is required and has no default (#812): the file can
+        hold the source identifiers (it does before `anonymize()`), so
+        where it lands is the caller's to name. Use `get_cohort_report()`
+        for the frame alone, with no file.
+
         It reports the session's in-memory graph and does not `save()`
         first: pending edits are not committed as a side effect.
 
         Args:
-            output_path (str): The output file path (ends with .csv or .parquet).
+            output_path (str): The output file path (ends with .csv or
+                .parquet). Required; its directory is created if missing.
             expand_metadata (bool): If True, includes all DICOM attributes as columns.
             patient_ids (Iterable[str], optional): Restrict the export to
                 these Patient IDs, read by `get_cohort_report()`, which

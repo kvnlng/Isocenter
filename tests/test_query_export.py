@@ -89,7 +89,7 @@ def test_export_dataframe_subset(session_for_query, tmp_path):
     mr_uid = session_for_query.test_uids['MR']
 
     # Get DF, filter for MR
-    df = session_for_query.export_dataframe(expand_metadata=True)
+    df = session_for_query.export_dataframe("export_metadata.csv", expand_metadata=True)
     subset_df = df[df['Modality'] == 'MR']
 
     session_for_query.export(str(out_dir), subset=subset_df, show_progress=False)
