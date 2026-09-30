@@ -139,6 +139,10 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
                                            # `session._export_dicom` reads
                                            # it, and how real attribute
                                            # dicts are actually keyed).
+        # The folder's number and modality are read from the instance,
+        # what the file carries, not from `Series` (#869).
+        "0020,0011": "3",                 # Series Number
+        "0008,0060": "ECG",               # Modality
     })
     # Only needed so the DICOM export worker's pixel-data check is
     # satisfied; unrelated to the WFDB path, which reads waveform_array.

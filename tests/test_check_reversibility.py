@@ -63,6 +63,10 @@ def _session_with_locked_identity(tmp_path, lock=True, instances=1,
         inst.file_path = None
         inst.set_attr("0010,0010", "Original Name")
         inst.set_attr("0010,0020", pid)
+        # Modality from the instance, as the export writes it (#869): one
+        # without it is written with a non-conformance WARNING row, which
+        # the late-failure arm would count as a second error.
+        inst.set_attr("0008,0060", "CT")
         for tag, val in (("0018,0050", "1.0"), ("0018,0060", "120"),
                          ("0020,0032", ["0", "0", "0"]),
                          ("0020,0037", ["1", "0", "0", "0", "1", "0"]),
