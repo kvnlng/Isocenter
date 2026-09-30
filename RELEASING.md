@@ -710,8 +710,9 @@ published at 02:10.
    outstanding. Under embargo, accept the report as a draft, and go on.
 4. **Fill the draft now:** package `isocenter` (pip), the affected range,
    the patched version this release will have, severity, weaknesses, and
-   credit for the reporter unless they ask not to be named. Request a CVE
-   now if one is wanted: GitHub's review can take three days, and it
+   credit for the reporter unless they ask not to be named. **Request a
+   CVE now,** for every embargoed advisory (owner ruling on #867,
+   2026-09-30): GitHub's review can take three days, and the request
    does not make the advisory public.
 5. **Start a temporary private fork** from the advisory, and add as
    collaborators whoever will develop or review.
@@ -731,9 +732,13 @@ check `git config branch.<branch>.remote` prints `ghsa` before any bare
    `release/X.Y` for the latest line SECURITY.md supports. The version is
    the line's next patch (`X.Y.Z+1`), or, while that line is in
    candidates, its next candidate (`X.Y.Zrc<N+1>`), carrying this fix
-   and nothing picked from `main`. If that tip holds a merged release
-   commit whose version is not yet on PyPI, stop and ask the owner
-   whether the fix joins that release.
+   and nothing picked from `main`.
+
+   **The security fix goes first** (owner ruling on #867, 2026-09-30).
+   A release already in progress on the line, with its PRs into
+   `release/X.Y` open or its version not yet on PyPI, pauses. Once this
+   release is published, it rebases onto the security patch and starts
+   its gate again.
 2. **Develop** on a work branch off that tip, tests first, as "Changes
    land on `main`" says. The branch holds four things:
    - the fix and its tests;
@@ -745,7 +750,8 @@ check `git config branch.<branch>.remote` prints `ghsa` before any bare
 
    **This is the release commit too,** unlike step 3 of "Cutting a
    release", which contains only the version files: it lands as one
-   squash commit, so that the window holds one public PR, not two. The
+   squash commit, so that the window holds one public PR, not two
+   (owner ruling on #867, 2026-09-30). The
    dates are the UTC date the upload will happen on ("Both dates are
    UTC"). Choose a disclosure time and write its date; if the time
    moves past midnight UTC, correct both dates on the branch before
@@ -774,8 +780,10 @@ check `git config branch.<branch>.remote` prints `ghsa` before any bare
    - **the full suite on 3.12 and 3.14t**, the patch release's
      integration test (step 3 of "Cutting a release"), with its rerun
      rule;
-   - **the full suite on 3.13 and 3.14**, in place of the rehearsal
-     (below);
+   - **the full suite on 3.13 and 3.14**, which replaces the rehearsal
+     (below). A red here is answered as step 4 of "Cutting a release"
+     answers a red `test-supported` job: fix it, or delete that version's
+     classifier from `setup.py` on this branch;
    - `python -m build` in a scratch worktree at the head, with every
      `isocenter/resources/*.json` in the wheel (`unzip -l`);
    - `python -m scripts.output_fingerprint check` on 3.12 and 3.14t, and
@@ -805,15 +813,15 @@ check `git config branch.<branch>.remote` prints `ghsa` before any bare
    while the advisory's conversation stays with its collaborators. Push
    the approved branch to the fork.
 
-**Why no rehearsal.** Step 4 of "Cutting a release" runs `publish.yml`
-from `release/X.Y`, which needs the fix there, public, for a second full
-run before the tag. The local full suite on all four versions, and the
-local build, stand in for it; `publish.yml` then runs the same gates
-from the tag before it uploads, and a failure before its upload job
-spends nothing ("If the publish run fails …", under "Cutting a
-release"). A red `test-supported` job in that run cannot be answered by
-deleting a classifier in the same release, as step 4 answers it: record
-it on the advisory and in the forward-port PR, and decide in the next
+**No rehearsal** (owner ruling on #867, 2026-09-30). Step 4 of "Cutting
+a release" runs `publish.yml` from `release/X.Y`, which would need the
+fix there, public, for a second full run before the tag. The local full
+suite on 3.13 and 3.14 replaces it, beside step 5's runs on 3.12 and
+3.14t and the local build. `publish.yml` then runs the same gates from
+the tag before it uploads, and a failure before its upload job spends
+nothing ("If the publish run fails …", under "Cutting a release"). If
+`test-supported` goes red in that run, the usual rule applies: the
+release ships, and that version's classifier is deleted in the same
 release.
 
 ### Disclosure
@@ -827,10 +835,10 @@ An admin does these steps in one sitting, without pausing between them.
 2. **Land it:** push the approved branch to `origin`, open its PR into
    `release/X.Y` with every log and the approved SHA in the body (the PR
    is the public record that outlives the fork), and merge it at once
-   with `gh pr merge N --squash --admin --match-head-commit <sha>`.
-   Not the advisory's **Merge pull request(s)**: it pins no SHA, and
-   GitHub documents what it does to `main` only, not to a release
-   branch.
+   with `gh pr merge N --squash --admin --match-head-commit <sha>`
+   (owner ruling on #867, 2026-09-30). Not the advisory's **Merge pull
+   request(s)**, which 0.9.7 used: it pins no SHA, and GitHub documents
+   what it does to `main` only, not to a release branch.
 3. **Check the tree:** `git fetch origin`, then `git diff --stat <sha>
    origin/release/X.Y` prints nothing. If it prints anything, the branch
    moved under the merge: stop, and do not tag.
