@@ -1,29 +1,36 @@
 name: Documentation
 
 on:
-  # The documentation follows the latest *published release*, not `main`:
-  # `main` is the development branch (RELEASING.md), and a site built from
-  # it describes behaviour nobody can `pip install`. So the site deploys
-  # from release tags. The ref filter is load-bearing, not tidiness: this
-  # job runs `mkdocs gh-deploy`, which publishes straight to the live
-  # site, and a filter that admitted branches is how unreviewed
-  # documentation went live twice during the isocenter rename, from a
-  # feature branch.
+  # The site is versioned with mike (#866): one folder per minor line
+  # (`1.0/`, `1.1/`), a `latest` alias copied from the highest final
+  # release, and a hidden `dev/` for `main`. The root redirects to
+  # `latest/`, so the default site describes the latest release, never
+  # unreleased `main`. The ref filter is load-bearing, not tidiness:
+  # this workflow pushes straight to the live site, and a filter that
+  # admitted branches is how unreviewed documentation went live twice
+  # during the isocenter rename, from a feature branch.
   #
-  # No `paths` filter. The site is the release's whole tree -- the API
-  # reference is generated from docstrings in `isocenter/` -- and a release
-  # whose `docs/` did not change since the last tag still has to replace
-  # the previous release's site.
+  # No `paths` filter. A folder is the release's whole tree -- the API
+  # reference is generated from docstrings in `isocenter/` -- and a
+  # release whose `docs/` did not change since the last tag still has to
+  # replace its line's folder.
   #
-  # The trigger is necessary, not sufficient: the `guard` job refuses any
-  # ref but the *latest* `v*` tag, so a patch tagged on an older release
-  # line cannot replace a newer release's documentation, and a manual run
-  # from a branch deploys nothing.
+  # The trigger is necessary, not sufficient: the `guard` job decides
+  # which folder the ref may write, or refuses it (RELEASING.md,
+  # "Documentation site", has the table).
   push:
     tags:
       - 'v*'
-  # To redeploy the current release (say, after a failed run), dispatch
-  # from its tag: `gh workflow run docs.yml --ref vX.Y.Z`.
+  # `main` reaches `dev/` by dispatch only (#866, Q2), and a docs-only
+  # change reaches a released line by dispatch from `release/X.Y`.
+  #
+  # NEVER dispatch this workflow from a tag cut before #866 (v1.0.0rc6
+  # and every tag before it). A dispatch runs the workflow file *at that
+  # ref*, which is the old `mkdocs gh-deploy`: while that tag is still
+  # the highest, its old guard admits it, and gh-deploy commits a tree
+  # holding only its root site, deleting every version folder,
+  # `versions.json` and the old-URL stubs. Recovery is a `git revert` of
+  # that commit on `gh-pages`.
   workflow_dispatch:
 
 permissions:
@@ -35,64 +42,148 @@ jobs:
   # Its own job, outside the deploy's concurrency group. When the group
   # sat at workflow level, a run this guard was about to refuse -- a patch
   # tag on an older line, a dispatch from a branch, the second of two tags
-  # pushed together -- joined the group first, cancelled the latest
-  # release's deploy in progress, and then refused itself, leaving the
-  # site on whatever was live before that release.
+  # pushed together -- joined the group first, cancelled a deploy in
+  # progress, and then refused itself.
   guard:
     runs-on: ubuntu-latest
     # Above the sum of its step caps (3 + 1 = 4), for the same reason the
     # deploy job's cap is; see there.
     timeout-minutes: 6
+    outputs:
+      folder: ${{ steps.decide.outputs.folder }}
+      title: ${{ steps.decide.outputs.title }}
+      alias: ${{ steps.decide.outputs.alias }}
+      hidden: ${{ steps.decide.outputs.hidden }}
     steps:
-    # `fetch-depth: 0` fetches every tag, which the guard compares
-    # against. A shallow checkout has no tags to compare with.
+    # `fetch-depth: 0` fetches every tag and the history the release-branch
+    # rule diffs. A shallow checkout has neither.
     - name: Checkout Repository
       uses: actions/checkout@v7
       with:
         fetch-depth: 0
       timeout-minutes: 3
 
-    # The highest `v*` tag by *version* order, not creation order or text
-    # order: under the release-branch procedure `v0.9.9` can be tagged on
-    # `release/0.9` after `v0.10.0` shipped, and as text it sorts after
-    # `v0.10.0` too. The `versionsort.suffix` settings sort `a`, `b` and
-    # `rc` as pre-releases: without them git ranks `v1.0.0rc1` above
-    # `v1.0.0`, and the release would be refused for as long as its
-    # candidate's tag existed. A pre-release of a *later* version still
-    # outranks the current release (`v1.0.1rc1` > `v1.0.0`), and blocks its
-    # deploy; RELEASING.md says so.
+    # Decides, and writes nothing to $GITHUB_OUTPUT until the decision is
+    # whole, so a refused run leaves no half-written outputs.
+    #
+    # "Line head" of X.Y is its highest *final* `vX.Y.Z`, or, while the
+    # line has no final, its highest pre-release. Order is git's
+    # `version:refname` (`v1.0.10` > `v1.0.9`), which creation order and
+    # text order are not. A pre-release is never ranked against a final
+    # -- finals are taken first -- so `versionsort.suffix` would decide
+    # nothing here and is deliberately not set.
+    #
+    # The release-branch rule compares against $GITHUB_SHA, the tip that
+    # was dispatched, never HEAD. `isocenter/` is the discriminator
+    # because mkdocstrings renders the API reference from it: a branch
+    # whose `isocenter/` equals its line head's describes exactly what
+    # `pip install isocenter==<title>` installs (#866, Q6).
+    #
     # tests/test_packaging_contract.py runs this script against real tags.
-    - name: Deploy only the latest release tag
+    - name: Decide which docs folder this ref may write
+      id: decide
       timeout-minutes: 1
       run: |
+        refuse() {
+          echo "::error::$1"
+          exit 1
+        }
+        all_tags=$(git tag --list 'v*' --sort=-version:refname)
+        first_matching() {
+          printf '%s\n' "$all_tags" | awk -v re="$1" '$0 ~ re { print; exit }'
+        }
+        line_head() {
+          local head
+          head=$(first_matching "^v$1[.]$2[.][0-9]+\$")
+          if [ -z "$head" ]; then
+            head=$(first_matching "^v$1[.]$2[.][0-9]+(a|b|rc)[0-9]+\$")
+          fi
+          printf '%s' "$head"
+        }
+        alias=""
+        hidden=false
         case "$GITHUB_REF" in
-          refs/tags/v*) ;;
+          refs/tags/v*)
+            tag=${GITHUB_REF#refs/tags/}
+            if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+              refuse "${tag} is not a release tag (vX.Y.Z, or vX.Y.Z with an a, b or rc suffix)"
+            fi
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            if [ "$major" -lt 1 ]; then
+              refuse "${tag}: lines below 1.0 are not published"
+            fi
+            head=$(line_head "$major" "$minor")
+            if [ "$tag" != "$head" ]; then
+              refuse "${tag} is not the head of ${major}.${minor} (${head}); deploying it would replace that line's documentation with an older or pre-release build"
+            fi
+            folder="${major}.${minor}"
+            title=${tag#v}
+            top_final=$(first_matching '^v[0-9]+[.][0-9]+[.][0-9]+$')
+            if [ "$tag" = "$top_final" ]; then
+              alias=latest
+            fi
+            ;;
+          refs/heads/release/*)
+            line=${GITHUB_REF#refs/heads/release/}
+            if [[ ! "$line" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+              refuse "release/${line} is not a release line (release/X.Y)"
+            fi
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            if [ "$major" -lt 1 ]; then
+              refuse "release/${line}: lines below 1.0 are not published"
+            fi
+            head=$(line_head "$major" "$minor")
+            if [ -z "$head" ]; then
+              refuse "release/${line} has no v${line}.* tag, so there is no release for its documentation to describe"
+            fi
+            if ! git merge-base --is-ancestor "$head" "$GITHUB_SHA"; then
+              refuse "release/${line} (${GITHUB_SHA}) does not contain ${head}, the line's newest tag"
+            fi
+            changed=$(git diff --name-only "$head" "$GITHUB_SHA" -- isocenter/)
+            if [ -n "$changed" ]; then
+              echo "changed under isocenter/ since ${head}:"
+              printf '  %s\n' $changed
+              refuse "release/${line} changed isocenter/ since ${head} ($(printf '%s ' $changed)); the API reference would describe code no release installs. Ship the page with the next patch."
+            fi
+            folder="${major}.${minor}"
+            title=${head#v}
+            ;;
+          refs/heads/main)
+            folder=dev
+            title=dev
+            hidden=true
+            ;;
           *)
-            echo "::error::the documentation deploys from the latest v* release tag only, not ${GITHUB_REF}"
-            exit 1
+            refuse "${GITHUB_REF} may not deploy the documentation: only a release tag, release/X.Y or main may"
             ;;
         esac
-        latest=$(git -c versionsort.suffix=a -c versionsort.suffix=b -c versionsort.suffix=rc \
-          tag --list 'v*' --sort=-version:refname | head -n 1)
-        if [ "$GITHUB_REF_NAME" != "$latest" ]; then
-          echo "::error::${GITHUB_REF_NAME} is not the latest release tag (${latest}); deploying it would replace newer documentation"
-          exit 1
-        fi
-        echo "deploying the documentation for ${GITHUB_REF_NAME}, the latest release tag"
+        {
+          echo "folder=${folder}"
+          echo "title=${title}"
+          echo "alias=${alias}"
+          echo "hidden=${hidden}"
+        } >> "$GITHUB_OUTPUT"
+        echo "deploying ${GITHUB_REF} into ${folder}/ titled ${title}${alias:+, moving ${alias}}"
 
   deploy:
     needs: guard
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Newest deploy wins, and only runs that passed the guard get here, so
-    # "newest" is always a deploy of the latest release tag.
+    # Deploys queue; none cancels another (#866). Newest-wins was right
+    # while every deploy wrote the one root site. Now runs write different
+    # folders, and cancelling a `1.0/` deploy because a `dev/` one started
+    # would drop 1.0's update silently. GitHub keeps at most one run
+    # pending per group, so a third arrival cancels the pending one: that
+    # shows as a cancelled run, and is re-dispatched from its ref.
     concurrency:
       group: docs-deploy
-      cancel-in-progress: true
+      cancel-in-progress: false
     # The inequality `tests.yml` also carries, and the
     # direction is the load-bearing half: this cap must EXCEED the sum of
-    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 = 19), so whatever
+    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 + 5 = 24), so whatever
     # hangs, the timeout that fires belongs to a step and the log names
     # it. It was the other way round until #635 -- a job cap of 10 over
     # step caps totalling 11, with three steps uncapped entirely -- so a
@@ -100,9 +191,11 @@ jobs:
     # job hung". Raise this before raising any step cap, never after.
     # `tests/test_packaging_contract.py::test_the_docs_deploy_builds_strict_from_the_docs_extra`
     # holds both halves.
-    timeout-minutes: 22
+    timeout-minutes: 27
 
     steps:
+    # `fetch-depth: 0` also fetches `origin/gh-pages`, which mike builds
+    # its commit on.
     - name: Checkout Repository
       uses: actions/checkout@v7
       with:
@@ -124,7 +217,7 @@ jobs:
       timeout-minutes: 3
       with:
         key: mkdocs-material-${{ env.cache_id }}
-        path: ~/.cache 
+        path: ~/.cache
         restore-keys: |
           mkdocs-material-
     # From the `docs` extra, not a hand-copied list. The workflow named
@@ -136,14 +229,12 @@ jobs:
     # Measured at 10.4 s warm on 3.14.7, against this 5-minute cap.
     - run: pip install -e ".[docs]"
       timeout-minutes: 5
-    # `--strict` turns a mkdocs or griffe warning into a failed deploy.
-    # This is safe on a workflow that publishes to the live site, and the
-    # reason is the ordering inside mkdocs: `gh_deploy_command` runs
-    # `build.build(cfg)` in a `try/finally` and reaches
-    # `gh_deploy.gh_deploy(...)` only afterwards, and `--strict` makes
-    # `build.build` raise `Abort`. So a warning costs a red deploy run
-    # and a site still serving its previous build -- it cannot publish a
-    # broken one.
+    # `--strict` turns a mkdocs or griffe warning into a failed run, and
+    # it is its own step because mike has none: `mike deploy` runs
+    # `mkdocs build --clean` and passes no flag through (mike 2.2.0,
+    # `mkdocs_utils.build`, `driver.deploy`). This step runs before the
+    # mike step, so a warning fails the run before anything is pushed;
+    # mike's build is the same tree built again.
     #
     # What it newly catches is ONE class: a broken relative file link
     # under `docs/`. Measured by mutation for #635, that is red under
@@ -159,5 +250,38 @@ jobs:
     # Do not "clean up" this flag after a red deploy. The warning count
     # at 0.9.8 was zero, so a red here is new drift, and the fix is the
     # docstring or the link -- not the flag.
-    - run: mkdocs gh-deploy --strict
+    - run: mkdocs build --strict
       timeout-minutes: 4
+    # The guard's decision arrives through `env:`, never interpolated into
+    # the script. `--update-aliases` is what lets `latest` move off the
+    # folder that holds it; a deploy with no alias still refreshes the
+    # aliases its folder already has (mike's README), so a re-run of the
+    # line `latest` is on refreshes `latest/` too.
+    #
+    # Never `--ignore-remote-status`, never `--force`: a diverged or newer
+    # `gh-pages` must fail this run, not be pushed over. mike's push is a
+    # plain `git push` without force. The fetch is mike's README advice
+    # for CI, and narrows the race to the seconds before the push.
+    - name: Deploy with mike
+      timeout-minutes: 5
+      env:
+        FOLDER: ${{ needs.guard.outputs.folder }}
+        TITLE: ${{ needs.guard.outputs.title }}
+        ALIAS: ${{ needs.guard.outputs.alias }}
+        HIDDEN: ${{ needs.guard.outputs.hidden }}
+      run: |
+        git fetch origin gh-pages
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        args=(--push --title "$TITLE")
+        if [ -n "$ALIAS" ]; then
+          args+=(--update-aliases)
+        fi
+        if [ "$HIDDEN" = true ]; then
+          args+=(--prop-set hidden=true)
+        fi
+        args+=("$FOLDER")
+        if [ -n "$ALIAS" ]; then
+          args+=("$ALIAS")
+        fi
+        mike deploy "${args[@]}"

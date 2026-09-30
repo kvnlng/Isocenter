@@ -148,7 +148,19 @@ setup(
             "mkdocs>=1.5.0",
             "mkdocs-material>=9.0.0",
             "mkdocstrings[python]>=0.20.0",
-            "mkdocs-awesome-pages-plugin>=2.8.0"
+            "mkdocs-awesome-pages-plugin>=2.8.0",
+            # The versioned site (#866): `docs.yml` runs `mike deploy
+            # --push --update-aliases --title ... --prop-set ...`, and
+            # mkdocs.yml's `mike` plugin block sets `alias_type: copy`.
+            # >=2.2 because 2.2.0 is the release whose source was read for
+            # the design; nothing older was checked. <3 because a major
+            # may rename those flags or keys, and because the design leans
+            # on a fact of 2.2.0's entry points: `[mike.themes]` registers
+            # no `material` theme, so mike injects no selector of its own
+            # beside Material's (`extra.version.provider: mike`). A major
+            # that registers one shows two selectors. Read the release
+            # notes for both before lifting this cap.
+            "mike>=2.2,<3"
         ],
         # Optional: ZoneDiscoverer imports spacy lazily and falls back to
         # regex when it is unavailable.

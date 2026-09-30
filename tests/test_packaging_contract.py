@@ -1820,11 +1820,12 @@ DOCS_WORKFLOW = REPO / ".github" / "workflows" / "docs.yml"
 
 
 def test_the_docs_deploy_builds_strict_from_the_docs_extra():
-    """`docs.yml` builds `--strict`, deploys only from release tags, and caps every step.
+    """`docs.yml` builds `--strict` before mike deploys, from the docs extra, and caps every step.
 
-    Five assertions about the only workflow in the repository that
-    publishes somewhere a reader can see: `mkdocs gh-deploy` pushes
-    straight to the live documentation site.
+    Assertions about the only workflow in the repository that publishes
+    somewhere a reader can see: `mike deploy --push` writes a version
+    folder of the live documentation site (#866; `mkdocs gh-deploy`
+    before it).
 
     **Strict.** Without `--strict` a mkdocs or griffe warning goes into
     a log nobody reads and the site deploys anyway (#635). Measured by
@@ -1838,29 +1839,39 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     at all and is caught only by
     `tests/test_api_docstrings_render_cleanly.py` (#565).
 
-    Safe on a live site because `gh-deploy` builds before it pushes:
-    `gh_deploy_command` calls `build.build(cfg)` inside a `try/finally`
-    and reaches `gh_deploy.gh_deploy(...)` only afterwards, and strict
-    makes `build.build` raise `Abort` (mkdocs 1.6.1). A warning costs a
-    red deploy run and a site still serving its previous build; it
-    cannot publish a broken one.
+    mike has no strict mode: `mike/mkdocs_utils.py::build` runs `mkdocs
+    build --clean` and the `mike deploy` CLI passes no flag through
+    (mike 2.2.0). So the strict build is its own step, **before** the
+    mike step in the same job: a warning fails the run before anything
+    is pushed, and mike's own build is the same tree built again. No
+    step may still run `gh-deploy`: it publishes a root site, and its
+    commit holds only that build, so it deletes every version folder,
+    `versions.json` and the old-URL stubs (#866's hazard).
+
+    **mike never overrides the remote.** `--ignore-remote-status` pushes
+    a diverged local `gh-pages`, and `--force` is the other way to throw
+    away what another deploy wrote. mike's own push is a plain `git push`
+    without force (`git_utils.push_branch`), which is the backstop for a
+    writer outside the workflow, such as a hand-run `mike alias`.
 
     **The ref filter** was pinned by nothing before this test, and its
     comment records the two unreviewed deploys from a feature branch it
     exists to prevent. Since the release-branch procedure (`RELEASING.md`)
     it is release tags rather than `main`: `main` is the development
-    branch, and the documentation follows the latest published release.
-    The trigger set is asserted as an equality because a `pull_request`
-    trigger on a workflow that deploys
-    to the live site is not a thing to notice in review. Which tag may
-    deploy is the next test's.
+    branch, and the documentation follows the published releases. `main`
+    reaches the hidden `dev` folder by manual dispatch only (#866, Q2),
+    so no branch is a push trigger. The trigger set is asserted as an
+    equality because a `pull_request` trigger on a workflow that deploys
+    to the live site is not a thing to notice in review. Which ref may
+    write which folder is the guard's, and the next tests'.
 
     **The package list has one home.** The workflow hand-copied five
     distributions, naming `pymdown-extensions` (absent from `setup.py`'s
     `docs` extra) and omitting `mkdocs` (present there). The two lists
     resolved to the identical eleven packages at the identical versions
     when measured, which is what a second source of truth looks like
-    right up to the edit that moves one of them.
+    right up to the edit that moves one of them. `mike`, whose console
+    script the deploy step runs, is in that extra too.
 
     **The caps** are the inequality `tests.yml` carries -- job cap above the sum of the step caps, every step
     capped -- so whatever hangs, the timeout that fires belongs to a
@@ -1890,19 +1901,41 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     job = workflow["jobs"]["deploy"]
     steps = job["steps"]
 
-    # 1. Strict. Found by walking the steps for the deploy command, so a
-    #    flag moved to another step or another job is still found.
-    deploying = [step for step in steps
-                 if "gh-deploy" in (step.get("run") or "")]
+    # 1. Strict, then mike. Found by walking every job's steps for the
+    #    commands, so one moved to another step or job is still found.
+    every_run = [step.get("run") or ""
+                 for each in workflow["jobs"].values()
+                 for step in each["steps"]]
+    gh_deploy = [run for run in every_run if "gh-deploy" in run]
+    assert not gh_deploy, (
+        f"a step still runs `mkdocs gh-deploy` ({gh_deploy!r}); it "
+        "publishes a root site whose commit holds only that build, which "
+        "deletes every version folder, versions.json and the old-URL "
+        "stubs (#866)")
+    runs = [step.get("run") or "" for step in steps]
+    deploying = [index for index, run in enumerate(runs)
+                 if "mike deploy" in run]
     assert len(deploying) == 1, (
-        f"{len(deploying)} steps run `mkdocs gh-deploy`; exactly one "
-        "must, or which one publishes the site is ambiguous")
-    assert "--strict" in deploying[0]["run"], (
-        f"the deploy step runs {deploying[0]['run']!r} without "
-        "`--strict`, so a mkdocs or griffe warning publishes the site "
-        "anyway and the warning lands in a log nobody reads (#635). A "
-        "strict failure cannot publish a broken site: gh-deploy builds "
-        "before it pushes and aborts inside the build")
+        f"{len(deploying)} steps of the deploy job run `mike deploy`; "
+        "exactly one must, or which one publishes the site is ambiguous")
+    elsewhere = sum("mike deploy" in run for run in every_run) - 1
+    assert not elsewhere, (
+        "`mike deploy` also runs outside the deploy job, outside its "
+        "concurrency group and without its strict build first")
+    strict = [index for index, run in enumerate(runs)
+              if "mkdocs build" in run and "--strict" in run]
+    assert len(strict) == 1, (
+        f"{len(strict)} steps run `mkdocs build --strict`; mike has no "
+        "strict mode, so without that step a mkdocs or griffe warning "
+        "publishes the site anyway and lands in a log nobody reads (#635)")
+    assert strict[0] < deploying[0], (
+        "the strict build runs after the mike deploy, so a warning fails "
+        "the run only once the site is already pushed")
+    mike_run = runs[deploying[0]]
+    for flag in ("--ignore-remote-status", "--force"):
+        assert flag not in mike_run, (
+            f"the mike deploy passes {flag}; a diverged or newer gh-pages "
+            "must fail the run, never be pushed over (#866)")
 
     # 2. The ref filter: release tags only, never a branch. `main` is the
     #    development branch, and the site follows the latest published
@@ -1914,7 +1947,8 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "here publishes unreleased documentation -- `main` is the "
         "development branch -- and a feature branch here is the "
         "unreviewed deploy that happened twice during the isocenter "
-        "rename. A `paths` filter here would skip the deploy of a release "
+        "rename, and `main` reaches `dev/` by dispatch only (#866, Q2). "
+        "A `paths` filter here would skip the deploy of a release "
         "whose docs did not change since the last tag, leaving the "
         "previous release's API reference live")
 
@@ -1947,6 +1981,11 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         f"the install step names {restated} itself as well as the `docs` "
         "extra; the extra in setup.py is the one home for that list "
         "(#635)")
+    assert "mike" in {spec.split(">=")[0].split("==")[0].split("[")[0]
+                      for spec in declared}, (
+        "the deploy step runs `mike`, and the `docs` extra does not "
+        "declare it; the command would come from nowhere the one list "
+        "names")
 
     # 5. The cap inequality, both halves.
     uncapped = [step.get("name") or step.get("uses") or step.get("run")
@@ -2007,46 +2046,19 @@ def _run_step_script(step, cwd, env):
         text=True, env={"PATH": os.environ["PATH"], **env}, check=False)
 
 
-DOCS_LATEST_TAG_STEP = "Deploy only the latest release tag"
+DOCS_GUARD_STEP = "Decide which docs folder this ref may write"
+DOCS_DEPLOY_STEP = "Deploy with mike"
+DOCS_OUTPUTS = ("folder", "title", "alias", "hidden")
 
 
-def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
-    """The site follows the latest release tag, and only that.
+def _scratch_git(repo):
+    """A `run_git(*args, when=None)` for a scratch repository at `repo`.
 
-    A `v*` tag trigger alone would redeploy the site from whichever tag
-    was pushed last. Under the release-branch procedure that is not
-    always the newest release: a patch to an older line (a `v0.9.9` on
-    `release/0.9` after `v0.10.0` shipped) would replace the newer
-    documentation with the older line's. And `workflow_dispatch` can be
-    started from any branch, including `main`, the development branch.
-
-    So a job the deploy needs refuses unless the ref is a `v*` tag and
-    that tag is the highest `v*` tag by version order, with `a`, `b` and
-    `rc` sorted as pre-releases: under git's default version sort
-    `v1.0.0rc1` outranks `v1.0.0`, and the 1.0.0 release would be refused
-    for as long as its release candidate's tag existed. The script is
-    executed here, against a scratch repository with real tags, rather
-    than grepped: a guard that names the right strings and compares them
-    wrongly passes a text search.
+    Global and system git configuration are cut off, so a developer's
+    `tag.sort` or `versionsort.suffix` cannot decide a test's outcome.
     """
     import os
 
-    import yaml
-
-    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
-    guard = _step_named(DOCS_WORKFLOW, "guard", DOCS_LATEST_TAG_STEP)
-    assert "if" not in guard, (
-        "the latest-tag guard is conditional; a condition is a way for "
-        "some trigger to skip it")
-    checkout = next(step for step in workflow["jobs"]["guard"]["steps"]
-                    if str(step.get("uses", "")).startswith("actions/checkout"))
-    assert checkout.get("with", {}).get("fetch-depth") == 0, (
-        "the guard's checkout does not fetch full history, so the runner "
-        "has no tags to compare against and the guard cannot know the "
-        "latest")
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
     git_env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
                "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
                "GIT_COMMITTER_NAME": "t",
@@ -2055,72 +2067,323 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
     def run_git(*args, when=None):
         dated = ({"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
                  if when else {})
-        subprocess.run(["git", *args], cwd=str(repo), check=True,
-                       capture_output=True,
-                       env={"PATH": os.environ["PATH"], **git_env, **dated})
+        return subprocess.run(
+            ["git", *args], cwd=str(repo), check=True, capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"], **git_env, **dated}).stdout.strip()
 
-    days = iter(range(1, 29))
+    return run_git, git_env
+
+
+def _read_outputs(path):
+    """The `name=value` lines a step appended to its `$GITHUB_OUTPUT` file."""
+    if not path.exists():
+        return {}
+    outputs = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name, _, value = line.partition("=")
+        assert name not in outputs, (
+            f"the guard wrote {name!r} twice to $GITHUB_OUTPUT; the job "
+            "output would be whichever GitHub reads last")
+        outputs[name] = value
+    return outputs
+
+
+def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
+    """Each ref writes one folder of the versioned site, or nothing (#866).
+
+    The site is versioned with mike: one folder per minor line (`1.0/`,
+    `1.1/`), a `latest` alias copied from the highest final release, and
+    a hidden `dev/` for `main`. The guard job decides, for the ref a run
+    was started from, which folder it may write, under what title, and
+    whether it moves `latest`; the deploy job only carries that out. A
+    wrong answer here is a silently wrong live site, so the decision is
+    executed against a scratch repository with real, explicitly dated
+    tags created out of version order, never grepped.
+
+    - A final tag `vX.Y.Z` (X >= 1) writes `X.Y/` only if it is its
+      line's head, the highest final `vX.Y.*`; it moves `latest` only if
+      it is also the highest final release. So a patch to an older line
+      updates that line's folder and leaves `latest` on the newer line,
+      and an older patch tag (a re-run of `v1.0.0` after `v1.0.1`)
+      writes nothing, where it would put a superseded release back.
+    - A pre-release tag writes `X.Y/` only while X.Y has no final:
+      `latest` is a copy of a final's folder, and must never come to
+      describe a candidate of a patch.
+    - `release/X.Y` by dispatch rewrites `X.Y/` under its head's title
+      only while nothing under `isocenter/` changed since that tag
+      (owner ruling Q6): the API reference is rendered from those
+      docstrings, so a changed `isocenter/` describes code no `pip
+      install` delivers. That is how a docs-only page reaches a released
+      line without a tag.
+    - `main` writes the hidden `dev/` (rulings Q2, Q3).
+    - Everything else, and every line below 1.0, writes nothing.
+
+    Version order is git's `version:refname`, which orders `v1.0.10`
+    above `v1.0.9` and `v0.10.0` above `v0.9.9` where text order and
+    creation order do not. The guard never ranks a pre-release against
+    a final -- finals are taken first, and pre-releases only on a line
+    with none -- so `versionsort.suffix` would change no answer here,
+    and the guard deliberately does not set it.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    guard = _step_named(DOCS_WORKFLOW, "guard", DOCS_GUARD_STEP)
+    assert "if" not in guard, (
+        "the guard step is conditional; a condition is a way for some "
+        "trigger to skip it")
+    checkout = next(step for step in workflow["jobs"]["guard"]["steps"]
+                    if str(step.get("uses", "")).startswith("actions/checkout"))
+    assert checkout.get("with", {}).get("fetch-depth") == 0, (
+        "the guard's checkout does not fetch full history, so the runner "
+        "has no tags to compare against and no history to diff")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git, git_env = _scratch_git(repo)
+    days = iter(range(1, 60))
+
+    def commit(message, path=None):
+        day = next(days)
+        when = f"2026-{1 + day // 28:02d}-{1 + day % 28:02d}T12:00:00+00:00"
+        if path:
+            target = repo / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(message, encoding="utf-8")
+            run_git("add", path)
+            run_git("commit", "-q", "-m", message, when=when)
+        else:
+            run_git("commit", "-q", "--allow-empty", "-m", message, when=when)
+        return when
 
     def tag(name):
-        when = f"2026-01-{next(days):02d}T12:00:00+00:00"
-        run_git("commit", "-q", "--allow-empty", "-m", name, when=when)
+        when = commit(name)
         run_git("tag", name, when=when)
 
-    def guarded(ref):
-        return _run_step_script(guard, repo, {
+    runs = iter(range(1000))
+
+    def decide(ref, sha=None):
+        output = tmp_path / f"output-{next(runs)}"
+        result = _run_step_script(guard, repo, {
             **git_env, "GITHUB_REF": ref,
-            "GITHUB_REF_NAME": ref.split("/", 2)[-1]})
+            "GITHUB_REF_NAME": ref.split("/", 2)[-1],
+            "GITHUB_SHA": sha or run_git("rev-parse", "HEAD"),
+            "GITHUB_OUTPUT": str(output)})
+        return result, _read_outputs(output)
 
-    def deploys(latest, refused):
-        result = guarded(latest)
+    def writes(ref, folder, title, alias="", hidden="false", sha=None):
+        result, outputs = decide(ref, sha)
         assert result.returncode == 0, (
-            f"the guard refused {latest}, the latest release tag:\n"
+            f"the guard refused {ref}, which should write {folder}/:\n"
             f"{result.stdout}{result.stderr}")
-        for ref in refused:
-            result = guarded(ref)
-            assert result.returncode != 0, (
-                f"the guard let {ref} deploy the site; only the latest `v*` "
-                f"tag ({latest}) may, or an older release, a pre-release or "
-                "a branch replaces the current release's documentation")
+        expected = {"folder": folder, "title": title, "alias": alias,
+                    "hidden": hidden}
+        assert outputs == expected, (
+            f"{ref} decided {outputs}, not {expected}:\n{result.stdout}")
 
-    run_git("init", "-q")
-    # Tagged out of version order on purpose: v0.9.9 is created last, a
-    # day after v0.10.0, and sorts after v0.10.0 as text -- and v0.10.0 is
-    # still the latest. The dates are explicit so creation order is
-    # unambiguous; created in one second they tie, and a guard sorting by
-    # creation date would pass by accident.
-    for name in ("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"):
+    def refused(ref, why, sha=None):
+        result, outputs = decide(ref, sha)
+        assert result.returncode != 0, (
+            f"the guard let {ref} deploy {outputs}; it must write nothing, "
+            f"because {why}")
+        assert "folder" not in outputs, (
+            f"the guard refused {ref} but wrote {outputs} first; a job "
+            "output from a failed step is a decision half taken")
+        return result
+
+    run_git("init", "-q", "-b", "main")
+    commit("start")
+
+    # Lines below 1.0 are not published (no pre-1.0 compatibility).
+    # v0.10.0 sorts below v0.9.9 as text; neither may deploy.
+    for name in ("v0.9.8", "v0.10.0", "v0.9.9"):
         tag(name)
-    # A tag outside the release pattern that sorts above every `v*` tag,
-    # so a guard that drops the `v*` pattern compares against it.
-    tag("zz-not-a-release")
-    # A branch spelled like the latest tag: its short name is the latest
-    # tag's, so only the ref filter refuses it.
-    run_git("branch", "v0.10.0")
-    deploys("refs/tags/v0.10.0",
-            ("refs/tags/v0.9.9", "refs/tags/v0.9.8",
-             "refs/tags/zz-not-a-release", "refs/heads/main",
-             "refs/heads/release/0.10", "refs/heads/v0.10.0"))
+    refused("refs/tags/v0.9.9", "0.x lines are not published")
+    refused("refs/tags/v0.10.0", "0.x lines are not published")
 
-    # A release candidate, then its release. Under git's default version
-    # sort `v1.0.0rc1` outranks `v1.0.0`, and the release is refused.
-    tag("v1.0.0rc1")
+    tag("v1.0.0rc5")
+    tag("v1.0.0rc6")
+    writes("refs/tags/v1.0.0rc6", "1.0", "1.0.0rc6")
+    refused("refs/tags/v1.0.0rc5",
+            "rc5 is not the head of 1.0; rc6 is, and would be replaced")
+
     tag("v1.0.0")
-    deploys("refs/tags/v1.0.0", ("refs/tags/v1.0.0rc1", "refs/tags/v0.10.0"))
+    writes("refs/tags/v1.0.0", "1.0", "1.0.0", alias="latest")
+    refused("refs/tags/v1.0.0rc6",
+            "1.0 has a final, and a candidate would replace it")
+
+    tag("v1.1.0rc1")
+    writes("refs/tags/v1.1.0rc1", "1.1", "1.1.0rc1")
+    # A candidate of a later line is not a final: `latest` stays on 1.0.
+    writes("refs/tags/v1.0.0", "1.0", "1.0.0", alias="latest")
+
+    tag("v1.0.1")  # created after v1.1.0rc1
+    writes("refs/tags/v1.0.1", "1.0", "1.0.1", alias="latest")
+    refused("refs/tags/v1.0.0",
+            "v1.0.1 is 1.0's head; an older patch would put a superseded "
+            "release back into 1.0/ and latest/")
+
+    tag("v1.1.0")
+    writes("refs/tags/v1.1.0", "1.1", "1.1.0", alias="latest")
+    writes("refs/tags/v1.0.1", "1.0", "1.0.1")  # no alias: 1.1 is newer
+    refused("refs/tags/v1.1.0rc1", "1.1 has a final")
+
+    tag("v1.0.2rc1")
+    refused("refs/tags/v1.0.2rc1",
+            "1.0 has a final; latest must never describe a patch candidate")
+
+    # Numeric, not textual: v1.0.10 is the head of 1.0, above v1.0.9.
+    tag("v1.0.10")
+    tag("v1.0.9")
+    writes("refs/tags/v1.0.10", "1.0", "1.0.10")
+    refused("refs/tags/v1.0.9", "v1.0.10 is 1.0's head")
+
+    # Not release tags, and a branch spelled like one: its short name is a
+    # real line head's, so only the ref's prefix refuses it.
+    tag("zz-not-a-release")
+    tag("v1.0")
+    tag("v1.1.0.post1")
+    run_git("branch", "v1.1.0")
+    for ref in ("refs/tags/zz-not-a-release", "refs/tags/v1.0",
+                "refs/tags/v1.1.0.post1", "refs/heads/v1.1.0",
+                "refs/heads/feature/x", "refs/heads/release/0.9",
+                "refs/heads/release/1", "refs/heads/release/1.0.1",
+                "refs/pull/1/merge"):
+        refused(ref, "it is not a release tag, release/X.Y (X >= 1) or main")
+
+    writes("refs/heads/main", "dev", "dev", hidden="true")
+
+    # release/X.Y by dispatch. Its head is v1.1.0 for 1.1.
+    run_git("checkout", "-q", "-b", "release/1.1", "refs/tags/v1.1.0")
+    writes("refs/heads/release/1.1", "1.1", "1.1.0",
+           sha=run_git("rev-parse", "HEAD"))
+    commit("a docs-only page", "docs/midi-b.md")
+    commit("a setup change", "setup.py")
+    docs_only = run_git("rev-parse", "HEAD")
+    writes("refs/heads/release/1.1", "1.1", "1.1.0", sha=docs_only)
+    commit("a fix", "isocenter/x.py")
+    code = run_git("rev-parse", "HEAD")
+    result = refused("refs/heads/release/1.1",
+                     "isocenter/ changed since v1.1.0, so the API reference "
+                     "would describe code no release installs", sha=code)
+    assert "isocenter/x.py" in result.stdout + result.stderr, (
+        "the refusal does not name the changed file, so whoever dispatched "
+        f"it cannot tell why:\n{result.stdout}{result.stderr}")
+    # The sha decides, not what is checked out: the run is of the ref's tip.
+    run_git("checkout", "-q", docs_only)
+    refused("refs/heads/release/1.1", "the dispatched tip changed isocenter/",
+            sha=code)
+    run_git("checkout", "-q", "release/1.1")
+    writes("refs/heads/release/1.1", "1.1", "1.1.0", sha=docs_only)
+
+    # A branch that does not contain its line's head.
+    run_git("checkout", "-q", "-b", "release/1.0", "v1.0.1")
+    commit("docs on an old base", "docs/y.md")
+    refused("refs/heads/release/1.0",
+            "the branch does not contain v1.0.10, 1.0's head",
+            sha=run_git("rev-parse", "HEAD"))
+    # A line with no tag at all.
+    run_git("checkout", "-q", "-b", "release/1.2", "refs/tags/v1.1.0")
+    refused("refs/heads/release/1.2", "1.2 has no release to describe",
+            sha=run_git("rev-parse", "HEAD"))
+
+
+def test_the_docs_deploy_passes_the_guards_decision_to_mike(tmp_path):
+    """The deploy step turns the guard's four outputs into one `mike deploy`.
+
+    Run here with a stub `mike` on PATH that records its arguments, and a
+    real `origin` holding a `gh-pages` branch for the step's fetch. mike
+    itself is not run (the `docs` extra is not in the tests environment;
+    see the strict test's last paragraph). What this pins is the
+    assembly, which is where a silently wrong deploy would come from:
+    `latest` given without `--update-aliases` makes mike refuse to move
+    an alias another folder holds, and `dev` deployed without its hidden
+    property shows `main` in the selector (ruling Q3).
+    """
+    import os
+    import stat
+
+    import yaml
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    deploy = _step_named(DOCS_WORKFLOW, "deploy", DOCS_DEPLOY_STEP)
+    env = deploy.get("env") or {}
+    for name in DOCS_OUTPUTS:
+        assert env.get(name.upper()) == \
+            f"${{{{ needs.guard.outputs.{name} }}}}", (
+                f"the deploy step's {name.upper()} does not come from the "
+                f"guard's `{name}` output: {env.get(name.upper())!r}")
+    guard_job = workflow["jobs"]["guard"]
+    guard = _step_named(DOCS_WORKFLOW, "guard", DOCS_GUARD_STEP)
+    step_id = guard.get("id")
+    assert step_id, "the guard step has no id, so its outputs cannot be read"
+    for name in DOCS_OUTPUTS:
+        assert (guard_job.get("outputs") or {}).get(name) == \
+            f"${{{{ steps.{step_id}.outputs.{name} }}}}", (
+                f"the guard job does not declare its `{name}` output, so "
+                "the deploy job reads an empty string")
+
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    run_origin, git_env = _scratch_git(origin)
+    run_origin("init", "-q", "-b", "gh-pages")
+    run_origin("commit", "-q", "--allow-empty", "-m", "live site")
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True,
+                   capture_output=True,
+                   env={"PATH": os.environ["PATH"], **git_env})
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record = tmp_path / "mike-argv"
+    stub = bin_dir / "mike"
+    stub.write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done '
+                    f'> "{record}"\n', encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+
+    def deploys(folder, title, alias, hidden):
+        if record.exists():
+            record.unlink()
+        result = _run_step_script(deploy, work, {
+            **git_env, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "FOLDER": folder, "TITLE": title, "ALIAS": alias,
+            "HIDDEN": hidden})
+        assert result.returncode == 0, result.stdout + result.stderr
+        return record.read_text(encoding="utf-8").splitlines()
+
+    assert deploys("1.0", "1.0.1", "latest", "false") == [
+        "deploy", "--push", "--title", "1.0.1", "--update-aliases",
+        "1.0", "latest"]
+    assert deploys("1.0", "1.0.1", "", "false") == [
+        "deploy", "--push", "--title", "1.0.1", "1.0"]
+    assert deploys("1.1", "1.1.0rc1", "", "false") == [
+        "deploy", "--push", "--title", "1.1.0rc1", "1.1"]
+    assert deploys("dev", "dev", "", "true") == [
+        "deploy", "--push", "--title", "dev", "--prop-set", "hidden=true",
+        "dev"]
 
 
 def test_a_refused_docs_run_cannot_cancel_a_deploy():
-    """The guard is its own job, and only the deploy job is in the group.
+    """The guard is its own job, and deploys queue rather than cancel.
 
-    The deploy uses `concurrency` with `cancel-in-progress`, so the newest
-    deploy wins -- which is right only among runs that will deploy. When
-    the group sat at workflow level, a run the guard was about to refuse
-    (a patch tag on an older line, a dispatch from a branch, the second
-    of two tags pushed together) joined it first, cancelled the latest
-    release's deploy in progress, then refused itself: the site stayed on
-    whatever was live before that release. With the guard in a job with
-    no group, and the deploy needing it, only runs that passed the guard
-    compete.
+    When the concurrency group sat at workflow level, a run the guard was
+    about to refuse (a patch tag on an older line, a dispatch from a
+    branch, the second of two tags pushed together) joined it first,
+    cancelled the latest release's deploy in progress, then refused
+    itself: the site stayed on whatever was live before that release.
+    With the guard in a job with no group, and the deploy needing it,
+    only runs that passed the guard compete.
+
+    **`cancel-in-progress` is now `false` (#866).** Newest-wins was right
+    while every deploy wrote the one root site: a newer deploy replaced
+    all of it. With a versioned site, runs write different folders, and
+    cancelling a `1.0/` deploy because a `dev/` deploy started would lose
+    1.0's update silently. With `false` the deploys serialise, so two
+    mike commits never race inside the workflow. GitHub still keeps at
+    most one run pending per group and cancels the older pending one, so
+    losing a deploy takes three in flight and shows as a cancelled run;
+    it is re-dispatched from its ref (RELEASING.md, "Documentation site").
     """
     import yaml
 
@@ -2129,27 +2392,27 @@ def test_a_refused_docs_run_cannot_cancel_a_deploy():
     assert set(jobs) == {"guard", "deploy"}, sorted(jobs)
     assert "concurrency" not in workflow, (
         "docs.yml has a workflow-level concurrency group; a run its guard "
-        "refuses joins it and cancels the latest release's deploy in "
-        "progress")
+        "refuses joins it and can cancel a deploy")
     assert "concurrency" not in jobs["guard"], (
         "the guard job is in a concurrency group; a refused run must not "
         "be able to cancel anything")
     assert jobs["deploy"].get("needs") in ("guard", ["guard"]), (
         "the deploy job does not need the guard, so it runs whether or not "
-        "the ref is the latest release tag")
+        "the ref may write any folder")
     assert "if" not in jobs["deploy"], (
         "the deploy job is conditional; `if: always()` or similar runs it "
         "after a refused guard")
     concurrency = jobs["deploy"].get("concurrency") or {}
-    assert concurrency.get("cancel-in-progress") is True \
-        and concurrency.get("group"), (
-            "the deploy job has no concurrency group with "
-            "cancel-in-progress; two deploys of the latest tag could "
-            "interleave their pushes to gh-pages")
-    assert not any(step.get("name") == DOCS_LATEST_TAG_STEP
+    assert concurrency.get("group"), (
+        "the deploy job has no concurrency group; two deploys could "
+        "interleave their pushes to gh-pages")
+    assert concurrency.get("cancel-in-progress") is False, (
+        "the deploy job's group cancels a deploy in progress; with one "
+        "folder per line, a newer run for another folder would silently "
+        "drop the older run's update (#866)")
+    assert not any(step.get("name") == DOCS_GUARD_STEP
                    for step in jobs["deploy"]["steps"]), (
-        "the latest-tag guard runs in the deploy job, inside its "
-        "concurrency group")
+        "the guard runs in the deploy job, inside its concurrency group")
 
     steps = jobs["guard"]["steps"]
     uncapped = [step.get("name") or step.get("uses") for step in steps
