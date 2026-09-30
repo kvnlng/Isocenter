@@ -993,6 +993,14 @@ holds. Version order is git's `version:refname`, so `v1.0.10` is above
 - **To redeploy line X.Y** (after a failed or cancelled run), dispatch from
   `release/X.Y` if it is docs-only since its newest tag, or from that tag if
   the tag was cut after #866.
+- **Never "Re-run" a failed docs run; dispatch it again from its ref.** A
+  re-run reuses the old run's guard decision, which a newer tag may have
+  overtaken (a `latest` that belongs to a newer line, a patch that is no
+  longer its line's newest). The deploy job decides again from the tags just
+  before `mike deploy` and fails on any difference, so a re-run of a stale
+  run fails rather than deploying, but only a fresh dispatch deploys the
+  right thing. The same check stops a tag's deploy that queued behind a
+  newer tag's; dispatch that one again too, if its folder still needs it.
 - **Never dispatch `docs.yml` from a tag cut before #866** (`v1.0.0rc6` and
   every earlier tag). A dispatch runs the workflow file *at that ref*,
   which is the old `mkdocs gh-deploy`. While such a tag is the highest `v*`
@@ -1022,8 +1030,17 @@ hand commands in a clean checkout of the line's branch with the `docs`
 extra and `origin/gh-pages` fetched, so that `mkdocs.yml`'s
 `alias_type: copy` applies (a tree without it makes a symlink alias).
 
-- **Bad content in a folder:** re-dispatch that folder's ref, or `mike
-  deploy --push --title X.Y.Z X.Y` by hand from the previous good tag.
+- **Bad content in a folder:** re-dispatch that folder's ref, after
+  reverting the bad change on `release/X.Y` if that is where it came from.
+  By hand,
+  `mike deploy --push --title X.Y.Z X.Y` works only from a checkout that
+  carries #866's `mkdocs.yml`: a checkout of `release/X.Y` at the good
+  commit, or a tag cut after #866. From an older tree, such as
+  `v1.0.0rc6`, the build has no version selector and mike falls back to
+  its default alias type, so `latest` becomes a git symlink (ruled out,
+  Q7). **Until a tag cut after #866 exists, the rollback for `1.0/` is a
+  re-dispatch of `release/1.0`**; the tag-based form is valid for 1.0 from
+  the first tag cut after #866 (the next 1.0 candidate or `v1.0.0`) on.
 - **Wrong `latest`:** `mike alias --push --update-aliases X.Y latest`.
 - **Unwanted `dev`:** `mike delete --push dev`.
 - **Abandon versioning** (before or after 1.0.0): revert the #866 change on
