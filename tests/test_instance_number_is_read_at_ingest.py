@@ -8,8 +8,9 @@ store's `instance_number` column and the scan worker's clone. All three
 said 0.
 
 The owner's ruling: read InstanceNumber at ingest, 0 when the file has
-none. A value that is not one DICOM IS integer -- empty, multi-valued,
-not a number, outside IS's range -- is read as none, and ingest goes on:
+none. A value pydicom does not read as one integer -- empty,
+multi-valued, a fraction, not a number -- or one outside IS's range is
+read as none, and ingest goes on:
 an ill-formed Instance Number is not a reason to refuse the file. The
 attribute is the file's element either way and is not touched by this.
 """
@@ -99,9 +100,20 @@ def test_an_ill_formed_instance_number_does_not_refuse_the_file(tmp_path, raw):
         assert inst.instance_number == 0
 
 
-def test_an_instance_number_outside_the_is_range_reads_as_zero(tmp_path):
-    """IS holds -2**31 .. 2**31-1. A value past it is not one, and one long
-    enough would not fit the store's INTEGER column either."""
+@pytest.mark.parametrize("text, expected", [
+    ("-1", -1),
+    ("-2147483648", -2147483648),   # IS's least value
+    ("-2147483649", 0),             # one past it
+    ("2147483647", 2147483647),     # IS's greatest value
+    ("2147483648", 0),              # one past it
+], ids=["minus-one", "is-min", "below-is-min", "is-max", "above-is-max"])
+def test_the_is_range_bounds_what_is_read(tmp_path, text, expected):
+    """IS holds -2**31 .. 2**31-1, negatives included, and a value past
+    either end reads as 0. One long enough past it would not fit the
+    store's INTEGER column either.
+
+    Written past pydicom, over a 12-byte marker, so the file carries the
+    text exactly and the element's length is unchanged."""
     marker = "000000097531"
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
     ds.InstanceNumber = marker
@@ -111,9 +123,9 @@ def test_an_instance_number_outside_the_is_range_reads_as_zero(tmp_path):
         data = f.read()
     assert data.count(marker.encode()) == 1
     with open(path, "wb") as f:
-        f.write(data.replace(marker.encode(), b"2147483648  "))
+        f.write(data.replace(marker.encode(), text.ljust(len(marker)).encode()))
     inst = _ingested(path)
-    assert inst.instance_number == 0
+    assert inst.instance_number == expected
 
 
 def test_the_store_column_holds_the_files_instance_number(tmp_path):

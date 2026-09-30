@@ -4060,12 +4060,16 @@ def _instance_number_of(ds) -> int:
     attribute `0020,0013` is populated from the element separately and is
     not touched by this.
 
-    A value that is not one IS integer -- absent, empty, multi-valued, a
-    fraction (pydicom reads `4.5` as `ISfloat`), text pydicom cannot
-    convert, or outside IS's range -- reads as 0, the value a file with no
-    Instance Number gets. An ill-formed Instance Number is not a reason to
-    refuse the file. The range check is also what keeps a long malformed
-    value out of the store's INTEGER column, which would overflow on save.
+    A value pydicom does not read as a single integer -- absent, empty,
+    multi-valued, a fraction (pydicom reads `4.5` as `ISfloat`), or text it
+    cannot convert, which it leaves as a `str` -- reads as 0, the value a
+    file with no Instance Number gets, and so does an integer outside IS's
+    range. An ill-formed Instance Number is not a reason to refuse the
+    file. What pydicom does read as one integer is taken as it reads it,
+    including spellings a conformant IS string would not use: `1e3` and
+    `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
+    long malformed value out of the store's INTEGER column, which would
+    overflow on save.
 
     Args:
         ds: The pydicom Dataset read from the file.
@@ -4074,18 +4078,16 @@ def _instance_number_of(ds) -> int:
         int: A plain `int`, never pydicom's `IS`, so the field pickles and
             binds to sqlite as the builtin.
     """
-    try:
-        value = ds.get("InstanceNumber")
-    except (TypeError, ValueError, OverflowError):
+    # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
+    # `str` pydicom leaves unconverted are not, and read as 0. No `str`
+    # arm: pydicom leaves text unconverted only when `float()` refused it,
+    # and `int()` refuses everything `float()` does. No `try` around the
+    # read either: it raises only under pydicom's process-wide RAISE
+    # reading mode, where `populate_attrs` would refuse the file anyway.
+    value = ds.get("InstanceNumber")
+    if not isinstance(value, int):
         return 0
-    # `IS` is an `int` subclass; an unconverted value arrives as `str`. A
-    # `MultiValue`, `ISfloat` or None is none of these and reads as 0.
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        return 0
-    try:
-        number = int(value) if isinstance(value, int) else int(value.strip())
-    except ValueError:
-        return 0
+    number = int(value)
     return number if _IS_MIN <= number <= _IS_MAX else 0
 
 

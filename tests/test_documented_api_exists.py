@@ -564,7 +564,12 @@ _FORWARDS_OPTIONS_TO = {"export": "_export_dicom"}
 
 
 def _session_signatures(source=None):
-    """`{method: (accepted keywords, takes **kwargs)}` for the session class."""
+    """`{method: (accepted keywords, takes **kwargs, required)}` for the session class.
+
+    `required` is `(positional, keyword_only)`: the names of the parameters
+    with no default, in order, that a call must fill (#812 made
+    `export_dataframe`'s path one, and four notebook cells raised).
+    """
     source = source or (PACKAGE / "session.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     cls = next(node for node in tree.body
@@ -576,12 +581,19 @@ def _session_signatures(source=None):
         args = node.args
         names = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
         names.discard("self")
-        signatures[node.name] = (names, args.kwarg is not None)
+        positional = [a.arg for a in (*args.posonlyargs, *args.args)]
+        if positional and positional[0] == "self":
+            positional = positional[1:]
+        positional = positional[:len(positional) - len(args.defaults)]
+        keyword_only = [a.arg for a, default in zip(args.kwonlyargs, args.kw_defaults)
+                        if default is None]
+        signatures[node.name] = (names, args.kwarg is not None,
+                                 (positional, keyword_only))
     for method, door in _FORWARDS_OPTIONS_TO.items():
         if method in signatures and door in signatures:
-            own, _ = signatures[method]
-            forwarded, variadic = signatures[door]
-            signatures[method] = (own | forwarded, variadic)
+            own, _, required = signatures[method]
+            forwarded, variadic, _ = signatures[door]
+            signatures[method] = (own | forwarded, variadic, required)
     return signatures
 
 
@@ -598,8 +610,18 @@ def _notebook_code(path):
     return "\n".join(lines)
 
 
+#: Marks a required parameter a call leaves unfilled, in `_notebook_offenders`.
+MISSING = "missing: "
+
+
 def _notebook_offenders(path, signatures, receiver="session"):
-    """`(line, method, keyword or None)` per call the session cannot take."""
+    """`(line, method, problem)` per call the session cannot take.
+
+    `problem` is None for a method the session lacks, the keyword for one
+    it does not accept, or `MISSING + name` for a required parameter the
+    call does not fill. A call spreading `*args` or `**kwargs` is not
+    counted short: what it fills cannot be read.
+    """
     tree = ast.parse(_notebook_code(path))
     offenders = []
     for node in ast.walk(tree):
@@ -612,12 +634,19 @@ def _notebook_offenders(path, signatures, receiver="session"):
         if method not in signatures:
             offenders.append((node.lineno, method, None))
             continue
-        accepted, variadic = signatures[method]
+        accepted, variadic, (positional, keyword_only) = signatures[method]
         for keyword in node.keywords:
             if keyword.arg is None or variadic and method not in _FORWARDS_OPTIONS_TO:
                 continue
             if keyword.arg not in accepted:
                 offenders.append((node.lineno, method, keyword.arg))
+        spread = (any(isinstance(a, ast.Starred) for a in node.args)
+                  or any(k.arg is None for k in node.keywords))
+        if not spread:
+            given = {k.arg for k in node.keywords}
+            for name in positional[len(node.args):] + keyword_only:
+                if name not in given:
+                    offenders.append((node.lineno, method, MISSING + name))
     return offenders
 
 
@@ -625,7 +654,9 @@ def test_the_getting_started_notebook_calls_methods_with_keywords_they_accept():
     """Every `session.<m>(k=...)` in the notebook must be a call `m` takes (#634).
 
     Red on the notebook as it stood: `export(..., safe=True,
-    compression="j2k")`, two keywords the DICOM door never had.
+    compression="j2k")`, two keywords the DICOM door never had. Red again
+    at #812, which made `export_dataframe`'s path required while four
+    cells called it with none: a missing required argument counts too.
     """
     signatures = _session_signatures()
     assert "export" in signatures and "ingest" in signatures, signatures.keys()
@@ -635,7 +666,9 @@ def test_the_getting_started_notebook_calls_methods_with_keywords_they_accept():
         "it does not accept, so the notebook raises for anyone who runs "
         "it (#634):\n" + "\n".join(
             f"    line {line}: session.{method}("
-            + (f"{keyword}=...)" if keyword else ") does not exist")
+            + (") does not exist" if keyword is None
+               else f") {keyword}" if keyword.startswith(MISSING)
+               else f"{keyword}=...)")
             for line, method, keyword in offenders))
 
 
@@ -653,7 +686,8 @@ _FIXTURE_SESSION = (
     "    def ingest(self, directory): pass\n"
     "    def export(self, folder, format='dicom', **options): pass\n"
     "    def _export_dicom(self, folder, subset=None, verify_readback=False): pass\n"
-    "    def anything(self, **kwargs): pass\n")
+    "    def anything(self, **kwargs): pass\n"
+    "    def write(self, output_path, expand=False, *, mode): pass\n")
 
 
 def test_the_notebook_check_resolves_export_through_its_dicom_door(tmp_path):
@@ -684,3 +718,22 @@ def test_a_keyword_the_dicom_door_does_not_take_is_flagged(tmp_path):
     assert _notebook_offenders(path, signatures) == [
         (1, "export", "safe"), (1, "export", "compression"),
         (2, "ingets", None)]
+
+
+def test_a_call_that_leaves_a_required_parameter_unfilled_is_flagged(tmp_path):
+    """#812's shape: `export_dataframe(expand_metadata=True)` once its path
+    had no default. A positional or a keyword fills a parameter; a spread
+    call is not judged."""
+    signatures = _session_signatures(_FIXTURE_SESSION)
+    path = _notebook(tmp_path,
+                     "session.write(expand=True)\n"
+                     "session.write('out.csv', mode='a')\n"
+                     "session.write(output_path='out.csv', mode='a')\n"
+                     "session.write('out.csv')\n"
+                     "session.write(*args, **kwargs)\n"
+                     "session.ingest()\n")
+
+    assert _notebook_offenders(path, signatures) == [
+        (1, "write", MISSING + "output_path"), (1, "write", MISSING + "mode"),
+        (4, "write", MISSING + "mode"),
+        (6, "ingest", MISSING + "directory")]
