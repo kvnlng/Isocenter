@@ -538,3 +538,23 @@ def test_every_file_without_modality_gets_its_own_row(tmp_path):
                                source_dir=source)
 
     assert len(_modality_rows(warnings)) == 2, warnings
+
+
+def test_a_source_with_no_modality_is_written_without_one_and_reported(
+        tmp_path):
+    """CT_small with Modality deleted and no rule. Ingest builds the Series
+    with `OT` and the stamp wrote `Modality 'OT'`, a value the source never
+    held. Now the file carries none, as for a source with no Series Number
+    (Q3's analog), and the non-conformance row is written: the worker
+    cannot tell a rule's removal from a source's absence, and the file is
+    non-conformant either way. Pending owner ruling M2 on #869, which may
+    choose to record at ingest whether the source had Modality and write
+    the row only for a rule's removal; this test is its own commit so that
+    reversal is cheap. Kills: the stamp restored."""
+    out, warnings = _pipeline(tmp_path, {}, modality=None)
+
+    [path] = _dicoms(out)
+    assert "Modality" not in pydicom.dcmread(str(path))
+    assert "_OT_" in path.parent.name
+    rows = _modality_rows(warnings)
+    assert len(rows) == 1 and "absent" in rows[0], warnings
