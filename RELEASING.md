@@ -457,10 +457,18 @@ a re-tag.
    that conflicts there: run `git checkout --ours CHANGELOG.md`, then
    `git add CHANGELOG.md` (without it the conflict stays unresolved),
    then `git cherry-pick --continue`. Resolve any other conflict as the
-   code on `main` requires, and have the PR reviewed like any other. If the
-   fix does not apply to `main` (the code is gone there), say so in the
-   release-branch PR instead. The changelog entry reaches `main` with the
-   released section in step 8, once the patch ships.
+   code on `main` requires, and have the PR reviewed like any other.
+   **A fix that retook `fingerprint/output.json`** brings the release
+   line's recording, not what `main` exports: take `main`'s copy back as
+   for `CHANGELOG.md` (never resolve a conflict in it by hand), then on
+   `main` check on 3.12, take and check on 3.14t, as "Changes land on
+   `main`", step 3, says, with the `**Output:**` lines it needs. **A fix
+   that bumped `CONFIG_VERSION`** takes `main`'s value back and bumps
+   `main`'s own minor, with its `SCHEMA_BY_VERSION` row in
+   `tests/test_config_schema_version.py` and the literals the bump moves.
+   If the fix does not apply to `main` (the code is gone there), say so in
+   the release-branch PR instead. The changelog entry reaches `main` with
+   the released section in step 8, once the patch ships.
 4. Release it by following "Cutting a release" from step 3, with version
    `X.Y.Z+1`. The branch already exists, so steps 1 and 2 do not apply.
    Step 3 renames the branch's `[Unreleased]` to `[X.Y.Z+1]`, and step 8
@@ -468,6 +476,9 @@ a re-tag.
 
 A fix that applies only to `main` (already gone from the release line) is an
 ordinary change to `main`.
+
+A security fix kept private until its release does not follow this
+section: see "Security fixes under embargo".
 
 ### Never merge a release branch into `main`
 
@@ -638,6 +649,283 @@ cut this way (#818, #821, #822).
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
+
+## Security fixes under embargo
+
+`.github/SECURITY.md` promises that a confirmed security problem "is fixed
+in a release, and a GitHub Security Advisory is published with that
+release". Every other path in this file puts a change on a public branch,
+in a public PR, before any release carries it, and so discloses the
+problem before its fix can be installed. This section is the path that
+does not (#838). It is a patch release ("Patch releases") with four
+differences: the work is private until the moment of release, the
+release's integration run is made before anything is public, the
+TestPyPI rehearsal is replaced by local runs, and the fix and the release
+commit reach `release/X.Y` as one commit.
+
+The GitHub facts it rests on are GitHub's documentation as read on
+2026-09-30, cited by page:
+- *Managing privately reported vulnerabilities* (docs.github.com,
+  code-security): a private report arrives as an advisory with status
+  `Triage`; **Accept and open as draft** "doesn't make the report
+  public"; comments on it are "visible only to the reporter and to any
+  collaborators on the advisory"; **Close security advisory** rejects it.
+- *Collaborating in a temporary private fork*: "integrations, including
+  CI, cannot access temporary private forks"; "status checks do not run
+  on pull requests in temporary private forks"; at **Merge pull
+  request(s)** GitHub "won't enforce any of the protection rules" of the
+  target branch, merges every open PR of the fork at once, and allows
+  only one into `main`.
+- *Publishing a repository security advisory*: "Publishing a security
+  advisory deletes the temporary private fork"; add a fixed version
+  before publishing, or Dependabot alerts users "without offering any
+  safe version to update to"; with "Request CVE ID later" chosen, the
+  **Publish advisory** button is replaced by **Request CVE**.
+- *About repository security advisories*: GitHub is a CVE Numbering
+  Authority; it "usually reviews the request within 72 hours", and
+  "requesting a CVE identification number doesn't make your security
+  advisory public". After publication anyone sees the advisory, and
+  collaborators see its conversation history.
+
+**The tag must be in this repository.** `publish.yml` cannot run from the
+private fork: no workflow runs there (the first citation above), and
+Trusted Publishing matches this repository by name ("What cannot be
+undone"), so a run anywhere else could not upload. Its build job also
+refuses a `pypi` run from anything but a `v*` tag. So the fix is public
+from the moment its branch is pushed to `origin` until the upload ends.
+That window is kept to the few minutes of landing and tagging
+("Disclosure", steps 2 to 4) plus one `publish.yml` run of about 20
+minutes: about 25 minutes in all.
+GHSA-phg9-vcvc-j4r7 (0.9.7), fixed before this section existed, was
+public for 41 minutes: squashed onto `main` from its fork at 01:28 UTC
+(1c41e5e3, "Merge commit from fork"), uploaded at 02:09, advisory
+published at 02:10.
+
+### Intake and triage
+
+1. **A report arrives** by private vulnerability reporting, as an
+   advisory in `Triage`, or by email to the address SECURITY.md names.
+   For an email, or a problem the maintainers find themselves, the owner
+   creates a draft advisory (**Security → Advisories → New draft security
+   advisory**). Reply to the reporter: SECURITY.md promises a reply.
+2. **Decide whether it is a security problem**, by SECURITY.md's "What
+   counts" and "What does not". If it is not, comment on the advisory to
+   say why and which public issue to open (by shape, never by content),
+   then close it.
+3. **The owner decides embargo or in the open.** In the open, it is an
+   ordinary change ("Patch releases", or "Changes land on `main`"), and
+   an advisory is still published with the release that fixes it, as
+   SECURITY.md promises. #840 was fixed in the open by the owner's
+   decision, because the maintainers found it and no report was
+   outstanding. Under embargo, accept the report as a draft, and go on.
+4. **Fill the draft now:** package `isocenter` (pip), the affected range,
+   the patched version this release will have, severity, weaknesses, and
+   credit for the reporter unless they ask not to be named. **Request a
+   CVE now,** for every embargoed advisory (owner ruling on #867,
+   2026-09-30): leave the draft's CVE identifier at "Request CVE ID
+   later", then press **Request CVE** at the bottom of the draft form.
+   GitHub's review can take three days, and the request does not make
+   the advisory public. Once it is requested, **Publish advisory** is
+   the button Disclosure step 6 finds there.
+5. **Start a temporary private fork** from the advisory, and add as
+   collaborators whoever will develop or review.
+
+**Nothing about the problem goes anywhere public until "Disclosure"
+below:** no issue, no discussion, no PR, no branch or commit on `origin`,
+and no mention in any other PR, commit message or changelog entry. The
+advisory's GHSA ID stands where an issue number would. The work branch
+lives in a local worktree, and its upstream is the fork: `git remote add
+ghsa <fork URL>` (remotes belong to the repository, so `origin` stays
+beside it, and the steps below fetch from `origin`), then `git push -u
+ghsa <branch>`, and check that `git config branch.<branch>.remote`
+prints `ghsa` before any bare `git push`. Never push the branch to
+`origin` before Disclosure step 2.
+
+### The private fix
+
+1. **Choose the version and base.** The base is the tip of
+   `release/X.Y` for the latest line SECURITY.md supports. The version is
+   the line's next patch (`X.Y.Z+1`), or, while that line is in
+   candidates, its next candidate (`X.Y.Zrc<N+1>`), carrying this fix
+   and nothing picked from `main`.
+
+   **If a release is already in progress on the same line, the
+   security fix goes first. The in-progress release pauses, rebases onto
+   the security patch, and restarts its gate** (owner ruling on #867,
+   2026-09-30). In progress means any stage before its tag is pushed,
+   from picks being prepared locally to a release commit merged and not
+   yet tagged. A release whose tag is already pushed does not pause and
+   is not rebased (the last case below). Which number the security
+   release takes depends on how far the other release got:
+   - **No release commit merged yet** (picks being prepared, or its pick
+     or release-commit PR open): the security release takes the next
+     number, and the paused release's number moves up by one. When it
+     rebases, its `isocenter/_version.py`, `CITATION.cff` and
+     `CHANGELOG.md` heading conflict, and move to that number.
+   - **A release commit merged on `release/X.Y`, and no tag pushed:**
+     the pending version is unreleased, and the security fix folds into
+     it (owner ruling on #867, 2026-09-30). The version is that pending
+     one (1.0.2, say), and it ships as the security release. The branch
+     leaves `isocenter/_version.py` alone, puts its entry in the
+     existing `[X.Y.Z]` section, as a fix after the release-commit PR
+     does (step 3 of "Cutting a release"), and moves the section's and
+     `CITATION.cff`'s dates when the upload's UTC date differs. Step 5's
+     runs below are that release's integration run, made again at this
+     branch's head. Any of its PRs still open (a rehearsal fix, say)
+     pause, and rebase afterwards.
+   - **A tag already pushed:** a pushed tag is never moved (owner
+     ruling on #867, 2026-09-30). That release does not pause. It is
+     published first, as it is, and the security release follows it,
+     taking the next number, on top of that tag.
+
+   **Nothing public says why a release paused:** no comment, label,
+   title or description on its PRs names a security release. The reason
+   is recorded on the advisory.
+2. **Develop** on a work branch off that tip, tests first, as "Changes
+   land on `main`" says. The branch holds four things:
+   - the fix and its tests;
+   - a `CHANGELOG.md` section `## [X.Y.Z+1] - YYYY-MM-DD` (or the
+     pending release's section) holding a `### Security` entry, and any
+     `**Output:**` line (below);
+   - `isocenter/_version.py` and `CITATION.cff` at the new version
+     (already there, dates aside, when the fix folds into a pending
+     release);
+   - `fingerprint/output.json` and the `CONFIG_VERSION` bump, when the
+     fix needs them (below).
+
+   **This is the release commit too,** unlike step 3 of "Cutting a
+   release", which contains only the version files: it lands as one
+   squash commit, so that the window holds one public PR, not two
+   (owner ruling on #867, 2026-09-30). The
+   dates are the UTC date the upload will happen on ("Both dates are
+   UTC"). Choose a disclosure time and write its date; if the time
+   moves past midnight UTC, correct both dates on the branch before
+   disclosure.
+3. **The `### Security` entry** is written to the depth of 0.9.7's
+   GHSA-phg9-vcvc-j4r7 entry: its bold lead names what an export carried
+   or let someone recover, ending with the GHSA ID (and the CVE ID, if one
+   is assigned) in the parenthesis where an issue number goes; which
+   releases did it, measured on the latest; who reported it or how it was
+   found; **Now**; what it does not cover; what a previously-working call
+   now does differently; and what to do about files earlier releases
+   exported. The advisory's description says the same, and its affected
+   range and patched version match the entry. Commit messages end with
+   the GHSA ID where an issue number goes.
+4. **If the fix changes exported output**, retake the fingerprint on this
+   branch as "Changes land on `main`", step 3, says (check on 3.12, take,
+   check on 3.14t), and name every group in an `**Output:**` line in the
+   new section. **If it changes what a configuration file does to the
+   same input** (findings, values a rule writes, tags a rule reaches,
+   pixel zones or date jitter), bump `CONFIG_VERSION`'s minor as the
+   comment above it in `isocenter/config_manager.py` says, with the
+   literals and the fingerprint that bump moves.
+5. **Rebase on the tip of `release/X.Y` and run, at the branch head,
+   with the SHA in each log:**
+   - `pytest -v --changed --changed-base=release/X.Y` on 3.12 and 3.14t;
+   - **the full suite on 3.12 and 3.14t**, the patch release's
+     integration test (step 3 of "Cutting a release"), with its rerun
+     rule;
+   - **the full suite on 3.13 and 3.14**, which replaces the rehearsal
+     (below). A red here is answered as step 4 of "Cutting a release"
+     answers a red `test-supported` job: fix it, or delete that version's
+     classifier from `setup.py` on this branch;
+   - `python -m build` in a scratch worktree at the head, with every
+     `isocenter/resources/*.json` in the wheel (`unzip -l`);
+   - `python -m scripts.output_fingerprint check` on 3.12 and 3.14t, and
+     `compare --base` the tag that `previous-tag --line X.Y` prints, as
+     step 3 of "Cutting a release" requires of a patch.
+
+   The runs happen before anything is public, so a failure costs only
+   time.
+6. **Adversarial review**, locally, of the branch as rebased. The reviewer
+   approves one SHA and checks:
+   - the new tests fail at the base tip and pass at the head;
+   - the fix, as for any change;
+   - `git diff --stat <base> <head>` touches only the fix, its tests,
+     `CHANGELOG.md`, `isocenter/_version.py`, `CITATION.cff`, the
+     fingerprint and `CONFIG_VERSION` changes if any, and step 5's
+     classifier deletion from `setup.py`, or its fix for 3.13 or 3.14, if
+     any, named by its own `CHANGELOG.md` line: nothing else rides
+     along;
+   - the entry is to the depth above, and agrees with the advisory
+     draft's text, affected range, patched version and credit;
+   - the version files agree and the dates are the planned UTC date;
+   - every `**Output:**` group, and the `CONFIG_VERSION` bump when the fix
+     needs one;
+   - the logs of step 5, all at the SHA under review.
+
+   A change after approval is a re-review of the delta and step 5 again.
+   Record the approval, with its SHA, as a comment on the advisory: the
+   fork and anything in it are deleted when the advisory is published,
+   while the advisory's conversation stays with its collaborators. Push
+   the approved branch to the fork.
+
+**No rehearsal** (owner ruling on #867, 2026-09-30). Step 4 of "Cutting
+a release" runs `publish.yml` from `release/X.Y`, which would need the
+fix there, public, for a second full run before the tag. The local full
+suite on 3.13 and 3.14 replaces it, beside step 5's runs on 3.12 and
+3.14t and the local build. `publish.yml` then runs the same gates from
+the tag before it uploads. A failure there is not free, as it is under
+"Cutting a release": the fix is public by then, with nothing to install.
+Disclosure step 5 says what happens instead. If `test-supported` goes red
+in that run after step 5's local runs were green, the upload has already
+happened and the release ships (owner ruling on #867, 2026-09-30). The
+next release on that line deletes that version's classifier from
+`setup.py`, or fixes the break, and its `CHANGELOG.md` entry says which,
+and why.
+
+### Disclosure
+
+An admin does these steps in one sitting, without pausing between them.
+
+1. **Check the date.** The upload comes about 25 minutes after step 2's
+   push: a few minutes to land and tag, then about 20 after step 5's
+   dispatch. If it would not fall on the written UTC date, stop here,
+   while nothing is public: wait, or correct the dates on the branch
+   (a date-only delta, re-approved by the reviewer).
+2. **Land it:** push the approved branch to `origin`, open its PR into
+   `release/X.Y` with every log and the approved SHA in the body (the PR
+   is the public record that outlives the fork), and merge it at once
+   with `gh pr merge N --squash --admin --match-head-commit <sha>`
+   (owner ruling on #867, 2026-09-30). Not the advisory's **Merge pull
+   request(s)**, which 0.9.7 used: it pins no SHA, and GitHub documents
+   what it does to `main` only, not to a release branch.
+3. **Check the tree:** `git fetch origin`, then `git diff --stat <sha>
+   origin/release/X.Y` prints nothing. If it prints anything, the branch
+   moved under the merge: stop, and do not tag.
+4. **Tag and push** the merge commit, as step 5 of "Cutting a release"
+   says. This deploys the documentation, as it always does.
+5. **Publish**: `gh workflow run publish.yml --ref vX.Y.Z -f
+   target=pypi`, and watch it to the upload. **A red `test-floor` job is
+   rerun once** (`gh run rerun <run id> --failed`; owner ruling on #867,
+   2026-09-30). If it is still red, the fix goes forward in the same
+   sitting. It takes "The private fix" steps 2 to 6 (the tests, the runs
+   and the review), though nothing about it is private any more, then
+   these steps again from step 1, so that the UTC date check runs
+   again. The pushed tag is never moved (see "The
+   private fix", step 1), so the forward fix takes the next number: its
+   branch moves the version files and the `CHANGELOG.md` heading to it,
+   and the advisory's patched version moves with them. The version that
+   never uploaded is skipped. The advisory waits for an upload.
+6. **Publish the advisory** once the upload has succeeded, and not
+   before: an advisory without an installable fixed version alerts users
+   with nothing to update to. This deletes the fork.
+7. **Create the GitHub Release**, as step 7 of "Cutting a release" says.
+
+### After disclosure
+
+The problem is public now, and the rest is the ordinary procedure.
+
+1. **Forward-port to `main`** as "Patch releases", step 3, says, by
+   `git cherry-pick -x` of the merge commit, the same day. The commit
+   also carries the version files, so take all three back:
+   `git checkout HEAD~ -- CHANGELOG.md isocenter/_version.py CITATION.cff`
+   before the amend, or `--ours` on each in a conflict. A fingerprint or
+   `CONFIG_VERSION` change is carried as "Patch releases", step 3, says.
+   On a line in candidates, the next release's pick range leaves it out as
+   a forward-port, by its `-x` line.
+2. **Bring the release record back** as step 8 of "Cutting a release"
+   says.
 
 ## Documentation site
 
