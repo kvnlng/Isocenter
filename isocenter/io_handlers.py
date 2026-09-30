@@ -6916,6 +6916,33 @@ class _ReVr:
 _RE_VR_NAMED = 10
 
 
+def _modality_warning(ds) -> Optional[str]:
+    """The `WARNING` sentence for a file written with no Modality, or with
+    an empty one; None when it carries one.
+
+    Modality (0008,0060) is Type 1 in the General Series module and its
+    equivalents (PS3.3 C.7.3.1), so such a file is not conformant. The
+    export writes it anyway, because the configuration asked for it
+    (#869, owner ruling Q6), and says so.
+
+    Args:
+        ds (pydicom.Dataset): The dataset as it will be written.
+
+    Returns:
+        Optional[str]: The sentence, or None.
+    """
+    if "Modality" not in ds:
+        state = "absent"
+    elif ds["Modality"].value in (None, "") or ds["Modality"].is_empty:
+        state = "empty"
+    else:
+        return None
+    return (f"Modality (0008,0060) is {state} in this file: it is Type 1, "
+            f"so the file is not conformant to its IOD. It was written as "
+            f"the graph holds it: the configuration removed or emptied "
+            f"it, or the source carried none.")
+
+
 def _re_vr_warning(revrs) -> Optional[str]:
     """The one `WARNING` sentence for an instance's re-VR'd private
     elements, or None when there are none.
@@ -7094,6 +7121,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         for tag in IODValidator.absent_type2(ds):
             ds.add_new(tag, dictionary_VR(tag), None)
 
+        # Modality is Type 1 and is never filled: a file whose instance
+        # holds none (a rule removed or emptied it, or the source had
+        # none) is written as it stands, with one `WARNING` row saying
+        # the file is not conformant (#869, owner ruling Q6). Per file,
+        # as the photometric and ambiguous-VR sentences are: it is a fact
+        # about this file's header.
+        modality = _modality_warning(ds)
+        if modality is not None:
+            warnings.append(modality)
+
         # There is deliberately no `populate_attrs(ds, inst)` here. That
         # is the ingest reader, and pointed at this dataset it writes the
         # merged result back onto the live instance: `add_sequence_item`
@@ -7118,9 +7155,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Image implementations MUST have pixels.
                 # Non-image (SR, PR, KO, DOC) can proceed without.
                 #
-                # From `ds`, not `inst.attributes`: the modality may
-                # live only at series level (hand-built graphs,
-                # write_tree()), and `ds` holds the merged view.
+                # From `ds`, the merged view the file is written from.
+                # Since #869 the export stamps no Modality from the
+                # series, so this is the instance's own value after the
+                # rules; a file with none reads `OT` here.
                 mod = str(ds.get("Modality", "OT"))
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
@@ -8766,6 +8804,73 @@ def _get_attr_case_insensitive(attributes: dict, tag: str, default):
     return default
 
 
+#: `exported_number_text`'s "no such key", told apart from a key that holds
+#: None (a zero-length element). A `None` default would read an absent tag
+#: as an empty one: `NoNumber` where a removed number must read `0`.
+_NO_ATTRIBUTE = object()
+
+#: The range of an IS value (PS3.5 6.2): a number outside it is not one a
+#: file can carry, so it names nothing.
+_IS_MIN, _IS_MAX = -2**31, 2**31 - 1
+
+
+def _is_integer_text(text: str) -> bool:
+    """Whether `text` is an IS integer spelling in range: `[+-]?digits`."""
+    digits = text[1:] if text[:1] in ("+", "-") else text
+    # `isascii`: `str.isdigit` also accepts superscripts and other scripts'
+    # digits, which `int()` refuses or reads as a different number.
+    if not (digits.isascii() and digits.isdigit()):
+        return False
+    return _IS_MIN <= int(text) <= _IS_MAX
+
+
+def exported_number_text(attributes, tag) -> str:
+    """The text an IS number contributes to a name, read from what the
+    export writes: the item's own attribute after the rules (#869).
+
+    The one reader behind the `Series_<n>_...` folder
+    (`export_folder_names`) and the WFDB record name
+    (`isocenter.exporters.wfdb.record_name_for`), so a name says what the
+    file carries. `Series.series_number` and `Instance.instance_number`
+    are the source's values as ingested and are not read.
+
+    Args:
+        attributes (dict): A `DicomItem.attributes`-shaped dict.
+        tag (str): The IS tag, e.g. `"0020,0011"`.
+
+    Returns:
+        str: `"0"` when the tag is absent (a rule removed it, or the source
+            never had it) or holds anything a name cannot carry as a
+            number (multi-valued, decimal, unparseable text, out of the
+            IS range, a bool); `""` when it is zero-length, which each
+            caller spells its own way; otherwise the value's text,
+            stripped, so an IS read as `04` keeps its `0`.
+    """
+    # The text, not `int(value)`: pydicom's IS keeps its source spelling
+    # (`str(IS('04')) == '04'`) and writes it, and the store keeps it
+    # across a reopen, so a fresh export and a reopened one name the same
+    # folder. The Series' INTEGER column does not keep it, which is why
+    # the name no longer reads the Series (the committed fingerprint had
+    # `Series_04_` fresh and `Series_4_` reopened).
+    value = _get_attr_case_insensitive(attributes, tag, _NO_ATTRIBUTE)
+    if value is _NO_ATTRIBUTE:
+        return "0"
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, MultiValue)):
+        return "" if len(value) == 0 else "0"
+    # `bool` before `int` (it is one), and `float` before `int` because
+    # `ISfloat` is a float and must not name a folder by its decimal.
+    if isinstance(value, (bool, float)):
+        return "0"
+    if isinstance(value, (int, str)):
+        text = str(value).strip()
+        if isinstance(value, str) and text == "":
+            return ""
+        return text if _is_integer_text(text) else "0"
+    return "0"
+
+
 def export_folder_names(patient, study, series):
     """Build the Subject/Study/Series folder names for the exported file
     tree: the "Hybrid Naming" scheme `session.export(folder)` writes with
@@ -8830,12 +8935,20 @@ def export_folder_names(patient, study, series):
     except (AttributeError, IndexError, KeyError):
         # As above: fall back to the "Series" default.
         pass
-    # `str(None)` is "None", which reads as a series *numbered* None
-    # rather than one whose number was never recorded -- the same defect
-    # as the sliced placeholder, one line up.
-    se_num = ("NoNumber" if series.series_number is None
-              else str(series.series_number))
-    se_mod = series.modality or "OT"
+    # The number and the modality are what the file carries: the first
+    # instance's own `0020,0011` and `0008,0060` after the configuration's
+    # rules, read from the same instance as `se_desc` so every instance of
+    # a series lands in one folder (#869). Never `Series.series_number` or
+    # `Series.modality`: those are the source's values as ingested, and a
+    # folder named from them put a number or a modality a rule had removed
+    # back into the path. A removed number reads `0`; an empty one reads
+    # `NoNumber`, never `str(None)`, which reads as a series *numbered*
+    # None rather than one whose number is unknown. A removed or empty
+    # modality reads `OT`, the fallback a series with none always had.
+    first = series.instances[0].attributes if series.instances else {}
+    se_num = exported_number_text(first, "0020,0011") or "NoNumber"
+    se_mod = _get_attr_case_insensitive(first, "0008,0060", None)
+    se_mod = (se_mod.strip() if isinstance(se_mod, str) else "") or "OT"
     se_uid_suffix = (series.series_instance_uid[-5:]
                      if series.series_instance_uid else "NoUID")
     series_folder = ConfigLoader.clean_filename(
@@ -9099,10 +9212,11 @@ def export_stamp_attributes(patient, study, series):
     What the export writes over the instance's own attributes, as
     `export_folder_names` is where it writes them; `session.export()` and
     `DicomExporter.write_tree()` both use it. Study Time is stamped only
-    when the study has one, and equipment (Manufacturer, Model Name,
-    Device Serial Number) is never stamped: it is written from the
-    instance. A hand-built graph gets its equipment onto the instances
-    from `SeriesBuilder`.
+    when the study has one. Equipment (Manufacturer, Model Name, Device
+    Serial Number), Series Number and Modality are never stamped: they
+    are written from the instance, which is what `anonymize()` edits
+    (#570, #869). A hand-built graph gets them onto the instances from
+    `SeriesBuilder`.
 
     Args:
         patient (Patient): The patient root.
@@ -9113,7 +9227,7 @@ def export_stamp_attributes(patient, study, series):
         Tuple[dict, dict, dict]: `(patient_attributes, study_attributes,
             series_attributes)`, keyed by `"gggg,eeee"`.
     """
-    # Two things this deliberately does not stamp; do not add either:
+    # Three things this deliberately does not stamp; do not add any:
     #
     # * No Study Time unless the study has one. The worker writes a
     #   zero-length Study Time when nothing supplied one (Type 2
@@ -9124,6 +9238,7 @@ def export_stamp_attributes(patient, study, series):
     #   purpose, because `redact()` matches rules on it, so stamping from
     #   it would put the scanner's real serial back into a de-identified
     #   file.
+    # * No Series Number and no Modality; see `series_attributes` below.
     patient_attributes = {
         "0010,0010": patient.patient_name,
         # Empty for a subject with no Patient ID, under KEEP and REPLACE
@@ -9147,14 +9262,17 @@ def export_stamp_attributes(patient, study, series):
     if getattr(study, 'accession_number', None):
         study_attributes["0008,0050"] = study.accession_number
 
+    # No Series Number and no Modality (#869): each file carries its own
+    # instance's `0020,0011` and `0008,0060`, the elements `anonymize()`
+    # applies a configuration's rules to, as for equipment above.
+    # `Series.series_number` and `Series.modality` are the source's values
+    # as ingested; stamped over the instance's, they put back a number or
+    # a modality a rule had removed or replaced, under a PASS and
+    # `(0012,0062) YES`. A tag stamped here must be one `anonymize()` keeps
+    # in step with its owner (`RemediationService._owner_stamps_copy`);
+    # `test_every_stamped_tag_has_an_owner_arm_or_a_reason` pins that.
     series_attributes = {
         "0020,000e": series.series_instance_uid,
-        "0008,0060": series.modality,
-        # None stays None, a zero-length Series Number (Type 2). Never
-        # `str(None)`: IS refuses "None", so the element would be dropped
-        # with a DATA_LOSS row.
-        "0020,0011": (None if series.series_number is None
-                      else str(series.series_number)),
     }
     if getattr(series, 'series_description', None):
         series_attributes["0008,103e"] = series.series_description

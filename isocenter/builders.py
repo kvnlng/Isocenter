@@ -145,8 +145,11 @@ class SeriesBuilder:
     def add_instance(self, uid, cls, num):
         """Adds a child Instance to this Series.
 
-        The instance carries the series' equipment tags if `set_equipment`
-        has already run.
+        The instance carries the series' Series Number `(0020,0011)` and
+        Modality `(0008,0060)`, when the series has them, and its
+        equipment tags if `set_equipment` has already run. The export
+        writes each of these from the instance, never from the series
+        (#570, #869), so an instance built without them writes none.
 
         Args:
             uid (str): The SOP Instance UID.
@@ -157,6 +160,14 @@ class SeriesBuilder:
             InstanceContextBuilder: A builder for the new instance.
         """
         inst = Instance(uid, cls, num)
+        # What the export would once have stamped from the series. It now
+        # writes the instance's own elements, which is what `anonymize()`
+        # edits, so a hand-built graph's files carry these only if the
+        # instance holds them. `str`: IS and CS are text.
+        if self.series.series_number is not None:
+            inst.set_attr("0020,0011", str(self.series.series_number))
+        if self.series.modality:
+            inst.set_attr("0008,0060", str(self.series.modality))
         self._stamp_equipment(inst)
         self.series.instances.append(inst)
         return InstanceContextBuilder(self, inst)

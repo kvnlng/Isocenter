@@ -18,7 +18,9 @@ Measured at c8b4f15 and again at 220a20f, 3.12.14:
   into a de-identified file that `session.export()` wrote empty.
 - **Series Number None.** The session stamped `str(None)`, which IS
   refuses, so the element was dropped with a `DATA_LOSS` row;
-  `write_tree` wrote it zero-length. (Measured on the same base.)
+  `write_tree` wrote it zero-length. (Measured on the same base.) Since
+  #869 neither door stamps Series Number or Modality: both write the
+  instance's own elements, which is what `anonymize()` edits.
 
 One helper, `export_stamp_attributes`, now builds the stamps for both
 doors, with no literal time and no equipment. A study with no time is
@@ -204,20 +206,28 @@ def test_a_study_date_of_any_shape_is_the_same_on_both_doors(
     assert _read_one(via_tree).StudyDate == expected
 
 
-def test_a_series_with_no_number_writes_an_empty_series_number(tmp_path):
-    """Series Number is Type 2. The session stamped `str(None)`, which IS
-    refuses, so the element was dropped with a `DATA_LOSS` row. Both doors
-    now write it present and empty. Killing mutation: `str(None)`
-    restored in the helper."""
+@pytest.mark.parametrize("number, present", [
+    ("", True), (None, False)], ids=["empty", "absent"])
+def test_series_number_is_the_instance_s_own_on_both_doors(
+        tmp_path, number, present):
+    """Series Number is written from the instance, never stamped from the
+    series (#869). An instance holding `0020,0011 = ""` writes it present
+    and zero-length on both doors; one holding none, under a
+    `Series(..., 3)`, writes none on either: the serializer writes the
+    graph as it stands. Killing mutation: the `0020,0011` stamp restored
+    in `export_stamp_attributes`."""
+    extra = [("0020,0011", number)] if number is not None else []
     summary, via_session = _session_export(
-        tmp_path, _hand_built(_image(), series_number=None))
-    via_tree = _tree_export(tmp_path, _hand_built(_image(), series_number=None))
+        tmp_path, _hand_built(_image(extra), series_number=3))
+    via_tree = _tree_export(tmp_path, _hand_built(_image(extra),
+                                                  series_number=3))
 
     assert summary.written == 1, summary.failures
     for root in (via_session, via_tree):
         written = _read_one(root)
-        assert "SeriesNumber" in written
-        assert written["SeriesNumber"].value in (None, "")
+        assert ("SeriesNumber" in written) is present
+        if present:
+            assert written["SeriesNumber"].value in (None, "")
 
 
 # ---------------------------------------------------------------------------

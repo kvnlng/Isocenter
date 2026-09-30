@@ -355,12 +355,15 @@ def test_a_series_status_is_not_counted_its_instances_are(tmp_path):
     a Series status an edit made stale could not be cleared by `audit()` --
     the one thing the line says clears it -- and the run graded
     REVIEW_REQUIRED for the rest of the session. The edit is counted where
-    it is read: the cascade marks the series' instance changed."""
+    it is read: the cascade marks the series' instance changed. The edit is
+    of the Series UID, which the export stamps into every file; not of
+    `series_number`, which since #869 reaches no file and does not cascade
+    (`test_a_series_number_rule_reaches_the_export.py`)."""
     with _saved(tmp_path) as session:
         session.anonymize(session.audit())
         _patient, _study, series = _owners(session)
         assert series.phi_status is PhiStatus.REMEDIATED, "setup: #544 stamps it"
-        series.series_number = 9
+        series.series_instance_uid = series.series_instance_uid + ".9"
         assert series.phi_status is PhiStatus.UNSCANNED
         reasons, passed, _out = _graded(session, tmp_path)
     assert not passed
