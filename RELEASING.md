@@ -735,16 +735,28 @@ check `git config branch.<branch>.remote` prints `ghsa` before any bare
    and nothing picked from `main`.
 
    **The security fix goes first** (owner ruling on #867, 2026-09-30).
-   A release already in progress on the line, with its PRs into
-   `release/X.Y` open or its version not yet on PyPI, pauses. Once this
-   release is published, it rebases onto the security patch and starts
-   its gate again.
+   A release in progress on the line whose PRs into `release/X.Y` are
+   still open pauses. Once the security release is published, it
+   rebases onto the security patch and starts its gate again.
+
+   **A release commit already merged on `release/X.Y` whose version is
+   not on PyPI is unreleased, and the security fix folds into it**
+   (owner ruling on #867, 2026-09-30). The version is that pending one
+   (1.0.2, say), and it ships as the security release. The branch then
+   leaves `isocenter/_version.py` alone, puts its entry in the existing
+   `[X.Y.Z]` section, as a fix after the release-commit PR does (step 3
+   of "Cutting a release"), and moves the section's and `CITATION.cff`'s
+   dates when the upload's UTC date differs. Step 5's runs below are
+   that release's integration run, made again at this branch's head.
 2. **Develop** on a work branch off that tip, tests first, as "Changes
    land on `main`" says. The branch holds four things:
    - the fix and its tests;
-   - a `CHANGELOG.md` section `## [X.Y.Z+1] - YYYY-MM-DD` holding a
-     `### Security` entry, and any `**Output:**` line (below);
-   - `isocenter/_version.py` and `CITATION.cff` at the new version;
+   - a `CHANGELOG.md` section `## [X.Y.Z+1] - YYYY-MM-DD` (or the
+     pending release's section) holding a `### Security` entry, and any
+     `**Output:**` line (below);
+   - `isocenter/_version.py` and `CITATION.cff` at the new version
+     (already there, dates aside, when the fix folds into a pending
+     release);
    - `fingerprint/output.json` and the `CONFIG_VERSION` bump, when the
      fix needs them (below).
 
@@ -820,9 +832,11 @@ suite on 3.13 and 3.14 replaces it, beside step 5's runs on 3.12 and
 3.14t and the local build. `publish.yml` then runs the same gates from
 the tag before it uploads, and a failure before its upload job spends
 nothing ("If the publish run fails …", under "Cutting a release"). If
-`test-supported` goes red in that run, the usual rule applies: the
-release ships, and that version's classifier is deleted in the same
-release.
+`test-supported` goes red in that run after step 5's local runs were
+green, the upload has already happened and the release ships (owner
+ruling on #867, 2026-09-30). The next release on that line deletes that
+version's classifier from `setup.py`, or fixes the break, and its
+`CHANGELOG.md` entry says which, and why.
 
 ### Disclosure
 
