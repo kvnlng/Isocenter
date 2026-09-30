@@ -63,109 +63,14 @@ jobs:
         fetch-depth: 0
       timeout-minutes: 3
 
-    # Decides, and writes nothing to $GITHUB_OUTPUT until the decision is
-    # whole, so a refused run leaves no half-written outputs.
-    #
-    # "Line head" of X.Y is its highest *final* `vX.Y.Z`, or, while the
-    # line has no final, its highest pre-release. Order is git's
-    # `version:refname` (`v1.0.10` > `v1.0.9`), which creation order and
-    # text order are not. A pre-release is never ranked against a final
-    # -- finals are taken first -- so `versionsort.suffix` would decide
-    # nothing here and is deliberately not set.
-    #
-    # The release-branch rule compares against $GITHUB_SHA, the tip that
-    # was dispatched, never HEAD. `isocenter/` is the discriminator
-    # because mkdocstrings renders the API reference from it: a branch
-    # whose `isocenter/` equals its line head's describes exactly what
-    # `pip install isocenter==<title>` installs (#866, Q6).
-    #
-    # tests/test_packaging_contract.py runs this script against real tags.
+    # The rule lives in one file because the deploy job runs it again
+    # just before `mike deploy` (see there). The file says what the rule
+    # is and why; RELEASING.md, "Documentation site", has it as a table.
+    # tests/test_packaging_contract.py runs it against real tags.
     - name: Decide which docs folder this ref may write
       id: decide
       timeout-minutes: 1
-      run: |
-        refuse() {
-          echo "::error::$1"
-          exit 1
-        }
-        all_tags=$(git tag --list 'v*' --sort=-version:refname)
-        first_matching() {
-          printf '%s\n' "$all_tags" | awk -v re="$1" '$0 ~ re { print; exit }'
-        }
-        line_head() {
-          local head
-          head=$(first_matching "^v$1[.]$2[.][0-9]+\$")
-          if [ -z "$head" ]; then
-            head=$(first_matching "^v$1[.]$2[.][0-9]+(a|b|rc)[0-9]+\$")
-          fi
-          printf '%s' "$head"
-        }
-        alias=""
-        hidden=false
-        case "$GITHUB_REF" in
-          refs/tags/v*)
-            tag=${GITHUB_REF#refs/tags/}
-            if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
-              refuse "${tag} is not a release tag (vX.Y.Z, or vX.Y.Z with an a, b or rc suffix)"
-            fi
-            major=${BASH_REMATCH[1]}
-            minor=${BASH_REMATCH[2]}
-            if [ "$major" -lt 1 ]; then
-              refuse "${tag}: lines below 1.0 are not published"
-            fi
-            head=$(line_head "$major" "$minor")
-            if [ "$tag" != "$head" ]; then
-              refuse "${tag} is not the head of ${major}.${minor} (${head}); deploying it would replace that line's documentation with an older or pre-release build"
-            fi
-            folder="${major}.${minor}"
-            title=${tag#v}
-            top_final=$(first_matching '^v[0-9]+[.][0-9]+[.][0-9]+$')
-            if [ "$tag" = "$top_final" ]; then
-              alias=latest
-            fi
-            ;;
-          refs/heads/release/*)
-            line=${GITHUB_REF#refs/heads/release/}
-            if [[ ! "$line" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-              refuse "release/${line} is not a release line (release/X.Y)"
-            fi
-            major=${BASH_REMATCH[1]}
-            minor=${BASH_REMATCH[2]}
-            if [ "$major" -lt 1 ]; then
-              refuse "release/${line}: lines below 1.0 are not published"
-            fi
-            head=$(line_head "$major" "$minor")
-            if [ -z "$head" ]; then
-              refuse "release/${line} has no v${line}.* tag, so there is no release for its documentation to describe"
-            fi
-            if ! git merge-base --is-ancestor "$head" "$GITHUB_SHA"; then
-              refuse "release/${line} (${GITHUB_SHA}) does not contain ${head}, the line's newest tag"
-            fi
-            changed=$(git diff --name-only "$head" "$GITHUB_SHA" -- isocenter/)
-            if [ -n "$changed" ]; then
-              echo "changed under isocenter/ since ${head}:"
-              printf '  %s\n' $changed
-              refuse "release/${line} changed isocenter/ since ${head} ($(printf '%s ' $changed)); the API reference would describe code no release installs. Ship the page with the next patch."
-            fi
-            folder="${major}.${minor}"
-            title=${head#v}
-            ;;
-          refs/heads/main)
-            folder=dev
-            title=dev
-            hidden=true
-            ;;
-          *)
-            refuse "${GITHUB_REF} may not deploy the documentation: only a release tag, release/X.Y or main may"
-            ;;
-        esac
-        {
-          echo "folder=${folder}"
-          echo "title=${title}"
-          echo "alias=${alias}"
-          echo "hidden=${hidden}"
-        } >> "$GITHUB_OUTPUT"
-        echo "deploying ${GITHUB_REF} into ${folder}/ titled ${title}${alias:+, moving ${alias}}"
+      run: bash .github/scripts/docs_decide.sh
 
   deploy:
     needs: guard
@@ -183,7 +88,7 @@ jobs:
       cancel-in-progress: false
     # The inequality `tests.yml` also carries, and the
     # direction is the load-bearing half: this cap must EXCEED the sum of
-    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 + 5 = 24), so whatever
+    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 + 1 + 5 = 25), so whatever
     # hangs, the timeout that fires belongs to a step and the log names
     # it. It was the other way round until #635 -- a job cap of 10 over
     # step caps totalling 11, with three steps uncapped entirely -- so a
@@ -252,6 +157,40 @@ jobs:
     # docstring or the link -- not the flag.
     - run: mkdocs build --strict
       timeout-minutes: 4
+    # The guard decided minutes ago, and possibly much longer: "Re-run
+    # failed jobs" reuses an old run's guard outputs, and two tag pushes'
+    # deploys enter the queue in the order their guards *finished*. Either
+    # can carry `alias=latest` decided before a newer final existed, and
+    # move `latest` back onto an older line, or put a superseded patch back
+    # into its folder. So the same rule runs again here, against the tags
+    # as they are now, and any difference fails the run before mike moves
+    # anything. The remedy is always a fresh dispatch from the ref, which
+    # decides again (RELEASING.md, "Documentation site").
+    - name: Check the guard's decision still holds
+      timeout-minutes: 1
+      env:
+        FOLDER: ${{ needs.guard.outputs.folder }}
+        TITLE: ${{ needs.guard.outputs.title }}
+        ALIAS: ${{ needs.guard.outputs.alias }}
+        HIDDEN: ${{ needs.guard.outputs.hidden }}
+      run: |
+        git fetch --quiet --force --tags origin
+        now=$(mktemp)
+        if ! GITHUB_OUTPUT="$now" bash .github/scripts/docs_decide.sh; then
+          echo "::error::${GITHUB_REF} may no longer deploy (above); the guard admitted it before the tags changed. Do not re-run this run: dispatch docs.yml again from its ref"
+          exit 1
+        fi
+        decided=$(printf 'folder=%s\ntitle=%s\nalias=%s\nhidden=%s' "$FOLDER" "$TITLE" "$ALIAS" "$HIDDEN")
+        current=$(cat "$now")
+        if [ "$current" != "$decided" ]; then
+          echo "the guard decided:"
+          printf '%s\n' "$decided" | sed 's/^/  /'
+          echo "the tags now decide:"
+          printf '%s\n' "$current" | sed 's/^/  /'
+          echo "::error::the guard's decision for ${GITHUB_REF} is stale; deploying it would undo a newer deploy. Do not re-run this run: dispatch docs.yml again from its ref"
+          exit 1
+        fi
+        echo "the decision still holds: ${FOLDER}/ titled ${TITLE}${ALIAS:+, moving ${ALIAS}}"
     # The guard's decision arrives through `env:`, never interpolated into
     # the script. `--update-aliases` is what lets `latest` move off the
     # folder that holds it; a deploy with no alias still refreshes the

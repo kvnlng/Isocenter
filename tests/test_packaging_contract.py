@@ -2048,6 +2048,21 @@ def _run_step_script(step, cwd, env):
 
 DOCS_GUARD_STEP = "Decide which docs folder this ref may write"
 DOCS_DEPLOY_STEP = "Deploy with mike"
+DOCS_RECHECK_STEP = "Check the guard's decision still holds"
+DOCS_DECIDE_SCRIPT = pathlib.PurePosixPath(".github/scripts/docs_decide.sh")
+
+
+def _with_decide_script(repo):
+    """Put this checkout's decision script where docs.yml runs it from.
+
+    Untracked in the scratch repository, so it is in no commit and no
+    `git diff` the rule takes. The steps run it by that relative path, so
+    a step that stopped running this file fails here.
+    """
+    target = repo / DOCS_DECIDE_SCRIPT
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text((REPO / DOCS_DECIDE_SCRIPT).read_text(encoding="utf-8"),
+                      encoding="utf-8")
 DOCS_OUTPUTS = ("folder", "title", "alias", "hidden")
 
 
@@ -2194,6 +2209,7 @@ def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
 
     run_git("init", "-q", "-b", "main")
     commit("start")
+    _with_decide_script(repo)
 
     # Lines below 1.0 are not published (no pre-1.0 compatibility).
     # v0.10.0 sorts below v0.9.9 as text; neither may deploy.
@@ -2205,6 +2221,10 @@ def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
     tag("v1.0.0rc5")
     tag("v1.0.0rc6")
     writes("refs/tags/v1.0.0rc6", "1.0", "1.0.0rc6")
+    # The cutover's own first run (RELEASING, "The cutover", step 3): a
+    # dispatch from release/1.0 while the line's newest tag is a candidate.
+    rc6 = run_git("rev-parse", "refs/tags/v1.0.0rc6^{commit}")
+    writes("refs/heads/release/1.0", "1.0", "1.0.0rc6", sha=rc6)
     refused("refs/tags/v1.0.0rc5",
             "rc5 is not the head of 1.0; rc6 is, and would be replaced")
 
@@ -2247,7 +2267,8 @@ def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
     run_git("branch", "v1.1.0")
     for ref in ("refs/tags/zz-not-a-release", "refs/tags/v1.0",
                 "refs/tags/v1.1.0.post1", "refs/heads/v1.1.0",
-                "refs/heads/feature/x", "refs/heads/release/0.9",
+                "refs/heads/feature/x", "refs/heads/mainline",
+                "refs/heads/main-x", "refs/heads/release/0.9",
                 "refs/heads/release/1", "refs/heads/release/1.0.1",
                 "refs/pull/1/merge"):
         refused(ref, "it is not a release tag, release/X.Y (X >= 1) or main")
@@ -2278,7 +2299,7 @@ def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
     writes("refs/heads/release/1.1", "1.1", "1.1.0", sha=docs_only)
 
     # A branch that does not contain its line's head.
-    run_git("checkout", "-q", "-b", "release/1.0", "v1.0.1")
+    run_git("checkout", "-q", "-B", "release/1.0", "refs/tags/v1.0.1")
     commit("docs on an old base", "docs/y.md")
     refused("refs/heads/release/1.0",
             "the branch does not contain v1.0.10, 1.0's head",
@@ -2362,6 +2383,103 @@ def test_the_docs_deploy_passes_the_guards_decision_to_mike(tmp_path):
     assert deploys("dev", "dev", "", "true") == [
         "deploy", "--push", "--title", "dev", "--prop-set", "hidden=true",
         "dev"]
+
+
+def test_the_docs_deploy_refuses_a_guard_decision_the_tags_have_since_overtaken(tmp_path):
+    """The deploy job decides again, just before mike, and stops on a change.
+
+    The guard's outputs can be old by the time the deploy uses them
+    (review of #871, finding 1). "Re-run failed jobs" reuses the outputs
+    of the guard that already succeeded: a `v1.0.1` deploy that failed and
+    is re-run after `v1.1.0` shipped would still carry `alias=latest`, and
+    `mike deploy --update-aliases 1.0 latest` would move `latest` back to
+    the older line. Two tags pushed together queue their deploys in the
+    order their guards *finished*, with the same result. And a re-run
+    after `v1.0.2` would put the superseded 1.0.1 back into `1.0/`.
+
+    So the deploy job runs the guard's own script again against the tags
+    as they are now, immediately before the mike step, and fails on any
+    difference from the guard's outputs. Executed here against real tags,
+    with the outputs of an earlier decision.
+    """
+    import os
+
+    import yaml
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["deploy"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert DOCS_RECHECK_STEP in names, (
+        "the deploy job does not check the guard's decision again, so a "
+        "re-run of an old run, or a deploy queued behind a newer tag, "
+        "deploys a decision the tags have overtaken and can move `latest` "
+        "back onto an older line")
+    recheck = _step_named(DOCS_WORKFLOW, "deploy", DOCS_RECHECK_STEP)
+    assert names.index(DOCS_RECHECK_STEP) == names.index(DOCS_DEPLOY_STEP) - 1, (
+        "the recheck is not the step immediately before the mike deploy; "
+        "every minute between them is a minute a newer tag can land in")
+    assert "if" not in recheck, "the recheck is conditional"
+    assert str(DOCS_DECIDE_SCRIPT) in recheck["run"], (
+        "the recheck does not run the guard's script; a second copy of the "
+        "rule is a second answer to it")
+    env = recheck.get("env") or {}
+    for name in DOCS_OUTPUTS:
+        assert env.get(name.upper()) == \
+            f"${{{{ needs.guard.outputs.{name} }}}}", (
+                f"the recheck's {name.upper()} does not come from the "
+                f"guard's `{name}` output")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git, git_env = _scratch_git(repo)
+    run_git("init", "-q", "-b", "main")
+    # The step fetches tags from `origin` first; here that is itself.
+    run_git("remote", "add", "origin", str(repo))
+    _with_decide_script(repo)
+    days = iter(range(1, 28))
+
+    def tag(name):
+        when = f"2026-03-{next(days):02d}T12:00:00+00:00"
+        run_git("commit", "-q", "--allow-empty", "-m", name, when=when)
+        run_git("tag", name, when=when)
+
+    def rechecked(ref, folder, title, alias="", hidden="false"):
+        return _run_step_script(recheck, repo, {
+            **git_env, "GITHUB_REF": ref,
+            "GITHUB_REF_NAME": ref.split("/", 2)[-1],
+            "GITHUB_SHA": run_git("rev-parse", "HEAD"),
+            "FOLDER": folder, "TITLE": title, "ALIAS": alias,
+            "HIDDEN": hidden})
+
+    def holds(*args, **kwargs):
+        result = rechecked(*args, **kwargs)
+        assert result.returncode == 0, (
+            f"the recheck refused a decision that still holds, {args} "
+            f"{kwargs}:\n{result.stdout}{result.stderr}")
+
+    def stale(*args, why, **kwargs):
+        result = rechecked(*args, **kwargs)
+        assert result.returncode != 0, (
+            f"the recheck let a stale decision deploy, {args} {kwargs}: "
+            f"{why}")
+
+    tag("v1.0.0")
+    tag("v1.0.1")
+    holds("refs/tags/v1.0.1", "1.0", "1.0.1", alias="latest")
+
+    tag("v1.1.0")
+    stale("refs/tags/v1.0.1", "1.0", "1.0.1", alias="latest",
+          why="v1.1.0 is now the highest final, and this would move "
+              "`latest` back onto 1.0")
+    holds("refs/tags/v1.0.1", "1.0", "1.0.1")
+
+    tag("v1.0.2")
+    stale("refs/tags/v1.0.1", "1.0", "1.0.1",
+          why="v1.0.2 is 1.0's head now; this would put 1.0.1 back")
+    holds("refs/tags/v1.0.2", "1.0", "1.0.2")
+    stale("refs/tags/v1.0.2", "1.0", "1.0.2", hidden="true",
+          why="every output is compared, not only the alias")
+    holds("refs/heads/main", "dev", "dev", hidden="true")
 
 
 def test_a_refused_docs_run_cannot_cancel_a_deploy():
