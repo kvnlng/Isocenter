@@ -1,0 +1,15 @@
+{#
+  The outdated banner of the versioned site (#866). Material shows this
+  block on every version whose aliases lack `extra.version.default`
+  (`latest`): an older line, a pre-release line and `dev`. The link is
+  Material's own recipe: `'../' ~ base_url` is the parent of the version
+  folder, whose index.html redirects to `latest/`, so an old version
+  does not hard-code the alias. docs/overrides/home.html extends this
+  file, so the landing page carries the banner too.
+#}
+{% extends "base.html" %}
+
+{% block outdated %}
+  This is the documentation for a version other than the latest release.
+  <a href="{{ '../' ~ base_url }}"><strong>Go to the latest release.</strong></a>
+{% endblock %}
