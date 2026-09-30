@@ -113049,7 +113049,7 @@
       },
       "A.wfdb": {
        "files": {
-        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_0.annotations.json": {
+        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_1.annotations.json": {
          "json": {
           "findings": [
            {
@@ -113453,31 +113453,31 @@
           "source": "isocenter/<isocenter-version> (Mortara Instrument, Inc.)"
          }
         },
-        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat": {
+        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat": {
          "samples": "sha256:6938eebab96b3fdc len=240000"
         },
-        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_0.hea": {
+        "Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_1.hea": {
          "lines": [
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0 12 1000 10000",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 80 20395 0 I",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 90 5974 0 II",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 10 -14421 0 III",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 -85 -10702 0 aVR",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 35 -17805 0 aVL",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 50 26050 0 aVF",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 40 24076 0 V1",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 15 -10525 0 V2",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 -10 31716 0 V3",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 -20 -22845 0 V4",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 -55 -18735 0 V5",
-          "ANON_b3e3124d7e069bc3fa73dd1e_0_0.dat 16 0.8(0)/uV 16 0 -40 -20330 0 V6",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1 12 1000 10000",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 80 20395 0 I",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 90 5974 0 II",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 10 -14421 0 III",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 -85 -10702 0 aVR",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 35 -17805 0 aVL",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 50 26050 0 aVF",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 40 24076 0 V1",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 15 -10525 0 V2",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 -10 31716 0 V3",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 -20 -22845 0 V4",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 -55 -18735 0 V5",
+          "ANON_b3e3124d7e069bc3fa73dd1e_0_1.dat 16 0.8(0)/uV 16 0 -40 -20330 0 V6",
           "# de-identified start date: 07/05/2012"
          ]
         }
        },
        "result": {
         "returned": [
-         "<out:A.wfdb>/Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_0.hea"
+         "<out:A.wfdb>/Subject_ANON_b3e3124d7e069bc3fa73dd1e/Study_2012-05-07__79328/Series_NoNumber_ECG_Series_99800/ANON_b3e3124d7e069bc3fa73dd1e_0_1.hea"
         ]
        }
       }
@@ -117065,7 +117065,7 @@
       },
       "A.wfdb": {
        "files": {
-        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_0.annotations.json": {
+        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_1.annotations.json": {
          "json": {
           "findings": [
            {
@@ -117088,27 +117088,27 @@
           "source": "isocenter/<isocenter-version> (IsocenterTest)"
          }
         },
-        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_0.dat": {
+        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_1.dat": {
          "samples": "sha256:d645e12558109f88 len=16000"
         },
-        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_0.hea": {
+        "Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_1.hea": {
          "lines": [
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0 8 500 1000",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 0 -24788 0 MDC_ECG_LEAD_I",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 1000 -7828 0 MDC_ECG_LEAD_II",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 2000 9132 0 MDC_ECG_LEAD_V1",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 3000 26092 0 MDC_ECG_LEAD_V2",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 4000 -22484 0 MDC_ECG_LEAD_V3",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 5000 -5524 0 MDC_ECG_LEAD_V4",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 6000 11436 0 MDC_ECG_LEAD_V5",
-          "ANON_1074d976cffcb3f4fb47c8cd_1_0.dat 16 1(0)/uV 16 0 7000 28396 0 MDC_ECG_LEAD_V6",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1 8 500 1000",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 0 -24788 0 MDC_ECG_LEAD_I",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 1000 -7828 0 MDC_ECG_LEAD_II",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 2000 9132 0 MDC_ECG_LEAD_V1",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 3000 26092 0 MDC_ECG_LEAD_V2",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 4000 -22484 0 MDC_ECG_LEAD_V3",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 5000 -5524 0 MDC_ECG_LEAD_V4",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 6000 11436 0 MDC_ECG_LEAD_V5",
+          "ANON_1074d976cffcb3f4fb47c8cd_1_1.dat 16 1(0)/uV 16 0 7000 28396 0 MDC_ECG_LEAD_V6",
           "# de-identified start date: 28/11/2025"
          ]
         }
        },
        "result": {
         "returned": [
-         "<out:A.wfdb>/Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_0.hea"
+         "<out:A.wfdb>/Subject_ANON_1074d976cffcb3f4fb47c8cd/Study_2025-11-28_Study_76332/Series_1_ECG_Series_30150/ANON_1074d976cffcb3f4fb47c8cd_1_1.hea"
         ]
        }
       }
@@ -124478,17 +124478,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "bf4f3bc93745621cb10a98296ba3db444c69b8cd",
-  "isocenter_version": "1.0.0rc4",
+  "git_sha": "af67ad462ae2c96f90655ccf4cfe71be45bf743e",
+  "isocenter_version": "1.0.0rc6",
   "jobs": 4,
-  "parts": [
-   "pydicom:*",
-   "pydicom-data:*",
-   "synthetic:*"
-  ],
-  "platform": "macOS-27.0-arm64-arm-64bit",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 933
+  "seconds": 385
  },
  "schema": 1,
  "toolchain": {

@@ -145,7 +145,7 @@ def test_two_id_less_subjects_stay_two_patients(tmp_path, mode, how):
         copies = {i.attributes.get("0010,0020") for p in patients
                   for st in p.studies for se in st.series for i in se.instances}
         session.export(str(tmp_path / "out"), use_compression=False)
-        frame = session.export_dataframe(expand_metadata=True)
+        frame = session.export_dataframe("export_metadata.csv", expand_metadata=True)
 
     files = _exported(tmp_path / "out")
     # Each study's UID is replaced (#544); the patient key keeps the source.

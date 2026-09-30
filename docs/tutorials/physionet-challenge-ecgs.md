@@ -90,7 +90,7 @@ session, so `save(sync=True)` keeps the de-identified graph in the store.
 
 ```python
 >>> records
-['challenge/Subject_ANON_.../Study_..._..._.../Series_NoNumber_ECG_Series_.../ANON_..._0_0.hea']
+['challenge/Subject_ANON_.../Study_..._..._.../Series_NoNumber_ECG_Series_.../ANON_..._0_1.hea']
 ```
 
 Each record sits in a folder per patient, study and series, and is named
