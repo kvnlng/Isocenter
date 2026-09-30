@@ -268,6 +268,15 @@ instance_number, file_path, source_path` (`pixel_array` and
 `AttributeError`. `Equipment`: `manufacturer, model_name,
 device_serial_number`.
 
+`Series.series_number` and `Series.modality` are the source's Series
+Number and Modality as ingested, and `Instance.instance_number` the
+file's Instance Number. None of the three is what an export writes: the
+export writes each instance's own `(0020,0011)`, `(0008,0060)` and
+`(0020,0013)` after the configuration's rules, and the folder and WFDB
+record names read the same elements (#869). Assigning
+`Series.series_number` changes no exported file and does not mark the
+series' instances edited.
+
 A subject whose files carry no Patient ID (absent, empty or blank) is a
 `Patient` per study, whose `patient_id` is
 `entities.NO_PATIENT_ID_PREFIX + <its source Study Instance UID>`

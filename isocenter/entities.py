@@ -2671,8 +2671,9 @@ class Series(TrackedEntity):
     #: own `0020,0011`, an edit of the Series' number changes nothing in
     #: any file and nothing a scan read, so staling the instances would
     #: send a run to REVIEW_REQUIRED (grade condition 8) over nothing.
-    #: `modality` stays for now although the export no longer writes it
-    #: either; that is an open owner question on #869.
+    #: `modality` stays, although the export no longer writes it either
+    #: (owner ruling M1 on #869); `equipment` stays because redaction
+    #: matches on it.
     _CASCADING_FIELDS: ClassVar[frozenset] = frozenset({
         "series_instance_uid", "modality", "equipment"})
 

@@ -515,8 +515,8 @@ def test_a_modality_rule_that_removes_is_honoured_and_reported(tmp_path):
 
 def test_a_modality_rule_that_empties_is_honoured_and_reported(tmp_path):
     """EMPTY on a CT's Modality: written zero-length, and the same row, for
-    an empty Type 1 element is as non-conformant as an absent one (pending
-    owner ruling M3). Kills: the row limited to an absent element."""
+    an empty Type 1 element is as non-conformant as an absent one (owner
+    ruling M3 on #869). Kills: the row limited to an absent element."""
     out, warnings = _pipeline(tmp_path, {"0008,0060": ("EMPTY", None)})
 
     [path] = _dicoms(out)
@@ -547,10 +547,9 @@ def test_a_source_with_no_modality_is_written_without_one_and_reported(
     held. Now the file carries none, as for a source with no Series Number
     (Q3's analog), and the non-conformance row is written: the worker
     cannot tell a rule's removal from a source's absence, and the file is
-    non-conformant either way. Pending owner ruling M2 on #869, which may
-    choose to record at ingest whether the source had Modality and write
-    the row only for a rule's removal; this test is its own commit so that
-    reversal is cheap. Kills: the stamp restored."""
+    non-conformant either way (owner ruling M2 on #869). Such a run now
+    grades REVIEW_REQUIRED where it graded PASS over a fabricated value.
+    Kills: the stamp restored."""
     out, warnings = _pipeline(tmp_path, {}, modality=None)
 
     [path] = _dicoms(out)
