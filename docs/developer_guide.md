@@ -300,7 +300,7 @@ Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CP
 
 ### `DicomExporter.write_tree()` and `session.export()`
 
-The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and a study with no Study Time is written with an empty one. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.
+The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and a study with no Study Time is written with an empty one. Both paths run the same Type 1 check (`IODValidator`, CT Image Storage only): `session.export()` withholds a failing instance with an `ERROR` row, and `write_tree()` raises `RuntimeError`. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.
 
 ## Configuration and storage internals
 
