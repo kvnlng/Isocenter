@@ -330,7 +330,7 @@ def test_the_record_does_not_leak_into_attributes(tmp_path):
         assert "__shifted__" not in instance.attributes
         assert "__shifted__" not in _nested(reopened).attributes
         assert instance._shifted_dates, "the record itself did not come back"
-        frame = reopened.export_dataframe(expand_metadata=True)
+        frame = reopened.export_dataframe("export_metadata.csv", expand_metadata=True)
         assert "__shifted__" not in frame.columns
         assert not [c for c in frame.columns if "shifted" in str(c).lower()]
 

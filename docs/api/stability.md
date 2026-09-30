@@ -89,7 +89,7 @@ moved across it is a different call.
 | `discover_redaction_zones` | `serial_number, sample_size=50, min_confidence=80.0` |
 | `reconcile_private_tags` | — |
 | `export` | `folder, format='dicom', **options` |
-| `export_dataframe` | `output_path='export_metadata.csv', expand_metadata=False, patient_ids=None` |
+| `export_dataframe` | `output_path, expand_metadata=False, patient_ids=None` |
 | `get_cohort_report` | `expand_metadata=False, patient_ids=None` |
 | `phi_status_summary` | — |
 | `generate_report` | `output_path, format='markdown'` |
@@ -267,6 +267,15 @@ instance_number, file_path, source_path` (`pixel_array` and
 `date_shifted` field until 0.9.6; it is gone, and reading it raises
 `AttributeError`. `Equipment`: `manufacturer, model_name,
 device_serial_number`.
+
+`Series.series_number` and `Series.modality` are the source's Series
+Number and Modality as ingested, and `Instance.instance_number` the
+file's Instance Number. None of the three is what an export writes: the
+export writes each instance's own `(0020,0011)`, `(0008,0060)` and
+`(0020,0013)` after the configuration's rules, and the folder and WFDB
+record names read the same elements (#869). Assigning
+`Series.series_number` changes no exported file and does not mark the
+series' instances edited.
 
 A subject whose files carry no Patient ID (absent, empty or blank) is a
 `Patient` per study, whose `patient_id` is

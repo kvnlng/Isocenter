@@ -128,9 +128,9 @@ def test_a_detached_item_moves_only_itself():
 
 
 def test_a_series_edit_marks_each_of_its_instances():
-    """The export writes a Series field into every instance of the series,
-    and a Series holds no status of its own: the instances are what go
-    stale. An equal value changes nothing."""
+    """A Series holds no status of its own, so an edit of a cascading field
+    (`Series._CASCADING_FIELDS`) stales its instances. An equal value
+    changes nothing."""
     series = Series("1.2.3.4", "CT", 1)
     insts = [Instance(sop_instance_uid=f"1.2.3.4.{k}") for k in range(2)]
     series.instances.extend(insts)
@@ -349,7 +349,9 @@ def test_the_pass_writing_a_series_uid_is_not_an_edit(tmp_path):
         # The markers (#554) read the same statuses: the pass's own Series
         # write withholds nothing.
         assert ds.PatientIdentityRemoved == "YES"
-        series.series_number = 767
+        # A field that still cascades: `series_number` has not since #869,
+        # because no file carries it.
+        series.modality = "MR"
         reasons, passed, ds = _graded(session, tmp_path, "r2.md")
     assert not passed
     assert _edited(reasons) == [_line(1, instances=1)], reasons
@@ -399,11 +401,14 @@ def test_a_nested_edit_in_a_reopened_store_reaches_the_store(tmp_path):
         assert item.attributes["0008,1150"] == "1.2.3.4.767"
 
 
+# No `series_number` row since #869 (owner ruling Q2): the export writes
+# each instance's own Series Number, so an edit of the Series' field
+# changes no file and does not mark the instances edited
+# (`test_a_series_number_rule_reaches_the_export.py` pins that).
 @pytest.mark.parametrize("edit", [
-    lambda se: setattr(se, "series_number", 767),
     lambda se: setattr(se, "modality", "MR"),
     lambda se: setattr(se, "equipment", Equipment.from_parts("Acme", "Golden", "SN-2")),
-], ids=["series_number", "modality", "equipment"])
+], ids=["modality", "equipment"])
 @pytest.mark.parametrize("then", ["a_reaudit", "a_reaudit_and_a_pass"])
 def test_a_series_edit_grades_through_its_instances_until_a_reaudit(tmp_path, edit, then):
     """Review of #774, finding 2: a Series field edited after the pass

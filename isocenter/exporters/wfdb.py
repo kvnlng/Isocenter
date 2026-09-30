@@ -13,6 +13,7 @@ import numpy as np
 from . import Exporter, register
 from ..config_manager import _vr_dummy
 from ..io_handlers import (ExportError, export_folder_names,
+                           exported_number_text,
                            format_study_date, LOSS_SCOPE_STANDARD,
                            select_patient_ids, unmatched_patient_ids_sentence)
 from ..entities import exported_patient_id
@@ -88,7 +89,12 @@ def record_name_for(patient, study, series, instance) -> str:
     """Build a record name from already-anonymized identifiers.
 
     Call after anonymization, so `patient.patient_id` is the pseudonym, not
-    the source MRN. InstanceNumber is often absent (read as 0), so several
+    the source MRN. The series and instance parts are built from the
+    instance's attributes as the export writes them, after the
+    configuration's rules (#869): a removed or empty number reads `0`.
+    `Series.series_number` and `Instance.instance_number` are the source's
+    values as ingested and are not read. InstanceNumber is often absent
+    (read as 0), so several
     instances of one series can produce the same name; a caller writing more
     than one instance into a directory must disambiguate the result (see
     `WfdbExporter._unique_record_name`).
@@ -97,7 +103,8 @@ def record_name_for(patient, study, series, instance) -> str:
         patient (Patient): The instance's patient; its exported Patient ID is
             used, never a synthetic no-Patient-ID key.
         study (Study): The instance's study (not used in the name).
-        series (Series): The instance's series.
+        series (Series): The instance's series (not used in the name since
+            #869: `Series.series_number` is the source's number).
         instance (Instance): The instance.
 
     Returns:
@@ -108,8 +115,11 @@ def record_name_for(patient, study, series, instance) -> str:
         # Never `patient_id` itself: a subject with no Patient ID is keyed
         # on its source Study UID, which must not name a record.
         _sanitize(exported_patient_id(patient)),
-        _sanitize(series.series_number if series.series_number is not None else 0),
-        _sanitize(instance.instance_number if instance.instance_number is not None else 0),
+        # This instance's own numbers, what a DICOM export of it carries,
+        # through the helper the folder name reads (#869); `or "0"` for a
+        # zero-length one, which the folder spells `NoNumber`.
+        _sanitize(exported_number_text(instance.attributes, "0020,0011") or "0"),
+        _sanitize(exported_number_text(instance.attributes, "0020,0013") or "0"),
     ])
 
 

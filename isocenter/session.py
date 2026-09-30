@@ -3056,7 +3056,7 @@ class DicomSession:
         """
         get_logger().info("Analyzing report for auto-remediation...")
 
-        suggestions = ConfigAutomator.suggest_config_updates(report, self.configuration)
+        suggestions = ConfigAutomator.suggest_config_updates(report)
 
         if not suggestions:
             print("No configuration updates suggested.")
@@ -7144,7 +7144,10 @@ class DicomSession:
                             drop_foreign_icons=drop_foreign,
                             verify_readback=options.verify_readback,
                             deid_markers=deid_markers(patient, study,
-                                                      instance, stamps)))
+                                                      instance, stamps),
+                            # For the missing-pixel guard only: the
+                            # source's, which no rule sets (#869).
+                            source_modality=series.modality))
 
         return tasks, patient_count, withheld
 
@@ -7262,7 +7265,7 @@ class DicomSession:
 
     def export_dataframe(
             self,
-            output_path: str = "export_metadata.csv",
+            output_path: str,
             expand_metadata: bool = False,
             patient_ids: Optional[List[str]] = None):
         """
@@ -7271,11 +7274,17 @@ class DicomSession:
         The format is chosen from the extension: ``.parquet`` writes
         Parquet, anything else writes CSV.
 
+        `output_path` is required and has no default (#812): the file can
+        hold the source identifiers (it does before `anonymize()`), so
+        where it lands is the caller's to name. Use `get_cohort_report()`
+        for the frame alone, with no file.
+
         It reports the session's in-memory graph and does not `save()`
         first: pending edits are not committed as a side effect.
 
         Args:
-            output_path (str): The output file path (ends with .csv or .parquet).
+            output_path (str): The output file path (ends with .csv or
+                .parquet). Required; its directory is created if missing.
             expand_metadata (bool): If True, includes all DICOM attributes as columns.
             patient_ids (Iterable[str], optional): Restrict the export to
                 these Patient IDs, read by `get_cohort_report()`, which

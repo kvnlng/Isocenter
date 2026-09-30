@@ -35,6 +35,10 @@ def mock_patient(tmp_path):
                                         # `_get_attr_case_insensitive` in
                                         # io_handlers.py.
         "0020,0013": "10",             # Instance Number
+        # The folder's number and modality are read from the instance,
+        # what the file carries, not from `Series` (#869).
+        "0020,0011": "1",              # Series Number
+        "0008,0060": "CT",             # Modality
         "0028,0010": 512,              # Rows
         "0028,0011": 512,              # Cols
     }

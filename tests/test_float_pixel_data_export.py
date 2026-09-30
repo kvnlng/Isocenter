@@ -409,6 +409,42 @@ def test_an_unwritable_float_on_an_image_modality_fails_the_export(tmp_path):
     assert not os.path.exists(str(tmp_path / "f16img.dcm"))
 
 
+
+def test_an_unwritable_float_is_judged_by_the_source_modality(tmp_path):
+    """The unwritable-float arm judges by the source's Modality
+    (`ExportContext.source_modality`), as the missing-pixel arm does
+    (#869, review of #873): here the instance's Modality is `XX`, what a
+    REPLACE rule leaves, and the source's is `OT`. Judged by the written
+    `XX`, the image would be written with no pixel element. Kills: this
+    arm reading the written Modality."""
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance("1.2.3.4.7")
+    inst.attributes.update({
+        "0008,0016": "1.2.840.10008.5.1.4.1.1.7",
+        "0008,0060": "XX",
+        "0028,0010": 4, "0028,0011": 4,
+        "0028,0100": 16, "0028,0101": 16, "0028,0102": 15,
+        "0028,0002": 1, "0028,0004": "MONOCHROME2", "0028,0103": 0,
+        "0020,0013": 1,
+    })
+    inst.set_pixel_data((np.arange(16, dtype=np.float16) + 0.5).reshape(4, 4))
+
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=str(tmp_path / "f16xx.dcm"),
+        patient_attributes={"0010,0020": "P1"},
+        study_attributes={"0020,000d": "1.2.3"},
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None,
+        source_modality="OT"))
+
+    assert outcome.ok is False
+    assert "Pixels missing for Image Modality OT" in str(outcome.error)
+    assert not os.path.exists(str(tmp_path / "f16xx.dcm"))
+
+
 # --- The three arms the reworked guard has that nothing pinned ---
 #
 # Each of these was found by mutating the guard and watching the suite

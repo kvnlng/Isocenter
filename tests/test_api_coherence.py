@@ -206,6 +206,61 @@ def test_both_public_export_paths_write_the_same_headers(tmp_path):
         compare(session, "hand_built")
 
 
+@pytest.mark.parametrize("tag, action, value, folder, element", [
+    ("0020,0011", "REMOVE", None, "Series_0_CT_", None),
+    ("0008,0060", "REPLACE", "MR", "Series_4242_MR_", "MR"),
+], ids=["series-number-removed", "modality-replaced"])
+def test_both_doors_agree_under_a_rule_on_a_formerly_stamped_tag(
+        tmp_path, tag, action, value, folder, element):
+    """The same agreement where the stamp is decided: CT_small with Series
+    Number 4242, a configuration that removes `(0020,0011)` or replaces
+    `(0008,0060)` with `MR`, and `anonymize()`. Both doors write one tree,
+    named from the rule's result, and the same headers (the #554 markers
+    excepted, as above), and the element is what the rule left (#869).
+    Killing mutations: either stamp restored in `export_stamp_attributes`
+    (both files carry 4242 or CT, under `Series_4242_CT_...`)."""
+    import pydicom
+    from pydicom.data import get_testdata_file
+    from isocenter.io_handlers import DicomExporter
+    from isocenter.session import DicomSession
+
+    source = tmp_path / "src"
+    source.mkdir()
+    ct = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ct.SeriesNumber = "4242"
+    ct.save_as(str(source / "ct.dcm"))
+
+    via_session, via_tree = tmp_path / "via_session", tmp_path / "via_tree"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(str(source))
+        config = str(tmp_path / "config.yaml")
+        session.create_config(config)
+        session.load_config(config)
+        session.configuration.set_phi_tag(tag, action, value)
+        session.anonymize(session.audit())
+        session.export(str(via_session), use_compression=False,
+                       show_progress=False)
+        DicomExporter.write_tree(session.store.patients[0], str(via_tree),
+                                 show_progress=False)
+
+    session_files = sorted(p.relative_to(via_session)
+                           for p in via_session.rglob("*.dcm"))
+    tree_files = sorted(p.relative_to(via_tree)
+                        for p in via_tree.rglob("*.dcm"))
+    assert len(session_files) == 1 and session_files == tree_files
+    [name] = session_files
+    assert name.parent.name.startswith(folder), str(name)
+    session_headers = [h for h in _headers(via_session / name)
+                       if h[0] not in _DEID_MARKERS]
+    tree_headers = _headers(via_tree / name)
+    assert session_headers == tree_headers
+    held = [h for h in tree_headers if h[0] == f"({tag.upper()})"]
+    if element is None:
+        assert not held, held
+    else:
+        assert len(held) == 1 and repr(element) in held[0][-1], held
+
+
 def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
     """Series/Study Description keys may be spelled with either hex-letter
     casing depending on how the object graph was built.
@@ -537,9 +592,16 @@ def test_a_series_with_no_number_is_not_labelled_None():
     `Series_None_CT_...` reads as a series numbered "None" rather than a
     series whose number was never recorded.
     """
+    from isocenter.entities import Instance
     from isocenter.io_handlers import export_folder_names
 
-    _, _, series_folder = export_folder_names(*_bare_graph(series_number=None))
+    # Since #869 the number is read from the first instance, as the file
+    # carries it, so the zero-length number sits on the instance.
+    patient, study, series = _bare_graph(series_number=None)
+    instance = Instance("1.2.3.4.5.8888.1", "1.2.840.10008.5.1.4.1.1.7", 1)
+    instance.set_attr("0020,0011", None)
+    series.instances.append(instance)
+    _, _, series_folder = export_folder_names(patient, study, series)
 
     assert "_None_" not in series_folder, series_folder
     assert "NoNumber" in series_folder, series_folder
