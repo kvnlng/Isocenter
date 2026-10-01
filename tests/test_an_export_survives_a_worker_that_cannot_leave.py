@@ -35,6 +35,20 @@ def _files(folder):
                   if p.is_file())
 
 
+def _row_counts(db):
+    """`{action_type: count}` over the whole audit log."""
+    with sqlite3.connect(db) as conn:
+        return dict(conn.execute(
+            "SELECT action_type, COUNT(*) FROM audit_log "
+            "GROUP BY action_type").fetchall())
+
+
+def _added(before, after):
+    return {kind: after.get(kind, 0) - before.get(kind, 0)
+            for kind in set(before) | set(after)
+            if after.get(kind, 0) != before.get(kind, 0)}
+
+
 def _rows(db, kinds):
     with sqlite3.connect(db) as conn:
         marks = ", ".join("?" for _ in kinds)
@@ -47,8 +61,9 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
         tmp_path, monkeypatch, caplog):
     """Three files, two workers that cannot leave: `export()` returns with
     all three written and no ERROR row, one WARNING names the kill, and the
-    files are byte for byte those of a second export, from the same session,
-    whose workers leave as usual.
+    files and the audit rows it adds are those of a second export, from the
+    same session, whose workers leave as usual: the files byte for byte,
+    the rows kind for kind.
 
     Killing mutation: the kill loop deleted (the export never returns).
     """
@@ -70,7 +85,9 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
         load_fixed_secret(session, tmp_path, FIXED_A)
         assert not session.ingest(str(tmp_path / "in")).failures
         session.save(sync=True)
+        session.store_backend.flush_audit_queue()
         errors_before = _rows(db, ("ERROR",))
+        counts_before = _row_counts(db)
         initializer = functools.partial(_cannot_leave, str(markers))
         with monkeypatch.context() as blocked:
             blocked.setattr(parallel, "resolve_worker_initializer",
@@ -92,6 +109,7 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
         assert "error" not in outcome, outcome
         summary = outcome["value"]
         assert summary.written == 3, summary.failures
+        session.store_backend.flush_audit_queue()
         assert _rows(db, ("ERROR",)) == errors_before
         records = _exit_records(caplog)
         assert len(records) == 1, [r.getMessage() for r in caplog.records]
@@ -99,8 +117,20 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
         # Its own pool's workers only: the session's ingest pool is alive.
         assert _gone(started), "a worker of the export's pool is still running"
 
+        session.store_backend.flush_audit_queue()
+        counts_blocked = _row_counts(db)
         again = session.export(str(tmp_path / "free"), use_compression=False)
         assert again.written == 3, again.failures
+        session.store_backend.flush_audit_queue()
+        counts_free = _row_counts(db)
+
+    # Rows exactly once: the export whose workers were killed wrote the
+    # same audit rows, kind for kind, as the one whose workers left. Not
+    # vacuous: an export writes rows of its own.
+    assert _added(counts_before, counts_blocked), counts_blocked
+    assert _added(counts_before, counts_blocked) == _added(
+        counts_blocked, counts_free), (counts_before, counts_blocked,
+                                       counts_free)
 
     blocked_files = _files(tmp_path / "blocked")
     free_files = _files(tmp_path / "free")

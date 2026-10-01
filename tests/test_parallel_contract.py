@@ -2060,7 +2060,10 @@ def test_a_worker_that_left_is_neither_killed_nor_named(
     """
     markers = tmp_path / "markers"
     markers.mkdir()
-    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 3.0)
+    # The free worker leaves within milliseconds of `close()`, both having
+    # started before any task returned; ten seconds is the margin a loaded
+    # machine needs, not a measurement (#851).
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 10.0)
     monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
                         raising=False)
     initializer = functools.partial(_one_cannot_leave, str(markers))
