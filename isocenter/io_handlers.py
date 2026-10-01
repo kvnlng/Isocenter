@@ -94,7 +94,10 @@ from pydicom.dataelem import DataElement
 from pydicom.filebase import DicomBytesIO
 from pydicom.filereader import read_sequence
 from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
-                                correct_ambiguous_vr_element)
+                                correct_ambiguous_vr_element,
+                                write_data_element)
+from pydicom.dataelem import RawDataElement, convert_raw_data_element
+from pydicom.valuerep import EXPLICIT_VR_LENGTH_32
 from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
@@ -2028,6 +2031,24 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     unscanned.append((tag, len(raw)))
                 # Falls through: the bytes stay in `attributes` and are
                 # exported as they are.
+
+        # A standard element read as `UN` over 0xFFFF bytes, decoded under
+        # its dictionary VR (#692). An Explicit VR writer must spell a long
+        # US or FD list that way (PS3.5 6.2.2) -- this library's own
+        # compressed export does -- and pydicom decodes such a `UN` only up
+        # to 0xFFFF bytes, so without this the gate below dropped it, and
+        # this library could not re-ingest its own output. Decoded, it takes
+        # the generic arm, which has no size gate, exactly as the Implicit
+        # VR source of the same value did. Even group only: a private tag
+        # has no dictionary VR, and keeps the gate. Little-endian only: a
+        # `UN` value's bytes follow the file's byte order, and the decode
+        # reads them as Implicit VR Little Endian.
+        if (elem.VR == 'UN' and elem.tag.group % 2 == 0 and not big_endian
+                and isinstance(elem.value, (bytes, bytearray, memoryview))
+                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+            decoded = _standard_un_decoded(elem, encoding)
+            if decoded is not None:
+                elem = decoded
 
         # The `UN` half of the size rule. A proven sequence was
         # taken structurally above and is exempt -- structure is
@@ -8015,6 +8036,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # written byte for byte as pydicom alone would write it.
         _resolve_ambiguous_vrs(ds, losses, warnings)
 
+        # A value too long for its VR's 2-byte Explicit VR length is
+        # written `UN`, and said (#692). After the ambiguous VRs are
+        # resolved, so every VR it weighs is concrete, and off the syntax
+        # in `ds.file_meta`, never `written_syntax`: a pixel-less file stays
+        # native under compression. Under Implicit VR every length is
+        # 4 bytes and nothing is relabelled.
+        if not ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+            _relabel_long_short_length_values(ds, corrections)
+
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
@@ -10002,6 +10032,132 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
     rows.append(_ambiguous_veto_clause(tag, other, named))
 
 
+#: The largest value an Explicit VR element with a 2-byte length can hold.
+_SHORT_LENGTH_MAX = 0xFFFF
+
+#: Bytes per value of the numeric VRs with a 2-byte Explicit VR length, for
+#: `_relabel_long_short_length_values`' cheap pre-filter.
+_SHORT_LENGTH_WIDTHS = {"US": 2, "SS": 2, "UL": 4, "SL": 4, "FL": 4,
+                        "FD": 8, "AT": 4}
+
+
+def _could_exceed_short_length(vr, value) -> bool:
+    """Whether `value` under `vr` can encode to more than 0xFFFF bytes.
+
+    A pre-filter only, so the encode runs on candidates alone: a numeric VR
+    is weighed by its count, anything else by its characters at the widest
+    an encoding can make one (4 bytes). Never False for a value that does
+    exceed.
+    """
+    many = isinstance(value, (list, tuple, MultiValue))
+    width = _SHORT_LENGTH_WIDTHS.get(vr)
+    if width is not None:
+        return (len(value) if many else 1) * width > _SHORT_LENGTH_MAX
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return len(value) > _SHORT_LENGTH_MAX
+    chars = (sum(len(str(item)) + 1 for item in value) if many
+             else len(str(value)))
+    return chars * 4 > _SHORT_LENGTH_MAX
+
+
+def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
+                                      within="") -> None:
+    """Write every value too long for its VR's 2-byte length as `UN`, and say so (#692).
+
+    Under an Explicit VR syntax, an element whose VR has a 2-byte length
+    (every VR outside pydicom's `EXPLICIT_VR_LENGTH_32`) holds at most 65535
+    bytes. pydicom relabels a longer one `UN` inside `dcmwrite`, as PS3.5
+    6.2.2 provides, but warns in the export worker, a spawned process, so
+    the caller never heard of it. This does the same relabel first --
+    `UN`, the value's own bytes in Implicit VR Little Endian encoding,
+    which is what pydicom writes -- and appends one INFO note per element.
+    Call it on a dataset written under an Explicit VR syntax only, after
+    every ambiguous VR is resolved.
+
+    Args:
+        ds (pydicom.Dataset): The dataset, edited in place; sequence items
+            are walked.
+        corrections (list): Where each note goes.
+        encodings: The character sets text is encoded with; the dataset's
+            own when None.
+        within (str): The enclosing sequence path, for the note.
+    """
+    # Keyed on the VR and the encoded length, never on pydicom's warning
+    # text (`_read_element`'s rule). The encode is pydicom's own writer
+    # into a scratch buffer, so the bytes are the ones `dcmwrite` would
+    # have written under the `UN` it chose;
+    # `test_our_relabel_writes_the_bytes_pydicom_would` compares them.
+    if encodings is None:
+        encodings = getattr(ds, "_character_set", None) or default_encoding
+    for elem in list(ds):
+        vr = str(elem.VR)
+        tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+        if vr == "SQ":
+            for index, item in enumerate(elem.value or []):
+                path = (f"{within} > ({tag}) item {index}" if within
+                        else f"({tag}) item {index}")
+                _relabel_long_short_length_values(
+                    item, corrections, encodings=encodings, within=path)
+            continue
+        if (vr in EXPLICIT_VR_LENGTH_32 or elem.is_empty
+                or not _could_exceed_short_length(vr, elem.value)):
+            continue
+        buffer = DicomBytesIO()
+        buffer.is_little_endian = True
+        buffer.is_implicit_VR = True
+        write_data_element(buffer, elem, encodings=encodings)
+        # Tag (4) and 4-byte length (4): the rest is the value.
+        value = buffer.getvalue()[8:]
+        if len(value) <= _SHORT_LENGTH_MAX:
+            continue
+        ds[elem.tag] = DataElement(elem.tag, "UN", value)
+        where = f"{within} > " if within else ""
+        corrections.append(
+            f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
+            f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
+            f"6.2.2). The bytes are the value's own, in Implicit VR Little "
+            f"Endian encoding, and this library reads them back under {vr} "
+            f"(#692).")
+
+
+def _standard_un_decoded(elem, encoding):
+    """A standard element read as `UN`, decoded under its dictionary VR, or None (#692).
+
+    pydicom decodes a `UN` of known VR only up to 0xFFFF bytes, so a longer
+    one -- which is how an Explicit VR writer, this library's compressed
+    export included, must spell a long US list or FD list (PS3.5 6.2.2) --
+    arrives as bytes. Decoded here as Implicit VR Little Endian, which is
+    what a `UN` value is, it takes the generic arm, as the Implicit VR
+    source of the same file did.
+
+    Args:
+        elem: The `UN` element, little-endian bytes.
+        encoding: The dataset's character set, for text.
+
+    Returns:
+        The decoded element, or None when the tag has no single dictionary
+        VR that is not binary or a sequence, or the bytes do not decode.
+    """
+    # Not for a private tag (no dictionary VR), an ambiguous VR (nothing
+    # here says which arm), a sequence (`_sequence_from_un_bytes` is the
+    # private-sequence route) or a binary VR (the binary gate weighs it).
+    try:
+        vr = dictionary_VR(elem.tag)
+    except KeyError:
+        return None
+    if (vr in AMBIGUOUS_VR or vr == "SQ"
+            or vr in ("OB", "OW", "OF", "OD", "OL", "OV", "UN")):
+        return None
+    raw = bytes(elem.value)
+    try:
+        return convert_raw_data_element(
+            RawDataElement(elem.tag, vr, len(raw), raw, 0, True, True),
+            encoding=encoding)
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Falls through to the `UN` size gate and its row, as before.
+        return None
+
+
 #: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
 _DS_MAX = 16
 
@@ -10141,10 +10297,12 @@ def _numeric_arm(vr, value):
     # only bytes. No ingest reaches the refusal -- an explicit source's
     # `US` is in range by construction -- only a caller's `set_attr`.
     #
-    # `US` has a 2-byte explicit length, so 32767 entries at most. No
-    # ingest exceeds it (an Explicit VR source has the same cap, and an
-    # Implicit one hands back bytes); a longer caller list raises at
-    # `dcmwrite`.
+    # `US` has a 2-byte explicit length, so 32767 entries at most under an
+    # Explicit VR syntax. A longer list -- a caller's, or an Implicit VR
+    # source's, where every length is 4 bytes -- does not raise: Implicit
+    # VR writes it whole, and an Explicit VR export writes it `UN` with an
+    # INFO note (`_relabel_long_short_length_values`, #692), which ingest
+    # decodes back under its dictionary VR.
     arms = vr.split(" or ")
     if vr not in AMBIGUOUS_VR:
         return vr
