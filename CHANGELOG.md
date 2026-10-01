@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **BREAKING: a Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)` rule other than `KEEP` or `REPLACE` with no `value:` key is refused when it is loaded (#877, owner rulings).** A Study owns `0020,000d` and a Series owns `0020,000e`, and the export stamps each file's copy from its owner (#624, #544). Three rules never changed the owner: `REMOVE`, `EMPTY`, and `REPLACE` with a `value:`. Under each, the stamp wrote the **source** UID, with no row. Measured on `main` at 61c59ce3 over `CT_small` and `MR_small` under `basic@2026c` plus the one rule:
+  - Under `REMOVE` nothing stayed open, so the run graded `PASS` and every file carried `(0012,0062) YES` beside the UID it was meant to have lost.
+  - Under `EMPTY` the instance's finding stayed open, so the run graded `REVIEW_REQUIRED` and wrote no markers. Nothing said why.
+  - A valued `REPLACE` (`value: '1.2.3.4'`) behaved like `EMPTY`, measured on CT_small. Honouring it would not have helped: one literal on every study would merge them all.
+
+  Neither element can be absent from a valid file. The three rules are therefore refused, and the refusal names the rule to use instead: `REPLACE` with no `value:` key, the keyed replacement UID that every shipped profile already applies. `KEEP` still loads.
+  - **What a previously-loading configuration now raises.** `load_config()`, `audit(config_path=)` and `ConfigLoader.load_unified_config` raise `ValueError`, for example `cfg.yaml: phi_tags['0020,000d'] is REMOVE; Study Instance UID can only be kept (KEEP) or replaced by this project's keyed replacement UID (REPLACE with no `value:` key, #544), because the study writes its UID on every exported file, so under REMOVE the export would carry the source UID (#877)`. A valued rule reads `... is REPLACE with value '1.2.3'; ... so under REPLACE with a value the export would carry the source UID (#877)`. `value: ''` is a value here and is refused the same way: the instance scan takes the keyed branch only when there is no value, so `''` proposed `ANONYMIZED` on an instance's copy and left a nested Study or Series UID as the source (measured in the review of #881). `value: null` is absent and loads. How `''` is read on every other UI tag is #883.
+    - The session's configuration is left unchanged.
+    - The same refusal is raised at the other doors a policy comes in by, as for Patient ID (#537): `set_phi_tag()`, before memory or, under `auto_save`, the file changes; `audit()` over a `configuration.phi_tags` assigned in code, before a project secret is minted; and `PhiInspector(config_tags=)`.
+    - The merged policy is what is judged, so an external profile carrying the rule is refused unless the file overrides it.
+    - To fix a configuration, delete the line, which falls back to the profile's `REPLACE`, or write `{action: REPLACE}`.
+    - `SHIFT` and `JITTER` on either tag were already refused (#559).
+    - A valued `REPLACE` on SOP Instance UID and on every other UID is unchanged.
+    - `tests/test_uids_are_replaced_by_the_project_secret.py::test_a_value_on_an_owned_uid_leaves_the_owner_as_0_9_8_did` now pins the refusal for the two owned UIDs and keeps the SOP case.
+  - **A store from before the fix.** Nothing in a store holds a configuration, so a store reopens as before, and the configuration it ran with is refused when it is loaded again. Its statuses were recorded under that policy's fingerprint, which no loadable policy reproduces. So reopened under `basic@2026c` and exported with no new `audit()`, a store anonymized under `REMOVE` on Study Instance UID grades `REVIEW_REQUIRED`, writes no `(0012,0062)`, and still carries the source UID the earlier pass left. After an `audit()` and `anonymize()` under the new configuration, both UIDs are replaced. Measured on CT_small.
+  - `CONFIG_VERSION` stays 2.0 (owner ruling). A refused file is not applied at all, every file that still loads is applied exactly as before, and statuses recorded under a refused policy already read as another policy (#762). The precedent is the #537, #556 and #560 refusals and #869 Q7.
+  - `docs/configuration.md` lists the refusal with the others under "PHI Tags", and the known-defect text that #874 added there and to `docs/export-output.md` now states the refusal. `tests/test_a_rule_cannot_remove_a_study_or_series_uid.py` covers each door, both tags, `REMOVE` and `EMPTY` in either case and a valued `REPLACE`, an upper-case key, and that value-less `REPLACE` and `KEEP` still load. `scripts/mutation_probe.py` lists it in the `config_manager`, `privacy` and `session` rows.
+  - **Output:** none. No configuration that loads exports differently.
+
 ### Changed
 
 - **RELEASING: a PR with no milestone takes the milestone of the issue it fixes** when a line's picks decide what is later-minor work (owner ruling, from the review of the 1.0.0rc7 picks, #875). The rule read only the PR's milestone, and this project's PRs usually carry none while their issues do. Only issues the PR closes by a closing link count, and one later-minor issue makes the PR later-minor work; a PR with neither belongs to the next unreleased line.

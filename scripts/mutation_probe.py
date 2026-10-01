@@ -266,7 +266,7 @@ TARGETS = {
     # the first default run is the new measurement.
     "isocenter/config_manager.py": (["tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_api_coherence.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py",  # hand extras (#556, #557): the mask arm and `_vr_dummy`, reached through Session and PhiInspector
                                      "tests/test_a_status_records_the_policy_it_was_scanned_under.py", "tests/test_the_policy_fingerprint.py",  # #762 on one line: io_handlers cites this file by line
-                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py", "tests/test_a_rule_cannot_remove_a_study_or_series_uid.py",
                                      "tests/test_config.py",
                                      "tests/test_config_scalar_types.py",
                                      "tests/test_config_schema_version.py",
@@ -364,7 +364,7 @@ TARGETS = {
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_relock_cannot_lose_a_held_identity.py",
                               "tests/test_a_replace_rule_writes_its_value.py",
-                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py", "tests/test_a_rule_cannot_remove_a_study_or_series_uid.py",
                               "tests/test_replace_on_an_unfit_vr_declines.py",
                               "tests/test_the_owned_tags_follow_their_rule.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
@@ -779,7 +779,7 @@ TARGETS = {
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_relock_cannot_lose_a_held_identity.py",
                               "tests/test_a_replace_rule_writes_its_value.py",
-                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py", "tests/test_a_rule_cannot_remove_a_study_or_series_uid.py",
                               "tests/test_remediation_dates.py",
                               "tests/test_replace_on_an_unfit_vr_declines.py",
                               "tests/test_the_owned_tags_follow_their_rule.py",
