@@ -3893,10 +3893,14 @@ class DicomSession:
         - a value it would capture is one no token can hold (`bytes`),
           naming the tag;
         - Patient's Name is blank under a rule of EMPTY or REMOVE on it;
+        - the patient holds a Patient ID (or a Patient's Name) and every
+          instance's copy of `0010,0020` (or `0010,0010`) is present and
+          blank, naming the tag: the token would restore the patient
+          without it (#761);
         - the patient has instances and any of them holds no value in any
           tag `tags_to_lock` names (or it names none), counted. A tag held
-          blank is a value, and a patient with no instances locks as 0
-          instances.
+          blank is a value, except as the refusal above says, and a
+          patient with no instances locks as 0 instances.
 
         Each of these is judged on every instance's own values: a value a
         pass wrote on any study refuses the lock. An existing token is
@@ -4527,6 +4531,37 @@ class DicomSession:
                     f"0010,0010 under a rule of {emptying[0]} on it, and a blank "
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
+
+        # Every copy of an owner-stamped tag blanked while the owner holds
+        # a value (#761). A token keeps what each instance held (the L8
+        # ruling), so it would hold `''`, the lock would report success,
+        # and a restore would write the blank over the patient -- for the
+        # ID, an ID-less patient, and the original unrecoverable. Refused
+        # rather than read from the patient, which would reverse the
+        # ruling; only when *every* copy is present and blank, because
+        # recovery takes the first non-blank token, and a copy that is
+        # absent is already read from the patient (`captured`). A subject
+        # with no Patient ID exports `''`, so its blank is the truth.
+        owned = (("0010,0020", exported_patient_id(patient), "Patient ID"),
+                 ("0010,0010", patient.patient_name, "Patient's Name"))
+        for tag, held, what in owned:
+            if (tag not in tags_to_lock or not instances
+                    or not str(held or "").strip()):
+                continue
+            copies = [captured(inst, tag) for inst in instances]
+            if all(not from_patient and not str(val if val is not None else "").strip()
+                   for val, from_patient in copies):
+                rest = [t for t in tags_to_lock if t != tag]
+                advice = (f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: this patient holds a {what}, and every "
+                    f"instance's copy of {tag} is blank, so the token would "
+                    f"restore the patient with no {what}. Put the value back "
+                    f"on its instances, or {advice}; the token this call would "
+                    "have written is unchanged.")
 
         # Instances to secure and nothing to stash. An empty record
         # builds no token (`generate_identity_token` returns `b""`) and
