@@ -5993,6 +5993,11 @@ class DicomSession:
         own scheme), and declines otherwise. The findings passed are not
         modified.
 
+        A patient, study or instance edited after its last scan and before
+        this pass is not stamped by it: it keeps the status that scan left
+        and still reads `UNSCANNED` afterwards, so it grades under
+        condition 8 until `audit()` reads the edit (#752).
+
         Two patients left holding one Patient ID (a study ingested under a
         patient's original ID after that patient was anonymized) are merged
         into whichever was in the session first, and the other is removed
@@ -6060,6 +6065,15 @@ class DicomSession:
             # so the statuses the pass records can be told from the rest.
             recorded_at = {id(entity): entity._phi_status_revision
                            for entity in self._status_bearers()}
+            # The entities whose status was already stale -- recorded, then
+            # edited with no scan since -- with the status and policy the
+            # scan left (#752). The pass reads none of the edit, so its
+            # stamps would vouch for content no scan saw; `_keep_stale`
+            # puts them back after it.
+            stale_at_start = [
+                (entity, entity._phi_status, entity._phi_status_policy)
+                for entity in self._status_bearers()
+                if _edited_since_its_status(entity)]
             # The entities the report's scan raised under, read before the
             # pass can replace a patient's ID. Only when the tally settling
             # this pass is the report's own: under another audit's tally,
@@ -6113,6 +6127,7 @@ class DicomSession:
                 PASS_WRITING.reset(passing)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)
+            self._keep_stale(stale_at_start, recorded_at)
 
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
@@ -7720,6 +7735,36 @@ class DicomSession:
             status, recorded = entity._phi_status_record()
             if status is not PhiStatus.UNSCANNED and recorded is None:
                 entity.record_phi_status(status, policy=policy)
+
+    @staticmethod
+    def _keep_stale(stale_at_start, recorded_at):
+        """Leave stale an entity that was stale when the pass began (#752).
+
+        For each entity in `stale_at_start` whose status this pass recorded
+        (its status revision moved), re-record the status and policy the
+        scan left and then mark it modified. It reads UNSCANNED again,
+        grade condition 8 counts it, the export withholds the
+        de-identification markers, and the store keeps the left-behind
+        status in `phi_status_edited` (#767). An entity the pass did not
+        record a status on is left exactly as it is.
+
+        Args:
+            stale_at_start (list): `(entity, status, policy)` for each
+                entity `_edited_since_its_status` before the pass.
+            recorded_at (dict): `id(entity) -> status revision` before the
+                pass.
+        """
+        # Re-recorded rather than only marked modified: that would leave
+        # REMEDIATED as the status "left behind", a claim about content no
+        # scan read. Record, then move the revision, is hydration's shape
+        # (`_restore_statuses`). Never-scanned entities (raw status None or
+        # UNSCANNED) are not stale, so a pass over hand-built findings
+        # still stamps them REMEDIATED.
+        for entity, status, policy in stale_at_start:
+            if recorded_at.get(id(entity)) == entity._phi_status_revision:
+                continue
+            entity.record_phi_status(status, policy=policy)
+            entity.mark_modified()
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
         """The instance holding each finding raised inside a sequence.
