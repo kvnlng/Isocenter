@@ -303,19 +303,21 @@ fixes, never features.
    row in `BEHAVIOUR_BY_VERSION` that a release is about to ship for the
    first time is copied into `SHIPPED_BEHAVIOUR` by hand, as a literal,
    in a PR into `main`, and step 1 starts again. What enforces a shipped
-   row is `test_no_row_the_previous_release_shipped_has_moved`: it reads
-   `BEHAVIOUR_BY_VERSION` from this file at the previous release tag
-   (`git show <tag>:tests/test_config_behaviour_is_versioned.py`, the
-   newest `v*` tag not after this version, in `previous-tag`'s order,
-   pre-releases included) and fails if any row it held is missing or
-   different in either table here. So once a tag carries the file, a row
-   never changes: a change that moves the digest is a new minor with a
-   new row, and a red test here is a change that reached `main` without
-   one. It is fixed on `main`, never by editing a shipped row. The test
-   skips, naming why, with no git checkout, no tags, or a previous tag
-   that does not carry the file (every tag through `v1.0.0rc8`); in the
-   full run at the cut, a skip for any reason but the last stops the
-   release until the tags are fetched (`git fetch --tags origin`).
+   row is `test_no_row_the_previous_final_release_shipped_has_moved`: it
+   reads `BEHAVIOUR_BY_VERSION` from this file at the previous **final**
+   release tag (`git show <tag>:tests/test_config_behaviour_is_versioned.py`,
+   the newest `vX.Y.Z` with no `a`/`b`/`rc` suffix at or before this
+   version, in `git tag --sort=-version:refname` order) and fails if any
+   row it held is missing or different in either table here. Final tags
+   only (owner ruling Q9): an rc freezes nothing. So once a final tag
+   carries the file, a row never changes: a change that moves the digest
+   is a new minor with a new row, and a red test here is a change that
+   reached `main` without one. It is fixed on `main`, never by editing a
+   shipped row. The test skips, naming why, with no git checkout, no
+   tags, no final tag, or a final that does not carry the file (every
+   final before v1.0.0); in the full run at the cut, a skip for no git
+   checkout or no tags stops the release until the tags are fetched
+   (`git fetch --tags origin`).
 
    Then compare the tracked fingerprint with the previous release's.
    First `git fetch --tags origin`: `previous-tag` refuses when origin has
