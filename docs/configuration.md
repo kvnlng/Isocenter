@@ -121,14 +121,26 @@ Three of these are traps YAML sets, and are refused rather than read:
   Quote it.
 
 **`version`.** A file with no `version` line is version 2.0, and always
-will be. A present `version` must be a quoted string whose major is `2`;
-any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused.
-A 1.x release raises the `2.x` minor for either of two reasons: it adds
-a key or a value, or it applies an unchanged file differently (for
-example, a value-less `REPLACE` writing a dummy its VR can hold).
-Either way, a `2.x` file still loads unchanged. A file that uses a key or
-a value this release does not have is refused, and the refusal says the
-file's version is newer than this isocenter's.
+will be. A present `version` must be a quoted string whose major is `2`, from
+`2.0` through this release's own minor. It is written one way: `"2.00"`
+and `"02.0"` are refused. A 1.x release raises the `2.x` minor for either
+of two reasons: it adds a key or a value, or it applies an unchanged file
+differently (for example, a value-less `REPLACE` writing a dummy its VR
+can hold). Either way, a file of an older `2.x` still loads unchanged in
+every later release. A file declaring a newer minor than this release's
+is refused, whatever it contains, because this release cannot apply it
+the way it was written for: `ValueError: cfg.yaml: version '2.1' is newer
+than this isocenter's configuration version 2.0, which may apply it
+differently than it was written for; upgrade isocenter, or set version:
+'2.0' to apply it as 2.0 does (#784)` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
+An external profile file declaring a newer minor is refused the same way. So
+is a `save()` over one, by a session whose `config_path` was assigned
+rather than loaded, plainly or under `auto_save`, and a `create_config()`
+onto one: `ValueError: cfg.yaml:
+declares version '2.1', newer than this isocenter's configuration version
+2.0; saving would rewrite it as 2.0. Nothing was written: upgrade
+isocenter, or save to another path (#784)`. A target that is missing,
+cannot be read, or declares no newer minor is written as before.
 
 When the way a file is applied changes, a store scanned under the older
 minor is not treated as scanned under the new one. The minor is part of
@@ -315,7 +327,7 @@ The shift applies only to tags whose rule is `SHIFT` or `JITTER`, and to Study D
       max_days: 10
     ```
 
-    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong.
+    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong. A range assigned in code (`session.configuration.date_jitter = ...`) is judged the same way: `audit()`, `anonymize()`, `configuration.save()` and `create_config()` raise the loader's `ValueError` rather than swap the bounds or write a file that does not load ([#731](https://github.com/kvnlng/Isocenter/issues/731)).
 
 ### Private Tags
 
@@ -438,6 +450,7 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 * a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (a 0.9.x spelling; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
 * a Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)` rule other than `KEEP` or `REPLACE` with no value: `REMOVE`, `EMPTY`, and `REPLACE` with a `value:` (`''` included) are refused. The study and the series write their UID on every exported file, so none of the three was ever applied: the export carried the source UID. Use `REPLACE` with no `value:` key, which writes this project's [replacement UID](#what-basic2026c-contains), or `KEEP` ([#877](https://github.com/kvnlng/Isocenter/issues/877));
+* `REPLACE` with `value: ''` on any other UI tag (SOP Instance UID, Frame of Reference UID, Referenced SOP Instance UID, ...). On a UI an empty `value:` is still a value, no UID is empty, and the scan would propose nothing the tag can hold, so the export would carry the source UID. Omit the `value:` key, or write `value: null`, for this project's [replacement UID](#what-basic2026c-contains), or use `EMPTY` or `REMOVE` ([#883](https://github.com/kvnlng/Isocenter/issues/883)). On a tag that is not UI, `value: ''` still loads and means no value. So does `set_phi_tag(tag, "REPLACE", value="")` on any tag: it stores no `value:` key;
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT;
 * `REPLACE` on a standard tag whose VR cannot hold what it writes. With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
 * a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form;
@@ -448,13 +461,13 @@ Private tags are not checked against a VR: the exporter writes a private value i
 
 #### A rule the export refuses
 
-Some rules load and are applied, but their result is not written. On a CT image (CT Image Storage), a `REMOVE` or `EMPTY` on Image Position (Patient) `(0020,0032)`, Image Orientation (Patient) `(0020,0037)` or Pixel Spacing `(0028,0030)` leaves the file without a Type 1 element, or with it empty, and `export()` withholds that instance, with an `ERROR` row naming the missing tag. So does one on SOP Class UID `(0008,0016)` or SOP Instance UID `(0008,0018)`. `load_config()`, `set_phi_tag()`, `audit()` and `anonymize()` do not refuse the rule; `anonymize()` applies it to the instance, and only the export stops. [What the export changes on the way out](export-output.md#what-the-export-changes-on-the-way-out) says what the refusal looks like and how it grades.
+Some rules load and are applied, but their result is not written. On a CT, MR or PET image (CT Image Storage, MR Image Storage or PET Image Storage), a `REMOVE` or `EMPTY` on Image Position (Patient) `(0020,0032)`, Image Orientation (Patient) `(0020,0037)` or Pixel Spacing `(0028,0030)` leaves the file without a Type 1 element, or with it empty, and `export()` withholds that instance, with an `ERROR` row naming the missing tag. On a CT image, so does one on SOP Class UID `(0008,0016)` or SOP Instance UID `(0008,0018)`. A source MR or PET image that lacks one of the three geometry elements, or holds it empty, is withheld the same way with no rule involved ([#879](https://github.com/kvnlng/Isocenter/issues/879)). `load_config()`, `set_phi_tag()`, `audit()` and `anonymize()` do not refuse the rule; `anonymize()` applies it to the instance, and only the export stops. [What the export changes on the way out](export-output.md#what-the-export-changes-on-the-way-out) says what the refusal looks like and how it grades.
 
-A `REMOVE` or `EMPTY` on Modality `(0008,0060)`, also Type 1, is honoured instead: the file is written without it, with one `WARNING` row saying it is not conformant. The difference is deliberate ([#874](https://github.com/kvnlng/Isocenter/issues/874)). Modality is metadata you may choose to hide; the geometry is what makes the pixels usable, and a CT file without it is not written.
+A `REMOVE` or `EMPTY` on Modality `(0008,0060)`, also Type 1, is honoured instead: the file is written without it, with one `WARNING` row saying it is not conformant. The difference is deliberate ([#874](https://github.com/kvnlng/Isocenter/issues/874)). Modality is metadata you may choose to hide; the geometry is what makes the pixels usable, and a CT, MR or PET file without it is not written.
 
 A `REMOVE` or `EMPTY` on Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)`, or a `REPLACE` with a `value:`, never reaches the export: it is refused when it is loaded, [above](#phi-tags), with a `ValueError` that names `REPLACE` with no `value:` key ([#877](https://github.com/kvnlng/Isocenter/issues/877)).
 
-Only CT Image Storage is checked. For any other SOP class, an MR image for example, a rule that removes or empties the three geometry elements is applied and the file is written without them, with no row, and the run can grade `PASS`.
+Only CT, MR and PET Image Storage are checked. The Enhanced and Legacy Converted Enhanced images (Enhanced MR, for example) keep their geometry in the per-frame functional groups rather than at the top level, so they are not checked; nor is a SOP class with no Image Plane module, such as Secondary Capture or Ultrasound. For any of these, a rule that removes or empties the three geometry elements is applied and the file is written without them, with no row, and the run can grade `PASS`. Releases before [#879](https://github.com/kvnlng/Isocenter/issues/879) checked CT Image Storage alone, so an MR or PET image was written that way too.
 
 #### Repeating groups
 
@@ -545,7 +558,7 @@ To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-n
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` from the session's inventory. It names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file

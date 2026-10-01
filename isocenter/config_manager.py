@@ -10,7 +10,6 @@ privacy profile files, and the built-in profiles.
 import os
 import logging
 import copy
-import contextlib
 import difflib
 from typing import Dict, Any, List, Optional
 import re
@@ -29,7 +28,9 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: - it applies an unchanged file differently, for example a value-less
 #:   REPLACE writing its VR's dummy.
 #:
-#: A 2.x file still loads unchanged under every 2.x.
+#: A 2.x file still loads unchanged under every later 2.x. A file declaring
+#: a newer minor than this one is refused (`_declared_version`, #784):
+#: this library cannot apply it the way that minor does.
 #:
 #: **Why the second reason matters.** The v1 policy fingerprint
 #: (`configuration._canonical_policy_v1`) hashes this value, read at call
@@ -37,7 +38,9 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: under an older minor read as another policy. `export()` then says so
 #: and the report grades REVIEW_REQUIRED until `audit()` runs again.
 #: Without the bump, the fingerprint equates two scans that behave
-#: differently. Nothing checks that such a change bumps.
+#: differently. `tests/test_config_behaviour_is_versioned.py` pins what
+#: this version does to fixed input, so such a change goes red there until
+#: it bumps (#782); its `SHIPPED_BEHAVIOUR` freezes a released version's.
 #:
 #: **The working test** is `docs/api/stability.md`'s promise. Bump
 #: whenever the same file would be applied differently to the same input:
@@ -122,7 +125,7 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
 
     Absent means `_UNVERSIONED_MEANS`. Present, it must be a `str` of the
     form `MAJOR.MINOR`, with no leading zero, whose major is
-    `_READABLE_MAJOR`.
+    `_READABLE_MAJOR` and whose minor is no newer than `CONFIG_VERSION`'s.
 
     Args:
         data (dict): The file's root mapping.
@@ -133,8 +136,9 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
 
     Raises:
         ValueError: For a version that is not a string (an unquoted number
-            or `null`), not `MAJOR.MINOR`, has a leading zero, or names a
-            major this library does not read (`"1.0"` included).
+            or `null`), not `MAJOR.MINOR`, has a leading zero, names a
+            major this library does not read (`"1.0"` included), or a
+            minor newer than `CONFIG_VERSION`'s (#784).
     """
     # An unquoted number is refused rather than coerced -- YAML reads
     # `version: 2.10` as the float 2.1 -- and so is `null`: only an absent
@@ -155,84 +159,66 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
         raise ValueError(
             f"{source}: version {version!r} is not a 'MAJOR.MINOR' string "
             f"such as '2.0' (#711)")
+    # `CONFIG_VERSION` is read at call time, not import time, so the
+    # constant has one home.
+    ours = CONFIG_VERSION
     if version.split(".")[0] != _READABLE_MAJOR:
         raise ValueError(
             f"{source}: version {version!r} is a configuration schema this "
             f"isocenter does not read; it reads version {_READABLE_MAJOR} "
-            f"({_READABLE_MAJOR}.0 through any {_READABLE_MAJOR}.x) (#711)")
+            f"({_READABLE_MAJOR}.0 through {ours}) (#711)")
+    # Refused, not loaded with a note (owner ruling Q1 A on #784): a minor
+    # bump means the same file is applied differently (#762), so a newer
+    # file loaded here would be applied this library's way under its own
+    # number, and `save()` would then rewrite it as ours. Minors compare as
+    # integers, so "2.10" is newer than "2.9". Decided in 1.0.0: had 1.0
+    # loaded a newer minor, no 1.x could refuse one (stability.md's "a file
+    # 1.0 loads, every 1.x loads").
+    if int(version.split(".")[1]) > int(ours.split(".")[1]):
+        raise ValueError(
+            f"{source}: version {version!r} is newer than this isocenter's "
+            f"configuration version {ours}, which may apply it differently "
+            f"than it was written for; upgrade isocenter, or set version: "
+            f"{ours!r} to apply it as {ours} does (#784)")
     return version
 
 
-def _newer_minor_note(declared: str, source: str) -> str:
-    """The sentence a refusal gains when the file at `source` declares a
-    minor newer than `CONFIG_VERSION`, else "".
+def _refuse_overwriting_a_newer_minor(path: str) -> None:
+    """Refuse to save over a file declaring a newer minor (#784).
 
-    Minors compare as integers: "2.10" is newer than "2.9".
-
-    Args:
-        declared (str): The file's version, already checked.
-        source (str): The file's path, named in the note.
-
-    Returns:
-        str: The note, starting with "; ", or "" when the minor is not
-        newer.
-    """
-    # Any minor of the readable major loads. A newer minor that only
-    # changed how a file is applied loads with no note and nothing flags
-    # it; a key or value this library lacks is refused, and this says why.
-    # `CONFIG_VERSION` is read at call time, not import time, so the
-    # constant has one home.
-    ours = CONFIG_VERSION
-    if int(declared.split(".")[1]) <= int(ours.split(".")[1]):
-        return ""
-    return (f"; {source} declares version {declared}; this isocenter reads "
-            f"{ours}, so a key or value added after {ours} needs a newer "
-            f"isocenter")
-
-
-#: The attribute a `ValueError` carries once the innermost file's
-#: `_noting_a_newer_minor` has judged it: the path of that file.
-_JUDGED_BY = "_isocenter_version_judged_by"
-
-
-@contextlib.contextmanager
-def _noting_a_newer_minor(declared: str, source: str):
-    """Re-raise any `ValueError` inside with `_newer_minor_note` appended.
-
-    With no note to add, the original exception propagates untouched.
-    Only the innermost wrap judges a refusal: it marks the exception with
-    `_JUDGED_BY`, and every outer wrap passes a marked one through
-    unchanged.
+    The load refuses such a file, but `config_path` can be assigned, and a
+    save would then rewrite another isocenter's file as this version,
+    erasing what it declared (owner ruling on #895). Only a readable
+    mapping whose `version` is a canonical `MAJOR.MINOR` string of this
+    major with a newer minor is refused: a missing, unreadable or
+    malformed target is not this guard's to judge and is written as
+    before, since the write replaces it whole.
 
     Args:
-        declared (str): The file's version.
-        source (str): The file's path.
-
-    Yields:
-        None: The body runs inside the wrap.
+        path (str): The file `save()` is about to write.
 
     Raises:
-        ValueError: The body's refusal, with the note appended when the
-            file declares a newer minor.
+        ValueError: When the file declares a newer minor. Nothing is
+            written.
     """
-    # On every refusal, not only an unknown key: a newer minor may add a
-    # value to an existing key (a new action, a new profile name) or a key
-    # inside a rule, and each reaches this library as a different refusal.
-    # Innermost only, because an external profile's refusal passes through
-    # the configuration's own wrap on its way out, and the configuration's
-    # version says nothing about the profile file.
     try:
-        yield
-    except ValueError as exc:
-        if getattr(exc, _JUDGED_BY, None) is not None:
-            raise
-        note = _newer_minor_note(declared, source)
-        if not note:
-            setattr(exc, _JUDGED_BY, source)
-            raise
-        noted = ValueError(f"{exc}{note}")
-        setattr(noted, _JUDGED_BY, source)
-        raise noted from exc
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return
+    if not isinstance(data, dict):
+        return
+    version = data.get("version")
+    if not isinstance(version, str) or not _VERSION_SHAPE.fullmatch(version):
+        return
+    ours = CONFIG_VERSION
+    major, minor = version.split(".")
+    if major == _READABLE_MAJOR and int(minor) > int(ours.split(".")[1]):
+        raise ValueError(
+            f"{path}: declares version {version!r}, newer than this "
+            f"isocenter's configuration version {ours}; saving would "
+            f"rewrite it as {ours}. Nothing was written: upgrade isocenter, "
+            f"or save to another path (#784)")
 
 
 def _unknown_keys(keys, known, where: str, whose: str,
@@ -296,15 +282,14 @@ def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
     # this library has never heard of, and the version is the true reason
     # to refuse it.
     declared = _declared_version(data, source)
-    with _noting_a_newer_minor(declared, source):
-        if "machine_rules" in data:
-            raise ValueError(
-                f"{source}: 'machine_rules' is an old spelling of 'machines'; "
-                f"rename it (#712)")
-        reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
-                               "A version 2 configuration's")
-        if reason is not None:
-            raise ValueError(f"{source}: {reason}")
+    if "machine_rules" in data:
+        raise ValueError(
+            f"{source}: 'machine_rules' is an old spelling of 'machines'; "
+            f"rename it (#712)")
+    reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
+                           "A version 2 configuration's")
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
     return declared
 
 #: Where this package's own shipped resources live.
@@ -494,19 +479,70 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
         raise ValueError(
             f"{path}: an external privacy profile must carry its rules under "
             f"a 'phi_tags:' mapping; this file has no phi_tags key")
-    declared = _declared_version(data, path)
-    with _noting_a_newer_minor(declared, path):
-        if "phi_tags" not in data:
-            raise ValueError(
-                f"{path}: an external privacy profile must carry its rules "
-                f"under a 'phi_tags:' mapping; this file has no phi_tags key")
-        unknown = sorted((k for k in data if k not in _PROFILE_FILE_KEYS), key=str)
-        if unknown:
-            raise ValueError(
-                f"{path}: an external privacy profile contributes only its "
-                f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
-                f"would be ignored (#712)")
-        return _validated_phi_tags(data["phi_tags"], path)
+    _declared_version(data, path)
+    if "phi_tags" not in data:
+        raise ValueError(
+            f"{path}: an external privacy profile must carry its rules "
+            f"under a 'phi_tags:' mapping; this file has no phi_tags key")
+    unknown = sorted((k for k in data if k not in _PROFILE_FILE_KEYS), key=str)
+    if unknown:
+        raise ValueError(
+            f"{path}: an external privacy profile contributes only its "
+            f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
+            f"would be ignored (#712)")
+    return _validated_phi_tags(data["phi_tags"], path)
+
+
+def _refused_date_jitter(dj: Any) -> Optional[str]:
+    """Why `dj` is not a `date_jitter` this library applies, or None.
+
+    The one judge of a range, for a file's (the loader) and for one
+    assigned in code (`audit()`, `anonymize()`, `save()`,
+    `create_config()` and `RemediationService`, #731), so the two cannot
+    disagree or be worded twice. The caller prefixes its source.
+
+    Args:
+        dj: The range: None (the default), or `{min_days: int, max_days:
+            int}` with `min_days <= max_days`.
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    # One shape, {min_days: int, max_days: int}; a bare int is refused
+    # with the mapping to write instead, and a bool is not an int here.
+    # None is the default, as a null `date_jitter:` is in a file.
+    if dj is None:
+        return None
+    if isinstance(dj, int) and not isinstance(dj, bool):
+        return (f"'date_jitter' must be {{min_days: int, max_days: int}}; the "
+                f"single-int form was removed in 1.0 -- write {{min_days: "
+                f"{dj}, max_days: {dj}}} for the same fixed shift (#713)")
+    if not (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
+            and all(isinstance(v, int) and not isinstance(v, bool)
+                    for v in dj.values())):
+        return (f"'date_jitter' must be {{min_days: int, max_days: int}}, "
+                f"got {dj!r}")
+    # Bounds the wrong way round have at least one of them wrong, and
+    # nothing can tell which. Equal bounds are a fixed shift.
+    if dj["min_days"] > dj["max_days"]:
+        return (f"'date_jitter' min_days {dj['min_days']} is greater than "
+                f"max_days {dj['max_days']}; one of them is wrong, and which "
+                f"cannot be told from the range alone (#713)")
+    return None
+
+
+def _refuse_date_jitter_in_code(dj: Any) -> None:
+    """Raise `_refused_date_jitter`'s refusal for a range assigned in code.
+
+    Args:
+        dj: `session.configuration.date_jitter`.
+
+    Raises:
+        ValueError: When the loader would refuse the same range in a file.
+    """
+    reason = _refused_date_jitter(dj)
+    if reason is not None:
+        raise ValueError(f"session.configuration: {reason}")
 
 
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
@@ -887,6 +923,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       `value:`: it can only be kept or pseudonymised;
     - Study or Series Instance UID under REMOVE, EMPTY, or REPLACE with a
       `value:`: the owner's stamp would export the source UID (#877);
+    - REPLACE with `value: ''` on any other UI tag: the scan would propose
+      nothing a UI holds, and the export would carry the source UID (#883);
     - SHIFT or JITTER on a standard tag that is not DA, DT or a sequence;
     - REPLACE on a standard tag whose VR cannot hold what it writes (a
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
@@ -984,6 +1022,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"because the {owner} writes its UID on every exported file, "
                 f"so under {under} the export would carry the source UID "
                 f"(#877)")
+    # Its own arm, before the UI exemption below, which reads `not value`
+    # and so would let `''` through as the keyed rule; and not reached by
+    # making that exemption `value is None`, which would fall through to
+    # the VR check and say `''` writes `ANONYMIZED`, which is not what the
+    # user wrote. Everywhere else `''` is no value; the instance scan's UI
+    # branch alone read it as a value (`rule_value is None`), proposed
+    # ANONYMIZED, had it declined (#560), and exported the source UID
+    # (owner rulings Q2 A and Q3 A on #883). `set_phi_tag(value='')`
+    # stores no `value:` key, so it never reaches here.
+    if action == "REPLACE" and value == "" and _standard_dictionary_vr(tag) == "UI":
+        return (f"phi_tags['{tag}'] is REPLACE with value ''; on a UI tag an "
+                f"empty value: is still a value, and no UID is empty, so the "
+                f"scan would propose nothing a UI can hold and the export "
+                f"would carry the source UID. Omit the value: key (or write "
+                f"value: null) for this project's keyed replacement UID "
+                f"(#544), or use EMPTY or REMOVE (#883)")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
@@ -1129,9 +1183,8 @@ def _loaded_unified_config(path: str):
     # First after the root is known to be a mapping: before the
     # keys, and before a profile file is opened, so a file this library
     # does not read is refused for that and nothing else.
-    declared = _checked_top_level(config, path)
-    with _noting_a_newer_minor(declared, path):
-        return _resolved_policy(config, path)
+    _checked_top_level(config, path)
+    return _resolved_policy(config, path)
 
 
 def _unshipped_profile_refusal(profile_name: str, path: str) -> ValueError:
@@ -1369,16 +1422,11 @@ class ConfigLoader:
                 machine rule `_validate_rule` refuses, a `date_jitter`
                 that is not `{min_days: int, max_days: int}` with
                 `min_days <= max_days`, and a `remove_private_tags` that
-                is not a bool. A file declaring a newer minor gains a
-                note saying so.
+                is not a bool.
         """
         # The version, the top-level keys, the phi_tags and the profile.
         data, base = _loaded_unified_config(filepath)
-        # Already checked; read again only for the newer-minor note on the
-        # refusals below, which a newer minor can reach too (a key inside
-        # a rule, a new value).
-        with _noting_a_newer_minor(_declared_version(data, filepath), filepath):
-            return ConfigLoader._checked_parts(data, filepath, base)
+        return ConfigLoader._checked_parts(data, filepath, base)
 
     @staticmethod
     def _checked_parts(
@@ -1426,31 +1474,11 @@ class ConfigLoader:
         # `remove_private_tags:` below: an absent range has one obvious
         # meaning here, and the default is what it gets.
         dj = data.get("date_jitter")
-        if dj is None:
-            date_jitter_config = {"min_days": -365, "max_days": -1}
-        elif isinstance(dj, int) and not isinstance(dj, bool):
-            raise ValueError(
-                f"{filepath}: 'date_jitter' must be {{min_days: int, "
-                f"max_days: int}}; the single-int form was removed in 1.0 -- "
-                f"write {{min_days: {dj}, max_days: {dj}}} for the same fixed "
-                f"shift (#713)")
-        elif (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
-              and all(isinstance(v, int) and not isinstance(v, bool)
-                      for v in dj.values())):
-            date_jitter_config = dj
-        else:
-            raise ValueError(
-                f"{filepath}: 'date_jitter' must be {{min_days: int, "
-                f"max_days: int}}, got {dj!r}")
-        # Bounds the wrong way round have at least one of them wrong, and
-        # the loader cannot know which. `RemediationService` still swaps
-        # them silently for a range assigned in code, which no loader sees.
-        if date_jitter_config["min_days"] > date_jitter_config["max_days"]:
-            raise ValueError(
-                f"{filepath}: 'date_jitter' min_days "
-                f"{date_jitter_config['min_days']} is greater than max_days "
-                f"{date_jitter_config['max_days']}; one of them is wrong, and "
-                f"which cannot be told from the file (#713)")
+        reason = _refused_date_jitter(dj)
+        if reason is not None:
+            raise ValueError(f"{filepath}: {reason}")
+        date_jitter_config = (dj if dj is not None
+                              else {"min_days": -365, "max_days": -1})
 
         # A bool, and only a bool. Absent is True. Present and anything
         # else is refused rather than read for truth: `"false"` is a

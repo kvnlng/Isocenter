@@ -381,8 +381,8 @@ COHORT_REPORT_COLUMNS = [
     "DeviceSerial",
 ]
 
-# The header written above every scaffolded config.
-_CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
+# The header above every scaffold; `<CONFIG_VERSION>` is filled at render (#782).
+_CONFIG_HEADER = """# Isocenter Privacy Configuration (v<CONFIG_VERSION>)
 # ==========================================
 #
 #
@@ -601,7 +601,9 @@ def _render_config_yaml(data: Dict[str, Any]) -> str:
             rendered.append("")
         rendered.append(line)
 
-    return _CONFIG_HEADER + "\n" + "\n".join(rendered) + "\n"
+    # The constant, read now: a literal here went stale on a bump (#782).
+    header = _CONFIG_HEADER.replace("<CONFIG_VERSION>", config_manager.CONFIG_VERSION)
+    return header + "\n" + "\n".join(rendered) + "\n"
 
 
 class _ExportOptions(NamedTuple):
@@ -2471,23 +2473,59 @@ class DicomSession:
         Args:
             output_path (str): Where to write the generated YAML. A
                 `.yaml` suffix is appended if missing.
+
+        The `phi_tags` section names the session's own base, as `save()`
+        does, and holds every rule that differs from that base's, compared
+        whole (#741): `privacy_profile: none` for a session under `none`,
+        the external file's path for an external profile, and the pinned
+        name for a built-in. The floor is the one exception, spelled
+        `privacy_profile: basic@2026c` with the research defaults as
+        editable lines, which loads to the same rules. The file loads to
+        the session's `phi_tags`.
+
+        Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in the file (#731), and `save()`'s
+                refusal when `phi_tags` lacks a rule its base supplies
+                (#741), or when `output_path` is a file declaring a newer
+                `version` minor than this library's (#784). Nothing is
+                written.
+            OSError: The write's own error, after it is logged (#741).
         """
+        # First: the scaffold carries the range, and a range the loader
+        # refuses would make a file that does not load (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
         if not (output_path.endswith(".yaml") or output_path.endswith(".yml")):
             output_path += ".yaml"
             print(f"Note: Appending .yaml extension -> {output_path}")
 
+        configuration = self.configuration
+        # The session's own base, diffed whole by `save()`'s helper (#741).
+        # The floor alone is spelled as its base profile, so the scaffold
+        # shows the research defaults as lines to edit; it reloads to the
+        # same rules, and so the same policy fingerprint. Every other base
+        # is written as `save()` writes it. One name, read once, for the
+        # line and the table diffed, so the file cannot name one table and
+        # carry the overrides of another.
+        if configuration._floor and not configuration.privacy_profile:
+            base = profiles.FLOOR_BASE
+            base_rules = profiles.PRIVACY_PROFILES[base]
+        else:
+            base = configuration.privacy_profile or "none"
+            base_rules = config_manager._policy_base_rules(
+                configuration.privacy_profile, configuration._floor)
+        # Before the machine scaffold and the write: a refusal writes
+        # nothing.
+        phi_tags = configuration._phi_tags_over(base_rules)
+
         machine_rules = self._scaffold_machine_rules()
-        base = profiles.FLOOR_BASE
 
         data = {
             # The module attribute, read now: one home for the number both
             # writers stamp.
             "version": config_manager.CONFIG_VERSION,
-            # The floor's base, which `_scaffold_phi_tags` diffs against:
-            # one constant, read once, so the file cannot name one table
-            # and carry the overrides of another.
             "privacy_profile": base,
-            "phi_tags": self._scaffold_phi_tags(base),
+            "phi_tags": phi_tags,
             "date_jitter": self.configuration.date_jitter,
             "remove_private_tags": self.configuration.remove_private_tags,
             "machines": machine_rules + self.configuration.rules
@@ -2496,6 +2534,9 @@ class DicomSession:
         if not machine_rules and not self.configuration.rules:
             print("No machines detected to scaffold.")
 
+        # `save()`'s refusal, for the same reason (owner ruling on #895):
+        # writing over a newer isocenter's file erases what it declared.
+        config_manager._refuse_overwriting_a_newer_minor(output_path)
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(_render_config_yaml(data))
@@ -2505,7 +2546,10 @@ class DicomSession:
                 output_path, len(machine_rules))
             print(f"Scaffolded Unified Config to {output_path}")
         except OSError as exc:
+            # Logged, then raised, as `save()` raises (#741, owner ruling Q7
+            # A): returning let a script go on as though the file existed.
             get_logger().error("Failed to write scaffold: %s", describe_exception(exc))
+            raise
 
     def _scaffold_machine_rules(self) -> List[Dict[str, Any]]:
         """Build a redaction rule for every machine not already configured.
@@ -2582,43 +2626,6 @@ class DicomSession:
         return (f"WARNING: {flagged} images have 'Burned In Annotation' "
                 f"flag. Verify pixel redaction.")
 
-    def _scaffold_phi_tags(self, base: str) -> Dict[str, Any]:
-        """The PHI tag section of a scaffolded config.
-
-        Every entry of the session's policy whose action differs from the
-        built-in profile `base`'s: the scaffold names `base` as its
-        `privacy_profile`, so a line repeating the profile would change
-        nothing. On a bare session the policy is the floor, and the difference
-        is exactly `profiles.RESEARCH_DEFAULTS`.
-
-        Args:
-            base (str): The pinned profile name the scaffold writes as its
-                `privacy_profile`; `create_config` passes
-                `profiles.FLOOR_BASE`.
-
-        Returns:
-            Dict[str, Any]: Tag to rule, each written structured.
-        """
-        # Derived rather than listed, so a bare session's scaffold loads back
-        # to exactly the floor. It is exact only because the policy it diffs is
-        # a superset of the basic profile: a session under `privacy_profile:
-        # none` is still scaffolded under `basic@2026c`, and its file reloads
-        # with that profile beneath its own tags -- more protection than the
-        # session had, never less.
-        #
-        # A plain-string value is a tag's display name and leaves the
-        # inspector's action at REPLACE (`PhiInspector.__init__`), so it is
-        # written structured, as the REPLACE it is.
-        table = profiles.PRIVACY_PROFILES[base]
-        structured = {}
-        for tag, val in self.configuration.phi_tags.items():
-            rule = dict(val) if isinstance(val, dict) else {
-                "name": str(val), "action": "REPLACE"}
-            action = table.get(tag, {}).get("action")
-            if str(rule.get("action", "REPLACE")).upper() != action:
-                structured[tag] = rule
-        return structured
-
     # =========================================================================
     # AUDIT & ANALYSIS
     # =========================================================================
@@ -2653,7 +2660,10 @@ class DicomSession:
             ValueError: When the file at `config_path` fails any check
                 `load_config()` makes, or the policy (that file's, or
                 `configuration.phi_tags`) holds a rule the pipeline cannot
-                honour. Raised before a project secret is created.
+                honour, or, with no `config_path`, when
+                `configuration.date_jitter` is a range the loader would
+                refuse in a file (#731). Raised before a project secret
+                is created.
             RuntimeError: When patients sharing a Patient ID were
                 de-identified under different date-offset schemes, so they
                 cannot be merged; raised after the policy is validated and
@@ -2701,6 +2711,11 @@ class DicomSession:
             # the project secret below, so a refused policy leaves no new
             # secret in the store.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+            # Likewise `configuration.date_jitter` (#731): the range
+            # `anonymize()` would shift by, judged as the loader judges a
+            # file's, before the secret. With `config_path` the file's own
+            # range was judged by the loader above.
+            config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         # Two `Patient` objects holding one Patient ID are merged before the
         # scan, as `anonymize()` and a restore merge them. The scan
@@ -6090,6 +6105,9 @@ class DicomSession:
                 one.
 
         Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in a file (#731); raised first, before
+                anything is scanned or shifted.
             RuntimeError: When two patients left holding one Patient ID
                 were de-identified under different date-offset schemes.
                 Raised at the merge, after the remediations are applied.
@@ -6097,6 +6115,11 @@ class DicomSession:
                 one built in user code.
         """
         from .remediation import RemediationService
+
+        # First, before the blind `audit()` and before the secret: the
+        # findings-given path never enters `audit()`, and a range the
+        # loader would refuse used to be swapped silently (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         if findings is None:
             # Blind execution: scan with the current configuration, then

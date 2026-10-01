@@ -59,19 +59,11 @@ def test_date_shifts_spread_across_the_configured_range():
         f"min={min(shifts)} max={max(shifts)}")
 
 
-def test_an_inverted_jitter_config_still_produces_a_spread():
-    """Kills `min_days > max_days` -> `<=`, which makes the ordering guard
-    swap unconditionally: span goes negative, clamps to 1, and every
-    patient is shifted by exactly the same day.
-
-    The guard's tolerance of a reversed config is only stated in a
-    comment; this is what holds it.
-    """
-    shifts = {_shift_for(f"PATIENT{i:04d}", {"min_days": -1, "max_days": -365})
-              for i in range(60)}
-
-    assert len(shifts) > 1, (
-        f"a reversed min/max config collapsed every shift to {shifts}")
+# `test_an_inverted_jitter_config_still_produces_a_spread` was here. It
+# held `_get_date_shift`'s silent swap of a reversed range, which #731
+# deleted: the swap was the defect (a reversed range has a wrong bound,
+# and which cannot be told). `RemediationService` now refuses one when it
+# is made, and `test_a_swapped_jitter_in_code_is_refused.py` pins that.
 
 
 # --- #105: the private-tag decision -----------------------------------

@@ -448,7 +448,7 @@ def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identit
 def test_the_scaffold_is_generated_from_the_floor(tmp_path):
     """`create_config` on a bare session writes exactly `RESEARCH_DEFAULTS`
     under `privacy_profile: basic`, and loading that file yields the
-    floor. Kills `_scaffold_phi_tags` reverting to its own table (the
+    floor. Kills the scaffold diffing against its own table (the
     scaffold and the floor can then disagree), and a REMOVE entry leaking
     into the scaffold."""
     from isocenter.config_manager import ConfigLoader

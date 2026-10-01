@@ -108,10 +108,17 @@ def test_scaffolding_does_not_edit_the_session_configuration(
     a research-friendly default for each. Those three used to be inserted
     into the live `configuration.phi_tags` dict, so asking for a scaffold
     silently added tags to the policy the session would go on to apply.
+
+    The policy is the floor with one rule changed: since #741 a policy
+    lacking a rule its base supplies is refused, as `save()` refuses it,
+    so the one-tag policy this test assigned until then raises.
     """
-    scaffolding_session.configuration.phi_tags = {"0010,0010": "Patient Name"}
+    import copy
+    from isocenter.profiles import FLOOR_POLICY
+    policy = copy.deepcopy(FLOOR_POLICY)
+    policy["0010,0010"] = "Patient Name"
+    scaffolding_session.configuration.phi_tags = copy.deepcopy(policy)
 
     scaffolding_session.create_config(str(tmp_path / "out.yaml"))
 
-    assert scaffolding_session.configuration.phi_tags == {
-        "0010,0010": "Patient Name"}
+    assert scaffolding_session.configuration.phi_tags == policy

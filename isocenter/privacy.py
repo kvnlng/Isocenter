@@ -1411,7 +1411,9 @@ class PhiInspector:
                 # one replacement. "Already replaced" is a UID this
                 # project minted (`_uid_is_minted`), not agreement with
                 # anything: a copy of an owner's source UID is raised
-                # like any other.
+                # like any other. `is None` stays: a `value: ''` on a UI
+                # no longer reaches here, refused at every door by
+                # `config_manager._refused_phi_rule`'s #883 arm.
                 if rule_value is None and _is_uid_replacement(config_val, tag):
                     new_val = _replaced_uids(val, self.project_secret)
                     needs_remediation = uid_replacement = new_val is not None

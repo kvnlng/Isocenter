@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from .parallel import progress_bar
 from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Series, Study
+from .config_manager import _refused_date_jitter
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -76,7 +77,9 @@ class RemediationService:
             store_backend (optional): The store the audit rows are written
                 to (`log_audit`, `log_audit_batch`). None writes no rows.
             date_jitter_config (dict, optional): The date shift range,
-                `{"min_days": ..., "max_days": ...}`. Defaults to -365 to -1.
+                `{"min_days": ..., "max_days": ...}`, `min_days` not greater
+                than `max_days`. Defaults to -365 to -1. A range the loader
+                would refuse in a file raises `ValueError` (#731).
             project_secret (bytes, optional): The store's project secret,
                 which keys the date offset and the UID and Patient ID
                 checks. Required at use: a keyed date shift without one
@@ -95,6 +98,11 @@ class RemediationService:
         # Reset by `apply_remediation`; read by `_folds_into_owner`.
         self._owner_copies: dict = {}
         self._pending_folds: dict = {}
+        # Judged here with the loader's words: `_get_date_shift` swapped a
+        # reversed range silently, which was the defect (#731).
+        reason = _refused_date_jitter(date_jitter_config)
+        if reason is not None:
+            raise ValueError(f"RemediationService: {reason}")
         self.jitter_config = date_jitter_config or {"min_days": -365, "max_days": -1}
 
     def apply_remediation(self, findings: List[PhiFinding]):
@@ -2217,8 +2225,8 @@ class RemediationService:
         jitter range, and cannot be computed from anything an export
         carries. With no secret, `canonical_patient_key` raises
         `RuntimeError` for a keyed patient; there is no unkeyed fallback.
-        The offset is `key % span + min_days`, with the range's bounds
-        swapped if given reversed.
+        The offset is `key % span + min_days`; a reversed range never
+        reaches here (`__init__` refuses it, #731).
 
         Args:
             patient_id (str): The seed Patient ID, original or pseudonym.
@@ -2236,9 +2244,6 @@ class RemediationService:
 
         min_days = self.jitter_config.get("min_days", -365)
         max_days = self.jitter_config.get("max_days", -1)
-
-        if min_days > max_days:
-            min_days, max_days = max_days, min_days
 
         span = max_days - min_days + 1
         if span < 1:

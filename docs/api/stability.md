@@ -483,8 +483,11 @@ default.
   promise that no exported date is recoverable: a date tag no rule names
   is exported as ingested, and a UID the configuration keeps can embed
   one.
-- A configuration file that 1.0 loads, every 1.x loads unchanged. Its
-  schema is version 2, and a 1.x never raises the major. A 1.x raises
+- A configuration file that 1.0 loads, every 1.x loads unchanged. The
+  promise runs forward: a file a 1.x loads, every later 1.x loads, but
+  an earlier 1.x refuses a file declaring a newer minor than its own,
+  and refuses to save over one. Its schema is version 2, and a 1.x
+  never raises the major. A 1.x raises
   the 2.x minor when it adds keys or values, and when it applies an
   unchanged file differently. A 1.x never changes how a file is
   applied without raising the minor. The minor is part of the policy
