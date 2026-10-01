@@ -39,7 +39,8 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 `main` is the development branch. Work meant for a minor later than the next
 unreleased line may merge at any time, but its PR carries that minor's
 milestone, so whoever cuts the line can leave it out ("Later releases on an
-existing line").
+existing line"). A PR with no milestone takes the milestone of the issue it
+fixes; a PR with neither is the next line's work.
 
 1. The architect writes the specification.
 2. The developer writes the tests first, then the code, on a work branch
@@ -548,7 +549,9 @@ cut this way (#818, #821, #822).
        (the command below) equals one already on the branch is a
        forward-port. A pick that comes out empty is one too:
        `git cherry-pick --skip` it;
-     - work for a later minor, which its PR's milestone names.
+     - work for a later minor, which its PR's milestone names, or, when
+       the PR has none, the milestone of the issue it fixes (a PR with
+       neither belongs to this line; the rc7 picks review, #875).
 
      **The line's left-out list** is every commit left out as later-minor
      work since the line was cut, in this PR and in every earlier pick PR
