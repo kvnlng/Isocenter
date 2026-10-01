@@ -10,8 +10,6 @@ source .venv/bin/activate
 pip install isocenter
 ```
 
-Release candidates: `pip install --pre isocenter`.
-
 Check which version you have:
 
 ```bash
