@@ -551,7 +551,7 @@ To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-n
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` from the session's inventory. It names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file

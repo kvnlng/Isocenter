@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/configuration.md` ("Date Jitter") says a range assigned in code is judged as a file's is. `tests/test_a_swapped_jitter_in_code_is_refused.py` covers each door, the dates unchanged in memory and in the store, no secret minted, the file left as it was or not written, auto-save, each refused shape, equal bounds, and the service's constructor.
   - **Output:** none.
 
+- **BREAKING: `create_config()` raises `OSError` when it cannot write the scaffold (#741, owner ruling Q7 A).** It logged the error and returned, so a script went on as though the file existed; `save()` has raised since #715. Measured on `main` at 7579d4df: `create_config('<missing directory>/c.yaml')` logged `Failed to write scaffold: FileNotFoundError` and returned `None`. The `ERROR` log line is kept.
+
+- **BREAKING: `create_config()` raises `save()`'s `ValueError` for a `phi_tags` that lacks a rule its base supplies (#741, owner ruling Q6 B).** The scaffold now diffs whole rules through the same helper as `save()` (below), so it refuses what `save()` refuses: `configuration.save() cannot write this policy over privacy_profile basic@2026c: phi_tags has no rule for 0010,0010, and a file naming basic@2026c brings them in. ... (#715)`. Before, the action-only diff omitted the deleted rule, the file named the profile, and its reload brought the rule back. No file is written.
+
 ### Changed
 
 - **`lock_identities()` creates `isocenter.key` only when it writes a token (#813, owner ruling Q1 A).** Four doors created a key file and locked nothing. Measured on `main` at 7579d4df:
@@ -78,6 +82,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The "token of ours and no key file" refusal still raises before any key exists. A `TypeError` for a bad selection still comes before any key work. A `ValueError` for an empty or malformed key file is unchanged. `enable_reversible_anonymization()` and `recover_patient_identity()` still create no key.
   - `tests/test_a_lock_that_secures_nothing_creates_no_key.py`.
   - **Output:** none.
+
+- **`create_config()`'s scaffold names the session's own base and keeps every rule that differs from it, value and name included (#741, owner ruling Q6 B).** The scaffold and `save()` diffed `phi_tags` two ways. `save()` names the session's base and writes every rule that differs from that base's, compared whole (#715); the scaffold always named `basic@2026c` and wrote only the rules whose *action* differed. Measured on `main` at 7579d4df: a `basic` session holding `0010,0010: {action: REPLACE, value: X}` scaffolded to a file whose reload had no `value`, so `X` was lost, where `save()` kept it; and a `privacy_profile: none` session holding one rule scaffolded under `basic@2026c`, which reloaded to 648 rules.
+  - Both writers now share one helper (`IsocenterConfiguration._phi_tags_over`), and `Session._scaffold_phi_tags` is deleted. A session under `none` scaffolds `privacy_profile: none`; one under an external profile, that file's path; one under `basic`, `basic@2026c`; and each file loads to the session's `phi_tags`.
+  - The floor keeps its teaching spelling: `privacy_profile: basic@2026c` with exactly the three research defaults as editable lines, which loads to the floor's rules and so to the same policy fingerprint. A bare session's scaffold is unchanged, so the tutorials that call `create_config()` render the same file.
+  - `docs/configuration.md` ("Generating Configuration Templates") says so. `tests/test_a_scaffold_reloads_to_the_session.py` covers the four bases, each with a rule changed in its value, its name or its action, the name each scaffold writes, the floor's spelling, the `OSError`, and the missing-rule refusal. `tests/test_create_config_output.py::test_scaffolding_does_not_edit_the_session_configuration` now assigns the floor with one rule changed, since the one-tag policy it assigned is refused.
+  - **Output:** none (a writer, and the loader reads every file as before).
 
 ### Fixed
 
