@@ -15,10 +15,12 @@ import datetime
 import multiprocessing
 import concurrent.futures
 import functools
+import numbers
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
+import numpy as np
 import yaml
 from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
@@ -1167,6 +1169,170 @@ def _unheld_spelling(value):
         list: A marker, the value's type name and its repr.
     """
     return ["\x00unheld", type(value).__name__, repr(value)]
+
+
+
+# The cells a Parquet column may hold as a list: Python sequences and
+# pydicom's `MultiValue` (a `MutableSequence`, not a `list`, which is why
+# pyarrow refuses it, #816). `str` and `bytes` are sequences to Python but
+# scalars here, so they are never in this tuple.
+_PARQUET_SEQUENCES = (list, tuple, MultiValue, np.ndarray)
+
+# The int64 range: an Arrow integer column holds nothing wider, and
+# pyarrow raises on a wider Python int rather than widening.
+_INT64_MIN, _INT64_MAX = -2 ** 63, 2 ** 63 - 1
+
+
+def _parquet_null(value, isna) -> bool:
+    """Whether a frame cell (or a sequence element) is a missing value.
+
+    Args:
+        value (Any): One cell or element.
+        isna (Callable): `pandas.isna`, passed in by the caller that
+            imported pandas, so a call per cell does not re-import it.
+
+    Returns:
+        bool: True for `None`, NaN, `pd.NA` and `NaT`. False for every
+            sequence, `str` and `bytes`, whatever they hold.
+    """
+    # Sequences first: `pd.isna` of a list is element-wise, and the
+    # truth of an array is an error.
+    if value is None:
+        return True
+    if isinstance(value, _PARQUET_SEQUENCES + (str, bytes)):
+        return False
+    try:
+        return bool(isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parquet_family(value) -> Optional[str]:
+    """The scalar family of a non-null value, or None when it is not a scalar.
+
+    Judged by `isinstance`, never by type name, so pydicom's `DSfloat`
+    and `IS` (float and int subclasses) and numpy's numbers fall in
+    `number`. `bool` is tested before `int`, of which it is a subclass,
+    and `datetime` before `date`, likewise.
+
+    Args:
+        value (Any): A non-null cell or element.
+
+    Returns:
+        Optional[str]: `bool`, `number` (an int in the int64 range, or a
+            float), `str`, `bytes`, `datetime`, `date` or `time`; None
+            for anything else -- a sequence, a pydicom `PersonName`
+            (not a `str`), a `Decimal`, an int wider than int64.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "bool"
+    if isinstance(value, numbers.Integral):
+        return "number" if _INT64_MIN <= int(value) <= _INT64_MAX else None
+    if isinstance(value, numbers.Real):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, bytes):
+        return "bytes"
+    if isinstance(value, datetime.datetime):
+        return "datetime"
+    if isinstance(value, datetime.date):
+        return "date"
+    if isinstance(value, datetime.time):
+        return "time"
+    return None
+
+
+def _parquet_column_shape(values, isna) -> str:
+    """How `export_dataframe` writes one object column to Parquet (#816).
+
+    Nulls (`_parquet_null`) are skipped throughout; they stay null in
+    every arm. Of the rest:
+
+    - `"keep"`: every cell is a scalar (`_parquet_family` is not None)
+      and all of one family. Written as it is, so the Arrow type is the
+      engine's (`date` stays a date, `int` an integer). A column of
+      nulls alone is kept.
+    - `"list"` (the column is *uniform*): every cell is a sequence (a
+      `list`, `tuple`, pydicom `MultiValue` or numpy array), and every
+      non-null element of every cell is a scalar, all of one family. An
+      empty sequence has no elements and does not break uniformity.
+      Written as an Arrow list column of that family.
+    - `"text"`: anything else. A column mixing scalars and sequences,
+      or two families (`str` beside `int`; `date` beside `datetime`,
+      which pyarrow would truncate to the day; `str` beside `bytes`,
+      which pyarrow would encode), or holding one value that is not a
+      scalar (a `PersonName`, a nested sequence, an int wider than
+      int64). Each non-null cell becomes `str(cell)`, the text the CSV
+      arm writes for it.
+
+    Args:
+        values (Iterable[Any]): The column's cells.
+        isna (Callable): `pandas.isna`, as `_parquet_null` takes it.
+
+    Returns:
+        str: `"keep"`, `"list"` or `"text"`.
+    """
+    scalar_families = set()
+    element_families = set()
+    sequences = scalars = 0
+    for value in values:
+        if _parquet_null(value, isna):
+            continue
+        if isinstance(value, _PARQUET_SEQUENCES):
+            sequences += 1
+            for element in value:
+                if _parquet_null(element, isna):
+                    continue
+                family = _parquet_family(element)
+                if family is None:
+                    return "text"
+                element_families.add(family)
+        else:
+            scalars += 1
+            family = _parquet_family(value)
+            if family is None:
+                return "text"
+            scalar_families.add(family)
+    if sequences and scalars:
+        return "text"
+    if sequences:
+        return "list" if len(element_families) <= 1 else "text"
+    return "keep" if len(scalar_families) <= 1 else "text"
+
+
+def _parquet_safe(df):
+    """A copy of `df` that a Parquet engine can write, by `_parquet_column_shape`.
+
+    Only columns of dtype `object` are read; every other column, and
+    every object column the rule keeps, is passed through unchanged, so
+    a frame that was already writable keeps its schema.
+
+    Args:
+        df (pd.DataFrame): The cohort frame.
+
+    Returns:
+        pd.DataFrame: A copy; `df` is not changed.
+    """
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+    out = df.copy()
+    for column in out.columns:
+        series = out[column]
+        if series.dtype != object:
+            continue
+        shape = _parquet_column_shape(series, pd.isna)
+        if shape == "list":
+            converted = [None if _parquet_null(v, pd.isna)
+                         else [None if _parquet_null(e, pd.isna) else e
+                               for e in v]
+                         for v in series]
+        elif shape == "text":
+            converted = [None if _parquet_null(v, pd.isna) else str(v)
+                         for v in series]
+        else:
+            continue
+        out[column] = pd.Series(converted, index=series.index, dtype=object)
+    return out
 
 
 
@@ -7417,6 +7583,15 @@ class DicomSession:
         It reports the session's in-memory graph and does not `save()`
         first: pending edits are not committed as a side effect.
 
+        Parquet holds a column of sequences (a multi-valued tag such as
+        Image Type) as a list column when its values are uniform: every
+        non-null cell a sequence whose non-null elements are all of one
+        scalar family. A column that is neither that nor scalars of one
+        family (a tag single-valued in one file and multi-valued in
+        another, or a `str` beside an `int`) is written as text, each
+        value as the CSV writes it. Missing values stay null in both.
+        Other columns are written as they are.
+
         Args:
             output_path (str): The output file path (ends with .csv or
                 .parquet). Required; its directory is created if missing.
@@ -7428,7 +7603,8 @@ class DicomSession:
                 line.
 
         Returns:
-            pd.DataFrame: The frame that was written.
+            pd.DataFrame: The frame as built, before any Parquet
+                conversion; the same frame for either format.
 
         Raises:
             ImportError: If pandas (or, for Parquet, a Parquet engine) is
@@ -7468,8 +7644,12 @@ class DicomSession:
 
         if output_path.endswith(".parquet"):
             try:
-                # Requires pandas plus pyarrow or fastparquet
-                df.to_parquet(output_path, index=False)
+                # Requires pandas plus pyarrow or fastparquet. Through
+                # `_parquet_safe`: a multi-valued tag is a pydicom
+                # `MultiValue`, which pyarrow refuses, and a column can mix
+                # types a CSV writes as text (#816). The copy is what is
+                # written; the frame returned is the one built.
+                _parquet_safe(df).to_parquet(output_path, index=False)
             except ImportError as e:
                 get_logger().error(
                     "Parquet engine (pyarrow or fastparquet) missing.")
