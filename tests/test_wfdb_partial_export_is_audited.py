@@ -389,6 +389,12 @@ def test_an_instance_with_no_uid_is_still_named_in_the_row(tmp_path,
     try:
         for instance in instances:
             instance.sop_instance_uid = None
+        # Since #809 a WFDB export saves the session before the walk, as a
+        # DICOM export does, and the store refuses an instance row with no
+        # UID (`instances.sop_instance_uid` is NOT NULL). That refusal is
+        # the store's, not this exporter's row-naming fallback, which is
+        # what this test is about; so the save is stood down here.
+        monkeypatch.setattr(session, "save", lambda sync=False: None)
 
         def failing(self, *args, **kwargs):
             raise RuntimeError("boom")

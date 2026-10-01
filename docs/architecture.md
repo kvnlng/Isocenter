@@ -6,7 +6,7 @@ Isocenter is an indexing layer over your DICOM files. It never modifies them. It
 
 The `Session` object is your single entry point. It manages:
 
-- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and a DICOM `export()` saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
+- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and `export()` (either built-in format) saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
 - **Inventory**: the patients, studies, series and instances the store holds.
 - **Workers**: a process pool and two background threads. Use `with Session(...) as session:` or call `close()`, or the worker processes outlive your script.
 

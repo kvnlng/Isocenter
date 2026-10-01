@@ -79,12 +79,12 @@ session.load_config("config.yaml")
 session.audit()
 session.anonymize()
 records = session.export("challenge", format="wfdb")
-session.save(sync=True)
 ```
 
 `create_config()` writes a configuration built on the DICOM Basic Profile
-([Configuration](../configuration.md)). A WFDB export does not save the
-session, so `save(sync=True)` keeps the de-identified graph in the store.
+([Configuration](../configuration.md)). A WFDB export saves the session
+before it writes, as a DICOM export does, so the de-identified graph is
+already in the store.
 
 `export()` returns the path of each record's header:
 

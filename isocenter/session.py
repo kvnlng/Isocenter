@@ -6262,6 +6262,10 @@ class DicomSession:
     def export(self, folder: str, format: str = "dicom", **options):
         """Export the session to a directory in the requested format.
 
+        Both built-in formats save the session (`save(sync=True)`) before
+        they write, after any refusal listed under `Raises:`; a refused
+        call saves nothing.
+
         Either format writes one `WARNING` audit row, and changes nothing it
         writes, when the instances it writes carry PHI statuses recorded
         under a policy that is neither the one in force nor one this

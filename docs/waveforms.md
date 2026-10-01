@@ -25,7 +25,6 @@ if __name__ == "__main__":
         session.audit()
         session.anonymize()
         records = session.export("out", format="wfdb")
-        session.save(sync=True)
 ```
 
 [Prepare your own ECGs for a PhysioNet Challenge](tutorials/physionet-challenge-ecgs.md)
@@ -34,9 +33,8 @@ Challenge's code reads it.
 
 Run it as a script: the `if __name__ == "__main__":` guard is required,
 because ingest starts worker processes that re-import the script. A WFDB
-export does not save the session (a DICOM export does), so call
-`save(sync=True)` before the block ends if you want the de-identified graph
-kept in the store; otherwise `close()` warns that the edits were not saved.
+export saves the session before it writes, as a DICOM export does, so the
+de-identified graph is in the store when the block ends.
 
 Each waveform instance becomes one WFDB record, written into the same
 directory tree the DICOM exporter uses, so a record's `.hea`/`.dat` files
