@@ -123,14 +123,12 @@ def _release_order():
     reading of a `v*` tag (`previous-tag`, RELEASING step 1): version
     order, pre-releases included, `a` < `b` < `rc` < final. One reader, so
     this test and the release step cannot disagree on which release came
-    before. Skips where `scripts/` is not in the tree."""
+    before. Imported, never skipped on: `scripts` is no declared extra, so
+    a skip on it would break #107's rule (`test_skip_contract.py`); a tree
+    without it is broken, as for `test_output_fingerprint.py`."""
     if str(_ROOT) not in sys.path:
         sys.path.insert(0, str(_ROOT))
-    try:
-        from scripts import output_fingerprint  # noqa: PLC0415
-    except ImportError as exc:
-        pytest.skip(f"scripts/output_fingerprint.py is not in this tree "
-                    f"(an sdist?), so release tags cannot be ordered: {exc}")
+    from scripts import output_fingerprint  # noqa: PLC0415
     return output_fingerprint._tag_order
 
 
@@ -213,11 +211,11 @@ def test_no_row_the_previous_release_shipped_has_moved():
     git checkout (an sdist), no `v*` tags (a shallow clone or one never
     fetched), no tag at or before this version, or a tag that does not
     carry this file (every release before it)."""
-    order = _release_order()
     code, _, err = _git("rev-parse", "--is-inside-work-tree")
     if code != 0:
         pytest.skip(f"not a git checkout, so no release tag to compare "
                     f"with (an sdist?): {err}")
+    order = _release_order()
     code, listed, err = _git("tag", "--list", "v*")
     assert code == 0, f"git tag --list failed: {err}"
     tags = listed.split()
