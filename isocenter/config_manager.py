@@ -10,7 +10,6 @@ privacy profile files, and the built-in profiles.
 import os
 import logging
 import copy
-import contextlib
 import difflib
 from typing import Dict, Any, List, Optional
 import re
@@ -29,7 +28,9 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: - it applies an unchanged file differently, for example a value-less
 #:   REPLACE writing its VR's dummy.
 #:
-#: A 2.x file still loads unchanged under every 2.x.
+#: A 2.x file still loads unchanged under every later 2.x. A file declaring
+#: a newer minor than this one is refused (`_declared_version`, #784):
+#: this library cannot apply it the way that minor does.
 #:
 #: **Why the second reason matters.** The v1 policy fingerprint
 #: (`configuration._canonical_policy_v1`) hashes this value, read at call
@@ -122,7 +123,7 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
 
     Absent means `_UNVERSIONED_MEANS`. Present, it must be a `str` of the
     form `MAJOR.MINOR`, with no leading zero, whose major is
-    `_READABLE_MAJOR`.
+    `_READABLE_MAJOR` and whose minor is no newer than `CONFIG_VERSION`'s.
 
     Args:
         data (dict): The file's root mapping.
@@ -133,8 +134,9 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
 
     Raises:
         ValueError: For a version that is not a string (an unquoted number
-            or `null`), not `MAJOR.MINOR`, has a leading zero, or names a
-            major this library does not read (`"1.0"` included).
+            or `null`), not `MAJOR.MINOR`, has a leading zero, names a
+            major this library does not read (`"1.0"` included), or a
+            minor newer than `CONFIG_VERSION`'s (#784).
     """
     # An unquoted number is refused rather than coerced -- YAML reads
     # `version: 2.10` as the float 2.1 -- and so is `null`: only an absent
@@ -155,84 +157,28 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
         raise ValueError(
             f"{source}: version {version!r} is not a 'MAJOR.MINOR' string "
             f"such as '2.0' (#711)")
+    # `CONFIG_VERSION` is read at call time, not import time, so the
+    # constant has one home.
+    ours = CONFIG_VERSION
     if version.split(".")[0] != _READABLE_MAJOR:
         raise ValueError(
             f"{source}: version {version!r} is a configuration schema this "
             f"isocenter does not read; it reads version {_READABLE_MAJOR} "
-            f"({_READABLE_MAJOR}.0 through any {_READABLE_MAJOR}.x) (#711)")
+            f"({_READABLE_MAJOR}.0 through {ours}) (#711)")
+    # Refused, not loaded with a note (owner ruling Q1 A on #784): a minor
+    # bump means the same file is applied differently (#762), so a newer
+    # file loaded here would be applied this library's way under its own
+    # number, and `save()` would then rewrite it as ours. Minors compare as
+    # integers, so "2.10" is newer than "2.9". Decided in 1.0.0: had 1.0
+    # loaded a newer minor, no 1.x could refuse one (stability.md's "a file
+    # 1.0 loads, every 1.x loads").
+    if int(version.split(".")[1]) > int(ours.split(".")[1]):
+        raise ValueError(
+            f"{source}: version {version!r} is newer than this isocenter's "
+            f"configuration version {ours}, which may apply it differently "
+            f"than it was written for; upgrade isocenter, or set version: "
+            f"{ours!r} to apply it as {ours} does (#784)")
     return version
-
-
-def _newer_minor_note(declared: str, source: str) -> str:
-    """The sentence a refusal gains when the file at `source` declares a
-    minor newer than `CONFIG_VERSION`, else "".
-
-    Minors compare as integers: "2.10" is newer than "2.9".
-
-    Args:
-        declared (str): The file's version, already checked.
-        source (str): The file's path, named in the note.
-
-    Returns:
-        str: The note, starting with "; ", or "" when the minor is not
-        newer.
-    """
-    # Any minor of the readable major loads. A newer minor that only
-    # changed how a file is applied loads with no note and nothing flags
-    # it; a key or value this library lacks is refused, and this says why.
-    # `CONFIG_VERSION` is read at call time, not import time, so the
-    # constant has one home.
-    ours = CONFIG_VERSION
-    if int(declared.split(".")[1]) <= int(ours.split(".")[1]):
-        return ""
-    return (f"; {source} declares version {declared}; this isocenter reads "
-            f"{ours}, so a key or value added after {ours} needs a newer "
-            f"isocenter")
-
-
-#: The attribute a `ValueError` carries once the innermost file's
-#: `_noting_a_newer_minor` has judged it: the path of that file.
-_JUDGED_BY = "_isocenter_version_judged_by"
-
-
-@contextlib.contextmanager
-def _noting_a_newer_minor(declared: str, source: str):
-    """Re-raise any `ValueError` inside with `_newer_minor_note` appended.
-
-    With no note to add, the original exception propagates untouched.
-    Only the innermost wrap judges a refusal: it marks the exception with
-    `_JUDGED_BY`, and every outer wrap passes a marked one through
-    unchanged.
-
-    Args:
-        declared (str): The file's version.
-        source (str): The file's path.
-
-    Yields:
-        None: The body runs inside the wrap.
-
-    Raises:
-        ValueError: The body's refusal, with the note appended when the
-            file declares a newer minor.
-    """
-    # On every refusal, not only an unknown key: a newer minor may add a
-    # value to an existing key (a new action, a new profile name) or a key
-    # inside a rule, and each reaches this library as a different refusal.
-    # Innermost only, because an external profile's refusal passes through
-    # the configuration's own wrap on its way out, and the configuration's
-    # version says nothing about the profile file.
-    try:
-        yield
-    except ValueError as exc:
-        if getattr(exc, _JUDGED_BY, None) is not None:
-            raise
-        note = _newer_minor_note(declared, source)
-        if not note:
-            setattr(exc, _JUDGED_BY, source)
-            raise
-        noted = ValueError(f"{exc}{note}")
-        setattr(noted, _JUDGED_BY, source)
-        raise noted from exc
 
 
 def _unknown_keys(keys, known, where: str, whose: str,
@@ -296,15 +242,14 @@ def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
     # this library has never heard of, and the version is the true reason
     # to refuse it.
     declared = _declared_version(data, source)
-    with _noting_a_newer_minor(declared, source):
-        if "machine_rules" in data:
-            raise ValueError(
-                f"{source}: 'machine_rules' is an old spelling of 'machines'; "
-                f"rename it (#712)")
-        reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
-                               "A version 2 configuration's")
-        if reason is not None:
-            raise ValueError(f"{source}: {reason}")
+    if "machine_rules" in data:
+        raise ValueError(
+            f"{source}: 'machine_rules' is an old spelling of 'machines'; "
+            f"rename it (#712)")
+    reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
+                           "A version 2 configuration's")
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
     return declared
 
 #: Where this package's own shipped resources live.
@@ -494,19 +439,18 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
         raise ValueError(
             f"{path}: an external privacy profile must carry its rules under "
             f"a 'phi_tags:' mapping; this file has no phi_tags key")
-    declared = _declared_version(data, path)
-    with _noting_a_newer_minor(declared, path):
-        if "phi_tags" not in data:
-            raise ValueError(
-                f"{path}: an external privacy profile must carry its rules "
-                f"under a 'phi_tags:' mapping; this file has no phi_tags key")
-        unknown = sorted((k for k in data if k not in _PROFILE_FILE_KEYS), key=str)
-        if unknown:
-            raise ValueError(
-                f"{path}: an external privacy profile contributes only its "
-                f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
-                f"would be ignored (#712)")
-        return _validated_phi_tags(data["phi_tags"], path)
+    _declared_version(data, path)
+    if "phi_tags" not in data:
+        raise ValueError(
+            f"{path}: an external privacy profile must carry its rules "
+            f"under a 'phi_tags:' mapping; this file has no phi_tags key")
+    unknown = sorted((k for k in data if k not in _PROFILE_FILE_KEYS), key=str)
+    if unknown:
+        raise ValueError(
+            f"{path}: an external privacy profile contributes only its "
+            f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
+            f"would be ignored (#712)")
+    return _validated_phi_tags(data["phi_tags"], path)
 
 
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
@@ -1147,9 +1091,8 @@ def _loaded_unified_config(path: str):
     # First after the root is known to be a mapping: before the
     # keys, and before a profile file is opened, so a file this library
     # does not read is refused for that and nothing else.
-    declared = _checked_top_level(config, path)
-    with _noting_a_newer_minor(declared, path):
-        return _resolved_policy(config, path)
+    _checked_top_level(config, path)
+    return _resolved_policy(config, path)
 
 
 def _unshipped_profile_refusal(profile_name: str, path: str) -> ValueError:
@@ -1387,16 +1330,11 @@ class ConfigLoader:
                 machine rule `_validate_rule` refuses, a `date_jitter`
                 that is not `{min_days: int, max_days: int}` with
                 `min_days <= max_days`, and a `remove_private_tags` that
-                is not a bool. A file declaring a newer minor gains a
-                note saying so.
+                is not a bool.
         """
         # The version, the top-level keys, the phi_tags and the profile.
         data, base = _loaded_unified_config(filepath)
-        # Already checked; read again only for the newer-minor note on the
-        # refusals below, which a newer minor can reach too (a key inside
-        # a rule, a new value).
-        with _noting_a_newer_minor(_declared_version(data, filepath), filepath):
-            return ConfigLoader._checked_parts(data, filepath, base)
+        return ConfigLoader._checked_parts(data, filepath, base)
 
     @staticmethod
     def _checked_parts(

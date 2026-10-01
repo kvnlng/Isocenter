@@ -187,11 +187,13 @@ def test_a_rule_the_base_supplies_cannot_be_saved_away(tmp_path, text, base):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("declared", ['version: "2.0"\n', "", 'version: "2.3"\n'])
+# A `version: "2.3"` row was here until #784: a file declaring a newer
+# minor is now refused at load, so `save()` can no longer rewrite one as
+# 2.0 (`test_config_schema_version.py`).
+@pytest.mark.parametrize("declared", ['version: "2.0"\n', ""])
 def test_save_writes_the_schema_version(tmp_path, declared):
-    """Every saved file has a `version` line, and it is the schema's: a
-    file declaring 2.3 is saved as 2.0 (owner ruling Q5), because what
-    `save()` writes is 2.0 content by construction. The literal, not
+    """Every saved file has a `version` line, and it is the schema's,
+    because what `save()` writes is 2.0 content by construction. The literal, not
     `CONFIG_VERSION`: `test_config_schema_version.py` covers the writer
     reading the constant. Kills the line dropped, an unquoted float, and
     the declared string copied through."""

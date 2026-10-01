@@ -121,14 +121,19 @@ Three of these are traps YAML sets, and are refused rather than read:
   Quote it.
 
 **`version`.** A file with no `version` line is version 2.0, and always
-will be. A present `version` must be a quoted string whose major is `2`;
-any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused.
-A 1.x release raises the `2.x` minor for either of two reasons: it adds
-a key or a value, or it applies an unchanged file differently (for
-example, a value-less `REPLACE` writing a dummy its VR can hold).
-Either way, a `2.x` file still loads unchanged. A file that uses a key or
-a value this release does not have is refused, and the refusal says the
-file's version is newer than this isocenter's.
+will be. A present `version` must be a quoted string whose major is `2`, from
+`2.0` through this release's own minor. It is written one way: `"2.00"`
+and `"02.0"` are refused. A 1.x release raises the `2.x` minor for either
+of two reasons: it adds a key or a value, or it applies an unchanged file
+differently (for example, a value-less `REPLACE` writing a dummy its VR
+can hold). Either way, a file of an older `2.x` still loads unchanged in
+every later release. A file declaring a newer minor than this release's
+is refused, whatever it contains, because this release cannot apply it
+the way it was written for: `ValueError: cfg.yaml: version '2.1' is newer
+than this isocenter's configuration version 2.0, which may apply it
+differently than it was written for; upgrade isocenter, or set version:
+'2.0' to apply it as 2.0 does (#784)` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
+An external profile file declaring a newer minor is refused the same way.
 
 When the way a file is applied changes, a store scanned under the older
 minor is not treated as scanned under the new one. The minor is part of
