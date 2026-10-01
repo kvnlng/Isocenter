@@ -455,6 +455,7 @@ TARGETS = {
     "isocenter/io_handlers.py": (["tests/test_type_1_geometry_is_checked_beyond_ct.py", "tests/test_an_absent_patient_name_exports_empty.py", "tests/test_two_patients_sharing_a_study_uid_are_declined.py","tests/test_a_series_number_rule_reaches_the_export.py", "tests/test_the_encrypted_attributes_item_is_conformant.py", "tests/test_instance_number_is_read_at_ingest.py", "tests/test_tutorials_run.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_an_unknown_subset_uid_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_private_ov_takes_the_size_gate.py",
+                                  "tests/test_an_absent_instance_number_is_not_invented.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
                                   # `Session.export()` without naming it), and listed for a
@@ -614,6 +615,7 @@ TARGETS = {
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_kept_private_binary_value_keeps_its_vr.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_nested_item_status_survives_a_reopen.py",
+                                  "tests/test_an_absent_instance_number_is_not_invented.py",
                                   "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
                                   "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                                   "tests/test_a_status_records_the_policy_it_was_scanned_under.py",

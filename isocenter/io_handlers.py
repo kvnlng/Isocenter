@@ -2071,6 +2071,13 @@ def _read_element(ds, tag, little_endian=True):
     VR twin of the file would hold. No audit row is written here; the
     export resolves again and writes its `WARNING` row.
 
+    An IS element whose text pydicom reads as an infinite float (`inf`,
+    `-inf`, `1e400`) raises `OverflowError` inside pydicom's own read, even
+    in its default reading mode. Such an element is returned holding the
+    file's text as a `str`, as pydicom holds an IS it cannot convert
+    (`ab12cd`), so the file is ingested and the export drops that one
+    element with a `DATA_LOSS` row (#870).
+
     Args:
         ds: The pydicom `Dataset` holding the element.
         tag: The element's tag, as `Dataset.__getitem__` accepts it.
@@ -2083,6 +2090,7 @@ def _read_element(ds, tag, little_endian=True):
     Raises:
         AttributeError: Any `AttributeError` from `ds[tag]` other than an
             unresolved ambiguous VR, which refuses the file.
+        OverflowError: From an element whose VR is not IS.
     """
     # `__getitem__` stores the converted element *before* it resolves the
     # VR, so `get_item` returns the file's bytes under the ambiguous VR.
@@ -2096,6 +2104,32 @@ def _read_element(ds, tag, little_endian=True):
         elem = ds.get_item(tag)
         if str(elem.VR) not in AMBIGUOUS_VR:
             raise
+    except OverflowError:
+        # #870. pydicom's `IS()` falls through to `int(float(text))`, which
+        # raises for an infinite value; its validation mode does not catch
+        # it. Keyed on the VR, never on pydicom's message. Under Implicit
+        # VR the raw element carries no VR, so the dictionary's is read;
+        # a private tag has none and re-raises.
+        raw_elem = ds.get_item(tag)
+        vr = raw_elem.VR
+        if vr is None:
+            try:
+                vr = dictionary_VR(Tag(tag))
+            except KeyError:
+                vr = None
+        if vr != "IS" or not isinstance(raw_elem.value, (bytes, bytearray)):
+            raise
+        # The file's text, as a `str`, which is how pydicom already holds
+        # an IS it cannot convert. `validation_mode=IGNORE` rather than
+        # `catch_warnings`: on 3.12 that mutates the process-global
+        # filters, and ingest runs on threads under 3.14t. The export
+        # cannot write it as IS either (`add_new` raises the same
+        # `OverflowError` inside `_merge`'s per-element `try`), so it is
+        # dropped there with one `DATA_LOSS` row, exactly as an IS of
+        # `ab12cd` is.
+        text = bytes(raw_elem.value).decode("ascii", "replace").strip(" \x00")
+        return DataElement(Tag(tag), "IS", text, already_converted=True,
+                           validation_mode=pydicom.config.IGNORE)
     # Outside the `try`, so a failure here is not reported "during
     # handling of" pydicom's.
     #
@@ -4114,10 +4148,11 @@ def _instance_number_of(ds) -> int:
     cannot convert, which it leaves as a `str` -- reads as 0, the value a
     file with no Instance Number gets, and so does an integer outside IS's
     range. An ill-formed Instance Number is not a reason to refuse the
-    file, with one exception that predates #810 and is not changed here:
-    an infinite value (`inf`, `-inf`, `1e400`) makes pydicom's own read
-    raise `OverflowError`, even in its default reading mode, and the file
-    is refused, as it was when only `populate_attrs` read the element.
+    file, and that includes an infinite value (`inf`, `-inf`, `1e400`),
+    whose read makes pydicom raise `OverflowError` even in its default
+    reading mode: it reads as 0 too (#870), and `_read_element` holds the
+    element as the file's text for the export to drop with its row. Until
+    #870 that `OverflowError` refused the file.
     What pydicom does read as one integer is taken as it reads it,
     including spellings a conformant IS string would not use: `1e3` and
     `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
@@ -4134,16 +4169,41 @@ def _instance_number_of(ds) -> int:
     # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
     # `str` pydicom leaves unconverted are not, and read as 0. No `str`
     # arm: pydicom leaves text unconverted only when `float()` refused it,
-    # and `int()` refuses everything `float()` does. No `try` around the
-    # read either: what it raises -- `OverflowError` for an infinite value
-    # in pydicom's default mode, any invalid value under its RAISE mode --
-    # `populate_attrs` raises on the same element, so the file is refused
-    # either way, as it was before #810. A `try` here would not keep it.
-    value = ds.get("InstanceNumber")
+    # and `int()` refuses everything `float()` does. `OverflowError` only:
+    # `populate_attrs` (through `_read_element`) takes the same element
+    # without raising, so catching it here is what lets the file in. Any
+    # other exception -- an invalid value under pydicom's RAISE mode --
+    # `populate_attrs` raises on the same element, and the file is refused
+    # either way; a wider `except` here would not keep it.
+    try:
+        value = ds.get("InstanceNumber")
+    except OverflowError:
+        return 0
     if not isinstance(value, int):
         return 0
     number = int(value)
     return number if _IS_MIN <= number <= _IS_MAX else 0
+
+
+def _series_number_of(ds):
+    """The file's Series Number (0020,0011) as pydicom reads it, or 0.
+
+    0 when the file has none, as before, and when pydicom's read raises
+    `OverflowError` for an infinite value (#870), which refused the file.
+    `populate_attrs` holds the element itself (`_read_element`), and the
+    export drops it with a `DATA_LOSS` row. Every other value is returned
+    as pydicom reads it, unchanged by #870.
+
+    Args:
+        ds: The pydicom Dataset read from the file.
+
+    Returns:
+        The value for `Series.series_number`.
+    """
+    try:
+        return ds.get("SeriesNumber", 0)
+    except OverflowError:
+        return 0
 
 
 def ingest_worker(fp: str) -> Tuple:
@@ -4195,7 +4255,7 @@ def ingest_worker(fp: str) -> Tuple:
             'man': ds.get("Manufacturer", ""),
             'model': ds.get("ManufacturerModelName", ""),
             'dev_sn': ds.get("DeviceSerialNumber", ""),
-            'series_num': ds.get("SeriesNumber", 0)
+            'series_num': _series_number_of(ds),
         }
 
         if not meta['sop']:
@@ -4206,10 +4266,19 @@ def ingest_worker(fp: str) -> Tuple:
         # Construct Instance (Metadata Only)
         # The file's Instance Number, not 0 (#810). `__post_init__` sets
         # `0020,0013` from it, and `populate_attrs` below then writes the
-        # file's own element over that whenever the file has one, so the
-        # attribute is exactly what it was before #810 in every case.
+        # file's own element over that whenever the file has one.
         inst = Instance(meta['sop'], meta['sop_class'],
                         _instance_number_of(ds), file_path=fp)
+        # And when the file has none, the attribute goes: the 0 that
+        # `__post_init__` wrote is ours, not the file's, and was exported
+        # as `(0020,0013) '0'` (#870). The field keeps its 0, for the
+        # store column, the scan clone and the WFDB record name, which
+        # reads the attribute and spells an absent one "0" anyway. `in`
+        # does not convert the value, so it cannot raise for an infinite
+        # one; a zero-length element is present and is kept. Both
+        # hydration sites in `persistence.py` repeat this for a reopen.
+        if "InstanceNumber" not in ds:
+            del inst.attributes["0020,0013"]
         # Losses ride `meta` rather than a ninth tuple slot, as the
         # multiplex-group loss does. This worker may be in a subprocess
         # with no store handle, so the loss travels and the parent
