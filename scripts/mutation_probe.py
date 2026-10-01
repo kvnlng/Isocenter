@@ -456,6 +456,7 @@ TARGETS = {
                                   "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_private_ov_takes_the_size_gate.py",
                                   "tests/test_an_absent_instance_number_is_not_invented.py",
+                                  "tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
                                   # `Session.export()` without naming it), and listed for a

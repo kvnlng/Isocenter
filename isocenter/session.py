@@ -6396,7 +6396,9 @@ class DicomSession:
                 JPEG 2000 (lossless). A 16-bit image with more than one
                 sample is written this way too, and pydicom with only its
                 Pillow plugin cannot decode it; the export names each such
-                instance at INFO.
+                instance at INFO. An image of 32- or 64-bit integer
+                samples, which JPEG 2000 here cannot carry exactly, is
+                written uncompressed instead, also named at INFO (#771).
             check_burned_in (bool): If True, scans for PHI before exporting and
                 withholds every instance that still carries an identifier,
                 at any level of its hierarchy. Each withheld instance

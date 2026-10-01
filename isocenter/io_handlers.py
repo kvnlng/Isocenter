@@ -728,7 +728,8 @@ def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
 
 
 def _photometric_warning(label, syntax_uid, *,
-                         has_pixels: bool) -> Optional[str]:
+                         has_pixels: bool,
+                         remedy: Optional[str] = None) -> Optional[str]:
     """One sentence for a label the written syntax does not admit.
 
     Args:
@@ -737,6 +738,9 @@ def _photometric_warning(label, syntax_uid, *,
         has_pixels (bool): Whether the file carries a pixel element.
             Keyword-only, no default. A pixel-less file gets the
             `_PHOTOMETRIC_NO_PIXELS` remedy instead of the table's.
+        remedy (Optional[str]): Replaces the table's remedy for a file
+            with pixels, where the door makes the table's false (the #771
+            fallback). None keeps the table's.
 
     Returns:
         Optional[str]: A sentence naming what was declared, what the file
@@ -751,7 +755,8 @@ def _photometric_warning(label, syntax_uid, *,
     found = _label_inadmissibility(label, syntax_uid)
     if found is None:
         return None
-    clause, remedy = found
+    clause, table_remedy = found
+    remedy = table_remedy if remedy is None else remedy
     if has_pixels:
         kept = ("The label was written as declared, over the samples the "
                 "instance held, and neither was changed.")
@@ -6008,7 +6013,8 @@ class ExportError(RuntimeError):
 
 
 def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
-                          syntax_uid: str, warnings=None) -> None:
+                          syntax_uid: str, warnings=None,
+                          remedy: Optional[str] = None) -> None:
     """Write the descriptors that describe the pixel element just written.
 
     Writes `Rows`, `Columns`, `SamplesPerPixel`, `NumberOfFrames` (when
@@ -6035,6 +6041,10 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
         warnings (list): Where a sentence goes for a label the syntax
             does not admit, for the parent to log and audit. `None`
             means the caller does not collect them.
+        remedy (Optional[str]): A remedy that replaces the table's in that
+            sentence, for a door where the table's is false: the #771
+            fallback passes `_PHOTOMETRIC_J2K_FALLBACK`. None keeps the
+            table's.
 
     Raises:
         _PhotometricRefusal: if the *file* would carry more than one
@@ -6179,7 +6189,7 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if warnings is not None:
         warning = _photometric_warning(
             _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid, has_pixels=True)
+            syntax_uid, has_pixels=True, remedy=remedy)
         if warning is not None:
             warnings.append(warning)
 
@@ -7438,6 +7448,37 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"the image's geometry, and a recipient cannot tell a "
                 f"guess apart from a correct answer.")
 
+        # A frame JPEG 2000 Lossless cannot carry exactly -- 32- and 64-bit
+        # integer samples -- is written uncompressed under
+        # `use_compression=True`, with an INFO note (#771, owner ruling
+        # Q1). It was refused by `_refuse_unencodable_j2k_frame`, which
+        # failed the instance, and an export of nothing but such images
+        # raised `ExportError`, while `use_compression=False` wrote the
+        # same pixels exactly. Decided here, per instance, once the frame
+        # and its geometry are known and before any reader of
+        # `compressed` or `written_syntax` below, so the label judgement,
+        # the raw write and `_finalize_dataset` all see the syntax the
+        # file is actually written under.
+        #
+        # Through `_j2k_encodable`, the guard's own predicate, never a set
+        # of widths of its own: the two cannot drift. `itemsize` is what
+        # the encoder sees (`bool` is 1, and the encoder views it as
+        # `uint8`).
+        #
+        # Integer frames only. The float arm below already writes native
+        # under compression and keeps the batch's `compressed`; folding it
+        # in here would change which syntax its label is judged against.
+        j2k_fallback = (compressed and arr is not None
+                        and arr.dtype.kind != 'f'
+                        and not _j2k_encodable(arr.dtype.itemsize,
+                                               geom.samples > 1))
+        if j2k_fallback:
+            compressed = False
+            written_syntax = str(ImplicitVRLittleEndian)
+            corrections.append(_J2K_FALLBACK_NOTE.format(
+                dtype=arr.dtype, bits=arr.dtype.itemsize * 8,
+                samples=geom.samples))
+
         if arr is not None and arr.dtype.kind == 'f':
             # A floating-point array is not Pixel Data, and writing it
             # under (7fe0,0010) does not make it Pixel Data -- it makes a
@@ -7729,7 +7770,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             _write_pixel_geometry(ds, geom, attributes,
                                   float_element=False,
                                   syntax_uid=written_syntax,
-                                  warnings=warnings)
+                                  warnings=warnings,
+                                  remedy=(_PHOTOMETRIC_J2K_FALLBACK
+                                          if j2k_fallback else None))
 
             # Derived from the array, never read from `attributes`, as Rows
             # and SamplesPerPixel are: `ds.PixelData = arr.tobytes()` is
@@ -7875,7 +7918,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             written_pixels = arr
 
         # Validate & Save
-        ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
+        #
+        # The per-instance answer, not `ctx.compression`: after a #771
+        # fallback, handing the batch's `"j2k"` on would send the frame to
+        # the encoder, whose guard refuses it again. A float frame and a
+        # pixel-less file keep the batch value, as before.
+        ds = DicomExporter._finalize_dataset(
+            ds, None if j2k_fallback else ctx.compression, pixel_array=arr)
 
         # A limit of ours, not a defect in the data: a
         # 16-bit or signed 8-bit YBR_FULL file is conformant and is
@@ -8161,6 +8210,49 @@ def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
     return (expected, expected + expected % 2)
 
 
+def _j2k_encodable(itemsize, multi_sample) -> bool:
+    """Whether a frame of this width and sample count is in `_J2K_ENCODABLE_FRAMES`.
+
+    The one predicate: the export worker asks it to decide whether an
+    instance is compressed at all (#771), and `_refuse_unencodable_j2k_frame`
+    asks it as the backstop for a direct `_compress_j2k` caller, so the two
+    cannot answer differently. Read at call time, never copied.
+
+    Args:
+        itemsize (int): The bytes per sample the encoder will see -- 1 for
+            a `bool` mask, which it views as `uint8`.
+        multi_sample (bool): More than one sample per pixel.
+
+    Returns:
+        bool: True when the cell is encodable and reads back exactly.
+    """
+    return (itemsize, bool(multi_sample)) in _J2K_ENCODABLE_FRAMES
+
+
+#: The INFO note for a frame the default compression writes uncompressed
+#: (#771, owner ruling Q1). No path and no identifier: the parent prefixes
+#: the SOP Instance UID. A note and not a row: the file is exact, written in
+#: the syntax `use_compression=False` would have written, and a WARNING
+#: would grade a correct file REVIEW_REQUIRED.
+_J2K_FALLBACK_NOTE = (
+    "written uncompressed (Implicit VR Little Endian) under "
+    "use_compression=True: JPEG 2000 Lossless here is exact only to 25 "
+    "bits, so a {dtype} frame at BitsAllocated {bits} with {samples} "
+    "sample(s) per pixel cannot be compressed losslessly (#771). The "
+    "samples are written exactly.")
+
+#: The remedy for an inadmissible label on a frame the fallback above
+#: wrote uncompressed. A property of the door, as `_PHOTOMETRIC_ICON` is
+#: of an icon: the table's ICT/RCT remedy says "export with
+#: use_compression=True", which is false for a frame compression cannot
+#: carry.
+_PHOTOMETRIC_J2K_FALLBACK = (
+    "This frame is written uncompressed under use_compression=True as "
+    "well, because JPEG 2000 Lossless cannot carry it exactly (#771), so "
+    "compressing the export does not change this. Declare the label these "
+    "bytes have with set_attr(\"0028,0004\", ...).")
+
+
 def _refuse_unencodable_j2k_frame(arr, ds, samples):
     """Raise before the encode, naming what the codec will not say.
 
@@ -8178,7 +8270,7 @@ def _refuse_unencodable_j2k_frame(arr, ds, samples):
         _J2kFrameRefusal: The `(itemsize, multi-sample)` cell is not in
             `_J2K_ENCODABLE_FRAMES`.
     """
-    if (arr.dtype.itemsize, samples > 1) in _J2K_ENCODABLE_FRAMES:
+    if _j2k_encodable(arr.dtype.itemsize, samples > 1):
         return
 
     # Every 8- and 16-bit cell is encodable, so what reaches here is

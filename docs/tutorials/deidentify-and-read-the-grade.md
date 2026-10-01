@@ -134,11 +134,10 @@ Two choices here are deliberate:
 - **`use_compression=False`.** `rtdose.dcm` stores 32-bit dose values,
   and Isocenter's JPEG 2000 encoder is exact only to 25 bits, so with
   compression on
-  [that instance fails to export](../export-output.md)
-  rather than be written wrong
-  ([#771](https://github.com/kvnlng/Isocenter/issues/771) tracks writing
-  it uncompressed instead). A failure is an `ERROR` row in the audit log,
-  and a row, once written, stays in the store for good.
+  [that instance is written uncompressed](../export-output.md#compression)
+  rather than be written wrong, with an INFO note
+  ([#771](https://github.com/kvnlng/Isocenter/issues/771)). Turning
+  compression off writes every file in one transfer syntax.
 - **The report comes last,** after `export()`. Export writes rows of its
   own (anything it lost or could not write), and the report grades only
   the rows that exist when you call it.
