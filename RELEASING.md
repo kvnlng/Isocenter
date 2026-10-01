@@ -293,6 +293,21 @@ fixes, never features.
    `python -c "import pydicom.data; pydicom.data.fetch_data_files()"`
    once per machine.
 
+   Then check the configuration behaviour pins (#782) in
+   `tests/test_config_behaviour_is_versioned.py`, which the full run has
+   just run. `BEHAVIOUR_BY_VERSION` holds the digest of what each
+   `CONFIG_VERSION` does to fixed input, and `SHIPPED_BEHAVIOUR` a literal
+   copy of each row a release has shipped. Read both: every key of
+   `SHIPPED_BEHAVIOUR` must hold the same hex in `BEHAVIOUR_BY_VERSION`,
+   and the row for the `CONFIG_VERSION` at this SHA must be in both. A
+   row in `BEHAVIOUR_BY_VERSION` that a release is about to ship for the
+   first time is copied into `SHIPPED_BEHAVIOUR` by hand, as a literal,
+   in a PR into `main`, and step 1 starts again. After the v1.0.0 tag a
+   shipped row never changes: a change that moves the digest is a new
+   minor with a new row, and a red test here is a change that reached
+   `main` without one. It is fixed on `main`, never by editing a shipped
+   row.
+
    Then compare the tracked fingerprint with the previous release's.
    First `git fetch --tags origin`: `previous-tag` refuses when origin has
    a newer `v*` tag than the clone. Then

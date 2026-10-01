@@ -89,6 +89,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/configuration.md` ("Generating Configuration Templates") says so. `tests/test_a_scaffold_reloads_to_the_session.py` covers the four bases, each with a rule changed in its value, its name or its action, the name each scaffold writes, the floor's spelling, the `OSError`, and the missing-rule refusal. `tests/test_create_config_output.py::test_scaffolding_does_not_edit_the_session_configuration` now assigns the floor with one rule changed, since the one-tag policy it assigned is refused.
   - **Output:** none (a writer, and the loader reads every file as before).
 
+### Added
+
+- **A behaviour digest pinned per `CONFIG_VERSION`, so a change to how a configuration is applied cannot keep the version (#782, owner ruling Q8 A).** A minor bump is owed whenever the same file is applied differently to the same input (#762), and nothing enforced it: `SCHEMA_BY_VERSION` checks keys only. Measured on `main` at 7579d4df: `config_manager.VR_DUMMY['PN']` changed from `'ANONYMIZED'` to `'CHANGED'` left the policy fingerprint equal and the suite green.
+  - `tests/support/behaviour_digest.py` runs `basic@2026c`, the floor, `basic@2026c` with `remove_private_tags: false`, and a `none` kitchen-sink policy (each action on each VR family, a valued `REPLACE`, value-less `REPLACE` on a UI and on each `VR_DUMMY` string VR, a mask key) over CT_small, MR_small and a synthetic image (an element of each dummy VR, a nested UID copy and date, a private element, an overlay element, a pixel zone's serial), under a fixed secret and range. It records every finding, the graph after `anonymize()`, and the floor's frames after `redact()`, and hashes them: `a3ea5ac8…53a2f` for 2.0, the same on 3.12 and 3.14t, in about four seconds.
+  - `tests/test_config_behaviour_is_versioned.py` holds `BEHAVIOUR_BY_VERSION` and `SHIPPED_BEHAVIOUR`, a literal copy, filled for 2.0 in this change, as `FROZEN_AT_1_0` freezes the profile tables. The digest must equal this version's row, and a shipped row may never move once the package is 1.x. Until the v1.0.0 tag a change that moves the digest updates both rows with a CHANGELOG line saying why it is not a behaviour change; after it, the only green path is a new minor with a new row. The test also checks one behaviour row per `SCHEMA_BY_VERSION` row. Shown to bite on the `VR_DUMMY['PN']` change, the date offset's `+ min_days` read as `+ max_days`, `_LABEL_UID` changed, a zone's rows off by one, and `CONFIG_VERSION` bumped with no row.
+  - `RELEASING.md` ("Cutting a release", step 1) checks the two tables at the cut.
+  - `CONFIG_VERSION` stays 2.0 at 1.0.0 (owner ruling Q9 A): no change in this release applies a file that loads differently, and 1.0.0's behaviour is the 2.0 baseline.
+  - **Output:** none.
+
 ### Fixed
 
 - **A file with no Patient's Name is exported with an empty Patient's Name, not `Unknown` (#746).** `ingest()` filled an absent Patient's Name `(0010,0010)` with the placeholder `Unknown` and held it on the `Patient`. The export stamps `0010,0010` from the `Patient`, and the scan's `REPLACE` arm exempted the literal `Unknown` by name. A file with no name was therefore exported as `0010,0010 PN 'Unknown'` beside `(0012,0062) YES`, and the run graded `PASS`. That happened under the default floor as well as under `KEEP`, which is wider than the issue as filed. Measured on `main` at 7579d4df over CT_small with the element deleted. A placeholder cannot be told from a recorded name once it is in the graph: a file really naming its patient `Unknown` kept that name through `REPLACE`, and the export claimed a name that no file recorded.
@@ -158,6 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
     Their folders stay `Subject_UnknownPatient`: that folder name comes from the empty Patient ID (#584), not from the name.
   - **Nothing else moved.** #745: no member shares a Study UID across two Patient IDs. #894: the tool never ingests twice. #752: it never edits between `audit()` and `anonymize()`. #765: configuration B keeps private tags, but no member's private element equals a UID replaced in its own instance. #761 and #813 change no output. `CONFIG_VERSION` stays 2.0, so no `(0012,0063)` hash and no `phi_policy` fingerprint moves.
+
+- **The scaffold's header names `CONFIG_VERSION`, not a literal `(v2.0)` (#782).** `create_config()` wrote `# Isocenter Privacy Configuration (v2.0)` as a literal beside the `version:` key it reads from the constant, so a bump would have left the header saying 2.0 above a 2.1 file. The header now reads the constant when it is written, and `tests/test_config_behaviour_is_versioned.py` pins it.
 
 ## [1.0.0rc8] - 2026-10-01
 

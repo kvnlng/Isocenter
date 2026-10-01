@@ -38,7 +38,9 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: under an older minor read as another policy. `export()` then says so
 #: and the report grades REVIEW_REQUIRED until `audit()` runs again.
 #: Without the bump, the fingerprint equates two scans that behave
-#: differently. Nothing checks that such a change bumps.
+#: differently. `tests/test_config_behaviour_is_versioned.py` pins what
+#: this version does to fixed input, so such a change goes red there until
+#: it bumps (#782); its `SHIPPED_BEHAVIOUR` freezes a released version's.
 #:
 #: **The working test** is `docs/api/stability.md`'s promise. Bump
 #: whenever the same file would be applied differently to the same input:

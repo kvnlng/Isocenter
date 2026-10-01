@@ -381,8 +381,8 @@ COHORT_REPORT_COLUMNS = [
     "DeviceSerial",
 ]
 
-# The header written above every scaffolded config.
-_CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
+# The header above every scaffold; `<CONFIG_VERSION>` is filled at render (#782).
+_CONFIG_HEADER = """# Isocenter Privacy Configuration (v<CONFIG_VERSION>)
 # ==========================================
 #
 #
@@ -601,7 +601,9 @@ def _render_config_yaml(data: Dict[str, Any]) -> str:
             rendered.append("")
         rendered.append(line)
 
-    return _CONFIG_HEADER + "\n" + "\n".join(rendered) + "\n"
+    # The constant, read now: a literal here went stale on a bump (#782).
+    header = _CONFIG_HEADER.replace("<CONFIG_VERSION>", config_manager.CONFIG_VERSION)
+    return header + "\n" + "\n".join(rendered) + "\n"
 
 
 class _ExportOptions(NamedTuple):
