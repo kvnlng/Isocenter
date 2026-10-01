@@ -4262,6 +4262,41 @@ def _series_number_of(ds):
         return 0
 
 
+#: The three Pixel Data elements a frame count divides (PS3.3 C.7.6.3).
+_FRAMED_PIXEL_TAGS = (0x7FE00008, 0x7FE00009, 0x7FE00010)
+
+
+def _refuse_an_infinite_frame_count(ds) -> None:
+    """Refuse an image whose NumberOfFrames reads as infinite, by name (#870).
+
+    Every other IS element that reads as infinite is held as its text and
+    dropped at export with a row (`_read_element`). NumberOfFrames over
+    Pixel Data cannot be: the count is what divides the pixels into
+    frames, and every decode -- pydicom's and ours -- converts it to an
+    integer first. So the file is refused, as before #870, but with a
+    reason that names the element; pydicom's own was `OverflowError:
+    cannot convert float infinity to integer`, naming nothing (review of
+    #900, F3). A file with no Pixel Data is not refused: the count lays
+    nothing out there.
+
+    Raises:
+        ValueError: The image's NumberOfFrames reads as infinite.
+    """
+    if not any(tag in ds for tag in _FRAMED_PIXEL_TAGS):
+        return
+    try:
+        ds.get("NumberOfFrames")
+    except OverflowError as exc:
+        text = ds.get_item(0x00280008).value
+        if isinstance(text, (bytes, bytearray)):
+            text = bytes(text).decode("ascii", "replace")
+        raise ValueError(
+            f"NumberOfFrames (0028,0008) reads as infinite "
+            f"({str(text).strip()!r}); the frame count divides Pixel Data "
+            f"into frames, so the image cannot be read without a finite "
+            f"one (#870)") from exc
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4316,6 +4351,7 @@ def ingest_worker(fp: str) -> Tuple:
 
         if not meta['sop']:
             raise ValueError("Missing SOPInstanceUID. Likely not a valid DICOM file.")
+        _refuse_an_infinite_frame_count(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))
 

@@ -147,6 +147,34 @@ def test_an_infinite_is_is_ingested_and_its_element_dropped(tmp_path, tag, text,
     assert tag not in ds
 
 
+@pytest.mark.parametrize("text", ["inf", "-inf", "1e400"])
+def test_an_infinite_number_of_frames_over_pixels_is_refused_by_name(tmp_path, text):
+    """NumberOfFrames is the one IS element the file cannot be read without.
+
+    The frame count divides Pixel Data into frames, so an image whose
+    count reads as infinite has no layout to decode; the file is refused,
+    as it was. What changed (review of #900, F3) is the reason: it named
+    `OverflowError: cannot convert float infinity to integer` and no tag.
+    """
+    path = _source(tmp_path / "src", _raw_is(0x00280008, text))
+    _meta, inst, *_rest, error = ingest_worker(str(path))
+    assert inst is None
+    assert error.startswith("ValueError: NumberOfFrames (0028,0008) reads as "
+                            "infinite"), error
+
+
+def test_an_infinite_number_of_frames_with_no_pixels_is_ingested(tmp_path):
+    """Without Pixel Data the count lays nothing out: an IS like the rest."""
+    def edit(ds):
+        del ds.PixelData
+        _raw_is(0x00280008, "inf")(ds)
+
+    _source(tmp_path / "src", edit)
+    with DicomSession(str(tmp_path / "s.db")) as s:
+        summary = s.ingest(str(tmp_path / "src"))
+    assert summary.failures == []
+
+
 @pytest.mark.parametrize("text", ["inf", "1e400"])
 def test_the_worker_reads_an_infinite_instance_number_as_zero(tmp_path, text):
     path = _source(tmp_path / "src", _raw_is(0x00200013, text))
