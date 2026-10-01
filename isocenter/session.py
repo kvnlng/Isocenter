@@ -2471,7 +2471,15 @@ class DicomSession:
         Args:
             output_path (str): Where to write the generated YAML. A
                 `.yaml` suffix is appended if missing.
+
+        Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in the file (#731). Nothing is
+                written.
         """
+        # First: the scaffold carries the range, and a range the loader
+        # refuses would make a file that does not load (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
         if not (output_path.endswith(".yaml") or output_path.endswith(".yml")):
             output_path += ".yaml"
             print(f"Note: Appending .yaml extension -> {output_path}")
@@ -2653,7 +2661,10 @@ class DicomSession:
             ValueError: When the file at `config_path` fails any check
                 `load_config()` makes, or the policy (that file's, or
                 `configuration.phi_tags`) holds a rule the pipeline cannot
-                honour. Raised before a project secret is created.
+                honour, or, with no `config_path`, when
+                `configuration.date_jitter` is a range the loader would
+                refuse in a file (#731). Raised before a project secret
+                is created.
             RuntimeError: When patients sharing a Patient ID were
                 de-identified under different date-offset schemes, so they
                 cannot be merged; raised after the policy is validated and
@@ -2701,6 +2712,11 @@ class DicomSession:
             # the project secret below, so a refused policy leaves no new
             # secret in the store.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+            # Likewise `configuration.date_jitter` (#731): the range
+            # `anonymize()` would shift by, judged as the loader judges a
+            # file's, before the secret. With `config_path` the file's own
+            # range was judged by the loader above.
+            config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         # Two `Patient` objects holding one Patient ID are merged before the
         # scan, as `anonymize()` and a restore merge them. The scan
@@ -6090,6 +6106,9 @@ class DicomSession:
                 one.
 
         Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in a file (#731); raised first, before
+                anything is scanned or shifted.
             RuntimeError: When two patients left holding one Patient ID
                 were de-identified under different date-offset schemes.
                 Raised at the merge, after the remediations are applied.
@@ -6097,6 +6116,11 @@ class DicomSession:
                 one built in user code.
         """
         from .remediation import RemediationService
+
+        # First, before the blind `audit()` and before the secret: the
+        # findings-given path never enters `audit()`, and a range the
+        # loader would refuse used to be swapped silently (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         if findings is None:
             # Blind execution: scan with the current configuration, then

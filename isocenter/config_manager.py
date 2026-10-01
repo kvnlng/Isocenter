@@ -453,6 +453,58 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
     return _validated_phi_tags(data["phi_tags"], path)
 
 
+def _refused_date_jitter(dj: Any) -> Optional[str]:
+    """Why `dj` is not a `date_jitter` this library applies, or None.
+
+    The one judge of a range, for a file's (the loader) and for one
+    assigned in code (`audit()`, `anonymize()`, `save()`,
+    `create_config()` and `RemediationService`, #731), so the two cannot
+    disagree or be worded twice. The caller prefixes its source.
+
+    Args:
+        dj: The range: None (the default), or `{min_days: int, max_days:
+            int}` with `min_days <= max_days`.
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    # One shape, {min_days: int, max_days: int}; a bare int is refused
+    # with the mapping to write instead, and a bool is not an int here.
+    # None is the default, as a null `date_jitter:` is in a file.
+    if dj is None:
+        return None
+    if isinstance(dj, int) and not isinstance(dj, bool):
+        return (f"'date_jitter' must be {{min_days: int, max_days: int}}; the "
+                f"single-int form was removed in 1.0 -- write {{min_days: "
+                f"{dj}, max_days: {dj}}} for the same fixed shift (#713)")
+    if not (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
+            and all(isinstance(v, int) and not isinstance(v, bool)
+                    for v in dj.values())):
+        return (f"'date_jitter' must be {{min_days: int, max_days: int}}, "
+                f"got {dj!r}")
+    # Bounds the wrong way round have at least one of them wrong, and
+    # nothing can tell which. Equal bounds are a fixed shift.
+    if dj["min_days"] > dj["max_days"]:
+        return (f"'date_jitter' min_days {dj['min_days']} is greater than "
+                f"max_days {dj['max_days']}; one of them is wrong, and which "
+                f"cannot be told from the range alone (#713)")
+    return None
+
+
+def _refuse_date_jitter_in_code(dj: Any) -> None:
+    """Raise `_refused_date_jitter`'s refusal for a range assigned in code.
+
+    Args:
+        dj: `session.configuration.date_jitter`.
+
+    Raises:
+        ValueError: When the loader would refuse the same range in a file.
+    """
+    reason = _refused_date_jitter(dj)
+    if reason is not None:
+        raise ValueError(f"session.configuration: {reason}")
+
+
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
     """Why a rule mapping's keys or `name` are not the schema's, or None.
 
@@ -1382,31 +1434,11 @@ class ConfigLoader:
         # `remove_private_tags:` below: an absent range has one obvious
         # meaning here, and the default is what it gets.
         dj = data.get("date_jitter")
-        if dj is None:
-            date_jitter_config = {"min_days": -365, "max_days": -1}
-        elif isinstance(dj, int) and not isinstance(dj, bool):
-            raise ValueError(
-                f"{filepath}: 'date_jitter' must be {{min_days: int, "
-                f"max_days: int}}; the single-int form was removed in 1.0 -- "
-                f"write {{min_days: {dj}, max_days: {dj}}} for the same fixed "
-                f"shift (#713)")
-        elif (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
-              and all(isinstance(v, int) and not isinstance(v, bool)
-                      for v in dj.values())):
-            date_jitter_config = dj
-        else:
-            raise ValueError(
-                f"{filepath}: 'date_jitter' must be {{min_days: int, "
-                f"max_days: int}}, got {dj!r}")
-        # Bounds the wrong way round have at least one of them wrong, and
-        # the loader cannot know which. `RemediationService` still swaps
-        # them silently for a range assigned in code, which no loader sees.
-        if date_jitter_config["min_days"] > date_jitter_config["max_days"]:
-            raise ValueError(
-                f"{filepath}: 'date_jitter' min_days "
-                f"{date_jitter_config['min_days']} is greater than max_days "
-                f"{date_jitter_config['max_days']}; one of them is wrong, and "
-                f"which cannot be told from the file (#713)")
+        reason = _refused_date_jitter(dj)
+        if reason is not None:
+            raise ValueError(f"{filepath}: {reason}")
+        date_jitter_config = (dj if dj is not None
+                              else {"min_days": -365, "max_days": -1})
 
         # A bool, and only a bool. Absent is True. Present and anything
         # else is refused rather than read for truth: `"false"` is a

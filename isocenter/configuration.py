@@ -333,10 +333,11 @@ class IsocenterConfiguration:
         new file.
 
         Raises:
-            ValueError: With no `config_path`; and when `phi_tags` has no
+            ValueError: With no `config_path`; when `phi_tags` has no
                 rule for a tag its base supplies, because a file naming
-                that base would bring the rule back on reload. Nothing is
-                written.
+                that base would bring the rule back on reload; and when
+                `date_jitter` is a range the loader would refuse (#731).
+                Nothing is written.
             OSError: The write's own error, unchanged.
         """
         if not self.config_path:
@@ -357,8 +358,14 @@ class IsocenterConfiguration:
             str: The document.
 
         Raises:
-            ValueError: When `phi_tags` lacks a rule its base supplies.
+            ValueError: When `phi_tags` lacks a rule its base supplies, or
+                `date_jitter` is a range the loader refuses (#731).
         """
+        # First, before the file is opened: a range the loader refuses
+        # would make a file that does not load (#731). Under auto-save this
+        # refuses every mutator while the range is wrong, which is right:
+        # the file each would write is that file.
+        config_manager._refuse_date_jitter_in_code(self.date_jitter)
         # The base lookup sits beside the loader's resolution, so the two
         # cannot resolve a name differently.
         base = config_manager._policy_base_rules(self.privacy_profile, self._floor)

@@ -320,7 +320,7 @@ The shift applies only to tags whose rule is `SHIFT` or `JITTER`, and to Study D
       max_days: 10
     ```
 
-    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong.
+    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong. A range assigned in code (`session.configuration.date_jitter = ...`) is judged the same way: `audit()`, `anonymize()`, `configuration.save()` and `create_config()` raise the loader's `ValueError` rather than swap the bounds or write a file that does not load ([#731](https://github.com/kvnlng/Isocenter/issues/731)).
 
 ### Private Tags
 
