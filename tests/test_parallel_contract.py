@@ -2042,6 +2042,9 @@ def test_a_recycling_pool_whose_worker_cannot_leave_returns_every_result(
     assert killed <= {p.pid for p in recorded_pools}, (killed, recorded_pools)
     # The time measured, and on a full grace never less than the grace.
     assert _logged_seconds(records[0]) >= 1.0, records[0].getMessage()
+    # The cause by path: a finished pool is closed, and no SIGTERM is sent.
+    assert "by its sentinel" in records[0].getMessage(), records[0].getMessage()
+    assert "SIGTERM" not in records[0].getMessage(), records[0].getMessage()
     assert _gone(recorded_pools), "a worker of the pool is still running"
     assert _no_child_left(), multiprocessing.active_children()
 
@@ -2120,6 +2123,9 @@ def test_a_recycling_pool_closed_by_its_reader_ends_workers_that_cannot_leave(
     records = _exit_records(caplog)
     assert len(records) == 1, [r.getMessage() for r in caplog.records]
     assert _killed_pids(records[0]) <= {p.pid for p in recorded_pools}
+    # The cause by path: this way out goes through terminate()'s SIGTERM.
+    assert "outlives SIGTERM" in records[0].getMessage(), (
+        records[0].getMessage())
     assert _gone(recorded_pools), "a worker of the pool is still running"
     assert _no_child_left(), multiprocessing.active_children()
 

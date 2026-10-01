@@ -821,6 +821,15 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
     #    Ctrl-C is raised inside the wait, and must kill and still reach
     #    the caller (#861, round 2). The log line comes after the kill
     #    loop, and nothing here takes a lock.
+    #
+    # A residual, named so nobody mistakes it for covered: a Ctrl-C that
+    # lands before the `try` below (from the `finally` in
+    # `_run_on_recycling_pool` through `close()` and building the helper)
+    # escapes with no helper started and nothing killed. The pool is then
+    # left to its finalizer, which is `_terminate_pool`, the unbounded
+    # SIGTERM-and-join this function exists to avoid. The window is
+    # microseconds against a 10 s grace, and moving those lines inside the
+    # `try` would only move it, not close it (review of #884, finding 2).
     if finished:
         pool.close()
     started = time.monotonic()
@@ -859,16 +868,25 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
                 killed.append(process.pid)
             if killed:
                 # The time measured, not the grace: an interrupt ends the
-                # wait early.
+                # wait early. The cause by path: a finished pool is closed
+                # and joined, and no signal is sent, so a worker still
+                # running failed to leave by its sentinel; only the other
+                # ways out go through `terminate()`'s SIGTERM (review of
+                # #884, finding 1).
+                cause = (
+                    "A worker cannot leave by its sentinel when its exit "
+                    "does not finish: a non-daemon thread still running, "
+                    "or an exit handler that does not return."
+                    if finished else
+                    "A worker outlives SIGTERM when something in it "
+                    "handles that signal; a handler a script installs at "
+                    "module level runs again in every spawned worker.")
                 get_logger().warning(
                     "%d worker process(es) of the recycling pool were still "
                     "running %.1f s after the pool was told to stop, and were "
-                    "sent SIGKILL (pid %s). A worker outlives SIGTERM when "
-                    "something in it handles that signal; a handler a script "
-                    "installs at module level runs again in every spawned "
-                    "worker.",
+                    "sent SIGKILL (pid %s). %s",
                     len(killed), time.monotonic() - started,
-                    ", ".join(str(pid) for pid in killed))
+                    ", ".join(str(pid) for pid in killed), cause)
     # After the `finally`, so an interrupt skips it and goes on.
     if not exited.wait(_POOL_EXIT_AFTER_KILL_S):
         get_logger().warning(
