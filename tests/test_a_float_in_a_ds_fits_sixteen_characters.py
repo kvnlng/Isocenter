@@ -164,6 +164,44 @@ def test_a_float_that_fits_is_written_as_before(tmp_path, caplog):
     assert notes == [] and warnings == []
 
 
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_source_private_ds_inf_is_written_as_read(tmp_path, caplog, reopen):
+    """A private `DS` the file wrote as `inf` keeps its VR and its text.
+
+    It carries `original_string`, the exemption `_ds_text_that_fits` honours;
+    the recorded-VR gate honours it too, so the live export and the
+    reopened one agree, and both write what `main` wrote (review of #900,
+    F1: live went to `LO` while reopened stayed `DS`).
+    """
+    # Explicit VR source and a compressed (Explicit VR) export: the private
+    # VR is recorded only from an explicit source (#676), and only an
+    # explicit file says what VR was written.
+    src = tmp_path / "src"
+    src.mkdir()
+    source = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    source.add_new(0x00090010, "LO", "ACME")
+    source.add_new(0x00091001, "DS", "inf")
+    source.save_as(str(src / "a.dcm"), enforce_file_format=True,
+                   implicit_vr=False, little_endian=True)
+    db, out = str(tmp_path / "s.db"), tmp_path / "out"
+    with DicomSession(db) as s:
+        s.ingest(str(src))
+        if not reopen:
+            s.export(str(out), show_progress=False)
+            losses = s.store_backend.get_audit_losses()
+        else:
+            s.save(sync=True)
+    if reopen:
+        with DicomSession(db) as s:
+            s.export(str(out), show_progress=False)
+            losses = s.store_backend.get_audit_losses()
+    (written,) = list(out.rglob("*.dcm"))
+    elem = pydicom.dcmread(str(written)).get_item(0x00091001)
+    assert elem.VR == "DS"
+    assert elem.value.strip() == b"inf"
+    assert not [r for r in losses if "0009,1001" in r[2]], losses
+
+
 @pytest.mark.parametrize("value", [float("inf"), float("-inf")], ids=["inf", "-inf"])
 def test_a_non_finite_float_under_a_recorded_private_ds_takes_the_fallback(value):
     """The private-VR gate declines what `_merge` would drop under `DS`.

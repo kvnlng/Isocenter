@@ -1293,12 +1293,20 @@ def _value_fits_vr(value, vr: str) -> bool:
             return True
         # `DSfloat` is a `float` subclass, same reasoning as `IS`, and
         # pydicom renders it with `str()` -- `str(1 / 3)` is 18
-        # characters, two past what `DS` may carry. A non-finite float has
-        # no `DS` spelling (PS3.5 6.2), and `_merge` drops it with a
-        # `DATA_LOSS` row under `DS` (#723), so it is declined here and
-        # takes the fallback, which keeps it exactly as a float VR.
-        return (vr == 'DS' and isfinite(value)
-                and len(str(value)) <= _TEXT_VR_MAX['DS'])
+        # characters, two past what `DS` may carry.
+        #
+        # A non-finite float a caller set has no `DS` spelling (PS3.5
+        # 6.2), and `_merge` drops it with a `DATA_LOSS` row under `DS`
+        # (#723), so it is declined here and takes the fallback, which
+        # writes its text under `LO`. A value read from a file carries its
+        # `original_string`, and `_ds_text_that_fits` leaves those alone:
+        # the same exemption here, so a source `inf` is written as it was
+        # read, under `DS`, live or after a reopen alike.
+        if vr != 'DS':
+            return False
+        if not getattr(value, "original_string", None) and not isfinite(value):
+            return False
+        return len(str(value)) <= _TEXT_VR_MAX['DS']
 
     if isinstance(value, str):
         if vr in _INTEGER_VRS or vr in _FLOAT_VRS:
