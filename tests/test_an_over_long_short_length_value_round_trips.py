@@ -134,6 +134,41 @@ def test_a_short_value_is_not_relabelled(tmp_path, caplog):
     assert _notes(caplog) == []
 
 
+#: Noise, so a lossless J2K stream of it stays above 65535 bytes.
+NOISE = np.random.default_rng(692).integers(
+    -32768, 32768, size=(256, 256), dtype=np.int16)
+
+
+@pytest.mark.parametrize("compress", [True, False])
+def test_pixel_data_over_the_threshold_is_never_relabelled(tmp_path, caplog, compress):
+    """Pixel Data's VR is a 4-byte-length VR whatever it is spelled as.
+
+    Under compression `_compress_j2k` assigns the stream to a dataset with
+    no Pixel Data element, so pydicom gives it the dictionary's `OB or OW`,
+    a spelling outside `EXPLICIT_VR_LENGTH_32`, and pydicom settles it only
+    inside `dcmwrite`. Read as "has a 2-byte length", a stream over 65535
+    bytes was relabelled `UN` and written with an undefined length, a file
+    pydicom cannot read back. Found by the fingerprint retake: 72 files,
+    every compressed export whose stream passed 64 KiB. The relabel now
+    weighs only the VRs pydicom names as 2-byte (`EXPLICIT_VR_LENGTH_16`).
+    Noise, so the stream stays that long.
+    """
+    def big(ds):
+        ds.Rows = ds.Columns = 256
+        ds.PixelRepresentation = 1
+        ds.PixelData = NOISE.tobytes()
+
+    _source(tmp_path / "src", syntax=ExplicitVRLittleEndian, extra=big)
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        written, _losses, _rows = _export(tmp_path / "src", tmp_path / "a.db",
+                                          tmp_path / "out", compress=compress)
+    ds = pydicom.dcmread(str(written))
+    assert ds["PixelData"].VR in ("OB", "OW")
+    assert len(ds.PixelData) > 65535
+    assert np.array_equal(ds.pixel_array, NOISE)
+    assert _notes(caplog) == []
+
+
 def test_a_private_un_over_the_threshold_is_still_dropped(tmp_path):
     """The decode is for standard tags: a private `UN` has no dictionary VR
     to decode under, and keeps the size gate."""

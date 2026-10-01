@@ -97,7 +97,7 @@ from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
                                 correct_ambiguous_vr_element,
                                 write_data_element)
 from pydicom.dataelem import RawDataElement, convert_raw_data_element
-from pydicom.valuerep import EXPLICIT_VR_LENGTH_32
+from pydicom.valuerep import EXPLICIT_VR_LENGTH_16
 from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
@@ -10113,7 +10113,7 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
     """Write every value too long for its VR's 2-byte length as `UN`, and say so (#692).
 
     Under an Explicit VR syntax, an element whose VR has a 2-byte length
-    (every VR outside pydicom's `EXPLICIT_VR_LENGTH_32`) holds at most 65535
+    (pydicom's `EXPLICIT_VR_LENGTH_16`) holds at most 65535
     bytes. pydicom relabels a longer one `UN` inside `dcmwrite`, as PS3.5
     6.2.2 provides, but warns in the export worker, a spawned process, so
     the caller never heard of it. This does the same relabel first --
@@ -10147,7 +10147,15 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
                 _relabel_long_short_length_values(
                     item, corrections, encodings=encodings, within=path)
             continue
-        if (vr in EXPLICIT_VR_LENGTH_32 or elem.is_empty
+        # Membership in the 2-byte set, never absence from the 4-byte one:
+        # an ambiguous spelling is in neither, and Pixel Data reaches here
+        # as `OB or OW` under compression (`_compress_j2k` assigns it to a
+        # dataset with no element, and pydicom settles the VR only inside
+        # `dcmwrite`). Weighed as 2-byte, a stream over 65535 bytes was
+        # relabelled `UN` and written with an undefined length, a file
+        # pydicom cannot read back -- every compressed export over 64 KiB
+        # of stream, found by the fingerprint retake.
+        if (vr not in EXPLICIT_VR_LENGTH_16 or elem.is_empty
                 or not _could_exceed_short_length(vr, elem.value)):
             continue
         buffer = DicomBytesIO()
