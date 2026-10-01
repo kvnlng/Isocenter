@@ -348,3 +348,94 @@ def test_a_new_profile_name_comes_with_a_schema_minor():
     for older, newer in zip(rows, rows[1:]):
         assert (SCHEMA_BY_VERSION[older]["profiles"]
                 <= SCHEMA_BY_VERSION[newer]["profiles"]), (older, newer)
+
+
+# --- save() over a file declaring a newer minor (#784, owner ruling on #895) ---
+
+def _newer_target(tmp_path):
+    """A file another, newer isocenter wrote, and its text."""
+    target = tmp_path / "theirs.yaml"
+    text = (f'version: "{_newer_minor()}"\nprivacy_profile: basic\n'
+            f'remove_private_tags: true\n')
+    target.write_text(text, encoding="utf-8")
+    return target, text
+
+
+def _expected_refusal(target):
+    return (f"{target}: declares version '{_newer_minor()}', newer than this "
+            f"isocenter's configuration version {CONFIG_VERSION}; saving "
+            f"would rewrite it as {CONFIG_VERSION}. Nothing was written: "
+            f"upgrade isocenter, or save to another path (#784)")
+
+
+def test_save_refuses_to_overwrite_a_file_declaring_a_newer_minor(tmp_path):
+    """Owner ruling on #895: the load refuses a newer file, but a session
+    pointed at one by assignment wrote over it on main, erasing its
+    declaration. Kills the guard deleted, and the guard reading the
+    session's own version instead of the file's."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.configuration.config_path = str(target)
+        with pytest.raises(ValueError) as caught:
+            session.configuration.save()
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+def test_auto_save_refuses_a_newer_target_and_leaves_memory_alone(tmp_path):
+    """The same guard reached through a `set_*` call under `auto_save`:
+    the trial save raises, so the rule is not applied in memory either."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        configuration = session.configuration
+        configuration.config_path = str(target)
+        configuration.auto_save = True
+        before = _copy(configuration.phi_tags)
+        with pytest.raises(ValueError) as caught:
+            configuration.set_phi_tag("0010,0010", "REMOVE")
+        assert configuration.phi_tags == before
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("existing", [
+    None,                                         # missing
+    "version: [unclosed\n",                       # not YAML
+    "- a\n- list\n",                              # not a mapping
+    "",                                           # empty
+    "version: 2.1\n",                             # not a string
+    'version: "two"\n',                           # not MAJOR.MINOR
+    f'version: "{CONFIG_VERSION}"\n',             # ours
+    'version: "9.9"\n',                           # another major: not a minor
+])
+def test_a_target_that_declares_no_newer_minor_is_saved_as_before(
+        tmp_path, existing):
+    """A missing or unreadable target, or one declaring no newer minor of
+    this major, is written as it was before the guard. Kills the guard
+    widened to refuse whatever it cannot read."""
+    target = tmp_path / "target.yaml"
+    if existing is not None:
+        target.write_text(existing, encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.configuration.config_path = str(target)
+        session.configuration.save()
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION
+
+
+def test_an_unreadable_target_is_saved_as_before(tmp_path):
+    """A target this process may write but not read (mode 0o200) saves as
+    before: the guard reads what it can, and a read error is not a
+    refusal."""
+    import os
+    target = tmp_path / "target.yaml"
+    target.write_text(f'version: "{_newer_minor()}"\n', encoding="utf-8")
+    os.chmod(target, 0o200)
+    try:
+        if os.access(target, os.R_OK):
+            pytest.skip("running as a user who reads a 0o200 file")
+        with DicomSession(str(tmp_path / "s.db")) as session:
+            session.configuration.config_path = str(target)
+            session.configuration.save()
+    finally:
+        os.chmod(target, 0o600)
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION

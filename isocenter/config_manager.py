@@ -183,6 +183,44 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
     return version
 
 
+def _refuse_overwriting_a_newer_minor(path: str) -> None:
+    """Refuse to save over a file declaring a newer minor (#784).
+
+    The load refuses such a file, but `config_path` can be assigned, and a
+    save would then rewrite another isocenter's file as this version,
+    erasing what it declared (owner ruling on #895). Only a readable
+    mapping whose `version` is a canonical `MAJOR.MINOR` string of this
+    major with a newer minor is refused: a missing, unreadable or
+    malformed target is not this guard's to judge and is written as
+    before, since the write replaces it whole.
+
+    Args:
+        path (str): The file `save()` is about to write.
+
+    Raises:
+        ValueError: When the file declares a newer minor. Nothing is
+            written.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return
+    if not isinstance(data, dict):
+        return
+    version = data.get("version")
+    if not isinstance(version, str) or not _VERSION_SHAPE.fullmatch(version):
+        return
+    ours = CONFIG_VERSION
+    major, minor = version.split(".")
+    if major == _READABLE_MAJOR and int(minor) > int(ours.split(".")[1]):
+        raise ValueError(
+            f"{path}: declares version {version!r}, newer than this "
+            f"isocenter's configuration version {ours}; saving would "
+            f"rewrite it as {ours}. Nothing was written: upgrade isocenter, "
+            f"or save to another path (#784)")
+
+
 def _unknown_keys(keys, known, where: str, whose: str,
                   refused_elsewhere=frozenset()) -> Optional[str]:
     """The refusal for `keys` outside `known`, or None.

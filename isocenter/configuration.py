@@ -336,8 +336,10 @@ class IsocenterConfiguration:
             ValueError: With no `config_path`; when `phi_tags` has no
                 rule for a tag its base supplies, because a file naming
                 that base would bring the rule back on reload; and when
-                `date_jitter` is a range the loader would refuse (#731).
-                Nothing is written.
+                `date_jitter` is a range the loader would refuse (#731);
+                and when `config_path` is a file declaring a newer
+                `version` minor than this library's (#784). Nothing is
+                written.
             OSError: The write's own error, unchanged.
         """
         if not self.config_path:
@@ -347,6 +349,7 @@ class IsocenterConfiguration:
         # than through a temporary file and `os.replace`, which would turn
         # a symlinked config into a regular file and drop its mode.
         text = self._rendered()
+        config_manager._refuse_overwriting_a_newer_minor(self.config_path)
         with open(self.config_path, "w", encoding="utf-8") as handle:
             handle.write(text)
         self._file_in_sync = True

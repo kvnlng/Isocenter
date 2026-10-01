@@ -133,7 +133,13 @@ the way it was written for: `ValueError: cfg.yaml: version '2.1' is newer
 than this isocenter's configuration version 2.0, which may apply it
 differently than it was written for; upgrade isocenter, or set version:
 '2.0' to apply it as 2.0 does (#784)` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
-An external profile file declaring a newer minor is refused the same way.
+An external profile file declaring a newer minor is refused the same way. So
+is a `save()` over one, by a session whose `config_path` was assigned
+rather than loaded, plainly or under `auto_save`: `ValueError: cfg.yaml:
+declares version '2.1', newer than this isocenter's configuration version
+2.0; saving would rewrite it as 2.0. Nothing was written: upgrade
+isocenter, or save to another path (#784)`. A target that is missing,
+cannot be read, or declares no newer minor is written as before.
 
 When the way a file is applied changes, a store scanned under the older
 minor is not treated as scanned under the new one. The minor is part of
