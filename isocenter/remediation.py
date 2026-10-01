@@ -1114,14 +1114,24 @@ class RemediationService:
         # one raised in another store over the same files reaches this one;
         # this store's next `audit()` would not recognise those UIDs as its
         # own and would replace them a second time.
-        from .privacy import UID_REPLACEMENT, _replaced_uids  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            UID_REPLACEMENT, _replacement_uid_for, _uid_texts)
 
         if not (self.project_secret and (proposal.metadata or {}).get(UID_REPLACEMENT)):
             return None
 
-        # Both sides as the scan builds them: `_replaced_uids` gives a str,
-        # or a list for a multi-valued element, and a pickle keeps either.
-        if _replaced_uids(proposal.original_value, self.project_secret) == proposal.new_value:
+        # Value by value, on the texts both sides hold: a private copy
+        # (#765) keeps its own type, so a `bytes` original takes NUL-padded
+        # `bytes`, and keeps in place any value that is not a UID this
+        # instance replaces. A whole-value comparison with what the
+        # standard arm would write declines every such copy. A value left
+        # as it was links nothing; only a written value must be this
+        # store's replacement of the one it replaces.
+        old = _uid_texts(proposal.original_value)
+        new = _uid_texts(proposal.new_value)
+        if len(old) == len(new) and all(
+                n == o or n == _replacement_uid_for(o, self.project_secret)
+                for o, n in zip(old, new)):
             return None
         return (f"{proposal.target_attr}: the value is not this store's "
                 "replacement for the UID the scan saw, so it is not written")
