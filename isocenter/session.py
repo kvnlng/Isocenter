@@ -2827,8 +2827,8 @@ class DicomSession:
         studies and instances only.
 
         `redact()` is the one edit that keeps an instance's status: an
-        instance REMEDIATED or CLEARED before the pass reads the same after
-        it, provided nothing but redaction's own writes changed it. See
+        instance REMEDIATED, CLEARED or IDENTIFIED before the pass reads the
+        same after it, provided nothing but redaction's own writes changed it. See
         `PhiStatus`.
 
         A status is counted whatever policy it was recorded under;

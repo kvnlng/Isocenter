@@ -105,7 +105,8 @@ class PhiStatus(Enum):
     says nothing about the current content.
 
     **One exception: pixel redaction.** Redaction re-records an instance's
-    REMEDIATED or CLEARED after its own writes. The pixels, their
+    REMEDIATED, CLEARED or IDENTIFIED after its own writes, when it was
+    current before them (#896). The pixels, their
     descriptors, the new SOP Instance UID and its bookkeeping are left out
     of the comparison; the flags it writes (ImageType, BurnedInAnnotation,
     DerivationDescription, the Derivation Code Sequence) are accepted only

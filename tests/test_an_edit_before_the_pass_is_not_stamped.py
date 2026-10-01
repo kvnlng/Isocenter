@@ -210,36 +210,77 @@ def test_an_edit_saved_across_a_reopen_stays_stale(tmp_path):
                 ("unscanned", "identified")]
 
 
-@pytest.mark.skip(reason="awaiting the owner's call on #896 review finding 1: "
-                         "(a) redaction carries IDENTIFIED, (b) pin "
-                         "REVIEW_REQUIRED, or (c) refuse the order")
-def test_audit_then_redact_then_anonymize_over_that_report(tmp_path):
-    """`audit()`, then `redact()`, then `anonymize(report)` (review of #896,
-    finding 1). Redaction carries only an assured status
-    (`services._CARRIED_STATUSES`), so the instance the audit left
-    IDENTIFIED reads stale once redacted, and `_keep_stale` holds it stale
-    through the pass. On 7579d4df the run graded PASS with the markers
-    written; at 3dd3e64e it grades REVIEW_REQUIRED and the markers are
-    withheld. The final assertion waits for the owner's call:
-      (a) REMEDIATED, `(0012,0062)` YES, PASS;
-      (b) UNSCANNED over IDENTIFIED, no markers, condition 8;
-      (c) `redact()` raises before writing anything.
-    """
+def _redactable(tmp_path):
     path = write_ct(tmp_path / "in" / "a.dcm", "PA", 7520, name="Alpha^Ann")
     ds = pydicom.dcmread(path)
     ds.DeviceSerialNumber = "B1-REDACT"
     ds.save_as(path)
+
+
+def _redact(session):
+    session.configuration.add_rule("B1-REDACT", redaction_zones=[[0, 4, 0, 4]])
+    assert session.redact() == 1
+
+
+def _settled(out, text, inst):
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    assert out.get((0x0012, 0x0062)) is not None and out[0x0012, 0x0062].value == "YES"
+    assert (0x0012, 0x0063) in out
+    basis = _basis(text)
+    assert len(basis) == 1 and basis[0].startswith("*   **Grade Basis:** PASS -- "), basis
+
+
+def test_audit_then_redact_then_anonymize_over_that_report(tmp_path):
+    """`audit()`, then `redact()`, then `anonymize(report)` (review of #896,
+    finding 1; owner ruling, option a). Redaction carries the IDENTIFIED the
+    audit left, because it writes no attribute the scan read, so the
+    instance is current when the pass begins and the pass settles it: PASS,
+    with the markers written, as on 7579d4df. Before the ruling, with #752
+    and redaction carrying only REMEDIATED/CLEARED, this graded
+    REVIEW_REQUIRED and withheld the markers.
+    """
+    _redactable(tmp_path)
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in"))
         report = session.audit()
         _patient, _study, inst = _only(session)
         assert inst.phi_status is PhiStatus.IDENTIFIED
-        session.configuration.add_rule("B1-REDACT", redaction_zones=[[0, 4, 0, 4]])
-        assert session.redact() == 1
+        _redact(session)
+        assert inst.phi_status is PhiStatus.IDENTIFIED
         session.anonymize(report)
         out, text = _export_and_report(session, tmp_path)
-        status, raw = inst.phi_status, inst._phi_status
-    measured = (status, raw, "markers" if out.get((0x0012, 0x0062)) else "no markers",
-                _basis(text))
-    # The final assertion goes here once the owner rules; see the docstring.
-    del measured
+        _settled(out, text, inst)
+
+
+def test_anonymize_then_redact_the_documented_order_settles(tmp_path):
+    """The documented order (`docs/tutorials/redact-burned-in-pixels.md`):
+    REMEDIATED is carried across the redaction, PASS, markers written."""
+    _redactable(tmp_path)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit())
+        _patient, _study, inst = _only(session)
+        _redact(session)
+        out, text = _export_and_report(session, tmp_path)
+        _settled(out, text, inst)
+
+
+def test_an_edit_before_the_redaction_still_holds_the_pass_stale(tmp_path):
+    """An edit after the audit, then `redact()`, then `anonymize(report)`:
+    redaction carries only a status current before it, so the edit is not
+    hidden, and #752 keeps the instance stale through the pass. Condition 8,
+    markers withheld."""
+    _redactable(tmp_path)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        _patient, _study, inst = _only(session)
+        inst.set_attr("0008,0090", "Real^Referrer")
+        _redact(session)
+        assert inst.phi_status is PhiStatus.UNSCANNED
+        session.anonymize(report)
+        out, text = _export_and_report(session, tmp_path)
+        assert inst.phi_status is PhiStatus.UNSCANNED
+        assert inst._phi_status is PhiStatus.IDENTIFIED
+        assert (0x0012, 0x0062) not in out
+        _review_with_condition_8(text, "patients 0, studies 0, instances 1")
