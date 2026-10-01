@@ -27,21 +27,19 @@ import datetime
 import os
 import shutil
 
+import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pydicom
 import pytest
+from pydicom.data import get_testdata_file
+from pydicom.multival import MultiValue
+from pydicom.uid import generate_uid
+from pydicom.valuerep import DSfloat, IS, PersonName
 
-pa = pytest.importorskip("pyarrow")
-pq = pytest.importorskip("pyarrow.parquet")
-pd = pytest.importorskip("pandas")
-
-import numpy as np  # noqa: E402
-import pydicom  # noqa: E402
-from pydicom.data import get_testdata_file  # noqa: E402
-from pydicom.multival import MultiValue  # noqa: E402
-from pydicom.uid import generate_uid  # noqa: E402
-from pydicom.valuerep import DSfloat, IS, PersonName  # noqa: E402
-
-from isocenter import session as session_module  # noqa: E402
-from isocenter.session import DicomSession  # noqa: E402
+from isocenter import session as session_module
+from isocenter.session import DicomSession
 
 #: The non-expanded file's schema, measured on `main` at 7579d4df over
 #: CT_small + MR_small (pandas 3.0.5, pyarrow 25.0.1). The rule must not
