@@ -7,9 +7,11 @@ loaded, and so did a file with no `version` line; `create_config()` and
 
 Now: an absent `version` is 2.0, permanently -- every configuration in the
 documentation omits it. A present one is a quoted `"MAJOR.MINOR"` string
-whose major is 2; any minor of 2 loads, and a refusal inside a file that
-declares a minor newer than this library's says so. Both writers stamp
-`CONFIG_VERSION`.
+whose major is 2 and whose minor is no newer than this library's
+(`CONFIG_VERSION`). A newer minor is refused, naming the remedy (#784): a
+minor bump means the same file is applied differently (#762), which this
+library cannot do, so loading it would apply it the old way under the new
+number. Both writers stamp `CONFIG_VERSION`.
 
 Every refusal here is asserted with the configuration unchanged after it,
 the sentinel pattern of `test_load_config_raises.py` (#456).
@@ -76,13 +78,88 @@ def test_a_version_this_library_does_not_read_is_refused(tmp_path, version):
     assert "cfg.yaml" in message, message
 
 
-@pytest.mark.parametrize("version", ["2.0", "2.7", "2.10"])
-def test_any_minor_of_version_2_loads(tmp_path, version):
-    """Kills `version == CONFIG_VERSION` in place of the major check."""
+def _newer_minor():
+    """`CONFIG_VERSION`'s minor plus one, computed, so the tests follow a
+    bump."""
+    major, minor = config_manager.CONFIG_VERSION.split(".")
+    return f"{major}.{int(minor) + 1}"
+
+
+def test_this_librarys_own_minor_loads(tmp_path):
+    """`"2.0"` (and so `CONFIG_VERSION`) loads. Kills `>` written `>=`."""
     tags, _, _, _, profile = _loaded(
-        tmp_path, f'version: "{version}"\nprivacy_profile: basic\n')
+        tmp_path, f'version: "{CONFIG_VERSION}"\nprivacy_profile: basic\n')
     assert profile == "basic@2026c"
     assert len(tags) > 0
+
+
+def test_a_newer_minor_is_refused(tmp_path):
+    """Owner ruling Q1 A on #784. Main: `version: '2.1'` loaded with no
+    warning and no row, was applied as 2.0 applies it, and `save()` then
+    wrote it back as `'2.0'`, erasing the declaration. Kills the check
+    deleted."""
+    newer = _newer_minor()
+    message = _refused(tmp_path, f'version: "{newer}"\nprivacy_profile: basic\n')
+    assert message == (
+        f"{tmp_path / 'cfg.yaml'}: version '{newer}' is newer than this "
+        f"isocenter's configuration version {CONFIG_VERSION}, which may apply "
+        f"it differently than it was written for; upgrade isocenter, or set "
+        f"version: '{CONFIG_VERSION}' to apply it as {CONFIG_VERSION} does "
+        f"(#784)")
+
+
+def test_a_newer_minor_is_refused_by_the_loader_and_audit(tmp_path):
+    """`ConfigLoader.load_unified_config` and `audit(config_path=)` read
+    the same check, the latter before the project secret is minted."""
+    newer = _newer_minor()
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(f'version: "{newer}"\nprivacy_profile: basic\n', encoding="utf-8")
+    with pytest.raises(ValueError, match=r"is newer than this isocenter's .*\(#784\)"):
+        ConfigLoader.load_unified_config(str(cfg))
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        with pytest.raises(ValueError, match=r"\(#784\)"):
+            session.audit(config_path=str(cfg))
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
+
+
+def test_a_refused_newer_file_is_not_the_one_save_writes(tmp_path):
+    """The erasure measured on main: load a `2.1` file, `save()`, and the
+    file said `'2.0'`. Refused at load, `config_path` never names it, so
+    no save of this session rewrites it."""
+    newer = _newer_minor()
+    cfg = tmp_path / "cfg.yaml"
+    text = f'version: "{newer}"\nprivacy_profile: basic\n'
+    cfg.write_text(text, encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        with pytest.raises(ValueError, match=r"\(#784\)"):
+            session.load_config(str(cfg))
+        assert session.configuration.config_path != str(cfg)
+    assert cfg.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("ours, theirs, loads", [
+    ("2.9", "2.10", False), ("2.9", "2.9", True), ("2.10", "2.9", True)])
+def test_minors_compare_as_numbers(tmp_path, monkeypatch, ours, theirs, loads):
+    """`"2.10"` is newer than `"2.9"`; compared as strings it is not.
+    Kills a string comparison of the minors, either way round, and a
+    `CONFIG_VERSION` read at import time."""
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", ours)
+    text = f'version: "{theirs}"\nprivacy_profile: basic\n'
+    if loads:
+        _loaded(tmp_path, text)
+    else:
+        assert "(#784)" in _refused(tmp_path, text)
+
+
+def test_the_newer_minor_is_named_before_the_keys(tmp_path):
+    """A newer file may carry a key this library lacks; its version is the
+    reason, as for another major. Kills the check placed after the key
+    check."""
+    message = _refused(tmp_path, f'version: "{_newer_minor()}"\na_new_key: 1\n')
+    assert "(#784)" in message, message
+    assert "a_new_key" not in message, message
 
 
 def test_a_file_with_no_version_loads_as_version_2(tmp_path):
@@ -129,35 +206,6 @@ def test_the_version_is_checked_before_the_keys(tmp_path):
     message = _refused(tmp_path, 'version: "3.0"\na_new_key: 1\n')
     assert "version '3.0'" in message, message
     assert "a_new_key" not in message, message
-
-
-def test_a_newer_minor_names_itself_when_it_brings_an_unknown_key(tmp_path):
-    """Kills the hint dropped, and the hint shown always (the ordinary typo
-    message stays short)."""
-    newer = _refused(tmp_path, 'version: "2.3"\na_new_key: 1\n')
-    assert "a_new_key" in newer, newer
-    assert f"{tmp_path / 'cfg.yaml'} declares version 2.3" in newer, newer
-    assert "newer isocenter" in newer, newer
-    current = _refused(tmp_path, 'version: "2.0"\na_new_key: 1\n')
-    assert "a_new_key" in current, current
-    assert "newer isocenter" not in current, current
-
-
-def test_a_newer_minor_hint_compares_minors_as_numbers(tmp_path, monkeypatch):
-    """`"2.10"` is newer than `"2.9"`; compared as strings it is not. Kills
-    a string comparison of the minors."""
-    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.9")
-    message = _refused(tmp_path, 'version: "2.10"\na_new_key: 1\n')
-    assert "newer isocenter" in message, message
-
-
-def test_a_newer_minor_hint_reaches_a_rule_refusal(tmp_path):
-    """A newer minor may add a key inside a machine rule as well as at the
-    top; the hint is on every refusal of such a file. Kills the hint
-    applied to the top level only."""
-    message = _refused(tmp_path, 'version: "2.3"\nmachines:\n'
-                       '  - serial_number: SN1\n    new_rule_key: 1\n')
-    assert "new_rule_key" in message and "newer isocenter" in message, message
 
 
 def test_audit_config_path_refuses_the_same_version_before_a_secret(tmp_path):
@@ -229,36 +277,41 @@ def _with_profile(tmp_path, main_version, profile_version, profile_rule):
     return profile, _refused(tmp_path, f"{head}privacy_profile: {profile}\n")
 
 
-def test_a_newer_minor_profile_names_itself_inside_an_unversioned_config(tmp_path):
-    """The profile door carries its own note (spec §11.3, review of #728,
-    R1): a `2.7` profile refused for a rule key says the profile declares
-    2.7. Kills the note's wrap removed from `_external_profile_tags`."""
-    profile, message = _with_profile(tmp_path, None, "2.7", "{actoin: KEEP}")
-    assert f"{profile} declares version 2.7" in message, message
+def test_a_newer_external_profile_is_refused_naming_the_profile(tmp_path):
+    """External profile files share `_declared_version`, so a profile
+    declaring a newer minor is refused, by its own path, inside a
+    configuration that declares nothing. Kept from the deleted note
+    tests (#784): the refusal names the file whose version it is."""
+    newer = _newer_minor()
+    profile, message = _with_profile(tmp_path, None, newer, "{action: KEEP}")
+    assert message.startswith(f"{profile}: version '{newer}'"), message
+    assert "(#784)" in message, message
 
 
-def test_a_configurations_version_is_not_blamed_on_its_profile(tmp_path):
-    """Review of #728, finding 2: a `2.5` configuration whose unversioned
-    profile holds a typo said "this file declares version 2.5" about the
-    profile, which declares nothing. Kills the outer wrap noting a refusal
-    the profile's own wrap already judged."""
-    _, message = _with_profile(tmp_path, "2.5", None, "{actoin: KEEP}")
+def test_a_newer_configuration_is_refused_before_its_profile_is_read(tmp_path):
+    """Both files newer: the configuration's own version is judged first,
+    and the refusal names the configuration, not the profile."""
+    newer = _newer_minor()
+    profile, message = _with_profile(tmp_path, newer, newer, "{actoin: KEEP}")
+    assert message.startswith(f"{tmp_path / 'cfg.yaml'}: version"), message
+    assert str(profile) not in message and "actoin" not in message, message
+
+
+def test_a_current_configuration_does_not_blame_its_profile(tmp_path):
+    """Review of #728, finding 2, as it stands after #784: a configuration
+    at this library's minor whose unversioned profile holds a typo is
+    refused for the typo, with no word about a version."""
+    _, message = _with_profile(tmp_path, CONFIG_VERSION, None, "{actoin: KEEP}")
     assert "unknown key 'actoin'" in message, message
-    assert "declares version" not in message, message
-
-
-def test_a_newer_profile_in_a_newer_configuration_is_noted_once(tmp_path):
-    """Both files newer: one note, naming the profile, whose refusal it
-    is. Kills a note per wrap."""
-    profile, message = _with_profile(tmp_path, "2.5", "2.7", "{actoin: KEEP}")
-    assert message.count("declares version") == 1, message
-    assert f"{profile} declares version 2.7" in message, message
+    assert "is newer than" not in message, message
 
 
 #: The schema, by version. A 1.x that adds a key bumps `CONFIG_VERSION` to
-#: 2.1 and adds a "2.1" row here. The accept-any-2.x rule is sound only if
-#: every added key comes with a minor bump -- otherwise a file using the
-#: new key under a library that lacks it gets no newer-minor hint.
+#: 2.1 and adds a "2.1" row here. A file declaring a minor newer than the
+#: library's is refused (#784), which names the cause only if every added
+#: key comes with a minor bump -- otherwise a file using the new key, as
+#: written by a library that has it, declares a version an older library
+#: reads, and is refused for the key rather than for the version.
 SCHEMA_BY_VERSION = {
     "2.0": {
         "top": {"version", "privacy_profile", "phi_tags", "date_jitter",
@@ -295,3 +348,121 @@ def test_a_new_profile_name_comes_with_a_schema_minor():
     for older, newer in zip(rows, rows[1:]):
         assert (SCHEMA_BY_VERSION[older]["profiles"]
                 <= SCHEMA_BY_VERSION[newer]["profiles"]), (older, newer)
+
+
+# --- save() over a file declaring a newer minor (#784, owner ruling on #895) ---
+
+def _newer_target(tmp_path):
+    """A file another, newer isocenter wrote, and its text."""
+    target = tmp_path / "theirs.yaml"
+    text = (f'version: "{_newer_minor()}"\nprivacy_profile: basic\n'
+            f'remove_private_tags: true\n')
+    target.write_text(text, encoding="utf-8")
+    return target, text
+
+
+def _expected_refusal(target):
+    return (f"{target}: declares version '{_newer_minor()}', newer than this "
+            f"isocenter's configuration version {CONFIG_VERSION}; saving "
+            f"would rewrite it as {CONFIG_VERSION}. Nothing was written: "
+            f"upgrade isocenter, or save to another path (#784)")
+
+
+def test_save_refuses_to_overwrite_a_file_declaring_a_newer_minor(tmp_path):
+    """Owner ruling on #895: the load refuses a newer file, but a session
+    pointed at one by assignment wrote over it on main, erasing its
+    declaration. Kills the guard deleted, and the guard reading the
+    session's own version instead of the file's."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.configuration.config_path = str(target)
+        with pytest.raises(ValueError) as caught:
+            session.configuration.save()
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+def test_auto_save_refuses_a_newer_target_and_leaves_memory_alone(tmp_path):
+    """The same guard reached through a `set_*` call under `auto_save`:
+    the trial save raises, so the rule is not applied in memory either."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        configuration = session.configuration
+        configuration.config_path = str(target)
+        configuration.auto_save = True
+        before = _copy(configuration.phi_tags)
+        with pytest.raises(ValueError) as caught:
+            configuration.set_phi_tag("0010,0010", "REMOVE")
+        assert configuration.phi_tags == before
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("existing", [
+    None,                                         # missing
+    "version: [unclosed\n",                       # not YAML
+    "- a\n- list\n",                              # not a mapping
+    "",                                           # empty
+    "version: 2.1\n",                             # not a string
+    'version: "two"\n',                           # not MAJOR.MINOR
+    f'version: "{CONFIG_VERSION}"\n',             # ours
+    'version: "9.9"\n',                           # another major: not a minor
+])
+def test_a_target_that_declares_no_newer_minor_is_saved_as_before(
+        tmp_path, existing):
+    """A missing or unreadable target, or one declaring no newer minor of
+    this major, is written as it was before the guard. Kills the guard
+    widened to refuse whatever it cannot read."""
+    target = tmp_path / "target.yaml"
+    if existing is not None:
+        target.write_text(existing, encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.configuration.config_path = str(target)
+        session.configuration.save()
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION
+
+
+def test_an_unreadable_target_is_saved_as_before(tmp_path):
+    """A target this process may write but not read (mode 0o200) saves as
+    before: the guard reads what it can, and a read error is not a
+    refusal."""
+    import os
+    target = tmp_path / "target.yaml"
+    target.write_text(f'version: "{_newer_minor()}"\n', encoding="utf-8")
+    os.chmod(target, 0o200)
+    try:
+        if os.access(target, os.R_OK):
+            pytest.skip("running as a user who reads a 0o200 file")
+        with DicomSession(str(tmp_path / "s.db")) as session:
+            session.configuration.config_path = str(target)
+            session.configuration.save()
+    finally:
+        os.chmod(target, 0o600)
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION
+
+
+def test_create_config_refuses_to_overwrite_a_file_declaring_a_newer_minor(tmp_path):
+    """The owner's save() ruling on #895 applied to the other writer
+    (review of #895): `create_config()` onto another isocenter's newer
+    file wrote over it as ours. Same refusal, same words, nothing
+    written. Kills the guard missing from `create_config()`."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        with pytest.raises(ValueError) as caught:
+            session.create_config(str(target))
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("existing", [None, f'version: "{CONFIG_VERSION}"\n',
+                                      "version: [unclosed\n"])
+def test_create_config_onto_a_target_declaring_no_newer_minor_writes(
+        tmp_path, existing):
+    """A missing target, one of ours, or one that is not YAML is
+    scaffolded as before."""
+    target = tmp_path / "scaffold.yaml"
+    if existing is not None:
+        target.write_text(existing, encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.create_config(str(target))
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION

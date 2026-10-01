@@ -129,7 +129,7 @@ already recorded on the graph:
 an instance's own icon when that instance was redacted, and every other one
 when any instance it writes was. This half of the gate needs no
 configuration. It also runs the export's Type 1 check, which covers
-CT Image Storage only, and raises `RuntimeError` for a CT instance missing one
+CT, MR and PET Image Storage only, and raises `RuntimeError` for such an instance missing one
 of those elements, or holding it empty
 ([What the export changes on the way out](../export-output.md#what-the-export-changes-on-the-way-out)).
 It applies none of the rest: no burned-in
