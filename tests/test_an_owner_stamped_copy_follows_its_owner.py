@@ -366,7 +366,12 @@ def test_a_copy_edited_after_the_audit_is_synced_back_without_a_record(tmp_path)
         session.anonymize(instance)
         assert inst.attributes["0010,0010"] == "Alpha^One"
         assert not inst.remediation_vouches_for("0010,0010", "Alpha^One")
-        assert inst.phi_status is PhiStatus.IDENTIFIED
+        # UNSCANNED, carrying the IDENTIFIED its scan left: the edit made
+        # the status stale before the pass, and since #752 a pass keeps
+        # such an entity stale rather than settling it. This line asserted
+        # IDENTIFIED until then; either way the run cannot grade PASS.
+        assert inst.phi_status is PhiStatus.UNSCANNED
+        assert inst._phi_status is PhiStatus.IDENTIFIED
 
 
 def test_a_study_date_no_study_holds_is_satisfied_by_the_empty_copy(tmp_path):
