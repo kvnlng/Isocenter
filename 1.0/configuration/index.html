@@ -1071,6 +1071,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#a-rule-the-export-refuses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A rule the export refuses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#repeating-groups" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2166,6 +2177,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#a-rule-the-export-refuses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A rule the export refuses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#repeating-groups" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3039,6 +3061,7 @@ section but does not change the grade.</p>
 <ul>
 <li>a <code>value:</code> under any action but <code>REPLACE</code>, a <code>value:</code> that is not a string, or a <code>replacement:</code> key (a 0.9.x spelling; rename it <code>value:</code>);</li>
 <li>a Patient ID <code>(0010,0020)</code> rule other than <code>KEEP</code> or <code>REPLACE</code> with no value;</li>
+<li>a Study Instance UID <code>(0020,000D)</code> or Series Instance UID <code>(0020,000E)</code> rule other than <code>KEEP</code> or <code>REPLACE</code> with no value: <code>REMOVE</code>, <code>EMPTY</code>, and <code>REPLACE</code> with a <code>value:</code> (<code>''</code> included) are refused. The study and the series write their UID on every exported file, so none of the three was ever applied: the export carried the source UID. Use <code>REPLACE</code> with no <code>value:</code> key, which writes this project's <a href="#what-basic2026c-contains">replacement UID</a>, or <code>KEEP</code> (<a href="https://github.com/kvnlng/Isocenter/issues/877">#877</a>);</li>
 <li><code>SHIFT</code> or <code>JITTER</code> on a standard tag that is not DA or DT;</li>
 <li><code>REPLACE</code> on a standard tag whose VR cannot hold what it writes. With no <code>value:</code>, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (<code>US or SS</code>). With a <code>value:</code>, a value the VR cannot hold, such as text in a DA. Use <code>EMPTY</code> or <code>REMOVE</code>, <code>JITTER</code> for a date, or a <code>value:</code> the VR can hold. Study Date's <code>REPLACE</code> with no value is the shift and is allowed.</li>
 <li>a <a href="#repeating-groups">repeating-group key</a> with an action other than <code>REMOVE</code> or <code>KEEP</code>, or in its string form;</li>
@@ -3046,6 +3069,11 @@ section but does not change the grade.</p>
 <li>a <code>REPLACE</code> <code>value:</code> whose count of <code>\</code>-separated values the standard tag's value multiplicity does not allow: a <code>\</code> on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.</li>
 </ul>
 <p>Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as <code>LO</code>.</p>
+<h4 id="a-rule-the-export-refuses">A rule the export refuses</h4>
+<p>Some rules load and are applied, but their result is not written. On a CT image (CT Image Storage), a <code>REMOVE</code> or <code>EMPTY</code> on Image Position (Patient) <code>(0020,0032)</code>, Image Orientation (Patient) <code>(0020,0037)</code> or Pixel Spacing <code>(0028,0030)</code> leaves the file without a Type 1 element, or with it empty, and <code>export()</code> withholds that instance, with an <code>ERROR</code> row naming the missing tag. So does one on SOP Class UID <code>(0008,0016)</code> or SOP Instance UID <code>(0008,0018)</code>. <code>load_config()</code>, <code>set_phi_tag()</code>, <code>audit()</code> and <code>anonymize()</code> do not refuse the rule; <code>anonymize()</code> applies it to the instance, and only the export stops. <a href="../export-output/#what-the-export-changes-on-the-way-out">What the export changes on the way out</a> says what the refusal looks like and how it grades.</p>
+<p>A <code>REMOVE</code> or <code>EMPTY</code> on Modality <code>(0008,0060)</code>, also Type 1, is honoured instead: the file is written without it, with one <code>WARNING</code> row saying it is not conformant. The difference is deliberate (<a href="https://github.com/kvnlng/Isocenter/issues/874">#874</a>). Modality is metadata you may choose to hide; the geometry is what makes the pixels usable, and a CT file without it is not written.</p>
+<p>A <code>REMOVE</code> or <code>EMPTY</code> on Study Instance UID <code>(0020,000D)</code> or Series Instance UID <code>(0020,000E)</code>, or a <code>REPLACE</code> with a <code>value:</code>, never reaches the export: it is refused when it is loaded, <a href="#phi-tags">above</a>, with a <code>ValueError</code> that names <code>REPLACE</code> with no <code>value:</code> key (<a href="https://github.com/kvnlng/Isocenter/issues/877">#877</a>).</p>
+<p>Only CT Image Storage is checked. For any other SOP class, an MR image for example, a rule that removes or empties the three geometry elements is applied and the file is written without them, with no row, and the run can grade <code>PASS</code>.</p>
 <h4 id="repeating-groups">Repeating groups</h4>
 <p>PS3.15 Table E.1-1 spells the retired Curve module and the Overlay Plane module as repeating groups, and <code>phi_tags</code> accepts those spellings as keys:</p>
 <ul>

@@ -2095,7 +2095,11 @@ write paths share those), and it drops nested icons by the redaction
 already recorded on the graph:
 an instance's own icon when that instance was redacted, and every other one
 when any instance it writes was. This half of the gate needs no
-configuration. It applies none of the rest: no burned-in
+configuration. It also runs the export's Type 1 check, which covers
+CT Image Storage only, and raises <code>RuntimeError</code> for a CT instance missing one
+of those elements, or holding it empty
+(<a href="../../export-output/#what-the-export-changes-on-the-way-out">What the export changes on the way out</a>).
+It applies none of the rest: no burned-in
 re-audit, no redaction zones, no <code>patient_ids</code> or <code>subset</code> selection, no
 recoverable-identity disclosure, no de-identification markers, no notices,
 and no <code>EXPORT</code> row. It writes <code>DATA_LOSS</code> rows only

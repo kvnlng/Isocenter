@@ -2555,9 +2555,10 @@ the rule's <code>value</code>, the key a file spells it with.</p>
               <div class="doc-md-description">
                 <p>For an unknown action, and for a rule the pipeline
 cannot honour: a Patient ID rule other than KEEP or REPLACE
-with no value, a <code>value</code> under an action other than
-REPLACE, SHIFT/JITTER on a standard tag that is not DA or
-DT, or REPLACE on a standard tag whose VR cannot hold the
+with no value, a Study or Series Instance UID rule other
+than KEEP or REPLACE with no value (#877), a <code>value</code>
+under an action other than REPLACE, SHIFT/JITTER on a
+standard tag that is not DA or DT, or REPLACE on a standard tag whose VR cannot hold the
 value. Raised before the policy or its file is changed.
 Under <code>auto_save</code>, also with no <code>config_path</code> and when
 <code>save()</code> refuses; the policy is then as it was.</p>
