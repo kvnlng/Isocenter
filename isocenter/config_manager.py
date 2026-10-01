@@ -885,8 +885,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       KEEP;
     - Patient ID under REMOVE, EMPTY, SHIFT or JITTER, or with a
       `value:`: it can only be kept or pseudonymised;
-    - Study or Series Instance UID under REMOVE or EMPTY: the owner's
-      stamp would export the source UID (#877);
+    - Study or Series Instance UID under REMOVE, EMPTY, or REPLACE with a
+      `value:`: the owner's stamp would export the source UID (#877);
     - SHIFT or JITTER on a standard tag that is not DA, DT or a sequence;
     - REPLACE on a standard tag whose VR cannot hold what it writes (a
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
@@ -962,17 +962,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"kept (KEEP) or replaced by its keyed pseudonym (REPLACE with "
                 f"no value), because the ID is what keeps two patients apart "
                 f"and anonymize() merges patients that share one (#537)")
-    # Refused rather than honoured or read as REPLACE (owner ruling on
+    # Refused rather than honoured or read as REPLACE (owner rulings on
     # #877): neither element can be absent from a valid file, and the
-    # owner's stamp is what the export writes, so no REMOVE or EMPTY on
-    # either was ever applied. SHIFT and JITTER fall to the arm below.
-    if tag in _OWNED_UIDS and action in ("REMOVE", "EMPTY"):
+    # owner's stamp is what the export writes, so no REMOVE, EMPTY or
+    # `value:` on either was ever applied; one literal would also merge
+    # every study or series under it. Before the VR check, which passes a
+    # value a UI can hold. SHIFT and JITTER fall to #559's arm below.
+    if tag in _OWNED_UIDS and (action in ("REMOVE", "EMPTY")
+                               or (action == "REPLACE" and value)):
         name, owner = _OWNED_UIDS[tag]
-        return (f"phi_tags['{tag}'] is {action}; {name} can only be kept "
-                f"(KEEP) or replaced (REPLACE), and REPLACE with no value "
-                f"gives it this project's keyed replacement UID (#544). The "
+        said = f" with value {value!r}" if value else ""
+        under = f"{action} with a value" if value else action
+        return (f"phi_tags['{tag}'] is {action}{said}; {name} can only be "
+                f"kept (KEEP) or replaced by this project's keyed "
+                f"replacement UID (REPLACE with no value, #544), because the "
                 f"{owner} writes its UID on every exported file, so under "
-                f"{action} the export would carry the source UID (#877)")
+                f"{under} the export would carry the source UID (#877)")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
