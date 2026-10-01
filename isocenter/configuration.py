@@ -644,7 +644,8 @@ class IsocenterConfiguration:
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
                 cannot honour: a Patient ID rule other than KEEP or REPLACE
-                with no value, a `value` under an action other than
+                with no value, REMOVE or EMPTY on Study or Series Instance
+                UID (#877), a `value` under an action other than
                 REPLACE, SHIFT/JITTER on a standard tag that is not DA or
                 DT, or REPLACE on a standard tag whose VR cannot hold the
                 value. Raised before the policy or its file is changed.
