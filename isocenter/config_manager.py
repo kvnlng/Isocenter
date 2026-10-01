@@ -968,16 +968,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     # `value:` on either was ever applied; one literal would also merge
     # every study or series under it. Before the VR check, which passes a
     # value a UI can hold. SHIFT and JITTER fall to #559's arm below.
+    # `is not None`, not truthiness: `value: ''` is a value here, because
+    # the instance scan takes the keyed branch only for a None value and
+    # proposes ANONYMIZED for '', which left a nested copy of the source
+    # UID in the export (review of #881). Only null or no key loads.
     if tag in _OWNED_UIDS and (action in ("REMOVE", "EMPTY")
-                               or (action == "REPLACE" and value)):
+                               or (action == "REPLACE" and value is not None)):
         name, owner = _OWNED_UIDS[tag]
-        said = f" with value {value!r}" if value else ""
-        under = f"{action} with a value" if value else action
+        valued = value is not None
+        said = f" with value {value!r}" if valued else ""
+        under = f"{action} with a value" if valued else action
         return (f"phi_tags['{tag}'] is {action}{said}; {name} can only be "
                 f"kept (KEEP) or replaced by this project's keyed "
-                f"replacement UID (REPLACE with no value, #544), because the "
-                f"{owner} writes its UID on every exported file, so under "
-                f"{under} the export would carry the source UID (#877)")
+                f"replacement UID (REPLACE with no `value:` key, #544), "
+                f"because the {owner} writes its UID on every exported file, "
+                f"so under {under} the export would carry the source UID "
+                f"(#877)")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
