@@ -838,10 +838,14 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
         finally:
             exited.set()
 
-    threading.Thread(target=stdlib_exit, name="isocenter-pool-exit",
-                     daemon=True).start()
+    helper = threading.Thread(target=stdlib_exit, name="isocenter-pool-exit",
+                              daemon=True)
     killed = []
     try:
+        # The start inside the `try`: `start()` itself waits for the thread
+        # to run, and a Ctrl-C landing there, or between it and the wait,
+        # must kill as one landing in the wait does.
+        helper.start()
         exited.wait(_BROKEN_POOL_GRACE_S)
     finally:
         if not exited.is_set():

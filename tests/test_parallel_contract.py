@@ -1824,6 +1824,33 @@ def _cannot_leave(marker_dir):
     _mark_ready(marker_dir)
 
 
+def _one_cannot_leave(marker_dir):
+    """Pool initializer: the first worker to get here cannot leave, and
+    writes `blocked-<pid>`; every other leaves as usual. All mark ready."""
+    try:
+        fd = os.open(os.path.join(marker_dir, "claimed"),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        _mark_ready(marker_dir)
+        return
+    os.close(fd)
+    with open(os.path.join(marker_dir, f"blocked-{os.getpid()}"), "w",
+              encoding="utf-8"):
+        pass
+    _cannot_leave(marker_dir)
+
+
+def _double_once_two_are_ready(args):
+    """Double, once two workers have marked themselves ready (at most 30 s),
+    so neither is still starting when the pool is told to stop."""
+    value, marker_dir = args
+    deadline = time.monotonic() + 30
+    while (len([n for n in os.listdir(marker_dir) if n.startswith("ready-")])
+           < 2 and time.monotonic() < deadline):
+        time.sleep(0.01)
+    return value * 2
+
+
 def _slow_atexit_marker(marker_dir):
     """Pool initializer: at its exit this worker sleeps a second and then
     writes `exit-<pid>`. A SIGTERM that lands in the sleep loses the marker,
@@ -2019,6 +2046,44 @@ def test_a_recycling_pool_whose_worker_cannot_leave_returns_every_result(
     assert _no_child_left(), multiprocessing.active_children()
 
 
+def test_a_worker_that_left_is_neither_killed_nor_named(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """Only a worker still running is killed and named: one that left by
+    its sentinel within the grace is not.
+
+    One worker of two cannot leave; the other, which the tasks wait for
+    until it has started, leaves at once on `close()`. The WARNING names
+    the one, as the sentinels say.
+
+    Killing mutation: every process in `pool._pool` killed, with no
+    readiness check (the spec's M8), which names the worker that left.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 3.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    initializer = functools.partial(_one_cannot_leave, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            _double_once_two_are_ready,
+            [(value, str(markers)) for value in range(4)], max_workers=2,
+            maxtasksperchild=25, show_progress=False), 60)
+
+    assert not outcome["hung"], outcome
+    assert sorted(outcome["value"]) == [0, 2, 4, 6]
+    blocked = _marked_pids(markers, "blocked-")
+    assert len(blocked) == 1 and len(_marked_pids(markers, "ready-")) == 2
+    records = _exit_records(caplog)
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert _killed_pids(records[0]) == blocked, records[0].getMessage()
+    assert records[0].getMessage().startswith("1 worker process(es) ")
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
 def test_a_recycling_pool_closed_by_its_reader_ends_workers_that_cannot_leave(
         tmp_path, monkeypatch, caplog, recorded_pools):
     """The failure path: a reader that stops (`redact()` streams) reaches
@@ -2118,8 +2183,9 @@ def test_a_ctrl_c_during_the_recycling_pools_exit_kills_at_once(
     asked `is_alive()` killed nothing and left the worker for the
     interpreter's exit to join for good (measured: no kill, a child left,
     the process never exited). The signal is sent only once the exit's
-    helper thread is running, which is when the caller is in its wait, so
-    it cannot land outside this call. The call runs on the main thread,
+    helper thread is running and the main thread is seen, twice, blocked in
+    a call the exit made after starting it (read from its frames), so it
+    lands in the wait and cannot land outside this call. The call runs on the main thread,
     where Python delivers SIGINT, bounded by a timer that SIGKILLs this
     test's own workers.
 
@@ -2139,14 +2205,35 @@ def test_a_ctrl_c_during_the_recycling_pools_exit_kills_at_once(
     sent = threading.Event()
     done = threading.Event()
 
+    main = threading.main_thread().ident
+
+    def waiting_in_the_exit():
+        """The main thread is blocked in a call `_end_recycling_pool` made
+        once its helper was running: its wait for the helper, whichever
+        way that wait is written, and not the helper's `start()`."""
+        if not any(t.name == "isocenter-pool-exit" and t.is_alive()
+                   for t in threading.enumerate()):
+            return False
+        frame = sys._current_frames().get(main)
+        names = []
+        while frame is not None:
+            names.append(frame.f_code.co_name)
+            frame = frame.f_back
+        if "_end_recycling_pool" not in names:
+            return False
+        inner = names[:names.index("_end_recycling_pool")]
+        return bool(inner) and "start" not in inner
+
     def interrupt_once_the_exit_waits():
         deadline = time.monotonic() + 40
         while not done.is_set() and time.monotonic() < deadline:
-            if any(t.name == "isocenter-pool-exit" and t.is_alive()
-                   for t in threading.enumerate()):
-                sent.set()
-                os.kill(os.getpid(), signal.SIGINT)
-                return
+            # Twice, 20 ms apart: blocked, not passing through.
+            if waiting_in_the_exit():
+                time.sleep(0.02)
+                if waiting_in_the_exit():
+                    sent.set()
+                    os.kill(os.getpid(), signal.SIGINT)
+                    return
             time.sleep(0.01)
 
     def free_a_hang():
