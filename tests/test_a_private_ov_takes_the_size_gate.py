@@ -21,7 +21,7 @@ SOP = "1.2.826.0.1.735.1"
 OV_TAG, OD_TAG, SMALL_OV_TAG = 0x00091001, 0x00091002, 0x00091003
 
 
-def _source(folder: Path, syntax, ov_bytes: int) -> None:
+def _source(folder: Path, syntax, ov_bytes: int, extra=None) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = SC
@@ -46,13 +46,15 @@ def _source(folder: Path, syntax, ov_bytes: int) -> None:
     ds.SamplesPerPixel = 1
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.PixelData = np.arange(16, dtype=np.uint8).tobytes()
+    if extra is not None:
+        extra(ds)
     ds.save_as(str(folder / "src.dcm"), enforce_file_format=True,
                little_endian=True,
                implicit_vr=syntax == ImplicitVRLittleEndian)
 
 
-def _ingest(tmp_path, syntax, ov_bytes):
-    _source(tmp_path / "src", syntax, ov_bytes)
+def _ingest(tmp_path, syntax, ov_bytes, extra=None):
+    _source(tmp_path / "src", syntax, ov_bytes, extra)
     with DicomSession(str(tmp_path / "s.db")) as s:
         s.ingest(str(tmp_path / "src"))
         (p,) = s.store.patients
@@ -98,3 +100,29 @@ def test_the_ov_and_its_implicit_twin_agree(tmp_path):
         assert "0009,1001" not in attrs
         assert "0009,1002" not in attrs
         assert len(_rows_for(losses, "0009,1001")) == 1, losses
+
+
+SELECTOR_OV = 0x00720081  # Selector OV Value, the dictionary's one OV tag
+
+
+def test_the_standard_ov_selector_value_takes_the_same_gate(tmp_path):
+    """Selector OV Value (0072,0081) is OV in the dictionary, so #735's
+    change reaches it too: over the threshold it is dropped with a
+    STANDARD row, as an OD or OW of that size is (review of #900, F5)."""
+    def big(ds):
+        ds.add_new(SELECTOR_OV, "OV", bytes(range(256)) * 256)  # 65536 B
+
+    attrs, _, losses = _ingest(tmp_path, ExplicitVRLittleEndian, 8, big)
+    assert "0072,0081" not in attrs
+    rows = _rows_for(losses, "0072,0081 (OV)")
+    assert len(rows) == 1, losses
+    assert rows[0][3] == "STANDARD"
+
+
+def test_a_small_standard_ov_selector_value_is_kept(tmp_path):
+    def small(ds):
+        ds.add_new(SELECTOR_OV, "OV", bytes(range(16)))
+
+    attrs, _, losses = _ingest(tmp_path, ExplicitVRLittleEndian, 8, small)
+    assert attrs["0072,0081"] == bytes(range(16))
+    assert _rows_for(losses, "0072,0081") == []
