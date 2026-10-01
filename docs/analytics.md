@@ -38,7 +38,7 @@ The report includes:
 4. **Exceptions & Errors**: every `ERROR` and `WARNING` audit row, plus report-time checks (`COMPLIANCE_CHECK`, `AUDIT_DROP`). Any row here grades the run `REVIEW_REQUIRED`.
     - An `ERROR` means something requested failed: a file refused at ingest, an instance that failed to write.
     - A `WARNING` means the run did what it should, but something about the source data could not be honoured or read, or was deliberately held back. Among them:
-        - a file declined because its SOP Instance UID is already held;
+        - a file declined because its SOP Instance UID is already held, or because its Study Instance UID belongs to a patient with a different Patient ID;
         - an instance `export(check_burned_in=True)` withheld because it still carries an identifier (it is not written, and nothing failed);
         - an instance OCR could not read;
         - a store an older release de-identified, where what that release did cannot be vouched for (see [Upgrading from 0.9.x](migration.md));

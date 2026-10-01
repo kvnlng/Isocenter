@@ -41,7 +41,7 @@ print(summary)      # IngestSummary(ingested=..., failures=[...], declined=..., 
 session.examine()   # the cohort and its equipment
 ```
 
-`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
+`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session, or its Study Instance UID belongs to a patient with a different Patient ID) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
 
 ## 3. Configure & Audit
 

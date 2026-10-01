@@ -2225,6 +2225,14 @@ class DicomSession:
         recorded as imported, so ingesting the same folder again declines
         it again.
 
+        **A study another patient holds.** A file carrying a Patient ID,
+        whose Study Instance UID a patient with a different Patient ID
+        already holds, is declined the same way, and in the same order
+        (#745). Its `WARNING` row names the file and the instance, never a
+        Patient ID. A file carrying the original ID of the patient whose
+        study `anonymize()` renamed is that patient's, and is linked; so
+        is a file with no Patient ID.
+
         **Byte order.** A big-endian source's values in words wider than a
         byte (`OW`, `OL`, `OF`, `OD`, `OV` and the waveform samples) are
         stored little-endian, as its pixels are. What cannot be converted

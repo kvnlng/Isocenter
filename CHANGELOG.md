@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tests/test_an_absent_patient_name_exports_empty.py` covers `KEEP` and the floor, the stored value across a reopen, a source named `Unknown`, the lock refusal, and a WFDB export, which carries no `Unknown` anywhere.
   - **Output:** see the `fingerprint/output.json` entry below.
 
+- **A file whose Study Instance UID is held by a patient with a different Patient ID is declined with a `WARNING` row, not linked into that patient's study (#745, owner ruling Q5 A).** The study is found by its UID before the patient is, so a file of patient `PB` carrying a Study UID that patient `PA`'s study already held was linked into PA's study. Measured on `main` at 7579d4df with two CT_small files, in one ingest and in two:
+  - PB's file was exported under PA's pseudonym and folder, carrying PA's shifted Study Date; PB's own date was gone.
+  - An empty `PB` patient stayed in the graph.
+  - Nothing was written to the audit trail, and the run graded `PASS`.
+  - **Now** the later file is declined above the sidecar write, as a duplicate SOP Instance UID is (#431), so no frame is stranded. "Later" means later in path order among the files new to the call, and a study the store already holds beats every new file. One `WARNING` row per file names the file path and the instance, and never a Patient ID: `Not importing <path>: its Study Instance UID is held by a patient with a different Patient ID, and one study belongs to one patient. Instance <uid> was not read into the store (#745).` `IngestSummary.declined` counts it, and the row grades the run `REVIEW_REQUIRED`.
+  - **Not declined:** a file carrying the patient's original ID, of a study `anonymize()` already moved under the pseudonym. That is the same patient, recognised by the key the date shift already uses (`canonical_patient_key` under the holder's scheme), and the patient merge (#548) folds it back as before. Also not declined: a file with no Patient ID, or a study held by an ID-less patient. Both stay #584's linkage.
+  - `tests/test_two_patients_sharing_a_study_uid_are_declined.py`.
+  - **Output:** none in the fingerprint, where no member shares a Study UID across two Patient IDs. Where two real Patient IDs share one Study UID, the later file is no longer exported, and the run grades `REVIEW_REQUIRED` where it graded `PASS`.
+
 ## [1.0.0rc8] - 2026-10-01
 
 ### Breaking
