@@ -162,3 +162,27 @@ def test_a_float_that_fits_is_written_as_before(tmp_path, caplog):
         tmp_path, lambda i: i.set_attr("0028,1050", 1e-07), caplog=caplog)
     assert _raw(ds, 0x00281050) == b"1e-07 "
     assert notes == [] and warnings == []
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf")], ids=["inf", "-inf"])
+def test_a_non_finite_float_under_a_recorded_private_ds_takes_the_fallback(value):
+    """The private-VR gate declines what `_merge` would drop under `DS`.
+
+    `_value_fits_vr` said yes to `inf` under a recorded private `DS` (three
+    characters), and the #723 rewrite then dropped it with a `DATA_LOSS`
+    row: the gate and the writer disagreeing, the shape
+    `test_the_gate_and_the_writer_agree_across_the_whole_vr_table` pins.
+    Declined, it takes `_fallback_encoding`, the path of a private tag with
+    no recorded VR, which writes its text under `LO` -- the same three or
+    four characters `main` wrote under `DS`, now under a VR that may hold
+    them.
+    """
+    from isocenter.io_handlers import DicomExporter, _value_fits_vr
+
+    assert not _value_fits_vr(value, "DS")
+    ds, losses = pydicom.Dataset(), []
+    DicomExporter._merge(ds, {"0009,1001": value}, losses,
+                         vrs={"0009,1001": "DS"})
+    assert losses == []
+    assert ds[0x00091001].VR == "LO"
+    assert ds[0x00091001].value == str(value)
