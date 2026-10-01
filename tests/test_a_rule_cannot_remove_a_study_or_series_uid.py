@@ -90,23 +90,34 @@ def test_remove_or_empty_on_an_owned_uid_is_refused(tmp_path, door, action, tag)
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is {action.upper()};" in message, message
     assert UIDS[tag] in message, message
-    assert "(REPLACE with no value" in message and "(#877)" in message, message
+    assert "(REPLACE with no `value:` key, #544)" in message and "(#877)" in message, message
 
 
 @pytest.mark.parametrize("door", DOORS)
-@pytest.mark.parametrize("value", ["1.2.3.4", "2.25.1"])
+# `''` is a value here (review of #881). The instance scan takes the
+# keyed branch only for `rule_value is None`, so `value: ''` proposed
+# `ANONYMIZED` on an instance's copy and exported a nested Study or Series
+# UID as the source, while the owner scan read it as value-less. Only the
+# rule with no `value:` key loads. Kills `and value` (truthiness).
+@pytest.mark.parametrize("value", ["1.2.3.4", "2.25.1", ""])
 @pytest.mark.parametrize("tag", sorted(UIDS))
 def test_replace_with_a_value_on_an_owned_uid_is_refused(tmp_path, door, value, tag):
     """Owner ruling (a) on #877. Measured before it: the export carried
     the source UID and graded REVIEW_REQUIRED with no row naming why. A
     value the UI can hold is chosen, so #560's VR check cannot be what
     refuses it; kills the arm keyed on REMOVE and EMPTY alone."""
+    if value == "" and door.startswith("set_phi_tag"):
+        # `set_phi_tag(tag, "REPLACE", "")` writes no `value:` key
+        # (`if value:`), so the rule it stores is the value-less one, and
+        # loads: the empty string never reaches the policy by this door.
+        _through(door, tmp_path, tag, {"action": "REPLACE", "value": value})
+        return
     with pytest.raises(ValueError) as caught:
         _through(door, tmp_path, tag, {"action": "REPLACE", "value": value})
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is REPLACE with value {value!r};" in message, message
     assert UIDS[tag] in message, message
-    assert "(REPLACE with no value" in message and "(#877)" in message, message
+    assert "(REPLACE with no `value:` key, #544)" in message and "(#877)" in message, message
 
 
 @pytest.mark.parametrize("tag", ["0020,000D", "0020,000E"])
@@ -127,7 +138,7 @@ def test_the_message():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000d'] is REMOVE; Study Instance UID can "
         "only be kept (KEEP) or replaced by this project's keyed replacement "
-        "UID (REPLACE with no value, #544), because the study writes its UID "
+        "UID (REPLACE with no `value:` key, #544), because the study writes its UID "
         "on every exported file, so under REMOVE the export would carry the "
         "source UID (#877)")
     with pytest.raises(ValueError) as caught:
@@ -135,7 +146,7 @@ def test_the_message():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000e'] is EMPTY; Series Instance UID can "
         "only be kept (KEEP) or replaced by this project's keyed replacement "
-        "UID (REPLACE with no value, #544), because the series writes its "
+        "UID (REPLACE with no `value:` key, #544), because the series writes its "
         "UID on every exported file, so under EMPTY the export would carry "
         "the source UID (#877)")
     with pytest.raises(ValueError) as caught:
@@ -144,20 +155,19 @@ def test_the_message():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000d'] is REPLACE with value '1.2.3'; Study "
         "Instance UID can only be kept (KEEP) or replaced by this project's "
-        "keyed replacement UID (REPLACE with no value, #544), because the "
-        "study writes its UID on every exported file, so under REPLACE with "
-        "a value the export would carry the source UID (#877)")
+        "keyed replacement UID (REPLACE with no `value:` key, #544), because "
+        "the study writes its UID on every exported file, so under REPLACE "
+        "with a value the export would carry the source UID (#877)")
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0020,000e": {"action": "REPLACE", "value": ""}},
+                            "cfg.yaml")
+    assert "is REPLACE with value ''; Series Instance UID" in str(caught.value)
 
 
 ALLOWED = {
     "replace": {"action": "REPLACE"},
     # A null value is an absent one (#713): the keyed replacement.
     "replace-null-value": {"action": "REPLACE", "value": None},
-    # An empty value is value-less too, as everywhere else the loader and
-    # the scan read one: Patient ID's `or value`, the dummy's `value or`,
-    # and `privacy._is_uid_replacement`'s `rule.get("value")`. So it is
-    # the keyed replacement, and loads. Kills `value is not None`.
-    "replace-empty-value": {"action": "REPLACE", "value": ""},
     "keep": {"action": "KEEP"},
     "string-form": "Instance UID",
 }
@@ -168,7 +178,7 @@ ALLOWED = {
 @pytest.mark.parametrize("tag", sorted(UIDS))
 def test_value_less_replace_and_keep_still_load(tmp_path, door, case, tag):
     """Kills over-refusal: the arm refusing every action on the two tags,
-    or reading a null or empty `value:` as a value."""
+    or reading a null `value:` as a value."""
     _through(door, tmp_path, tag, ALLOWED[case])
 
 
