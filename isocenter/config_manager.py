@@ -674,6 +674,15 @@ def _vr_dummy(tag: str) -> Any:
 _PATIENT_ID = "0010,0020"
 _STUDY_DATE = "0008,0020"
 
+#: The two UIDs a Study and a Series own, with the name and the owner the
+#: refusal says (#877). The exporter stamps every file's copy from its
+#: owner (#624, #544), and REMOVE or EMPTY never changed the owner, so
+#: the export wrote the source UID; under REMOVE it graded PASS and wrote
+#: `(0012,0062) YES`. A mask key cannot reach either (`_GROUP_MASK_KEY` is
+#: 50xx/60xx only), so the concrete key is the whole of it.
+_OWNED_UIDS = {"0020,000d": ("Study Instance UID", "study"),
+               "0020,000e": ("Series Instance UID", "series")}
+
 
 def _standard_dictionary_vr(tag: str) -> Optional[str]:
     """The dictionary VR of a standard (even-group) tag.
@@ -876,6 +885,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       KEEP;
     - Patient ID under REMOVE, EMPTY, SHIFT or JITTER, or with a
       `value:`: it can only be kept or pseudonymised;
+    - Study or Series Instance UID under REMOVE, EMPTY, or REPLACE with a
+      `value:`: the owner's stamp would export the source UID (#877);
     - SHIFT or JITTER on a standard tag that is not DA, DT or a sequence;
     - REPLACE on a standard tag whose VR cannot hold what it writes (a
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
@@ -951,6 +962,28 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"kept (KEEP) or replaced by its keyed pseudonym (REPLACE with "
                 f"no value), because the ID is what keeps two patients apart "
                 f"and anonymize() merges patients that share one (#537)")
+    # Refused rather than honoured or read as REPLACE (owner rulings on
+    # #877): neither element can be absent from a valid file, and the
+    # owner's stamp is what the export writes, so no REMOVE, EMPTY or
+    # `value:` on either was ever applied; one literal would also merge
+    # every study or series under it. Before the VR check, which passes a
+    # value a UI can hold. SHIFT and JITTER fall to #559's arm below.
+    # `is not None`, not truthiness: `value: ''` is a value here, because
+    # the instance scan takes the keyed branch only for a None value and
+    # proposes ANONYMIZED for '', which left a nested copy of the source
+    # UID in the export (review of #881). Only null or no key loads.
+    if tag in _OWNED_UIDS and (action in ("REMOVE", "EMPTY")
+                               or (action == "REPLACE" and value is not None)):
+        name, owner = _OWNED_UIDS[tag]
+        valued = value is not None
+        said = f" with value {value!r}" if valued else ""
+        under = f"{action} with a value" if valued else action
+        return (f"phi_tags['{tag}'] is {action}{said}; {name} can only be "
+                f"kept (KEEP) or replaced by this project's keyed "
+                f"replacement UID (REPLACE with no `value:` key, #544), "
+                f"because the {owner} writes its UID on every exported file, "
+                f"so under {under} the export would carry the source UID "
+                f"(#877)")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning

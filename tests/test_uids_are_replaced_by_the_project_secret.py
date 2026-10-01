@@ -422,25 +422,30 @@ def test_keep_on_the_uid_rows_retains_them_and_a_value_is_written(tmp_path):
 
 
 def test_a_value_on_an_owned_uid_leaves_the_owner_as_0_9_8_did(tmp_path):
-    """`REPLACE value:` on Study, Series or SOP Instance UID is what it was
-    in 0.9.8 (owner ruling on Q-C): only a value-less REPLACE moves the
-    owner, because one literal written into every Study would collide on
-    the store's UNIQUE key. The owners keep their UIDs, which the export
-    stamps over the copies; the SOP Instance UID element and the file meta
-    take the value while the file is still named by the instance's own UID.
-    Measured at b7462cd3 (0.9.8's behaviour), unchanged here. Kills the
-    owner arm taking a valued REPLACE."""
+    """`REPLACE value:` on SOP Instance UID is what it was in 0.9.8 (owner
+    ruling on Q-C): the SOP Instance UID element and the file meta take
+    the value, while the file is still named by the instance's own source
+    UID. Measured at b7462cd3 (0.9.8's behaviour), unchanged here.
+
+    The same rule on Study or Series Instance UID loaded here until #877
+    and exported the source UID, which the export stamps from the owner;
+    it is now refused at load (owner ruling (a) on #877), which is all
+    this test says of those two. Their full door-by-door pins are in
+    `test_a_rule_cannot_remove_a_study_or_series_uid.py`."""
     src = tmp_path / "src"
     src.mkdir()
     shutil.copy(get_testdata_file("CT_small.dcm"), src / "CT_small.dcm")
+    for tag in ("0020,000d", "0020,000e"):
+        with pytest.raises(ValueError, match=r"\(#877\)"):
+            _pipeline(tmp_path, src, name=f"refused-{tag[-1]}", config=(
+                "privacy_profile: basic\nphi_tags:\n"
+                f"  '{tag}': {{action: REPLACE, value: '1.2.3.5'}}\n"))
     out = _pipeline(tmp_path, src, config=(
         "privacy_profile: basic\nphi_tags:\n"
-        "  '0008,0018': {action: REPLACE, value: '1.2.3.4'}\n"
-        "  '0020,000d': {action: REPLACE, value: '1.2.3.5'}\n"
-        "  '0020,000e': {action: REPLACE, value: '1.2.3.6'}\n"))
+        "  '0008,0018': {action: REPLACE, value: '1.2.3.4'}\n"))
     ((rel, ds),) = _exported(out).items()
-    assert ds.StudyInstanceUID == CT_SMALL_STUDY
-    assert ds.SeriesInstanceUID == CT_SMALL_SERIES
+    assert ds.StudyInstanceUID == M(CT_SMALL_STUDY)
+    assert ds.SeriesInstanceUID == M(CT_SMALL_SERIES)
     assert ds.SOPInstanceUID == ds.file_meta.MediaStorageSOPInstanceUID == "1.2.3.4"
     assert rel.stem == CT_SMALL_SOP
 

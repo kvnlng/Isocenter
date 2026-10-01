@@ -437,6 +437,7 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 
 * a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (a 0.9.x spelling; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
+* a Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)` rule other than `KEEP` or `REPLACE` with no value: `REMOVE`, `EMPTY`, and `REPLACE` with a `value:` (`''` included) are refused. The study and the series write their UID on every exported file, so none of the three was ever applied: the export carried the source UID. Use `REPLACE` with no `value:` key, which writes this project's [replacement UID](#what-basic2026c-contains), or `KEEP` ([#877](https://github.com/kvnlng/Isocenter/issues/877));
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT;
 * `REPLACE` on a standard tag whose VR cannot hold what it writes. With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
 * a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form;
@@ -444,6 +445,16 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 * a `REPLACE` `value:` whose count of `\`-separated values the standard tag's value multiplicity does not allow: a `\` on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.
 
 Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as `LO`.
+
+#### A rule the export refuses
+
+Some rules load and are applied, but their result is not written. On a CT image (CT Image Storage), a `REMOVE` or `EMPTY` on Image Position (Patient) `(0020,0032)`, Image Orientation (Patient) `(0020,0037)` or Pixel Spacing `(0028,0030)` leaves the file without a Type 1 element, or with it empty, and `export()` withholds that instance, with an `ERROR` row naming the missing tag. So does one on SOP Class UID `(0008,0016)` or SOP Instance UID `(0008,0018)`. `load_config()`, `set_phi_tag()`, `audit()` and `anonymize()` do not refuse the rule; `anonymize()` applies it to the instance, and only the export stops. [What the export changes on the way out](export-output.md#what-the-export-changes-on-the-way-out) says what the refusal looks like and how it grades.
+
+A `REMOVE` or `EMPTY` on Modality `(0008,0060)`, also Type 1, is honoured instead: the file is written without it, with one `WARNING` row saying it is not conformant. The difference is deliberate ([#874](https://github.com/kvnlng/Isocenter/issues/874)). Modality is metadata you may choose to hide; the geometry is what makes the pixels usable, and a CT file without it is not written.
+
+A `REMOVE` or `EMPTY` on Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)`, or a `REPLACE` with a `value:`, never reaches the export: it is refused when it is loaded, [above](#phi-tags), with a `ValueError` that names `REPLACE` with no `value:` key ([#877](https://github.com/kvnlng/Isocenter/issues/877)).
+
+Only CT Image Storage is checked. For any other SOP class, an MR image for example, a rule that removes or empties the three geometry elements is applied and the file is written without them, with no row, and the run can grade `PASS`.
 
 #### Repeating groups
 

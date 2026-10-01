@@ -1547,8 +1547,10 @@ class PhiInspector:
         """
         # The exporter stamps each file's copy from the entity
         # (`export_stamp_attributes`), so the entity is what has to move. A
-        # `REPLACE value:` leaves the owner alone, since one literal written
-        # into every Study would merge them under the store's UNIQUE key.
+        # `REPLACE value:` never moves the owner, since one literal written
+        # into every Study would merge them under the store's UNIQUE key;
+        # the loader refuses it on both owned UIDs, with REMOVE and EMPTY
+        # (#877), so a policy reaching here has none of the three.
         rule = _rule_for(self.phi_tags, tag)
         uid = getattr(entity, attr, None)
         if not _owned_uid_is_open(self.phi_tags, tag, uid, self.project_secret):

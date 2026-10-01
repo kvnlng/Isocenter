@@ -11,6 +11,7 @@ import os
 import sys
 import multiprocessing
 import multiprocessing.connection
+import threading
 import time
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
@@ -724,6 +725,182 @@ def _run_on_shared_executor(executor, func, items, strategy):
         _end_broken_pool_stragglers(executor)
 
 
+#: How long the recycling pool's exit waits, once every worker has been
+#: SIGKILLed, for the stdlib's own exit to finish on its helper thread
+#: before it lets the caller go and leaves that thread behind (#860). No
+#: environment variable: tests patch it.
+#:
+#: A killed worker ends at once, so this is only ever used up when the
+#: helper is stuck in `Pool._help_stuff_finish`, acquiring the inqueue's
+#: read lock, which a killed worker can hold for good: the kernel does not
+#: release a POSIX semaphore. Together with the grace it bounds the exit at
+#: `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`, below conftest's
+#: `_STALL_S` and pytest's faulthandler window, so a bounded exit is never
+#: reported as a stall or dumped. `test_packaging_contract.py` pins that.
+_POOL_EXIT_AFTER_KILL_S = 5.0
+
+
+def _still_running(processes) -> list:
+    """The processes of `processes` whose sentinel is not ready.
+
+    The sentinels, never `join()` or `is_alive()`: those reap the child
+    with `waitpid`, racing the helper thread's own `join()` of it (#861's
+    rule). A process object already closed has nothing to end.
+    """
+    waiting = {}
+    for process in processes:
+        try:
+            waiting[process.sentinel] = process
+        except ValueError:
+            continue
+    if not waiting:
+        return []
+    ready = set(multiprocessing.connection.wait(list(waiting), timeout=0))
+    return [process for sentinel, process in waiting.items()
+            if sentinel not in ready]
+
+
+def _end_recycling_pool(pool, finished: bool) -> list[int]:
+    """End a recycling `multiprocessing.Pool`, holding the caller no longer
+    than `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`.
+
+    The stdlib's exit can wait for good. `terminate()`, which is what a
+    `with` block's exit is, first takes the inqueue's read lock and never
+    gives it back, so a worker not yet waiting for work (one still booting,
+    or a recycled replacement) can never read its sentinel; then it SIGTERMs
+    each worker and joins every one with no timeout. A worker that also
+    outlives SIGTERM (a handler a script installs at module level runs again
+    in every spawned worker; coverage's `sigterm = True` can deadlock) hung
+    `export()` for good after every file was written (#860).
+
+    So the stdlib's whole exit runs on a daemon helper thread: on success,
+    `close()` here and then `join()` and `terminate()` there, so every
+    worker leaves by its sentinel and its own exit work, `atexit` included,
+    runs; otherwise `terminate()` there. The caller waits for it at most
+    `_BROKEN_POOL_GRACE_S`, SIGKILLs every worker still running, logs one
+    WARNING naming them, and waits at most `_POOL_EXIT_AFTER_KILL_S` more.
+    A helper still stuck then is left behind, with a second WARNING. An
+    interrupt during the grace, such as Ctrl-C, kills at once and goes on.
+    Takes no lock.
+
+    Args:
+        pool: The `multiprocessing.Pool` `_run_on_recycling_pool` built.
+        finished (bool): Whether every result was read. False on any other
+            way out: a reader that stops, a task's exception, Ctrl-C.
+
+    Returns:
+        list[int]: The pids it sent SIGKILL, or `[]`.
+    """
+    # Four rules here are traps someone would tidy away:
+    #
+    # 1. Never `terminate()` or `join()` on the caller's thread, and never
+    #    let the pool be collected there before the helper has run its
+    #    `terminate()`. Both can block where SIGKILL does not reach: a
+    #    worker killed while it held the inqueue's read lock leaves it held
+    #    for good, and `_help_stuff_finish` acquires it. A pool's finalizer
+    #    is `_terminate_pool` too, so a pool only closed and joined would
+    #    run `_help_stuff_finish` on whatever thread dropped it. The
+    #    helper's trailing `terminate()` consumes the finalizer on the
+    #    helper: `util.Finalize` deletes its registry entry before it calls
+    #    back, so it runs once.
+    # 2. Never kill while the pool is RUN: the worker handler replaces the
+    #    dead, and the replacements starve behind the lock a dead worker
+    #    held. On success `close()` is called here, before the helper
+    #    starts (it only sets the state and posts a wakeup; it does not
+    #    block), so a Ctrl-C at any later instant finds the pool closed. On
+    #    the other ways out the state changes only when the helper's
+    #    `terminate()` runs, which blocks and so cannot run here; a Ctrl-C
+    #    in the instant before it can kill under RUN, and the after-kill
+    #    bound covers what that can leave stuck.
+    # 3. Wait on an `Event`, never `Thread.join()` and `is_alive()`. On
+    #    3.12 a `KeyboardInterrupt` inside `join()` runs bpo-45274's
+    #    handler, which marks a thread that is still running as stopped:
+    #    `is_alive()` then says False, nothing is killed, and the
+    #    interpreter's exit joins the worker for good (measured).
+    # 4. The kill in a `finally`, never an `except`, and no `return` in it:
+    #    Ctrl-C is raised inside the wait, and must kill and still reach
+    #    the caller (#861, round 2). The log line comes after the kill
+    #    loop, and nothing here takes a lock.
+    #
+    # A residual, named so nobody mistakes it for covered: a Ctrl-C that
+    # lands before the `try` below (from the `finally` in
+    # `_run_on_recycling_pool` through `close()` and building the helper)
+    # escapes with no helper started and nothing killed. The pool is then
+    # left to its finalizer, which is `_terminate_pool`, the unbounded
+    # SIGTERM-and-join this function exists to avoid. The window is
+    # microseconds against a 10 s grace, and moving those lines inside the
+    # `try` would only move it, not close it (review of #884, finding 2).
+    if finished:
+        pool.close()
+    started = time.monotonic()
+    exited = threading.Event()
+    failure = []
+
+    def stdlib_exit():
+        try:
+            if finished:
+                pool.join()
+            pool.terminate()
+        except BaseException as exc:  # pylint: disable=broad-exception-caught
+            # Kept to log, so a helper that raises does not read as a hang.
+            failure.append(exc)
+        finally:
+            exited.set()
+
+    helper = threading.Thread(target=stdlib_exit, name="isocenter-pool-exit",
+                              daemon=True)
+    killed = []
+    try:
+        # The start inside the `try`: `start()` itself waits for the thread
+        # to run, and a Ctrl-C landing there, or between it and the wait,
+        # must kill as one landing in the wait does.
+        helper.start()
+        exited.wait(_BROKEN_POOL_GRACE_S)
+    finally:
+        if not exited.is_set():
+            # The live list, read only now: nothing grows it once the pool
+            # is closed or terminating.
+            for process in _still_running(list(pool._pool)):
+                try:
+                    process.kill()
+                except (OSError, ValueError):
+                    continue
+                killed.append(process.pid)
+            if killed:
+                # The time measured, not the grace: an interrupt ends the
+                # wait early. The cause by path: a finished pool is closed
+                # and joined, and no signal is sent, so a worker still
+                # running failed to leave by its sentinel; only the other
+                # ways out go through `terminate()`'s SIGTERM (review of
+                # #884, finding 1).
+                cause = (
+                    "A worker cannot leave by its sentinel when its exit "
+                    "does not finish: a non-daemon thread still running, "
+                    "or an exit handler that does not return."
+                    if finished else
+                    "A worker outlives SIGTERM when something in it "
+                    "handles that signal; a handler a script installs at "
+                    "module level runs again in every spawned worker.")
+                get_logger().warning(
+                    "%d worker process(es) of the recycling pool were still "
+                    "running %.1f s after the pool was told to stop, and were "
+                    "sent SIGKILL (pid %s). %s",
+                    len(killed), time.monotonic() - started,
+                    ", ".join(str(pid) for pid in killed), cause)
+    # After the `finally`, so an interrupt skips it and goes on.
+    if not exited.wait(_POOL_EXIT_AFTER_KILL_S):
+        get_logger().warning(
+            "The recycling pool's exit had not finished %.1f s after the "
+            "pool was told to stop, and was left to a daemon thread "
+            "(isocenter-pool-exit). A killed worker can leave a lock of the "
+            "pool held, which its exit then waits on for good.",
+            time.monotonic() - started)
+    elif failure:
+        get_logger().warning("The recycling pool's exit raised: %r",
+                             failure[0])
+    return killed
+
+
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
     """Runs in a spawned pool whose workers are replaced every N tasks.
 
@@ -748,9 +925,14 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
     # Spawn, not fork: a forked worker inherits the parent's open SQLite
     # handles and its sidecar file position.
     ctx = multiprocessing.get_context("spawn")
-    with ctx.Pool(processes=strategy.max_workers,
-                  maxtasksperchild=strategy.maxtasksperchild,
-                  initializer=strategy.worker_initializer) as pool:
+    pool = ctx.Pool(processes=strategy.max_workers,
+                    maxtasksperchild=strategy.maxtasksperchild,
+                    initializer=strategy.worker_initializer)
+    # No `with`: its exit is `terminate()`, on every way out, which can
+    # wait for good (#860). `_end_recycling_pool` bounds it, and lets the
+    # workers of a run that finished leave by their sentinel.
+    finished = False
+    try:
         # Unordered unless asked: results are yielded as workers finish,
         # so one slow item does not hold back everything queued behind
         # it. `import_files` asks, because the order it links files in
@@ -761,6 +943,12 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
         mapper = pool.imap if ordered else pool.imap_unordered
         iterator = mapper(func, items, chunksize=strategy.chunksize)
         yield from _tracked(iterator, items, strategy)
+        # Only once every result has been read: any other way out (a
+        # reader that stops, a task's exception, Ctrl-C) leaves tasks
+        # queued or running, which `close()` and `join()` would wait for.
+        finished = True
+    finally:
+        _end_recycling_pool(pool, finished)
 
 
 def _run_on_new_executor(func, items, strategy):
@@ -867,7 +1055,11 @@ def run_parallel(
             worker by respawning it and waiting forever for the lost task,
             so under `maxtasksperchild` that case hangs rather than
             yielding -- ordinary task exceptions still come back as values
-            there.
+            there. The recycling pool's exit is bounded: a worker still
+            running `_BROKEN_POOL_GRACE_S` (10 s) after the pool is told
+            to stop is sent SIGKILL and named in one WARNING log line, and
+            the call waits at most `_POOL_EXIT_AFTER_KILL_S` (5 s) more
+            for the pool to finish (#860).
         strategy (optional): A `_Strategy` the caller has already
             resolved with `_resolve_strategy`. When given it is used as
             it stands and **every resolution keyword above is ignored**

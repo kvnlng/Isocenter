@@ -12,6 +12,7 @@ import functools
 import logging
 import multiprocessing
 import multiprocessing.connection
+import multiprocessing.pool
 import os
 import re
 import signal
@@ -1788,6 +1789,659 @@ def test_the_pool_internals_the_straggler_helper_reads_are_there():
         assert multiprocessing.connection.wait([process.sentinel], timeout=30)
     finally:
         pool.shutdown(wait=True)
+
+
+# --- #860: the recycling pool's exit -----------------------------------------
+#
+# `_run_on_recycling_pool` exited through `with ctx.Pool(...)`, which is
+# `terminate()` on every way out, success included. `terminate()` SIGTERMs
+# each worker and then joins it with no timeout (`Pool._terminate_pool`), and
+# before that takes the inqueue's read lock for good, so a worker not yet
+# waiting for work never reads its sentinel. A worker that also outlived
+# SIGTERM hung the caller for good: `export()` always, and `audit()`,
+# `redact()` and the rest under ISOCENTER_MAX_TASKS_PER_CHILD.
+#
+# `_cannot_leave` is the deterministic stand-in (the spec's repro): a worker
+# that ignores SIGTERM at the C level and holds a non-daemon thread open, so
+# it can leave neither by its sentinel (`threading._shutdown` joins the
+# thread) nor by SIGTERM. Every call that can hang runs bounded, and every
+# test SIGKILLs the workers of its own pools, by the pids it recorded, on
+# the way out. Assertions are what the ordering guarantees (#851, #857): no
+# upper bound on a time but the hang bound, no count of killed workers where
+# scheduling decides it.
+
+_HELD_OPEN = []
+
+
+def _cannot_leave(marker_dir):
+    """Pool initializer: this worker can leave neither by its sentinel nor by
+    SIGTERM, and says so. Module scope: it pickles into the worker."""
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    never = threading.Event()
+    held = threading.Thread(target=never.wait, daemon=False)
+    held.start()
+    _HELD_OPEN.append(held)
+    _mark_ready(marker_dir)
+
+
+def _one_cannot_leave(marker_dir):
+    """Pool initializer: the first worker to get here cannot leave, and
+    writes `blocked-<pid>`; every other leaves as usual. All mark ready."""
+    try:
+        fd = os.open(os.path.join(marker_dir, "claimed"),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        _mark_ready(marker_dir)
+        return
+    os.close(fd)
+    with open(os.path.join(marker_dir, f"blocked-{os.getpid()}"), "w",
+              encoding="utf-8"):
+        pass
+    _cannot_leave(marker_dir)
+
+
+def _double_once_two_are_ready(args):
+    """Double, once two workers have marked themselves ready (at most 30 s),
+    so neither is still starting when the pool is told to stop."""
+    value, marker_dir = args
+    deadline = time.monotonic() + 30
+    while (len([n for n in os.listdir(marker_dir) if n.startswith("ready-")])
+           < 2 and time.monotonic() < deadline):
+        time.sleep(0.01)
+    return value * 2
+
+
+def _slow_atexit_marker(marker_dir):
+    """Pool initializer: at its exit this worker sleeps a second and then
+    writes `exit-<pid>`. A SIGTERM that lands in the sleep loses the marker,
+    which is how a worker's own exit work (coverage's data file among it)
+    was lost."""
+    import atexit  # pylint: disable=import-outside-toplevel
+
+    def mark():
+        time.sleep(1.0)
+        with open(os.path.join(marker_dir, f"exit-{os.getpid()}"), "w",
+                  encoding="utf-8"):
+            pass
+
+    atexit.register(mark)
+    _mark_ready(marker_dir)
+
+
+def _pid_and_double(value):
+    """The worker's pid with the result, so a test knows who answered."""
+    return os.getpid(), value * 2
+
+
+def _unpicklable_result(value):
+    """A result the worker cannot send: a pool failure, not a task's."""
+    return lambda: value
+
+
+def _marked_pids(marker_dir, prefix):
+    return {int(name[len(prefix):]) for name in os.listdir(marker_dir)
+            if name.startswith(prefix)}
+
+
+class _RecordedPool(multiprocessing.pool.Pool):
+    """The recycling pool, with every worker it ever starts recorded, so a
+    test can name them and SIGKILL them on its way out."""
+
+    started = []
+
+    @staticmethod
+    def Process(ctx, *args, **kwds):  # pylint: disable=invalid-name
+        process = ctx.Process(*args, **kwds)
+        _RecordedPool.started.append(process)
+        return process
+
+
+@pytest.fixture
+def recorded_pools(monkeypatch):
+    """Every worker a recycling pool starts in this test, SIGKILLed after it.
+
+    `ctx.Pool()` imports `Pool` from `multiprocessing.pool` when it is called,
+    so the patched name is the one `_run_on_recycling_pool` builds. The kill
+    is what keeps a red test from leaving a worker that cannot leave behind,
+    for the interpreter's exit to join for good.
+    """
+    started = []
+    monkeypatch.setattr(_RecordedPool, "started", started)
+    monkeypatch.setattr(multiprocessing.pool, "Pool", _RecordedPool)
+    try:
+        yield started
+    finally:
+        for process in list(started):
+            try:
+                process.kill()
+            except (OSError, ValueError, AttributeError):
+                pass
+        sentinels = []
+        for process in list(started):
+            try:
+                sentinels.append(process.sentinel)
+            except (ValueError, AttributeError):
+                pass
+        if sentinels:
+            multiprocessing.connection.wait(sentinels, timeout=30)
+        deadline = time.monotonic() + 30
+        while (any(t.name == "isocenter-pool-exit" and t.is_alive()
+                   for t in threading.enumerate())
+               and time.monotonic() < deadline):
+            time.sleep(0.05)
+
+
+def _blocking_initializer(monkeypatch, marker_dir):
+    initializer = functools.partial(_cannot_leave, str(marker_dir))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+
+
+def _run_bounded(call, seconds):
+    """`_bounded`, keeping what the call raised beside whether it hung.
+
+    Returns:
+        dict: `hung`, and `value` or `error`.
+    """
+    outcome = {}
+
+    def run():
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # pylint: disable=broad-exception-caught
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    outcome["hung"] = worker.is_alive()
+    if outcome["hung"]:
+        for child in multiprocessing.active_children():
+            child.kill()
+        worker.join(60)
+    return outcome
+
+
+def _gone(processes, seconds=30):
+    """Whether every one of `processes` has ended within `seconds`."""
+    sentinels = [p.sentinel for p in processes]
+    deadline = time.monotonic() + seconds
+    while sentinels:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        for ready in multiprocessing.connection.wait(sentinels, timeout=left):
+            sentinels.remove(ready)
+    return True
+
+
+def _no_child_left(seconds=30):
+    """Every child of this process reaped, waiting for the exit's helper
+    thread to finish its `join()`s first."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not multiprocessing.active_children():
+            return True
+        time.sleep(0.05)
+    return not multiprocessing.active_children()
+
+
+def _exit_records(caplog):
+    return [r for r in caplog.records
+            if "recycling pool" in r.getMessage()]
+
+
+def _killed_pids(record):
+    match = re.search(r"\(pid ([0-9, ]+)\)", record.getMessage())
+    assert match, record.getMessage()
+    return {int(pid) for pid in match.group(1).split(", ")}
+
+
+def _logged_seconds(record):
+    match = re.search(r"still running ([0-9.]+) s after", record.getMessage())
+    assert match, record.getMessage()
+    return float(match.group(1))
+
+
+def test_a_recycling_pool_whose_worker_cannot_leave_returns_every_result(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """The success path: every result, then the workers that cannot leave
+    are killed after the grace, and one WARNING names them.
+
+    `with ctx.Pool()` ended in `terminate()`, which joined a worker that
+    ignores SIGTERM with no timeout, after every result was in: `export()`
+    hung with its files written. 3 of 3 runs hung on 3.12 and 3.14t.
+
+    Killing mutations: the kill loop deleted; the kill issued while the pool
+    is still RUN (the worker handler replaces the dead, and the replacements
+    cannot leave either); the logged time replaced by the grace is caught
+    with the Ctrl-C test, which logs less than the grace.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    _blocking_initializer(monkeypatch, markers)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            _pid_and_double, list(range(8)), max_workers=2,
+            maxtasksperchild=25, show_progress=False), 60)
+
+    assert not outcome["hung"], (
+        "run_parallel(maxtasksperchild=) did not return: the recycling "
+        "pool's exit joined a worker that cannot leave (#860)")
+    assert "error" not in outcome, outcome
+    assert sorted(v for _, v in outcome["value"]) == [2 * i for i in range(8)]
+    records = _exit_records(caplog)
+    assert len(records) == 1 and records[0].levelno == logging.WARNING, [
+        r.getMessage() for r in caplog.records]
+    killed = _killed_pids(records[0])
+    assert killed, records[0].getMessage()
+    assert killed <= {p.pid for p in recorded_pools}, (killed, recorded_pools)
+    # The time measured, and on a full grace never less than the grace.
+    assert _logged_seconds(records[0]) >= 1.0, records[0].getMessage()
+    # The cause by path: a finished pool is closed, and no SIGTERM is sent.
+    assert "by its sentinel" in records[0].getMessage(), records[0].getMessage()
+    assert "SIGTERM" not in records[0].getMessage(), records[0].getMessage()
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+    assert _no_child_left(), multiprocessing.active_children()
+
+
+def test_a_worker_that_left_is_neither_killed_nor_named(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """Only a worker still running is killed and named: one that left by
+    its sentinel within the grace is not.
+
+    One worker of two cannot leave; the other, which the tasks wait for
+    until it has started, leaves at once on `close()`. The WARNING names
+    the one, as the sentinels say.
+
+    Killing mutation: every process in `pool._pool` killed, with no
+    readiness check (the spec's M8), which names the worker that left.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    # The free worker leaves within milliseconds of `close()`, both having
+    # started before any task returned; ten seconds is the margin a loaded
+    # machine needs, not a measurement (#851).
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 10.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    initializer = functools.partial(_one_cannot_leave, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            _double_once_two_are_ready,
+            [(value, str(markers)) for value in range(4)], max_workers=2,
+            maxtasksperchild=25, show_progress=False), 60)
+
+    assert not outcome["hung"], outcome
+    assert sorted(outcome["value"]) == [0, 2, 4, 6]
+    blocked = _marked_pids(markers, "blocked-")
+    assert len(blocked) == 1 and len(_marked_pids(markers, "ready-")) == 2
+    records = _exit_records(caplog)
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert _killed_pids(records[0]) == blocked, records[0].getMessage()
+    assert records[0].getMessage().startswith("1 worker process(es) ")
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
+def test_a_recycling_pool_closed_by_its_reader_ends_workers_that_cannot_leave(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """The failure path: a reader that stops (`redact()` streams) reaches
+    `terminate()` with the workers busy or idle, and returns after the kill.
+
+    It hung on every run with a surviving worker, 3 of 3 on both
+    interpreters.
+
+    Killing mutations: the kill loop deleted; the #861 shape (wait on the
+    sentinels, kill, then `terminate()` on the caller's thread), which a
+    killed idle worker holding the inqueue's read lock hangs.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    _blocking_initializer(monkeypatch, markers)
+    stream = parallel.run_parallel(
+        _pid_and_double, list(range(8)), max_workers=2, maxtasksperchild=25,
+        show_progress=False, return_generator=True)
+    assert next(stream)[1] in [2 * i for i in range(8)]
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(stream.close, 60)
+
+    assert not outcome["hung"], (
+        "closing a recycling pool's stream did not return: terminate() "
+        "joined a worker that cannot leave (#860)")
+    assert "error" not in outcome, outcome
+    records = _exit_records(caplog)
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert _killed_pids(records[0]) <= {p.pid for p in recorded_pools}
+    # The cause by path: this way out goes through terminate()'s SIGTERM.
+    assert "outlives SIGTERM" in records[0].getMessage(), (
+        records[0].getMessage())
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+    assert _no_child_left(), multiprocessing.active_children()
+
+
+def test_a_raising_task_reaches_the_caller_after_the_recycling_pools_exit(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """A task's exception, without `yield_exceptions`, is the third way out,
+    and reaches the caller once the workers that cannot leave are killed."""
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    _blocking_initializer(monkeypatch, markers)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            double_or_raise, [1, -2, 3, 4], max_workers=2,
+            maxtasksperchild=25, show_progress=False), 60)
+
+    assert not outcome["hung"], (
+        "a raising task on the recycling pool did not reach the caller: "
+        "terminate() joined a worker that cannot leave (#860)")
+    assert isinstance(outcome.get("error"), ValueError), outcome
+    assert len(_exit_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
+def test_a_pool_failure_is_still_yielded_last_after_the_recycling_pools_exit(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """`yield_exceptions=True`'s trailing value for a failure of the pool
+    itself (a result that will not pickle) still comes, after the kill."""
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    _blocking_initializer(monkeypatch, markers)
+
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            _unpicklable_result, [1, 2], max_workers=2, maxtasksperchild=25,
+            show_progress=False, yield_exceptions=True), 60)
+
+    assert not outcome["hung"], (
+        "a pool failure on the recycling pool was never yielded: "
+        "terminate() joined a worker that cannot leave (#860)")
+    assert "error" not in outcome, outcome
+    assert isinstance(outcome["value"][-1], Exception), outcome["value"]
+    assert len(_exit_records(caplog)) == 1, [
+        r.getMessage() for r in caplog.records]
+    assert _gone(recorded_pools), "a worker of the pool is still running"
+
+
+def test_a_ctrl_c_during_the_recycling_pools_exit_kills_at_once(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """Ctrl-C during the grace kills the workers that cannot leave at once,
+    and the `KeyboardInterrupt` reaches the caller.
+
+    A real SIGINT, because the 3.12 trap is inside `Thread.join`: an
+    interrupt there runs bpo-45274's handler, which marks a thread that is
+    still running as stopped, so an exit that waited with `join()` and
+    asked `is_alive()` killed nothing and left the worker for the
+    interpreter's exit to join for good (measured: no kill, a child left,
+    the process never exited). The signal is sent only once the exit's
+    helper thread is running and the main thread is seen, twice, blocked in
+    a call the exit made after starting it (read from its frames), so it
+    lands in the wait and cannot land outside this call. The call runs on the main thread,
+    where Python delivers SIGINT, bounded by a timer that SIGKILLs this
+    test's own workers.
+
+    Killing mutations: the `Event` replaced by `helper.join()` and
+    `is_alive()` (3.12 only: 3.14 has no such handler); the `finally`
+    around the wait narrowed to `except Exception`; the kill moved after
+    the wait so it runs only when the wait returns.
+    """
+    assert threading.current_thread() is threading.main_thread()
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    # Far beyond this test's run, so a kill seen here is the interrupt's.
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 30.0,
+                        raising=False)
+    _blocking_initializer(monkeypatch, markers)
+    sent = threading.Event()
+    done = threading.Event()
+
+    main = threading.main_thread().ident
+
+    def waiting_in_the_exit():
+        """The main thread is blocked in a call `_end_recycling_pool` made
+        once its helper was running: its wait for the helper, whichever
+        way that wait is written, and not the helper's `start()`."""
+        if not any(t.name == "isocenter-pool-exit" and t.is_alive()
+                   for t in threading.enumerate()):
+            return False
+        frame = sys._current_frames().get(main)
+        names = []
+        while frame is not None:
+            names.append(frame.f_code.co_name)
+            frame = frame.f_back
+        if "_end_recycling_pool" not in names:
+            return False
+        inner = names[:names.index("_end_recycling_pool")]
+        return bool(inner) and "start" not in inner
+
+    def interrupt_once_the_exit_waits():
+        deadline = time.monotonic() + 40
+        while not done.is_set() and time.monotonic() < deadline:
+            # Twice, 20 ms apart: blocked, not passing through.
+            if waiting_in_the_exit():
+                time.sleep(0.02)
+                if waiting_in_the_exit():
+                    sent.set()
+                    os.kill(os.getpid(), signal.SIGINT)
+                    return
+            time.sleep(0.01)
+
+    def free_a_hang():
+        for process in list(recorded_pools):
+            try:
+                process.kill()
+            except (OSError, ValueError):
+                pass
+
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    watcher = threading.Thread(target=interrupt_once_the_exit_waits,
+                               daemon=True)
+    watchdog = threading.Timer(50, free_a_hang)
+    started = time.monotonic()
+    interrupted = False
+    try:
+        watcher.start()
+        watchdog.start()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            try:
+                parallel.run_parallel(
+                    _pid_and_double, list(range(4)), max_workers=2,
+                    maxtasksperchild=25, show_progress=False)
+            except KeyboardInterrupt:
+                interrupted = True
+        elapsed = time.monotonic() - started
+    finally:
+        done.set()
+        watcher.join(60)
+        watchdog.cancel()
+        signal.signal(signal.SIGINT, previous)
+
+    assert sent.is_set(), (
+        "the recycling pool's exit never started its helper thread; it "
+        "waited on the caller's thread (#860)")
+    assert interrupted, "the KeyboardInterrupt did not reach the caller"
+    assert elapsed < 50, (
+        f"the interrupted exit took {elapsed:.1f} s; the watchdog freed it")
+    assert _gone(recorded_pools, 10), (
+        "a worker the interrupted exit was waiting on is still running: the "
+        "interrupt was let out before the kill (#860)")
+    assert _no_child_left(), multiprocessing.active_children()
+    records = _exit_records(caplog)
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert _logged_seconds(records[0]) < 30.0, records[0].getMessage()
+
+
+def test_a_recycling_pools_workers_leave_by_their_sentinel_and_run_atexit(
+        tmp_path, monkeypatch, recorded_pools):
+    """On success every worker leaves by its sentinel, so its own exit work
+    runs: here, an `atexit` handler that takes a second.
+
+    `terminate()` SIGTERMed the idle workers, so a worker's `atexit` ran
+    only when the signal happened to miss it (measured: 4 markers of 8, on
+    both interpreters). Coverage's data file is such exit work.
+
+    Killing mutation: the success flag never set, so success exits through
+    `terminate()` again.
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
+    initializer = functools.partial(_slow_atexit_marker, str(markers))
+    monkeypatch.setattr(parallel, "resolve_worker_initializer",
+                        lambda disable_gc=False: initializer)
+
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        _pid_and_double, list(range(16)), max_workers=4, maxtasksperchild=4,
+        show_progress=False), 90)
+
+    assert not outcome["hung"], outcome
+    assert sorted(v for _, v in outcome["value"]) == [2 * i for i in range(16)]
+    ready = _marked_pids(markers, "ready-")
+    assert ready, "no worker ran its initializer"
+    assert _marked_pids(markers, "exit-") == ready, (
+        "a worker of the recycling pool was ended before its atexit "
+        "handler ran: the success path exited through terminate() (#860)")
+
+
+def test_a_healthy_recycling_pool_exits_without_a_kill(monkeypatch, caplog):
+    """Workers with SIGTERM's default disposition leave by their sentinel,
+    and nothing is killed or logged."""
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        outcome = _run_bounded(lambda: parallel.run_parallel(
+            identity, list(range(20)), max_workers=2, maxtasksperchild=3,
+            show_progress=False), 60)
+    assert not outcome["hung"], outcome
+    assert sorted(outcome["value"]) == list(range(20))
+    assert _exit_records(caplog) == [], [
+        r.getMessage() for r in caplog.records]
+    assert _no_child_left(), multiprocessing.active_children()
+
+
+def test_a_recycling_pool_exit_stuck_behind_a_leaked_lock_lets_the_caller_go(
+        tmp_path, monkeypatch, caplog, recorded_pools):
+    """When `terminate()` itself is stuck, the caller is held no longer than
+    the grace plus `_POOL_EXIT_AFTER_KILL_S`, and a second WARNING says the
+    exit was left behind.
+
+    `_help_stuff_finish` acquires the inqueue's read lock, which a killed
+    worker can hold for good: the kernel does not release a POSIX semaphore
+    (measured in the spec's `rlock.py`). It is made to block here.
+
+    Killing mutation: the #861 shape, `terminate()` on the caller's thread.
+    """
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 1.0)
+    monkeypatch.setattr(parallel, "_POOL_EXIT_AFTER_KILL_S", 1.0,
+                        raising=False)
+    release = threading.Event()
+    blocked_on = []
+
+    def leaked_lock(inqueue, task_handler, size):  # pylint: disable=unused-argument
+        blocked_on.append(threading.current_thread().name)
+        release.wait(120)
+
+    monkeypatch.setattr(multiprocessing.pool.Pool, "_help_stuff_finish",
+                        staticmethod(leaked_lock))
+    try:
+        stream = parallel.run_parallel(
+            identity, list(range(8)), max_workers=2, maxtasksperchild=25,
+            show_progress=False, return_generator=True)
+        assert next(stream) in range(8)
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            outcome = _run_bounded(stream.close, 60)
+        assert not outcome["hung"], (
+            "the caller waited on a recycling pool's exit stuck behind a "
+            "leaked lock (#860)")
+        assert "error" not in outcome, outcome
+        # Whether a worker is left to kill is scheduling's: `terminate()`
+        # sends each idle worker its sentinel before `_help_stuff_finish`,
+        # and they usually leave within the grace. The second line is not.
+        records = _exit_records(caplog)
+        left = [r for r in records
+                if "left to a daemon thread" in r.getMessage()]
+        assert len(left) == 1 and left[0] is records[-1], [
+            r.getMessage() for r in caplog.records]
+        assert len(records) <= 2, [r.getMessage() for r in records]
+        assert blocked_on == ["isocenter-pool-exit"], blocked_on
+    finally:
+        release.set()
+
+
+def test_a_recycling_pool_is_finalized_on_the_exits_thread_not_the_callers(
+        monkeypatch, recorded_pools):
+    """The exit's helper thread runs the pool's `terminate()` itself, so the
+    pool's finalizer, which runs `_help_stuff_finish`, has nothing left to do
+    when the pool is collected on the caller's thread.
+
+    A pool closed and joined but never terminated still holds its
+    `util.Finalize`, and its collection runs `_terminate_pool` on whichever
+    thread drops the last reference, where a leaked lock blocks for good.
+
+    Killing mutation: the helper's trailing `terminate()` removed.
+    """
+    import gc  # pylint: disable=import-outside-toplevel
+    called_on = []
+    real = multiprocessing.pool.Pool._help_stuff_finish
+
+    def recorded(inqueue, task_handler, size):
+        called_on.append(threading.current_thread().name)
+        return real(inqueue, task_handler, size)
+
+    monkeypatch.setattr(multiprocessing.pool.Pool, "_help_stuff_finish",
+                        staticmethod(recorded))
+    outcome = _run_bounded(lambda: parallel.run_parallel(
+        identity, list(range(6)), max_workers=2, maxtasksperchild=25,
+        show_progress=False), 60)
+    assert not outcome["hung"], outcome
+    gc.collect()
+    assert called_on == ["isocenter-pool-exit"], called_on
+
+
+def test_the_pool_internals_the_recycling_exit_reads_are_there():
+    """`Pool._pool`, a worker's `sentinel`, and a `terminate()` that runs its
+    finalizer once, pinned on each interpreter the gate runs.
+
+    The exit kills the processes in `_pool` whose sentinel is not ready, and
+    relies on its helper's `terminate()` consuming the pool's finalizer so
+    the collector cannot run it again on the caller's thread. A CPython that
+    renamed `_pool` would make the kill a silent no-op, and the hang return.
+    """
+    pool = multiprocessing.get_context("spawn").Pool(2, maxtasksperchild=25)
+    try:
+        assert sorted(pool.imap_unordered(identity, range(4))) == [0, 1, 2, 3]
+        assert isinstance(pool._pool, list) and pool._pool
+        for process in pool._pool:
+            assert isinstance(process, multiprocessing.process.BaseProcess)
+            assert isinstance(process.sentinel, int)
+        assert callable(multiprocessing.pool.Pool._help_stuff_finish)
+        pool.close()
+        pool.join()
+        pool.terminate()
+        assert not pool._terminate.still_active()
+        started = time.monotonic()
+        pool.terminate()
+        assert time.monotonic() - started < 5
+    finally:
+        pool.terminate()
 
 
 # --- #250: the child-side watchdog ------------------------------------------
