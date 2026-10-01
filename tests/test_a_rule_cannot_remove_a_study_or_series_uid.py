@@ -1,5 +1,5 @@
-"""A REMOVE or EMPTY rule on Study or Series Instance UID is refused at
-every door a policy comes in by (#877).
+"""A REMOVE or EMPTY rule on Study or Series Instance UID, or a REPLACE
+with a value, is refused at every door a policy comes in by (#877).
 
 A Study owns `0020,000d` and a Series owns `0020,000e`, and the exporter
 stamps each file's copy from its owner (#624, #544). Neither action ever
@@ -7,8 +7,11 @@ changed the owner, so the stamp wrote the **source** UID. Measured on
 61c59ce3 over `CT_small` and `MR_small` under basic@2026c plus the one
 rule: REMOVE exported the source UID with no row, graded PASS and wrote
 `(0012,0062) YES`; EMPTY exported it too, graded REVIEW_REQUIRED, and
-wrote no marker. The owner's ruling: refuse the rule when it is loaded,
-and name REPLACE, the keyed replacement, as the action to use.
+wrote no marker. A REPLACE with a `value:` exported the source UID as
+well (REVIEW_REQUIRED, no marker), and a literal on every study would
+merge them. The owner's rulings: refuse each when it is loaded, and name
+REPLACE with no value, the keyed replacement, as the action to use; only
+that and KEEP load.
 
 The doors are the ones `test_a_rule_that_cannot_be_honoured_is_refused`
 names: `load_config`, `audit(config_path=)`, `set_phi_tag`, `audit()`
@@ -87,7 +90,23 @@ def test_remove_or_empty_on_an_owned_uid_is_refused(tmp_path, door, action, tag)
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is {action.upper()};" in message, message
     assert UIDS[tag] in message, message
-    assert "REPLACE" in message and "(#877)" in message, message
+    assert "(REPLACE with no value" in message and "(#877)" in message, message
+
+
+@pytest.mark.parametrize("door", DOORS)
+@pytest.mark.parametrize("value", ["1.2.3.4", "2.25.1"])
+@pytest.mark.parametrize("tag", sorted(UIDS))
+def test_replace_with_a_value_on_an_owned_uid_is_refused(tmp_path, door, value, tag):
+    """Owner ruling (a) on #877. Measured before it: the export carried
+    the source UID and graded REVIEW_REQUIRED with no row naming why. A
+    value the UI can hold is chosen, so #560's VR check cannot be what
+    refuses it; kills the arm keyed on REMOVE and EMPTY alone."""
+    with pytest.raises(ValueError) as caught:
+        _through(door, tmp_path, tag, {"action": "REPLACE", "value": value})
+    message = str(caught.value)
+    assert f"phi_tags['{tag}'] is REPLACE with value {value!r};" in message, message
+    assert UIDS[tag] in message, message
+    assert "(REPLACE with no value" in message and "(#877)" in message, message
 
 
 @pytest.mark.parametrize("tag", ["0020,000D", "0020,000E"])
@@ -107,23 +126,33 @@ def test_the_message():
         validate_phi_policy({"0020,000d": {"action": "REMOVE"}}, "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000d'] is REMOVE; Study Instance UID can "
-        "only be kept (KEEP) or replaced (REPLACE), and REPLACE with no value "
-        "gives it this project's keyed replacement UID (#544). The study "
-        "writes its UID on every exported file, so under REMOVE the export "
-        "would carry the source UID (#877)")
+        "only be kept (KEEP) or replaced by this project's keyed replacement "
+        "UID (REPLACE with no value, #544), because the study writes its UID "
+        "on every exported file, so under REMOVE the export would carry the "
+        "source UID (#877)")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0020,000e": {"action": "EMPTY"}}, "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000e'] is EMPTY; Series Instance UID can "
-        "only be kept (KEEP) or replaced (REPLACE), and REPLACE with no value "
-        "gives it this project's keyed replacement UID (#544). The series "
-        "writes its UID on every exported file, so under EMPTY the export "
-        "would carry the source UID (#877)")
+        "only be kept (KEEP) or replaced by this project's keyed replacement "
+        "UID (REPLACE with no value, #544), because the series writes its "
+        "UID on every exported file, so under EMPTY the export would carry "
+        "the source UID (#877)")
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0020,000d": {"action": "REPLACE", "value": "1.2.3"}},
+                            "cfg.yaml")
+    assert str(caught.value) == (
+        "cfg.yaml: phi_tags['0020,000d'] is REPLACE with value '1.2.3'; Study "
+        "Instance UID can only be kept (KEEP) or replaced by this project's "
+        "keyed replacement UID (REPLACE with no value, #544), because the "
+        "study writes its UID on every exported file, so under REPLACE with "
+        "a value the export would carry the source UID (#877)")
 
 
 ALLOWED = {
     "replace": {"action": "REPLACE"},
-    "replace-value": {"action": "REPLACE", "value": "1.2.3.4"},
+    # A null value is an absent one (#713): the keyed replacement.
+    "replace-null-value": {"action": "REPLACE", "value": None},
     "keep": {"action": "KEEP"},
     "string-form": "Instance UID",
 }
@@ -132,19 +161,20 @@ ALLOWED = {
 @pytest.mark.parametrize("door", DOORS)
 @pytest.mark.parametrize("case", sorted(ALLOWED))
 @pytest.mark.parametrize("tag", sorted(UIDS))
-def test_replace_and_keep_still_load(tmp_path, door, case, tag):
+def test_value_less_replace_and_keep_still_load(tmp_path, door, case, tag):
     """Kills over-refusal: the arm refusing every action on the two tags,
-    or refusing a valued REPLACE."""
+    or reading a null `value:` as a value."""
     _through(door, tmp_path, tag, ALLOWED[case])
 
 
 @pytest.mark.parametrize("tag", ["0008,0018", "0020,0052", "0008,1155"])
-@pytest.mark.parametrize("action", ["REMOVE", "EMPTY"])
-def test_other_uids_are_not_swept_in(tag, action):
+@pytest.mark.parametrize("rule", [{"action": "REMOVE"}, {"action": "EMPTY"},
+                                  {"action": "REPLACE", "value": "1.2.3.4"}])
+def test_other_uids_are_not_swept_in(tag, rule):
     """Kills the arm keyed on the UI VR rather than on the two owned tags:
     SOP Instance UID, Frame of Reference UID and Referenced SOP Instance
-    UID take REMOVE and EMPTY as they did."""
-    PhiInspector(config_tags={tag: {"action": action}})
+    UID take REMOVE, EMPTY and a valued REPLACE as they did."""
+    PhiInspector(config_tags={tag: rule})
 
 
 @pytest.mark.parametrize("tag", sorted(UIDS))
