@@ -17,10 +17,24 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
   `VR_DUMMY` string VR, and a repeating-group mask key.
 
-The files are CT_small and MR_small (bundled with pydicom) and one
-synthetic image built from CT_small: an element of every `VR_DUMMY` string
-VR, a nested sequence holding a UID copy and a date, a private element, a
-60xx overlay element, and a Device Serial Number one pixel zone matches.
+The files are CT_small and MR_small (bundled with pydicom) and three
+synthetic images built from CT_small. One holds an element of every
+`VR_DUMMY` string VR, a nested sequence holding a UID copy and a date, a
+private element, private copies of its own SOP Instance and Study UIDs
+(#765), a 60xx overlay element, and a Device Serial Number one pixel zone
+matches. The other two are patients of their own: one named `Unknown`, one
+with no Patient's Name (#746).
+
+**What it cannot see** (a change to any of these moves no digest, so its
+PR must say whether it is a behaviour change): pixel-zone matching beyond
+one zone matched by exact serial (no `"*"` serial, no manufacturer or model
+match, no zone overlapping the frame edge, no multi-frame image); external
+profile files; `SHIFT` and `JITTER` on TM; date ranges other than the one
+`JITTER` fixes; `remove_private_tags: false` under the floor or `none`;
+nested sequences deeper than one item; private sequences; UIDs only another
+instance carries; the reversible lock; WFDB and waveform scenarios; burned-in
+text detection (OCR); and every behaviour at export (markers, the Type 1
+gates, owner stamps), which `fingerprint/output.json` measures instead.
 
 **What it records,** per policy: each finding as `(entity_type, path, tag,
 action, new value)`; after `anonymize()`, every patient, study, series and
@@ -120,7 +134,29 @@ def _synthetic(path):
     ds.ReferencedImageSequence = Sequence([item])
     ds.add_new(0x00090010, "LO", "B3 DIGEST")
     ds.add_new(0x00091001, "LO", "private value")
+    # Private copies of this instance's own UIDs (#765): while private tags
+    # are kept (`basic-keep-private`) each takes its UID's replacement.
+    ds.add_new(0x00091002, "LO", ds.SOPInstanceUID)
+    ds.add_new(0x00091003, "LO", ds.StudyInstanceUID)
     ds.add_new(0x60000022, "LO", "overlay description")
+    ds.save_as(str(path))
+
+
+def _named(path, suffix, name):
+    """CT_small as a patient of its own (`suffix` keys its IDs and UIDs)
+    whose Patient's Name is `name`, or absent when `name` is None (#746):
+    a name literally `Unknown` is replaced like any other, and an absent
+    one is held as `''`, never a placeholder."""
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.SOPInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}1"
+    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    ds.SeriesInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}2"
+    ds.StudyInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}3"
+    ds.PatientID = f"DIGEST-782-{suffix}"
+    if name is None:
+        del ds.PatientName
+    else:
+        ds.PatientName = name
     ds.save_as(str(path))
 
 
@@ -129,6 +165,8 @@ def _inputs(directory):
     shutil.copy(get_testdata_file("CT_small.dcm"), os.path.join(directory, "ct.dcm"))
     shutil.copy(get_testdata_file("MR_small.dcm"), os.path.join(directory, "mr.dcm"))
     _synthetic(os.path.join(directory, "synthetic.dcm"))
+    _named(os.path.join(directory, "named-unknown.dcm"), "5", "Unknown")
+    _named(os.path.join(directory, "no-name.dcm"), "6", None)
 
 
 def _canon(value):

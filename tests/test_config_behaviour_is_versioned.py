@@ -52,15 +52,16 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 
 #: The digest of what each configuration version does, computed by
 #: `support.behaviour_digest.behaviour_digest`. Recomputed on the B3 PR
-#: (#782) after #879, #883, #784, #731 and #741 landed in it.
+#: (#782) after #879, #883, #784, #731 and #741 landed in it, and again
+#: when the fixture was widened to see B1's #746 and #765 (review of #895).
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "a3ea5ac8a0ad9d3a13b0fd52a4f0422d96156dd483f72ee582a559377e953a2f",
+    "2.0": "6eeeb91d8923e1132394c47bc5129d86e8e08bbba3513023f6d4cdde3738ee90",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "a3ea5ac8a0ad9d3a13b0fd52a4f0422d96156dd483f72ee582a559377e953a2f",
+    "2.0": "6eeeb91d8923e1132394c47bc5129d86e8e08bbba3513023f6d4cdde3738ee90",
 }
 
 _WHAT_TO_DO = (
