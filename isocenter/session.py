@@ -3093,9 +3093,15 @@ class DicomSession:
         Scan instances for burned-in text with OCR, and report the text no
         configured redaction zone covers.
 
-        Only instances of machines (by Device Serial Number) the current
-        configuration has a rule for are scanned; other machines are
-        skipped.
+        Only instances of machines a rule covers, by exact Device Serial
+        Number or `"*"` (as `redact()` reads it), and whose covering rules
+        hold at least one valid zone, are scanned. Each instance is
+        checked against the zones of every rule that covers it, `[y1, y2,
+        x1, x2]` and `{"roi": [...]}` alike, the zones `redact()` and
+        `export()` apply. A series with no Device Serial Number is never
+        scanned. When nothing is scanned, the printed line counts the
+        instances of machines no rule names apart from those whose rules
+        hold no zone.
 
         Args:
             serial_number (str, optional): Scan only the machine with this
@@ -3140,49 +3146,55 @@ class DicomSession:
         current_rules = self.configuration.rules
 
         worker_items = []
-        skipped_count = 0
+        # Counted apart (#808, owner ruling Q3-A): a machine no rule names,
+        # and one whose covering rules hold no zone (a `create_config()`
+        # scaffold), call for different fixes. `skipped_count` stays their
+        # sum, which `PixelScanSummary.skipped` reports.
+        unconfigured = 0
+        zoneless = 0
 
         for p in self.store.patients:
             for st in p.studies:
                 for se in st.series:
                     equip = se.equipment
-                    if not equip or not equip.device_serial_number:
-                        skipped_count += len(se.instances)
-                        continue
+                    sn = equip.device_serial_number if equip else None
 
-                    sn = equip.device_serial_number
-
-                    # Filter 1: Must be in Config
-                    # We check if we have a rule for this serial
-                    matched_rule = None
-                    for r in current_rules:
-                        if r.get("serial_number") == sn:
-                            matched_rule = r
-                            break
-
-                    if not matched_rule:
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Rule Refinement: Skip if NO ZONES defined (Scaffolded state)
-                    # Unless user explicitly wants to scan? No, user req says skip.
-                    if not matched_rule.get("redaction_zones"):
-                        # Log once per serial?
-                        # For now just skip
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Filter 2: Explicit User Filter
+                    # The explicit filter first: it is the caller's machine
+                    # selector, compared exactly, not a rule.
                     if serial_number and sn != serial_number:
+                        continue
+
+                    # The rules `redact()` and the export's zones read for
+                    # this series (`rules_matching`: exact or "*", and none
+                    # for a series with no serial), never a reading of its
+                    # own. Taking the first exact match missed "*" and
+                    # every rule after the first (#808).
+                    matched = rules_matching(current_rules, sn)
+                    if not matched:
+                        unconfigured += len(se.instances)
+                        continue
+                    # `zone_rois`, the one reader of a zone: `{"roi": [...]}`
+                    # is a zone, `[1, 2, 3]` is not (#814).
+                    if not any(zone_rois(r.get("redaction_zones"))
+                               for r in matched):
+                        zoneless += len(se.instances)
                         continue
 
                     for inst in se.instances:
                         worker_items.append((inst, equip, current_rules, tesseract_cmd))
 
+        skipped_count = unconfigured + zoneless
         if not worker_items:
             msg = "No matching configured instances found to scan."
-            if skipped_count > 0:
-                msg += f" (Skipped {skipped_count} unconfigured instances)"
+            parts = []
+            if unconfigured:
+                parts.append(f"{unconfigured} instance(s) of machines no "
+                             f"rule names")
+            if zoneless:
+                parts.append(f"{zoneless} instance(s) whose rules have no "
+                             f"redaction zones")
+            if parts:
+                msg += " (Skipped " + "; ".join(parts) + ")"
             print(msg)
             # Recorded: a call that found nothing configured to read still
             # ran, and "no scan ran" would be the wrong thing for section 5

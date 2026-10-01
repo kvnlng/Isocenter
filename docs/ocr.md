@@ -193,27 +193,21 @@ Or in code, with `session.configuration.add_rule()` or `update_rule()` (see [Pro
 
 ### How it works
 
-1. **Match**: each instance is matched to a rule by its series' Device Serial Number.
+1. **Match**: each instance is matched to every rule that covers its series' Device Serial Number, exactly or by `"*"`, as `redact()` reads them.
 2. **Scan**: OCR finds every text region in the image.
-3. **Filter**: each region is compared with the rule's `redaction_zones`:
+3. **Filter**: each region is compared with the `redaction_zones` of every matching rule:
     * **Covered**: at least 80% of the region lies in one zone. Not reported.
     * **`PARTIAL_LEAK`**: more than 0% and less than 80% covered. Reported.
     * **`NEW_LEAK`**: not covered at all. Reported.
 
 Text of two characters or fewer is skipped as noise.
 
-**Zones the scan reads.** The scan reads only zones written as a list,
-`[y1, y2, x1, x2]`. A zone written as `{roi: [...]}`, the other form a rule
-accepts, counts as no zone: text inside it is reported as a leak
-([#814](https://github.com/kvnlng/Isocenter/issues/814)). And when two rules
-share a serial, the scan reads only the first rule's zones, while `redact()`
-applies the zones of every matching rule.
+**Zones the scan reads.** The zones `redact()` and `export()` apply: both forms a rule accepts, `[y1, y2, x1, x2]` and `{roi: [y1, y2, x1, x2]}`, from every rule that covers the instance's machine, an exact rule and a `"*"` rule alike. A zone that does not hold exactly four values is not a zone here either.
 
-**What is scanned.** Only instances whose Device Serial Number equals a rule's `serial_number` exactly, and only when that rule has at least one zone. So:
+**What is scanned.** Only instances of a machine a rule covers, by exact serial or `"*"`, and only when at least one of the rules covering it has a zone. So:
 
-* a session that has loaded no configuration, or whose rules are all fresh from `create_config()` with empty `redaction_zones`, scans nothing: it prints "No matching configured instances found to scan." and returns an empty report;
-* a `"*"` rule is applied by `redact()` and `export()`, but the scan never selects instances by it;
-* a series with no Device Serial Number is never scanned.
+* a session that has loaded no configuration, or whose rules are all fresh from `create_config()` with empty `redaction_zones`, scans nothing: it prints "No matching configured instances found to scan." with how many instances it skipped, counting those of machines no rule names apart from those whose rules have no zone, and returns an empty report;
+* a series with no Device Serial Number is never scanned, not even by a `"*"` rule, as `redact()` never redacts one.
 
 Load a configuration whose rules have zones first:
 
@@ -251,7 +245,7 @@ After changing the zones, scan again: a report with no findings means every text
 
 ## Automated Remediation
 
-`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it. It changes the configuration in memory and returns the number of changes.
+`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it, in place (a `{roi: [...]}` zone keeps its `note`). A `NEW_LEAK` on a machine that only a `"*"` rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on `"*"`, which would redact that region on every machine's images. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.
 
 ```python
 import isocenter
