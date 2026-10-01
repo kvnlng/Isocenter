@@ -2225,6 +2225,14 @@ class DicomSession:
         recorded as imported, so ingesting the same folder again declines
         it again.
 
+        **A study another patient holds.** A file carrying a Patient ID,
+        whose Study Instance UID a patient with a different Patient ID
+        already holds, is declined the same way, and in the same order
+        (#745). Its `WARNING` row names the file and the instance, never a
+        Patient ID. A file carrying the original ID of the patient whose
+        study `anonymize()` renamed is that patient's, and is linked; so
+        is a file with no Patient ID.
+
         **Byte order.** A big-endian source's values in words wider than a
         byte (`OW`, `OL`, `OF`, `OD`, `OV` and the waveform samples) are
         stored little-endian, as its pixels are. What cannot be converted
@@ -2819,8 +2827,8 @@ class DicomSession:
         studies and instances only.
 
         `redact()` is the one edit that keeps an instance's status: an
-        instance REMEDIATED or CLEARED before the pass reads the same after
-        it, provided nothing but redaction's own writes changed it. See
+        instance REMEDIATED, CLEARED or IDENTIFIED before the pass reads the
+        same after it, provided nothing but redaction's own writes changed it. See
         `PhiStatus`.
 
         A status is counted whatever policy it was recorded under;
@@ -3885,10 +3893,14 @@ class DicomSession:
         - a value it would capture is one no token can hold (`bytes`),
           naming the tag;
         - Patient's Name is blank under a rule of EMPTY or REMOVE on it;
+        - the patient holds a Patient ID (or a Patient's Name) and every
+          instance's copy of `0010,0020` (or `0010,0010`) is present and
+          blank, naming the tag: the token would restore the patient
+          without it (#761);
         - the patient has instances and any of them holds no value in any
           tag `tags_to_lock` names (or it names none), counted. A tag held
-          blank is a value, and a patient with no instances locks as 0
-          instances.
+          blank is a value, except as the refusal above says, and a
+          patient with no instances locks as 0 instances.
 
         Each of these is judged on every instance's own values: a value a
         pass wrote on any study refuses the lock. An existing token is
@@ -3901,9 +3913,11 @@ class DicomSession:
 
         No message carries a Patient ID: a message says "this patient", its
         advice spells the ID `<its Patient ID>`, and a replaced Patient ID
-        is described, not quoted. When the lock creates the key file (the
-        first lock under a path with none), the file is created already
-        written, with mode 0600.
+        is described, not quoted. The key file is created only by a lock
+        that writes a token (the first under a path with none), after every
+        patient is planned, already written and with mode 0600; a lock that
+        writes no token (refused, no patient found, or none with an
+        instance) creates no key file (#813).
 
         Args:
             patient_id (str): The ID of the patient to lock; anything that
@@ -3991,11 +4005,13 @@ class DicomSession:
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
-        """Load the lock's key, creating it if allowed, and build its engine.
+        """Choose the key the lock plans under, and build its engine.
 
-        Call it before any patient's lock is planned. The key is created only
-        when no file exists at the path and no instance in the session carries
-        a token this library wrote. Writes no token.
+        Call it before any patient's lock is planned. The key is the file's;
+        when no file exists and no instance in the session carries a token
+        this library wrote, it is a key held in memory, which
+        `_commit_lock_key` writes only once a plan carries a token (#813).
+        Writes no token and no file.
 
         Raises:
             RuntimeError: No key file at the path, and an instance in the
@@ -4015,12 +4031,14 @@ class DicomSession:
         # scope, not the patient's: a key minted here would be the session's
         # key from then on.
         #
-        # The single lock calls this only once its patient is found, so a lock
-        # of an ID no patient holds creates no key file. The batch calls it
-        # after reading its selection and before it plans, found or not,
-        # because it cannot plan without the engine; a batch of IDs that match
-        # no patient therefore creates the key, as does a lock then refused
-        # for any other reason.
+        # Nothing is written here (#813). The batch calls this after reading
+        # its selection and before it plans, found or not, because it cannot
+        # plan without the engine; were the key written here, a batch of IDs
+        # matching no patient, an empty report, or a lock then refused would
+        # each leave a key file that opens nothing, and every later
+        # `Session()` in that directory would turn reversible anonymization
+        # on by itself. The file is written by `_commit_lock_key`, after
+        # every plan has succeeded.
         try:
             self.key_manager.load_key()
         except FileNotFoundError:
@@ -4040,8 +4058,36 @@ class DicomSession:
                     "reversible anonymization with the key the identities "
                     "were locked with; no key was created, and the token this "
                     "call would have written is unchanged.") from None
-            self.key_manager.load_or_generate_key()
-        self.reversibility_service.engine  # pylint: disable=pointless-statement
+        self.reversibility_service._use_key(self.key_manager._key_for_planning())
+
+    def _commit_lock_key(self, plans) -> bool:
+        """Write the key the plans were made under, when any carries a token.
+
+        Call it after every plan of the call has succeeded and before the
+        first token is embedded. Writes nothing unless some value-set has
+        both a token and an instance to embed it in (#813).
+
+        Args:
+            plans: Each `_planned_identity_lock` result of the call.
+
+        Returns:
+            bool: True when another session wrote a key first: the engine
+                is now built over that key, and the caller must plan every
+                patient again before embedding anything.
+        """
+        # A token embedded somewhere: a patient with no instances plans a
+        # token from the patient's own values and embeds it on nothing.
+        if not any(token and members for _, value_sets in plans
+                   for _, token, members in value_sets):
+            return False
+        planned = self.reversibility_service._engine_key
+        key = self.key_manager._commit_planned_key()
+        if key == planned:
+            return False
+        # Lost the race to another session's key: a token built under the
+        # planned key would open under no key anyone holds.
+        self.reversibility_service._use_key(key)
+        return True
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
                                verbose: bool, tags_to_lock: Optional[List[str]]
@@ -4064,6 +4110,8 @@ class DicomSession:
                 persist `_write_identity_lock` cannot complete.
         """
         plan = self._planned_identity_lock(patient, tags_to_lock)
+        if self._commit_lock_key([plan]):
+            plan = self._planned_identity_lock(patient, tags_to_lock)
         return self._write_identity_lock(patient, plan, persist, verbose)
 
     def _planned_identity_lock(self, patient: "Patient",
@@ -4520,6 +4568,37 @@ class DicomSession:
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
 
+        # Every copy of an owner-stamped tag blanked while the owner holds
+        # a value (#761). A token keeps what each instance held (the L8
+        # ruling), so it would hold `''`, the lock would report success,
+        # and a restore would write the blank over the patient -- for the
+        # ID, an ID-less patient, and the original unrecoverable. Refused
+        # rather than read from the patient, which would reverse the
+        # ruling; only when *every* copy is present and blank, because
+        # recovery takes the first non-blank token, and a copy that is
+        # absent is already read from the patient (`captured`). A subject
+        # with no Patient ID exports `''`, so its blank is the truth.
+        owned = (("0010,0020", exported_patient_id(patient), "Patient ID"),
+                 ("0010,0010", patient.patient_name, "Patient's Name"))
+        for tag, held, what in owned:
+            if (tag not in tags_to_lock or not instances
+                    or not str(held or "").strip()):
+                continue
+            copies = [captured(inst, tag) for inst in instances]
+            if all(not from_patient and not str(val if val is not None else "").strip()
+                   for val, from_patient in copies):
+                rest = [t for t in tags_to_lock if t != tag]
+                advice = (f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: this patient holds a {what}, and every "
+                    f"instance's copy of {tag} is blank, so the token would "
+                    f"restore the patient with no {what}. Put the value back "
+                    f"on its instances, or {advice}; the token this call would "
+                    "have written is unchanged.")
+
         # Instances to secure and nothing to stash. An empty record
         # builds no token (`generate_identity_token` returns `b""`) and
         # `embed_identity_token` embeds nothing for it, so the lock
@@ -4795,6 +4874,13 @@ class DicomSession:
                 "Each is numbered by its place among the patients found, in "
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
+
+        # The key file is written only now, every plan having succeeded,
+        # and only when one carries a token (#813). If another session
+        # wrote its key first, every patient is planned again under it.
+        if self._commit_lock_key(plans.values()):
+            plans = {pid: self._planned_identity_lock(patient_map[pid], tags_to_lock)
+                     for pid in plans}
 
         # Drained after every plan and before the first token is embedded,
         # for the reason `lock_identities` gives. Once, here: nothing
@@ -5310,7 +5396,7 @@ class DicomSession:
 
         Loads the key when a file is there. This call never creates the
         key file, and neither does recovery: the first `lock_identities()`
-        creates it when none exists. So a mistyped path before
+        that writes a token creates it when none exists. So a mistyped path before
         `recover_patient_identity()` fails there with `FileNotFoundError`
         rather than minting a key the data was never locked under.
 
@@ -5985,6 +6071,11 @@ class DicomSession:
         own scheme), and declines otherwise. The findings passed are not
         modified.
 
+        A patient, study or instance edited after its last scan and before
+        this pass is not stamped by it: it keeps the status that scan left
+        and still reads `UNSCANNED` afterwards, so it grades under
+        condition 8 until `audit()` reads the edit (#752).
+
         Two patients left holding one Patient ID (a study ingested under a
         patient's original ID after that patient was anonymized) are merged
         into whichever was in the session first, and the other is removed
@@ -6052,6 +6143,15 @@ class DicomSession:
             # so the statuses the pass records can be told from the rest.
             recorded_at = {id(entity): entity._phi_status_revision
                            for entity in self._status_bearers()}
+            # The entities whose status was already stale -- recorded, then
+            # edited with no scan since -- with the status and policy the
+            # scan left (#752). The pass reads none of the edit, so its
+            # stamps would vouch for content no scan saw; `_keep_stale`
+            # puts them back after it.
+            stale_at_start = [
+                (entity, entity._phi_status, entity._phi_status_policy)
+                for entity in self._status_bearers()
+                if _edited_since_its_status(entity)]
             # The entities the report's scan raised under, read before the
             # pass can replace a patient's ID. Only when the tally settling
             # this pass is the report's own: under another audit's tally,
@@ -6105,6 +6205,7 @@ class DicomSession:
                 PASS_WRITING.reset(passing)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)
+            self._keep_stale(stale_at_start, recorded_at)
 
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
@@ -7712,6 +7813,36 @@ class DicomSession:
             status, recorded = entity._phi_status_record()
             if status is not PhiStatus.UNSCANNED and recorded is None:
                 entity.record_phi_status(status, policy=policy)
+
+    @staticmethod
+    def _keep_stale(stale_at_start, recorded_at):
+        """Leave stale an entity that was stale when the pass began (#752).
+
+        For each entity in `stale_at_start` whose status this pass recorded
+        (its status revision moved), re-record the status and policy the
+        scan left and then mark it modified. It reads UNSCANNED again,
+        grade condition 8 counts it, the export withholds the
+        de-identification markers, and the store keeps the left-behind
+        status in `phi_status_edited` (#767). An entity the pass did not
+        record a status on is left exactly as it is.
+
+        Args:
+            stale_at_start (list): `(entity, status, policy)` for each
+                entity `_edited_since_its_status` before the pass.
+            recorded_at (dict): `id(entity) -> status revision` before the
+                pass.
+        """
+        # Re-recorded rather than only marked modified: that would leave
+        # REMEDIATED as the status "left behind", a claim about content no
+        # scan read. Record, then move the revision, is hydration's shape
+        # (`_restore_statuses`). Never-scanned entities (raw status None or
+        # UNSCANNED) are not stale, so a pass over hand-built findings
+        # still stamps them REMEDIATED.
+        for entity, status, policy in stale_at_start:
+            if recorded_at.get(id(entity)) == entity._phi_status_revision:
+                continue
+            entity.record_phi_status(status, policy=policy)
+            entity.mark_modified()
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
         """The instance holding each finding raised inside a sequence.

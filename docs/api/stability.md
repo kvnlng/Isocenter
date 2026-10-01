@@ -391,14 +391,19 @@ otherwise.
   prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
-  file, creating none. The first `lock_identities()` creates the key,
-  exclusively and with mode 0600, unless the session holds an identity
-  token this library wrote that no key here opens, in which case it
+  file, creating none. The first `lock_identities()` that writes a token
+  creates the key, exclusively and with mode 0600; a lock that writes
+  none (a refusal, or no patient found, or none with an instance) creates
+  no key file (#813). When no key file exists and the session holds an
+  identity token this library wrote, which no new key could open, it
   raises `RuntimeError` and creates none.
 - `lock_identities()` refusals name no patient: a batch refusal numbers
   each refused patient by its place among the patients found, in Patient
   ID order. A patient any of whose instances holds no value in any tag
-  `tags_to_lock` names is refused.
+  `tags_to_lock` names is refused. A blank value is a value, except
+  that a patient holding a Patient ID (or a Patient's Name) whose every
+  instance's copy of `0010,0020` (or `0010,0010`) is present and blank
+  is refused: the token would restore the patient without it (#761).
 - `lock_identities(persist=True)` and `lock_identities_batch()` raise
   the `sqlite3.Error` of a store write that fails, and `RuntimeError`
   for a write that finds no store row for one of its instances. Both are

@@ -3888,8 +3888,9 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
         tuple: `(patient, linked_under_id_less)`; the flag is True when the
         caller must write the `WARNING` row.
     """
-    # Two patients sharing a real Study UID can still arise; that is not
-    # this function's case. The studies move is what
+    # Two patients sharing a real Study UID never reach here: the later
+    # file is declined above the sidecar write (`_held_by_another_patient`,
+    # #745). The studies move is what
     # `SqliteStore._reparent_studies` persists.
     pid = meta['pid']
     if meta['no_patient_id']:
@@ -3984,6 +3985,45 @@ def _held_under(held, uid, secret):
     from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
     replaced = _replacement_uid_for(uid, secret)
     return replaced if replaced in held else uid
+
+
+def _held_by_another_patient(owner, meta, secret) -> bool:
+    """Whether a file's study is held by a patient the file does not name.
+
+    True only when the file carries a real Patient ID, the study's owner
+    holds a real one too, and the two do not name one patient. One
+    patient's two spellings are the original ID and the pseudonym this
+    store gives it, read under the owner's jitter scheme
+    (`canonical_patient_key`, the key the date shift and the remediation
+    holder check already use), so a file of a study `anonymize()` renamed,
+    carrying its patient's original ID, is that patient's. An ID-less file
+    or an ID-less owner is `_link_patient`'s case (#584), never this one.
+
+    Args:
+        owner (Patient): The patient holding the file's study, or None.
+        meta (dict): The file's metadata, with `_linkage_keys`' `pid` and
+            `no_patient_id`.
+        secret: The project secret, or falsy when the store holds none.
+
+    Returns:
+        bool: True when the file must be declined (#745).
+    """
+    if owner is None or meta['no_patient_id']:
+        return False
+    if is_synthetic_patient_id(owner.patient_id):
+        return False
+    pid = meta['pid']
+    if owner.patient_id == pid:
+        return False
+    from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+    from .privacy import canonical_patient_key  # pylint: disable=import-outside-toplevel
+    scheme = owner._jitter_scheme
+    # No secret: this store has replaced no keyed ID, so a keyed owner
+    # holding another ID is another patient.
+    if not secret and scheme != JITTER_SCHEME_UNKEYED:
+        return True
+    return (canonical_patient_key(pid, secret, scheme)
+            != canonical_patient_key(owner.patient_id, secret, scheme))
 
 
 def _linkage_keys(ds) -> dict:
@@ -4129,7 +4169,13 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Extract Linking Metadata
         meta = {
-            'pname': str(ds.get("PatientName", "Unknown")),
+            # Absent becomes empty, never a placeholder (#746). A placeholder
+            # cannot be told from a recorded name downstream: the export
+            # stamped `Unknown` from the Patient beside `(0012,0062) YES`,
+            # and the scan had to exempt the literal by name, so a file
+            # really carrying `Unknown` kept it. Empty is what Type 2
+            # "unknown" is, and what #584 does for a Patient ID.
+            'pname': str(ds.PatientName) if "PatientName" in ds else "",
             # Absent stays absent. A placeholder date cannot be told from a
             # real one downstream: SHIFT_DATE would jitter it and export
             # it as genuine study timing.
@@ -4492,8 +4538,10 @@ class IngestSummary:
             file, the same pair its `ERROR` audit row carries.
         declined (int): Files refused because the session already holds
             their SOP Instance UID (as another instance's UID, or as a
-            redacted instance's UID before redaction). Each has a
-            `WARNING` audit row and is not read into the store.
+            redacted instance's UID before redaction), or because their
+            Study Instance UID is held by a patient with a different
+            Patient ID (#745). Each has a `WARNING` audit row and is not
+            read into the store.
         skipped (int): Files already in the store, not read again.
         failed (int): `len(failures)`.
     """
@@ -4742,10 +4790,11 @@ class DicomImporter:
         gate = (store_backend._hold_sidecar_gate
                 if hasattr(store_backend, "_hold_sidecar_gate")
                 else contextlib.nullcontext)
-        # Two refusals, counted apart so the closing log line can say
+        # Three refusals, counted apart so the closing log line can say
         # which one happened; `IngestSummary.declined` is their sum.
         declined_superseded = 0
         declined_duplicate = 0
+        declined_shared_study = 0
         high_bit_rows = 0
         lossy_rows = 0
         precision_rows = 0
@@ -4975,6 +5024,39 @@ class DicomImporter:
                             logger.warning(
                                 "... (suppressing further per-file messages "
                                 "for duplicate SOP Instance UIDs) ...")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="WARNING",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
+                        continue
+
+                    # A study another patient already holds (#745). Linked,
+                    # this patient's file would be exported under the
+                    # holder's pseudonym, folder and shifted Study Date,
+                    # beside an empty patient of its own, and nothing would
+                    # say so. Declined above the sidecar write for the
+                    # duplicate's reason, with the same "first" (path
+                    # order, the store's own studies first). The lookup is
+                    # the linkage block's below, read early; `held` is not
+                    # touched. The row names the file and the instance,
+                    # never a Patient ID, as no linkage row does.
+                    shared_sid = _held_under(study_map, meta['sid'], uid_secret)
+                    if (shared_sid in study_map and _held_by_another_patient(
+                            study_owner.get(shared_sid), meta, uid_secret)):
+                        detail = (
+                            f"Not importing {inst.file_path}: its Study "
+                            f"Instance UID is held by a patient with a "
+                            f"different Patient ID, and one study belongs to "
+                            f"one patient. Instance {inst.sop_instance_uid} "
+                            f"was not read into the store (#745).")
+                        declined_shared_study += 1
+                        if declined_shared_study <= 5:
+                            logger.warning(detail)
+                        elif declined_shared_study == 6:
+                            logger.warning(
+                                "... (suppressing further per-file messages "
+                                "for studies held by another patient) ...")
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="WARNING",
@@ -5521,10 +5603,16 @@ class DicomImporter:
                 f"Declined {declined_duplicate} file(s) whose SOP Instance "
                 "UID an instance in this session already holds; each has a "
                 "WARNING audit row naming both files.")
+        if declined_shared_study:
+            logger.warning(
+                f"Declined {declined_shared_study} file(s) whose Study "
+                "Instance UID a patient with a different Patient ID already "
+                "holds; each has a WARNING audit row naming the file.")
 
         return IngestSummary(
             ingested=count, failures=failures,
-            declined=declined_superseded + declined_duplicate,
+            declined=(declined_superseded + declined_duplicate
+                      + declined_shared_study),
             skipped=skipped_count)
 
 

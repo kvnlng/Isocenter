@@ -280,6 +280,9 @@ def test_what_a_relock_over_an_unmarked_token_leaves(tmp_path):
 def _hand_token(session, instances, payload):
     """A token of ours holding exactly `payload`, embedded on `instances`."""
     rs = session.reversibility_service
+    # The key on disk, as a lock leaves it: since #813
+    # `_key_for_locking()` alone plans under a key held in memory.
+    session.key_manager.load_or_generate_key()
     session._key_for_locking()
     token = rs.engine.encrypt(json.dumps(payload).encode("utf-8"))
     for inst in instances:

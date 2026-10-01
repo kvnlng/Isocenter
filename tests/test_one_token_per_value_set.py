@@ -215,6 +215,9 @@ def _pre_098_token(session, instances, record, stamped=False):
     record, and a marked token here would turn every pre-0.9.8 test in
     this file into a test of a token this release wrote."""
     rs = session.reversibility_service
+    # The key on disk, as the earlier lock left it: since #813
+    # `_key_for_locking()` alone plans under a key held in memory.
+    session.key_manager.load_or_generate_key()
     session._key_for_locking()
     token = rs.engine.encrypt(json.dumps(record).encode("utf-8"))
     for inst in instances:

@@ -248,9 +248,16 @@ _REDACTION_OWN_ATTRS = frozenset({
 _REDACTION_SKIPPED_ATTRS = _REDACTION_OWN_ATTRS | frozenset(_REDACTION_FLAG_TAGS)
 _REDACTION_OWN_SEQUENCES = frozenset({_REDACTION_FLAG_SEQUENCE})
 
-#: Only an assurance is worth carrying. UNSCANNED has nothing to carry, and
-#: IDENTIFIED is not an assurance; both are left to the revision rule.
-_CARRIED_STATUSES = (PhiStatus.REMEDIATED, PhiStatus.CLEARED)
+#: Every scan result is carried; UNSCANNED has nothing to carry and is left
+#: to the revision rule. IDENTIFIED is carried too (owner ruling on #896,
+#: option a): redaction writes the pixels, the minted SOP UID and its flags,
+#: never an attribute the scan read, so the scan's conclusion about those
+#: attributes still holds. Leaving it stale instead made `audit()`,
+#: `redact()`, `anonymize(report)` grade REVIEW_REQUIRED once #752's pass
+#: stopped stamping over a stale status. "Current before the pass" is
+#: `phi_status` itself: a status an edit had left stale reads UNSCANNED and
+#: is not captured, so an edit made before redaction is not hidden (#486).
+_CARRIED_STATUSES = (PhiStatus.REMEDIATED, PhiStatus.CLEARED, PhiStatus.IDENTIFIED)
 
 
 def _metadata_outside_redaction(inst: Instance) -> tuple:
@@ -354,7 +361,8 @@ def capture_phi_status_for_redaction(inst: Instance) -> Optional[tuple]:
 
     Returns:
         Optional[tuple]: `(status, metadata, flags)` when the instance's
-        status is REMEDIATED or CLEARED at its current revision, else None.
+        status is REMEDIATED, CLEARED or IDENTIFIED at its current
+        revision, else None.
     """
     # Redaction's own writes advance the revision, so without the capture
     # and the carry every redacted instance would read UNSCANNED after the

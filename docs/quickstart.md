@@ -41,7 +41,7 @@ print(summary)      # IngestSummary(ingested=..., failures=[...], declined=..., 
 session.examine()   # the cohort and its equipment
 ```
 
-`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
+`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session, or its Study Instance UID belongs to a patient with a different Patient ID) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
 
 ## 3. Configure & Audit
 
@@ -69,7 +69,7 @@ Reversible anonymization encrypts each patient's original identifiers into the E
 
 ```python
 # Keep the key outside the project: whoever holds the key and an export
-# can read the identities in it. The first lock creates the key file.
+# can read the identities in it. The first lock that writes a token creates the key file.
 session.enable_reversible_anonymization("/secure/keys/my_project.key")
 
 # Lock every patient the audit found, by the Patient ID in the findings.
@@ -81,7 +81,7 @@ session.save()
 
 The lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, unless that sequence holds an Isocenter identity token the lock cannot read or would change: then the lock refuses with `RuntimeError`. `lock_identities()` before `enable_reversible_anonymization()` raises `RuntimeError`. Locking again before anonymizing replaces the stored token, unless the new token would lose a value the existing one holds: then it raises `RuntimeError` and writes nothing. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
 
-Locking after `anonymize()` secures nothing. Given the report, `lock_identities()` finds none of its Patient IDs (they have been replaced), logs one `ERROR`, returns an empty result and still creates the key file. Given a patient's new ID, it raises `RuntimeError`. Check the count it returns.
+Locking after `anonymize()` secures nothing. Given the report, `lock_identities()` finds none of its Patient IDs (they have been replaced), logs one `ERROR` and returns an empty result. Given a patient's new ID, it raises `RuntimeError`. Neither creates the key file: only a lock that writes a token does. Check the count it returns.
 
 `Session()` loads a key by itself only from `./isocenter.key` in the current working directory. A key kept anywhere else is named with `enable_reversible_anonymization(path)`, as above. [What to keep](configuration.md#what-to-keep) lists the key, the store and the configuration, and what each is for.
 

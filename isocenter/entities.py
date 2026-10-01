@@ -105,7 +105,8 @@ class PhiStatus(Enum):
     says nothing about the current content.
 
     **One exception: pixel redaction.** Redaction re-records an instance's
-    REMEDIATED or CLEARED after its own writes. The pixels, their
+    REMEDIATED, CLEARED or IDENTIFIED after its own writes, when it was
+    current before them (#896). The pixels, their
     descriptors, the new SOP Instance UID and its bookkeeping are left out
     of the comparison; the flags it writes (ImageType, BurnedInAnnotation,
     DerivationDescription, the Derivation Code Sequence) are accepted only
@@ -326,10 +327,12 @@ class TrackedEntity:
                 under; omit to keep the policy already recorded, even when
                 that status has gone stale. `None` is a value, not an
                 omission: it records "no policy". The default is a private
-                sentinel because `None` is taken (#815). Four callers pass
-                one: a scan, hydration, the patient merge, and a pass that
+                sentinel because `None` is taken (#815). Five callers pass
+                one: a scan, hydration, the patient merge, a pass that
                 settles its statuses against a report carried from another
-                session, which records the report's policy.
+                session, which records the report's policy, and a pass that
+                puts back the status of an entity already stale when it
+                began (`Session._keep_stale`, #752).
         """
         if policy is _KEEP:
             policy = self._phi_status_policy

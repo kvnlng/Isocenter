@@ -478,6 +478,12 @@ def test_a_pass_after_the_audit_is_settled_keeps_pass_accounting(tmp_path):
         instance = _instances(session)[0]
         assert instance.phi_status is PhiStatus.REMEDIATED, "setup"
         instance.set_attr("0008,0081", "1 Main St")
+        # The edit left the status stale, and since #752 a pass keeps an
+        # entity stale that was stale when it began, whatever it settles.
+        # This test is about the tally's answer for a uid it no longer
+        # holds, so the status is made current again first, as a scan
+        # reading the edit would leave it.
+        instance.record_phi_status(PhiStatus.REMEDIATED)
         finding = PhiFinding(
             entity_uid=instance.sop_instance_uid, entity_type="Instance",
             field_name="Institution Address", value="1 Main St",
