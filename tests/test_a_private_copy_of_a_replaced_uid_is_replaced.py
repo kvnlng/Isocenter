@@ -42,7 +42,7 @@ def _threads(monkeypatch):
 
 
 def _source(tmp_path, implicit=False, other_uid=None, creator_uid=False,
-            serial=None):
+            serial=None, multi=None):
     path = write_ct(tmp_path / "in" / "a.dcm", "PA", 765)
     ds = pydicom.dcmread(path)
     if serial is not None:
@@ -55,6 +55,8 @@ def _source(tmp_path, implicit=False, other_uid=None, creator_uid=False,
     own.add_new(0x12, "UI", ds.SOPInstanceUID)
     if other_uid is not None:
         own.add_new(0x13, "UI", other_uid)
+    if multi is not None:
+        own.add_new(0x14, "UI", [ds.SeriesInstanceUID, multi])
     if creator_uid:
         # A private creator whose text is the Study UID: a creator names a
         # block, it is never a copy of anything.
@@ -146,6 +148,31 @@ def test_a_private_uid_of_no_uid_of_its_instance_is_kept(tmp_path):
         session.anonymize(report)
         out = pydicom.dcmread(_export(session, tmp_path))
     assert _text(out[0x00331013].value) == other
+
+
+@pytest.mark.parametrize("implicit", [False, True], ids=["explicit", "implicit"])
+def test_a_multi_valued_copy_replaces_its_uid_and_keeps_the_other_value(tmp_path, implicit):
+    """A private UI holding the instance's Series UID beside a UID of no
+    element of the instance: the first value takes the replacement, the
+    second is kept as it was, and nothing is declined. The pass checks each
+    value (`_foreign_uid_refused`) as either left as it was or this store's
+    replacement of it; a check that accepted only the replacement would
+    decline the whole element and leave the source Series UID in the file
+    (review of #896, finding 2)."""
+    other = "1.2.826.0.1.3680043.10.9999.4343"
+    src = _source(tmp_path, implicit=implicit, multi=other)
+    with _session(tmp_path) as session:
+        report = session.audit()
+        assert [f.tag for f in report.findings if f.tag == "0033,1014"] == ["0033,1014"]
+        session.anonymize(report)
+        assert _declines(session) == []
+        out = pydicom.dcmread(_export(session, tmp_path))
+    value = out[0x00331014].value
+    texts = (_text(value).split("\\") if isinstance(value, bytes)
+             else [str(v) for v in (value if isinstance(value, (list, pydicom.multival.MultiValue))
+                                    else [value])])
+    assert texts == [out.SeriesInstanceUID, other]
+    assert out.SeriesInstanceUID != src.SeriesInstanceUID
 
 
 def test_a_private_creator_is_never_replaced(tmp_path):
