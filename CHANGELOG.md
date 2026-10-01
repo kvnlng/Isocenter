@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc8] - 2026-10-01
+
 ### Breaking
 
 - **BREAKING: a Study Instance UID `(0020,000D)` or Series Instance UID `(0020,000E)` rule other than `KEEP` or `REPLACE` with no `value:` key is refused when it is loaded (#877, owner rulings).** A Study owns `0020,000d` and a Series owns `0020,000e`, and the export stamps each file's copy from its owner (#624, #544). Three rules never changed the owner: `REMOVE`, `EMPTY`, and `REPLACE` with a `value:`. Under each, the stamp wrote the **source** UID, with no row. Measured on `main` at 61c59ce3 over `CT_small` and `MR_small` under `basic@2026c` plus the one rule:
