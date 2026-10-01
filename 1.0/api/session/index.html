@@ -4913,7 +4913,7 @@ attempted, and its <code>WARNING</code> rows grade the run.</p>
 
 
 <h3 id="isocenter.session.DicomSession.export_dataframe" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">export_dataframe</span><span class="p">(</span><span class="n">output_path</span><span class="o">=</span><span class="s1">'export_metadata.csv'</span><span class="p">,</span> <span class="n">expand_metadata</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">export_dataframe</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">expand_metadata</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -4923,6 +4923,10 @@ attempted, and its <code>WARNING</code> rows grade the run.</p>
         <p>Write the cohort report to CSV or Parquet, and return it.</p>
 <p>The format is chosen from the extension: <code>.parquet</code> writes
 Parquet, anything else writes CSV.</p>
+<p><code>output_path</code> is required and has no default (#812): the file can
+hold the source identifiers (it does before <code>anonymize()</code>), so
+where it lands is the caller's to name. Use <code>get_cohort_report()</code>
+for the frame alone, with no file.</p>
 <p>It reports the session's in-memory graph and does not <code>save()</code>
 first: pending edits are not committed as a side effect.</p>
 
@@ -4947,11 +4951,12 @@ first: pending edits are not committed as a side effect.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The output file path (ends with .csv or .parquet).</p>
+                <p>The output file path (ends with .csv or
+.parquet). Required; its directory is created if missing.</p>
               </div>
             </td>
             <td>
-                  <code>&#39;export_metadata.csv&#39;</code>
+                <em>required</em>
             </td>
           </tr>
           <tr class="doc-section-item">

@@ -3125,7 +3125,9 @@ Typically represents a single scan or reconstruction.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The modality type (e.g., 'CT', 'MR').</p>
+                <p>The source's Modality as ingested (e.g., 'CT',
+'MR'). The export writes each instance's own <code>0008,0060</code>, after
+the configuration's rules, not this (#869).</p>
               </div>
             </td>
           </tr>
@@ -3136,7 +3138,11 @@ Typically represents a single scan or reconstruction.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The series number.</p>
+                <p>The source's Series Number as ingested. The
+export writes each instance's own <code>0020,0011</code>, after the
+configuration's rules, not this, and the folder and WFDB record
+names read the same attribute (#869); assigning it changes no
+file and does not mark the instances edited.</p>
               </div>
             </td>
           </tr>
@@ -4878,9 +4884,13 @@ remediated again records nothing here, and the remediation must call
             <td>
               <div class="doc-md-description">
                 <p>The policy the status is recorded
-under. Omitted, the entity keeps the policy it was last
-recorded under, even when that status has gone stale. Only a
-scan, hydration and the patient merge pass one.</p>
+under; omit to keep the policy already recorded, even when
+that status has gone stale. <code>None</code> is a value, not an
+omission: it records "no policy". The default is a private
+sentinel because <code>None</code> is taken (#815). Four callers pass
+one: a scan, hydration, the patient merge, and a pass that
+settles its statuses against a report carried from another
+session, which records the report's policy.</p>
               </div>
             </td>
             <td>

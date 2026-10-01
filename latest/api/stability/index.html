@@ -1985,7 +1985,7 @@ moved across it is a different call.</p>
 </tr>
 <tr>
 <td><code>export_dataframe</code></td>
-<td><code>output_path='export_metadata.csv', expand_metadata=False, patient_ids=None</code></td>
+<td><code>output_path, expand_metadata=False, patient_ids=None</code></td>
 </tr>
 <tr>
 <td><code>get_cohort_report</code></td>
@@ -2244,6 +2244,14 @@ instance_number, file_path, source_path</code> (<code>pixel_array</code> and
 <code>date_shifted</code> field until 0.9.6; it is gone, and reading it raises
 <code>AttributeError</code>. <code>Equipment</code>: <code>manufacturer, model_name,
 device_serial_number</code>.</p>
+<p><code>Series.series_number</code> and <code>Series.modality</code> are the source's Series
+Number and Modality as ingested, and <code>Instance.instance_number</code> the
+file's Instance Number. None of the three is what an export writes: the
+export writes each instance's own <code>(0020,0011)</code>, <code>(0008,0060)</code> and
+<code>(0020,0013)</code> after the configuration's rules, and the folder and WFDB
+record names read the same elements (#869). Assigning
+<code>Series.series_number</code> changes no exported file and does not mark the
+series' instances edited.</p>
 <p>A subject whose files carry no Patient ID (absent, empty or blank) is a
 <code>Patient</code> per study, whose <code>patient_id</code> is
 <code>entities.NO_PATIENT_ID_PREFIX + &lt;its source Study Instance UID&gt;</code>

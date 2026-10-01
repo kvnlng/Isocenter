@@ -1896,16 +1896,19 @@ copied into <code>ecg/</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>out/Subject_ANON_afd45d1d36f4892754cd8246/
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>└─ Study_2012-07-23__39467/
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   └─ Series_NoNumber_ECG_Series_47942/
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_0.hea               header
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_0.dat               format-16 samples
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      └─ ANON_afd45d1d36f4892754cd8246_0_0.annotations.json  cart findings, when present
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_1.hea               header
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_1.dat               format-16 samples
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      └─ ANON_afd45d1d36f4892754cd8246_0_1.annotations.json  cart findings, when present
 </code></pre></div>
 <p>The folder names are <code>Subject_&lt;Patient ID&gt;</code>, <code>Study_&lt;date&gt;_&lt;description&gt;_&lt;last
 5 characters of the Study UID&gt;</code> and <code>Series_&lt;number&gt;_&lt;modality&gt;_&lt;description&gt;_&lt;last 5
-characters of the Series UID&gt;</code>, each read from the exported values; a
-missing value becomes a placeholder such as <code>NoNumber</code> or <code>Series</code>. A
-record name starts with the exported Patient ID and the Series Number (<code>0</code>
-when there is none); when two records in one folder would share a name,
+characters of the Series UID&gt;</code>, each read from the exported values after
+the configuration's rules; a missing value becomes a placeholder such as
+<code>NoNumber</code> or <code>Series</code>. A record name is the exported Patient ID, the Series
+Number and the file's Instance Number, joined by <code>_</code>, read from the file's
+own elements after the rules: a number the rules remove, or an empty one,
+reads <code>0</code>, as does a number the file never had (an empty Series Number
+reads <code>NoNumber</code> in the folder). When two records in one folder would share a name,
 the later ones get <code>_2</code>, <code>_3</code>, and so on. The pseudonym, the shifted date
 and the UID suffixes differ in your run: all three are derived from a secret
 generated for each store. That file carries two multiplex groups, so ingest
