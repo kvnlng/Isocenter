@@ -19,15 +19,27 @@ tables (`test_profile_editions.py`).
   ships, the row updated with a CHANGELOG line saying why it is not a
   behaviour change.
 - `SHIPPED_BEHAVIOUR` is a literal copy, checked once the package is 1.x.
-  Until the v1.0.0 tag, a change that moves the digest updates both dicts
-  in the same PR, and its review checks that it did. After the tag
-  `SHIPPED_BEHAVIOUR["2.0"]` never changes, so the only green path for a
-  behaviour change is a new version row: the bump is enforced, not
-  reviewed. `RELEASING.md` ("Cutting a release") has the cut's check.
+  A PR can edit both dicts, so that check alone enforces nothing.
+- What enforces it (review of #895): every row of `BEHAVIOUR_BY_VERSION`
+  in the previous release's copy of this file (`git show <tag>:<this
+  file>`, the newest `v*` tag not after `isocenter.__version__`, in the
+  release step's own order, pre-releases included) must be in both
+  tables here with the same hex. Once a release tag carries this file, a
+  PR that edits both rows is red, and the only green path for a
+  behaviour change is a new `CONFIG_VERSION` row. Before then (every tag
+  up to `v1.0.0rc8`), a row may move with both dicts and a CHANGELOG
+  line. With no git checkout, no tags, or no tag carrying this file, the
+  comparison skips with the cause named; it never passes without
+  comparing. `RELEASING.md` ("Cutting a release") has the cut's check.
 
 The digest runs real sessions, about four seconds under
 `ISOCENTER_FORCE_THREADS=1`. It must give the same hex on 3.12 and 3.14t.
 """
+import ast
+import pathlib
+import subprocess
+import sys
+
 import pytest
 
 import isocenter
@@ -73,7 +85,11 @@ def test_behaviour_matches_this_versions_row(digest):
 
 
 def test_a_shipped_versions_behaviour_never_moves(digest):
-    """`FROZEN_AT_1_0`'s gate: live from the first 1.x version string."""
+    """The working pin, live from the first 1.x version string: the digest
+    equals the `SHIPPED_BEHAVIOUR` row, and each shipped row is in the
+    working table unchanged. On its own this pins nothing a PR cannot
+    move, since a PR can edit both dicts; the tag comparison below is what
+    makes it hold after a release."""
     major = int(isocenter.__version__.split(".")[0])
     if major < 1:
         pytest.skip(f"isocenter {isocenter.__version__} is before 1.0")
@@ -87,6 +103,146 @@ def test_a_shipped_versions_behaviour_never_moves(digest):
         assert BEHAVIOUR_BY_VERSION.get(shipped) == frozen, (
             f"BEHAVIOUR_BY_VERSION[{shipped!r}] moved from the shipped "
             f"{frozen}; a shipped version's row never changes (#782)")
+
+
+# --- The previous release's rows (review of #895) -------------------------
+
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+_THIS_FILE = "tests/test_config_behaviour_is_versioned.py"
+
+
+def _git(*args):
+    """`git -C <checkout> args`, as (returncode, stdout, stderr)."""
+    done = subprocess.run(["git", "-C", str(_ROOT), *args],
+                          capture_output=True, text=True, check=False)
+    return done.returncode, done.stdout, done.stderr.strip()
+
+
+def _release_order():
+    """`scripts/output_fingerprint._tag_order`, the release step's own
+    reading of a `v*` tag (`previous-tag`, RELEASING step 1): version
+    order, pre-releases included, `a` < `b` < `rc` < final. One reader, so
+    this test and the release step cannot disagree on which release came
+    before. Skips where `scripts/` is not in the tree."""
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+    try:
+        from scripts import output_fingerprint  # noqa: PLC0415
+    except ImportError as exc:
+        pytest.skip(f"scripts/output_fingerprint.py is not in this tree "
+                    f"(an sdist?), so release tags cannot be ordered: {exc}")
+    return output_fingerprint._tag_order
+
+
+def _previous_release_tag(version, tags, order):
+    """The newest `v*` tag at or before `version` by `order`, pre-releases
+    included, as `previous-tag` reads them, but never one after this
+    tree's version: a patch line's tree is not compared with a later
+    line's release. Not by reachability: release tags sit on
+    `release/X.Y`, and `main` reaches none of them. None when no tag
+    is."""
+    ours = order(f"v{version}")
+    assert ours is not None, f"isocenter.__version__ {version!r} is not a release version"
+    eligible = [tag for tag in tags if order(tag) is not None and order(tag) <= ours]
+    return max(eligible, key=order) if eligible else None
+
+
+def _rows_in(source):
+    """`BEHAVIOUR_BY_VERSION` and `SHIPPED_BEHAVIOUR` as `source` (this
+    file's text at some commit) assigns them, read without importing it."""
+    rows = {}
+    for node in ast.parse(source).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in ("BEHAVIOUR_BY_VERSION",
+                                           "SHIPPED_BEHAVIOUR")):
+            rows[node.targets[0].id] = ast.literal_eval(node.value)
+    return rows
+
+
+def _moved_rows(released, ours):
+    """Each row the release held that `ours` (both tables) does not hold
+    with the same hex. A row added since is not a move."""
+    moved = []
+    for version, frozen in sorted(released.items()):
+        for table, held in ours.items():
+            if held.get(version) != frozen:
+                moved.append(f"{table}[{version!r}] is {held.get(version)!r}, "
+                             f"released as {frozen!r}")
+    return moved
+
+
+def test_the_previous_release_is_the_newest_tag_not_after_this_version():
+    """The tag finder alone, on listed tags: no git needed."""
+    order = _release_order()
+    tags = ["v0.9.8", "v1.1.0", "v1.0.0rc8", "v1.0.1", "v1.0.0", "not-a-tag"]
+    assert _previous_release_tag("1.0.0rc9", tags, order) == "v1.0.0rc8"
+    assert _previous_release_tag("1.0.0rc8", tags, order) == "v1.0.0rc8"
+    assert _previous_release_tag("1.0.0", tags, order) == "v1.0.0"
+    assert _previous_release_tag("1.0.2", tags, order) == "v1.0.1"
+    assert _previous_release_tag("1.1.0rc1", tags, order) == "v1.0.1"
+    assert _previous_release_tag("0.9.0", tags, order) is None
+
+
+def test_a_moved_row_is_named_and_an_added_row_is_not():
+    released = {"2.0": "aa"}
+    assert _moved_rows(released, {"BEHAVIOUR_BY_VERSION": {"2.0": "aa", "2.1": "bb"},
+                                  "SHIPPED_BEHAVIOUR": {"2.0": "aa"}}) == []
+    assert _moved_rows(released, {"BEHAVIOUR_BY_VERSION": {"2.0": "cc"},
+                                  "SHIPPED_BEHAVIOUR": {"2.0": "cc"}}) == [
+        "BEHAVIOUR_BY_VERSION['2.0'] is 'cc', released as 'aa'",
+        "SHIPPED_BEHAVIOUR['2.0'] is 'cc', released as 'aa'"]
+    assert _moved_rows(released, {"BEHAVIOUR_BY_VERSION": {},
+                                  "SHIPPED_BEHAVIOUR": {}}) == [
+        "BEHAVIOUR_BY_VERSION['2.0'] is None, released as 'aa'",
+        "SHIPPED_BEHAVIOUR['2.0'] is None, released as 'aa'"]
+
+
+def test_no_row_the_previous_release_shipped_has_moved():
+    """The enforcement (review of #895): every row of `BEHAVIOUR_BY_VERSION`
+    in the previous release's copy of this file must be in both tables
+    here with the same hex, so a PR that edits both dicts after a release
+    is red, and the only green path for a behaviour change is a new
+    `CONFIG_VERSION` row. The previous release is the newest `v*` tag not
+    after `isocenter.__version__`, in the release step's own order
+    (pre-releases included). Its rows are read from this file's text at
+    the tag (`git show <tag>:<this file>`), so no table here vouches for
+    itself.
+
+    Skips, each with its cause named, never a pass without comparing: no
+    git checkout (an sdist), no `v*` tags (a shallow clone or one never
+    fetched), no tag at or before this version, or a tag that does not
+    carry this file (every release before it)."""
+    order = _release_order()
+    code, _, err = _git("rev-parse", "--is-inside-work-tree")
+    if code != 0:
+        pytest.skip(f"not a git checkout, so no release tag to compare "
+                    f"with (an sdist?): {err}")
+    code, listed, err = _git("tag", "--list", "v*")
+    assert code == 0, f"git tag --list failed: {err}"
+    tags = listed.split()
+    if not tags:
+        _, shallow, _ = _git("rev-parse", "--is-shallow-repository")
+        pytest.skip("no v* tags in this checkout"
+                    + (" (a shallow clone)" if shallow.strip() == "true" else "")
+                    + "; `git fetch --tags origin` to compare")
+    tag = _previous_release_tag(isocenter.__version__, tags, order)
+    if tag is None:
+        pytest.skip(f"no v* tag at or before isocenter {isocenter.__version__}")
+    code, released_text, err = _git("show", f"{tag}:{_THIS_FILE}")
+    if code != 0:
+        pytest.skip(f"{tag} does not carry {_THIS_FILE}, so it shipped no "
+                    f"rows to hold: {err}")
+    released = _rows_in(released_text)
+    assert set(released) == {"BEHAVIOUR_BY_VERSION", "SHIPPED_BEHAVIOUR"}, (
+        f"{tag}'s {_THIS_FILE} does not assign both tables")
+    moved = _moved_rows(released["BEHAVIOUR_BY_VERSION"],
+                        {"BEHAVIOUR_BY_VERSION": BEHAVIOUR_BY_VERSION,
+                         "SHIPPED_BEHAVIOUR": SHIPPED_BEHAVIOUR})
+    assert not moved, (
+        f"a row {tag} released has moved: {'; '.join(moved)}. A shipped "
+        f"version's behaviour never changes: bump CONFIG_VERSION's minor and "
+        f"add a row (#782)")
 
 
 def test_one_behaviour_row_per_schema_row():

@@ -302,11 +302,20 @@ fixes, never features.
    and the row for the `CONFIG_VERSION` at this SHA must be in both. A
    row in `BEHAVIOUR_BY_VERSION` that a release is about to ship for the
    first time is copied into `SHIPPED_BEHAVIOUR` by hand, as a literal,
-   in a PR into `main`, and step 1 starts again. After the v1.0.0 tag a
-   shipped row never changes: a change that moves the digest is a new
-   minor with a new row, and a red test here is a change that reached
-   `main` without one. It is fixed on `main`, never by editing a shipped
-   row.
+   in a PR into `main`, and step 1 starts again. What enforces a shipped
+   row is `test_no_row_the_previous_release_shipped_has_moved`: it reads
+   `BEHAVIOUR_BY_VERSION` from this file at the previous release tag
+   (`git show <tag>:tests/test_config_behaviour_is_versioned.py`, the
+   newest `v*` tag not after this version, in `previous-tag`'s order,
+   pre-releases included) and fails if any row it held is missing or
+   different in either table here. So once a tag carries the file, a row
+   never changes: a change that moves the digest is a new minor with a
+   new row, and a red test here is a change that reached `main` without
+   one. It is fixed on `main`, never by editing a shipped row. The test
+   skips, naming why, with no git checkout, no tags, or a previous tag
+   that does not carry the file (every tag through `v1.0.0rc8`); in the
+   full run at the cut, a skip for any reason but the last stops the
+   release until the tags are fetched (`git fetch --tags origin`).
 
    Then compare the tracked fingerprint with the previous release's.
    First `git fetch --tags origin`: `previous-tag` refuses when origin has

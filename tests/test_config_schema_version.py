@@ -439,3 +439,30 @@ def test_an_unreadable_target_is_saved_as_before(tmp_path):
     finally:
         os.chmod(target, 0o600)
     assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION
+
+
+def test_create_config_refuses_to_overwrite_a_file_declaring_a_newer_minor(tmp_path):
+    """The owner's save() ruling on #895 applied to the other writer
+    (review of #895): `create_config()` onto another isocenter's newer
+    file wrote over it as ours. Same refusal, same words, nothing
+    written. Kills the guard missing from `create_config()`."""
+    target, text = _newer_target(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        with pytest.raises(ValueError) as caught:
+            session.create_config(str(target))
+    assert str(caught.value) == _expected_refusal(target)
+    assert target.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("existing", [None, f'version: "{CONFIG_VERSION}"\n',
+                                      "version: [unclosed\n"])
+def test_create_config_onto_a_target_declaring_no_newer_minor_writes(
+        tmp_path, existing):
+    """A missing target, one of ours, or one that is not YAML is
+    scaffolded as before."""
+    target = tmp_path / "scaffold.yaml"
+    if existing is not None:
+        target.write_text(existing, encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.create_config(str(target))
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["version"] == CONFIG_VERSION

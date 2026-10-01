@@ -23,6 +23,7 @@ import sqlite3
 
 import pydicom
 import pytest
+import yaml
 from pydicom.data import get_testdata_file
 
 from isocenter.remediation import RemediationService
@@ -207,3 +208,25 @@ def test_a_remediation_service_refuses_a_swapped_range():
         RemediationService(date_jitter_config=dict(SWAPPED))
     RemediationService(date_jitter_config={"min_days": -7, "max_days": -7})
     RemediationService()
+
+
+def test_auto_save_recovers_once_the_range_is_fixed(tmp_path):
+    """The refusal holds only while the refused range is in memory (review
+    of #895): once `date_jitter` is fixed, the next mutators save again,
+    with the fixed range and each change made since. Kills a refusal that
+    latches, and a trial save that keeps the refused range."""
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        config = session.configuration
+        config.config_path = str(tmp_path / "saved.yaml")
+        config.auto_save = True
+        config.date_jitter = dict(SWAPPED)
+        with pytest.raises(ValueError, match=SWAPPED_PHRASE):
+            config.set_phi_tag("0008,0081", "KEEP")
+        assert not (tmp_path / "saved.yaml").exists()
+        config.date_jitter = {"min_days": -365, "max_days": -1}
+        config.set_phi_tag("0008,0081", "KEEP")
+        config.add_rule("SN-RECOVERED")
+    saved = yaml.safe_load((tmp_path / "saved.yaml").read_text(encoding="utf-8"))
+    assert saved["date_jitter"] == {"min_days": -365, "max_days": -1}
+    assert saved["phi_tags"]["0008,0081"]["action"] == "KEEP"
+    assert [m["serial_number"] for m in saved["machines"]] == ["SN-RECOVERED"]

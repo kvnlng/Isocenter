@@ -2487,7 +2487,9 @@ class DicomSession:
             ValueError: When `configuration.date_jitter` is a range the
                 loader would refuse in the file (#731), and `save()`'s
                 refusal when `phi_tags` lacks a rule its base supplies
-                (#741). Nothing is written.
+                (#741), or when `output_path` is a file declaring a newer
+                `version` minor than this library's (#784). Nothing is
+                written.
             OSError: The write's own error, after it is logged (#741).
         """
         # First: the scaffold carries the range, and a range the loader
@@ -2532,6 +2534,9 @@ class DicomSession:
         if not machine_rules and not self.configuration.rules:
             print("No machines detected to scaffold.")
 
+        # `save()`'s refusal, for the same reason (owner ruling on #895):
+        # writing over a newer isocenter's file erases what it declared.
+        config_manager._refuse_overwriting_a_newer_minor(output_path)
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(_render_config_yaml(data))
