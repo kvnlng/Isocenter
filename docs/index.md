@@ -45,8 +45,6 @@ Isocenter needs Python 3.12 or later on Linux or macOS. On Windows, use WSL or a
 pip install isocenter
 ```
 
-Release candidates: `pip install --pre isocenter`.
-
 Check which version you have:
 
 ```bash

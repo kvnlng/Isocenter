@@ -108,8 +108,9 @@ with a capital letter, such as `T1` or `L5`, and `TEXT` otherwise.
 
 `filter()`, `to_zones()` and `to_dataframe()` are frozen for 1.x.
 `get_density_matrix()`, `visualize_heatmap()`, `analyze_temporal_stability()`
-and `n_sources` are documented but internal: they may change in a 1.x release,
-with a changelog entry ([API stability](api/stability.md)).
+and `n_sources` are documented but internal: they may change in a minor 1.x
+release, never a patch, with a `Breaking` changelog entry
+([API stability](api/stability.md#renames-and-removals-after-10)).
 
 ### Inspecting the candidates
 
