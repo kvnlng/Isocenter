@@ -149,6 +149,7 @@ TARGETS = {
     # after the `force_threads` short-circuit. Extras cost the guard
     # nothing.
     "isocenter/parallel.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                               "tests/test_an_export_survives_a_worker_that_cannot_leave.py",
                                "tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
                                "tests/test_packaging_contract.py",
                                "tests/test_parallel_config.py",
