@@ -39,8 +39,12 @@ def test_no_phi():
     # Setup a patient with no PHI (sanitized): its ID is already a
     # replacement. This used `"UNKNOWN"`, which the scan exempted by name
     # until #584; that string is a Patient ID a file can carry, and is
-    # pseudonymized like any other now.
-    pat = Patient("ANON_0123456789abcdef01234567", "Unknown")
+    # pseudonymized like any other now. Its name is the floor's
+    # replacement for the same reason: this used `"Unknown"`, the name
+    # ingest gave a file with none and the scan exempted by name until
+    # #746; that string is a name a file can carry, and is replaced like
+    # any other now.
+    pat = Patient("ANON_0123456789abcdef01234567", "ANONYMIZED")
     # No studies
 
     inspector = PhiInspector(project_secret=FIXED_A)

@@ -245,13 +245,13 @@ def test_findings_may_be_mixed_with_patient_ids(session):
 
 def test_a_report_with_no_findings_locks_nobody(session, tmp_path):
     """What the code does with an empty report, pinned as it stands: it
-    locks nobody and returns an empty `LockingResult`, and, like any lock,
-    creates the key file when none exists (the key is resolved before the
-    selection is read)."""
+    locks nobody and returns an empty `LockingResult`. It creates no key
+    file: since #813 (owner ruling Q1 A) only a lock that writes a token
+    does. This line asserted the file existed until then."""
     result = session.lock_identities(PhiReport([]))
     assert isinstance(result, session_module.LockingResult) and list(result) == []
     assert not any(_instance_of(session, pid).has_unsaved_changes for pid in ("P1", "P2"))
-    assert (tmp_path / "k.key").exists()
+    assert not (tmp_path / "k.key").exists()
 
 
 def _write_key(path):

@@ -15,8 +15,8 @@ import hmac
 import re
 from pydicom.multival import MultiValue
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
-                       Patient, Study, is_synthetic_patient_id,
-                       iter_item_tree)
+                       Patient, Study, SOURCE_SOP_UID_ATTR,
+                       is_synthetic_patient_id, iter_item_tree)
 from .config_manager import _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
@@ -497,6 +497,75 @@ def _uid_text(value) -> str:
     if isinstance(value, (bytes, bytearray)):
         return bytes(value).decode("ascii", "replace").rstrip("\x00 ")
     return str(value)
+
+
+def _uid_texts(value):
+    """The UID texts a UI value holds, value by value.
+
+    The one reading of a value as UIDs for the private copies (#765) and
+    `RemediationService._foreign_uid_refused`, so a bytes copy and the
+    `str` its replacement is checked against are read alike.
+
+    Args:
+        value: A `str`; `bytes`, decoded as ASCII with undecodable bytes
+            replaced; or a list, tuple or `MultiValue` of either. A `str`
+            or `bytes` holding backslashes is read as that many values.
+
+    Returns:
+        List[str]: Each value's text, NUL and space padding stripped.
+    """
+    if isinstance(value, (list, tuple, MultiValue)):
+        return [text for v in value for text in _uid_texts(v)]
+    if isinstance(value, (bytes, bytearray)):
+        value = bytes(value).decode("ascii", "replace")
+    return [part.strip("\x00 ") for part in str(value).split("\\")]
+
+
+def _private_uid_copy(value, replaced, secret):
+    """What the keyed UID replacement writes over a private element whose
+    value copies a UID replaced in the same instance (#765), or None.
+
+    Value by value: a value whose text is in `replaced` takes
+    `_replacement_uid_for(text)`, and any other keeps its place unchanged.
+    The result is in the element's own type, so its recorded VR still
+    describes it: `bytes` in gives ASCII `bytes` NUL-padded to an even
+    length, a list gives a list, a `str` gives a `str`.
+
+    Args:
+        value: The private element's value.
+        replaced (set): The UID texts this scan replaces in the instance.
+        secret: The project secret.
+
+    Returns:
+        The new value, or None when no value is in `replaced` or the value
+        is not ASCII text.
+    """
+    if not replaced:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            text = bytes(value).decode("ascii")
+        except UnicodeDecodeError:
+            return None
+        parts = text.rstrip("\x00 ").split("\\")
+    elif isinstance(value, (list, tuple, MultiValue)):
+        if not all(isinstance(v, str) for v in value):
+            return None
+        parts = list(value)
+    elif isinstance(value, str):
+        parts = value.split("\\")
+    else:
+        return None
+    new = [_replacement_uid_for(part.strip("\x00 "), secret)
+           if part.strip("\x00 ") in replaced else part for part in parts]
+    if new == parts:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        out = "\\".join(new).encode("ascii")
+        return out + b"\x00" if len(out) % 2 else out
+    if isinstance(value, (list, tuple, MultiValue)):
+        return new
+    return "\\".join(new)
 
 
 def _replaced_uids(value, secret):
@@ -984,7 +1053,10 @@ class PhiInspector:
                     action_type="REPLACE_TAG", target_attr="patient_name",
                     new_value="", original_value=patient.patient_name)
         elif name_action == "REPLACE":
-            if (patient.patient_name and patient.patient_name != "Unknown"
+            # No exemption of `Unknown` by name (#746): ingest no longer
+            # writes it for an absent name, so a patient holding it holds
+            # the name its file recorded.
+            if (patient.patient_name
                     and not _holds_owned_replacement(
                         self.phi_tags, "0010,0010", patient.patient_name)):
                 name_proposal = PhiRemediation(
@@ -1381,6 +1453,50 @@ class PhiInspector:
                     remediation_proposal=proposal
                 ))
 
+        # 2b. Private copies of a UID replaced in this instance (#765).
+        # Only while private tags are kept: under the sweep they are
+        # removed. A private element with a rule of its own is the rule's
+        # (the configuration decides), and a private creator
+        # (`gggg,0010`-`00ff`) names a block, never a copy of anything.
+        # The replaced set is built here, in the worker that holds the
+        # instance, from the predicates the standard arms use, so no
+        # store-wide set and no secret crosses a process boundary.
+        if not self.remove_private_tags and self.project_secret:
+            replaced = None
+            for item, tag, path in scan_targets:
+                try:
+                    group, element = (int(part, 16) for part in tag.split(","))
+                except ValueError:
+                    continue
+                if group % 2 == 0 or element < 0x1000:
+                    continue
+                if _rule_for(self.phi_tags, tag):
+                    continue
+                val = item.attributes.get(tag)
+                if val is None:
+                    continue
+                if replaced is None:
+                    replaced = self._uids_replaced_in(instance, scan_targets, study)
+                new_val = _private_uid_copy(val, replaced, self.project_secret)
+                if new_val is None:
+                    continue
+                findings.append(PhiFinding(
+                    entity_uid=instance.sop_instance_uid,
+                    entity_type="Instance",
+                    field_name=(f"Private Tag {tag} (Deep)" if item is not instance
+                                else f"Private Tag {tag}"),
+                    value=val,
+                    reason=("Private element holds a UID replaced in the "
+                            "same instance"),
+                    tag=tag,
+                    patient_id=patient_id,
+                    entity=item,
+                    entity_path=path,
+                    remediation_proposal=PhiRemediation(
+                        action_type="REPLACE_TAG", target_attr=tag,
+                        new_value=new_val, original_value=val,
+                        metadata={UID_REPLACEMENT: True})))
+
         # 3. Configured rules on sequence tags. The loop above reads
         # `attributes` alone, so without this a `REMOVE` or `EMPTY` on a
         # sequence would raise nothing and the sequence would be exported
@@ -1438,6 +1554,64 @@ class PhiInspector:
                     remediation_proposal=proposal))
 
         return findings + self._innermost_first(seq_removals)
+
+    def _uids_replaced_in(self, instance, scan_targets, study) -> set:
+        """The UID texts this scan replaces in `instance` under the keyed
+        UID replacement, for its private copies (#765).
+
+        Each non-blank value, not minted by this project, of:
+
+        - every standard UI element at any depth whose rule is the
+          value-less REPLACE (`_is_uid_replacement`), as the instance arm
+          reads it;
+        - the study's Study Instance UID, when `_owned_uid_is_open` says
+          the study is raised (the Series' UID is read through the
+          instance's own copy of `0020,000e`);
+        - the instance's SOP Instance UID and the source UID it was read
+          under (`SOURCE_SOP_UID_ATTR`), when the policy replaces SOP
+          Instance UIDs or the instance's SOP UID is already one this
+          project minted (redaction gives it one whatever the policy).
+
+        Args:
+            instance (Instance): The instance.
+            scan_targets (list): `(item, tag, path)` for every attribute.
+            study (Study): The owning study, or None.
+
+        Returns:
+            set: The UID texts.
+        """
+        secret = self.project_secret
+        texts = set()
+
+        def add(value):
+            for text in _uid_texts(value):
+                if text and not _uid_is_minted(text, secret):
+                    texts.add(text)
+
+        for item, tag, _ in scan_targets:
+            try:
+                if int(tag.split(",")[0], 16) % 2:
+                    continue
+            except ValueError:
+                continue
+            rule = _rule_for(self.phi_tags, tag)
+            if not rule:
+                continue
+            rule_value = rule.get("value") if isinstance(rule, dict) else None
+            if rule_value is None and _is_uid_replacement(rule, tag):
+                add(item.attributes.get(tag))
+        if study is not None and _owned_uid_is_open(
+                self.phi_tags, "0020,000d", study.study_instance_uid, secret):
+            add(study.study_instance_uid)
+        sop_rule = _rule_for(self.phi_tags, "0008,0018")
+        if ((sop_rule and (sop_rule.get("value") if isinstance(sop_rule, dict) else None) is None
+                and _is_uid_replacement(sop_rule, "0008,0018"))
+                or _uid_is_minted(str(instance.sop_instance_uid), secret)):
+            for uid in (instance.sop_instance_uid,
+                        instance.attributes.get(SOURCE_SOP_UID_ATTR)):
+                if uid is not None:
+                    add(uid)
+        return texts
 
     @staticmethod
     def _innermost_first(seq_removals: List[PhiFinding]) -> List[PhiFinding]:

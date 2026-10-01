@@ -103,6 +103,9 @@ class ReversibilityService:
     def __init__(self, key_manager: KeyManager):
         self.key_manager = key_manager
         self._engine: Optional[CryptoEngine] = None
+        # The key `_engine` was built from, so a lock can tell whether the
+        # key it planned under is the one that reached the disk (#813).
+        self._engine_key: Optional[bytes] = None
         self.logger = get_logger()
 
     @property
@@ -120,8 +123,22 @@ class ReversibilityService:
         # Lazy: `enable_reversible_anonymization()` creates no key file,
         # the first lock does, so a service built at enable has no key yet.
         if self._engine is None:
-            self._engine = CryptoEngine(self.key_manager.get_key())
+            self._use_key(self.key_manager.get_key())
         return self._engine
+
+    def _use_key(self, key: bytes) -> None:
+        """Build the engine over `key`, unless it is already built over it.
+
+        A lock builds it over the key it plans under, which may be held in
+        memory only until the lock writes a token (#813), and again over
+        the key on disk if another session wrote one first.
+
+        Args:
+            key (bytes): The Fernet key.
+        """
+        if self._engine is None or self._engine_key != key:
+            self._engine = CryptoEngine(key)
+            self._engine_key = key
 
     def generate_identity_token(self, original_attributes: Dict[str, Any]) -> bytes:
         """Serializes and encrypts the attributes into a reusable token.
@@ -190,7 +207,7 @@ class ReversibilityService:
             # `mark_modified()` is NOT redundant and must not be tidied
             # away. `add_sequence()` marks the instance modified **only
             # when it creates** -- `self.mark_modified()` at
-            # `entities.py` line 517 sits under `if sequence is None`
+            # `entities.py` line 520 sits under `if sequence is None`
             # -- and this path reaches into `items` in place
             # rather than through `add_sequence_item()`, which marks on
             # every call. Without the line below the second and later
