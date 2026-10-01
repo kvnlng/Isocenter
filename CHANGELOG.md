@@ -5,7 +5,7 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0rc9] - 2026-10-02
 
 **rc testers: re-audit your stores.** The fixes below change what `audit()` raises for the same configuration and the same files: a patient named `Unknown` (#746) and a private element holding a UID of its own instance (#765). `CONFIG_VERSION` stays 2.0 (owner ruling Q4, 2026-10-01). A store audited under an earlier rc therefore keeps statuses its policy fingerprint still accepts, but they do not describe this release's scan. Run `audit()` and `anonymize()` again before exporting.
 
