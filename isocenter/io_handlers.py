@@ -1036,11 +1036,13 @@ class NestedPixelRef:
 #: Reporting them would put two `DATA_LOSS` rows on every encapsulated
 #: instance carrying an Extended Offset Table.
 #:
-#: These three are the group's non-binary members (`OV`, `OV`, `UV`),
-#: and `import_files`' reason clause says "binary-VR elements are not
-#: held in the object graph", which exempting them keeps true. A future
-#: non-binary member of this group has to be added here *or* given a
-#: reason clause of its own -- do not let it inherit this one.
+#: These three (`OV`, `OV`, `UV`) are not the group's bulk bytes, and
+#: `import_files`' reason clause says "binary-VR elements are not held in
+#: the object graph", which exempting them keeps true. The group is skipped
+#: before `populate_attrs` weighs any VR, so `OV`'s membership of
+#: `BINARY_VRS` there (#735) does not reach them. A future member of this
+#: group has to be added here *or* given a reason clause of its own -- do
+#: not let it inherit this one.
 _DERIVED_PIXEL_INDEX_TAGS = frozenset({
     Tag(0x7fe0, 0x0001),   # Extended Offset Table
     Tag(0x7fe0, 0x0002),   # Extended Offset Table Lengths
@@ -1814,7 +1816,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # attempt first; its blob fallback takes the same size gate further
     # down. Do not assume `UN` values are small: under Implicit VR every
     # private element is `UN`, megabyte blobs included.
-    BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
+    #
+    # `OV` is a member (#735). Left out, an Explicit VR private `OV` over
+    # the threshold took the generic arm, which has no size gate, and was
+    # kept and exported while its Implicit VR twin (`UN`) and an `OD` of
+    # the same size were dropped: the transfer-syntax dependence #151
+    # removed for every other binary VR. One side effect, harmless: a
+    # zero-length `OV` is now held as `b""` rather than None, and
+    # `_merge` writes both as a zero-length element.
+    BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL', 'OV'}
 
     # Read once, not per element: the float pair's exemption depends on
     # whether this instance also carries Pixel Data, and `in` on a
@@ -1933,8 +1943,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 # A retained private value keeps the VR it was read with,
                 # so the export can write it under that VR. Only
                 # here, where the value is kept: a dropped one records
-                # nothing. `OV` is not in `BINARY_VRS` and records
-                # through the generic arm below.
+                # nothing.
                 _record_private_vr(item, b_tag, elem, implicit)
                 continue
             if dropped is not None:
@@ -2041,7 +2050,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             item.set_attr(tag, str(elem.value))
             _record_private_vr(item, tag, elem)
         else:
-            # `OV` and `UN` land here, not in the `BINARY_VRS` arm.
+            # `UN` lands here, not in the `BINARY_VRS` arm.
             item.set_attr(tag, _stored_byte_order(
                 _process_safe(elem.value), elem.VR, tag, path, big_endian,
                 unconverted, waveform_bits,
