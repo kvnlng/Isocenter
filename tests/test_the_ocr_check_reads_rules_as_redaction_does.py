@@ -207,6 +207,88 @@ def test_a_partial_leak_on_a_wildcard_zone_suggests_a_rule_and_never_widens_it(
         session.close()
 
 
+def test_a_new_leak_on_a_machine_with_an_exact_rule_adds_a_zone_to_that_rule(
+        tmp_path):
+    """`rule_serial` is the exact rule, and the suggestion is ADD_ZONE.
+
+    The end state alone cannot tell this apart from an ADD_RULE that
+    falls back to the exact rule, so the finding and the suggestion are
+    asserted too (review of #899, M-a).
+    """
+    from isocenter.automation import ConfigAutomator
+    session = _session(tmp_path)
+    try:
+        findings, _, _ = _scan(session, [
+            {"serial_number": SERIAL, "redaction_zones": [{"roi": ELSEWHERE}]},
+            {"serial_number": "*", "redaction_zones": [ELSEWHERE]}])
+        assert _leaks(findings) == ["NEW_LEAK"]
+        assert findings[0].metadata["rule_serial"] == SERIAL
+        assert [s["action"] for s in
+                ConfigAutomator.suggest_config_updates(findings)] == ["ADD_ZONE"]
+    finally:
+        session.close()
+
+
+def test_a_wildcard_partial_leak_on_a_machine_with_its_own_rule_grows_that_rule(
+        tmp_path):
+    """ADD_RULE never makes a second rule for a serial (review of #899, M-b)."""
+    session = _session(tmp_path)
+    try:
+        findings, _, _ = _scan(session, [
+            {"serial_number": SERIAL, "redaction_zones": [list(ELSEWHERE)]},
+            {"serial_number": "*", "redaction_zones": [list(PARTIAL)]}])
+        assert _leaks(findings) == ["PARTIAL_LEAK"]
+        from isocenter.automation import ConfigAutomator
+        (suggestion,) = ConfigAutomator.suggest_config_updates(findings)
+        # The reason is true of a machine that has its own rule too.
+        assert "only the '*' rule covers" not in suggestion["reason"]
+        assert f"a rule for serial {SERIAL}" in suggestion["reason"]
+        assert session.auto_remediate_config(findings) == 1
+        assert session.configuration.rules == [
+            {"serial_number": SERIAL,
+             "redaction_zones": [ELSEWHERE, [0, 30, 0, 110]]},
+            {"serial_number": "*", "redaction_zones": [PARTIAL]}]
+    finally:
+        session.close()
+
+
+def test_two_leaks_on_a_wildcard_only_machine_make_one_rule(tmp_path, monkeypatch):
+    """The second ADD_RULE adds its zone to the rule the first created."""
+    second = pixel_analysis.TextRegion("MRN 998877", (150, 40, 60, 10), 95.0, 0)
+    monkeypatch.setattr(
+        pixel_analysis, "_ocr_instance",
+        lambda inst: pixel_analysis._InstanceOcr([REGION, second], True, None))
+    session = _session(tmp_path)
+    try:
+        findings, _, _ = _scan(session, [
+            {"serial_number": "*", "redaction_zones": [list(ELSEWHERE)]}])
+        assert _leaks(findings) == ["NEW_LEAK", "NEW_LEAK"]
+        assert session.auto_remediate_config(findings) == 2
+        assert session.configuration.rules[1:] == [
+            {"serial_number": SERIAL, "manufacturer": MAKER,
+             "model_name": MODEL,
+             "redaction_zones": [SUGGESTED, [40, 50, 150, 210]]}]
+    finally:
+        session.close()
+
+
+def test_the_serial_filter_is_applied_before_anything_is_counted(tmp_path, capsys):
+    """A series `serial_number=` leaves out is not a skip (review of #899, M-c)."""
+    session = _session(tmp_path, serials=(SERIAL, "OTHER"))
+    try:
+        session.configuration.rules = [
+            {"serial_number": SERIAL, "redaction_zones": []}]
+        capsys.readouterr()
+        session.scan_pixel_content(serial_number=SERIAL)
+        out = capsys.readouterr().out
+        summary = session._pixel_scans[-1]
+    finally:
+        session.close()
+    assert summary.skipped == 1
+    assert ("No matching configured instances found to scan. (Skipped 1 "
+            "instance(s) whose rules have no redaction zones)\n") in out
+
+
 def test_a_series_with_no_serial_is_not_scanned_by_the_wildcard(tmp_path, capsys):
     """6: `rule_applies_to` matches no serial-less series, as `redact()` reads it."""
     session = _session(tmp_path, serials=("",))

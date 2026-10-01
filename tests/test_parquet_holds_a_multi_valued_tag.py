@@ -194,6 +194,14 @@ def test_a_uniform_sequence_column_is_an_arrow_list(values, expected):
                  id="not-a-scalar"),
     pytest.param([2 ** 64 - 1, None], [str(2 ** 64 - 1), None],
                  id="int-wider-than-int64"),
+    # pyarrow writes these two as one timestamp column and drops the
+    # offset (review of #899), so they are two families.
+    pytest.param([DT.replace(tzinfo=datetime.timezone.utc), DT],
+                 [str(DT.replace(tzinfo=datetime.timezone.utc)), str(DT)],
+                 id="aware-and-naive-datetime"),
+    # A 0-d array is neither a sequence (it cannot be iterated) nor a
+    # Python scalar.
+    pytest.param([np.array(5), None], ["5", None], id="zero-d-array"),
 ])
 def test_a_column_that_is_not_uniform_is_text(values, expected):
     arrow_type, written = _written(values)

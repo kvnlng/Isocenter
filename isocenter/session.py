@@ -1228,8 +1228,8 @@ def _parquet_family(value) -> Optional[str]:
 
     Returns:
         Optional[str]: `bool`, `number` (an int in the int64 range, or a
-            float), `str`, `bytes`, `datetime`, `date` or `time`; None
-            for anything else -- a sequence, a pydicom `PersonName`
+            float), `str`, `bytes`, `datetime` (naive), `datetime-tz`
+            (aware), `date` or `time`; None for anything else -- a sequence, a pydicom `PersonName`
             (not a `str`), a `Decimal`, an int wider than int64.
     """
     if isinstance(value, (bool, np.bool_)):
@@ -1243,7 +1243,9 @@ def _parquet_family(value) -> Optional[str]:
     if isinstance(value, bytes):
         return "bytes"
     if isinstance(value, datetime.datetime):
-        return "datetime"
+        # Aware and naive are two families: pyarrow writes them as one
+        # timestamp column and drops the offset (review of #899).
+        return "datetime" if value.tzinfo is None else "datetime-tz"
     if isinstance(value, datetime.date):
         return "date"
     if isinstance(value, datetime.time):
@@ -1269,9 +1271,10 @@ def _parquet_column_shape(values, isna) -> str:
     - `"text"`: anything else. A column mixing scalars and sequences,
       or two families (`str` beside `int`; `date` beside `datetime`,
       which pyarrow would truncate to the day; `str` beside `bytes`,
-      which pyarrow would encode), or holding one value that is not a
-      scalar (a `PersonName`, a nested sequence, an int wider than
-      int64). Each non-null cell becomes `str(cell)`, the text the CSV
+      which pyarrow would encode; an aware `datetime` beside a naive
+      one, whose offset pyarrow would drop), or holding one value that
+      is not a scalar (a `PersonName`, a nested sequence, an int wider
+      than int64, a 0-d numpy array). Each non-null cell becomes `str(cell)`, the text the CSV
       arm writes for it.
 
     Args:
@@ -1287,6 +1290,10 @@ def _parquet_column_shape(values, isna) -> str:
     for value in values:
         if _parquet_null(value, isna):
             continue
+        if isinstance(value, np.ndarray) and value.ndim == 0:
+            # Neither a sequence (it cannot be iterated) nor a Python
+            # scalar: written as its text.
+            return "text"
         if isinstance(value, _PARQUET_SEQUENCES):
             sequences += 1
             for element in value:

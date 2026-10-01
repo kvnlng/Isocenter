@@ -30,8 +30,11 @@ def _rule_for_machine(finding, meta, zone):
         "zone": list(zone),
         "manufacturer": meta.get("manufacturer") or "",
         "model_name": meta.get("model_name") or "",
-        "reason": (f"{meta.get('leak_type')} detected ({finding.value}) on a "
-                   f"machine only the '*' rule covers. Added a rule for it."),
+        # True whether or not the machine already has a rule of its own:
+        # `apply_suggestions` grows that rule when it exists.
+        "reason": (f"{meta.get('leak_type')} detected ({finding.value}); a "
+                   f"zone on the '*' rule would apply to every machine, so "
+                   f"the zone goes to a rule for serial {machine}."),
     }
 
 

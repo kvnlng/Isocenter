@@ -116,8 +116,17 @@ def _bits_at_or_above(raw, bits_stored):
 
 def _pipeline(tmp_path, encoding):
     src, arr = _write(tmp_path, encoding)
-    assert int(((arr >> OVERLAY_BIT) & 1).sum()) == OVERLAY_PIXELS, (
-        "precondition: the source fixture must hold the overlay bits")
+    assert int(((arr >> OVERLAY_BIT) & 1).sum()) == OVERLAY_PIXELS
+    if encoding != "j2k_precision_16":
+        # Read from the file as written, with pydicom's mask off, not from
+        # the array it was built from: an encoder that masked (RLE) would
+        # otherwise leave the test vacuous without a sound (review of
+        # #899). The J2K case asserts the 550 bits in its export instead.
+        written = pydicom.dcmread(os.path.join(src, "overlay.dcm"))
+        written.pixel_array_options(correct_unused_bits=False)
+        held = written.pixel_array.astype(np.uint16)
+        assert int(((held >> OVERLAY_BIT) & 1).sum()) == OVERLAY_PIXELS, (
+            "precondition: the written source must hold the overlay bits")
     db = str(tmp_path / "s.db")
     out = str(tmp_path / "out")
     report = str(tmp_path / "report.md")
