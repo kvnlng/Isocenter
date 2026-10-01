@@ -887,6 +887,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       `value:`: it can only be kept or pseudonymised;
     - Study or Series Instance UID under REMOVE, EMPTY, or REPLACE with a
       `value:`: the owner's stamp would export the source UID (#877);
+    - REPLACE with `value: ''` on any other UI tag: the scan would propose
+      nothing a UI holds, and the export would carry the source UID (#883);
     - SHIFT or JITTER on a standard tag that is not DA, DT or a sequence;
     - REPLACE on a standard tag whose VR cannot hold what it writes (a
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
@@ -984,6 +986,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"because the {owner} writes its UID on every exported file, "
                 f"so under {under} the export would carry the source UID "
                 f"(#877)")
+    # Its own arm, before the UI exemption below, which reads `not value`
+    # and so would let `''` through as the keyed rule; and not reached by
+    # making that exemption `value is None`, which would fall through to
+    # the VR check and say `''` writes `ANONYMIZED`, which is not what the
+    # user wrote. Everywhere else `''` is no value; the instance scan's UI
+    # branch alone read it as a value (`rule_value is None`), proposed
+    # ANONYMIZED, had it declined (#560), and exported the source UID
+    # (owner rulings Q2 A and Q3 A on #883). `set_phi_tag(value='')`
+    # stores no `value:` key, so it never reaches here.
+    if action == "REPLACE" and value == "" and _standard_dictionary_vr(tag) == "UI":
+        return (f"phi_tags['{tag}'] is REPLACE with value ''; on a UI tag an "
+                f"empty value: is still a value, and no UID is empty, so the "
+                f"scan would propose nothing a UI can hold and the export "
+                f"would carry the source UID. Omit the value: key (or write "
+                f"value: null) for this project's keyed replacement UID "
+                f"(#544), or use EMPTY or REMOVE (#883)")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning

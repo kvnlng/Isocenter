@@ -639,7 +639,10 @@ class IsocenterConfiguration:
             action (str): One of `KEEP`, `REMOVE`, `EMPTY`, `REPLACE`,
                 `SHIFT` and `JITTER` (`JITTER` is `SHIFT`).
             value (str, optional): The value `REPLACE` writes, stored as
-                the rule's `value`, the key a file spells it with.
+                the rule's `value`, the key a file spells it with. An empty
+                value is no value, on every tag: `value=""` stores no
+                `value` key, so on a UI tag it is the keyed replacement UID,
+                although a file's `value: ''` on a UI tag is refused (#883).
 
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
@@ -669,6 +672,9 @@ class IsocenterConfiguration:
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action
         }
+        # Truthiness on purpose: `""` is no value, so it stores no key and
+        # never meets the loader's #883 refusal of `value: ''` on a UI
+        # (owner ruling Q3 A).
         if value:
             val["value"] = value
 
