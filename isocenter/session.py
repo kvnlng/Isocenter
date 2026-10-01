@@ -3821,14 +3821,19 @@ class DicomSession:
                     model = se.equipment.model_name if se.equipment else ""
 
                     for inst in se.instances:
-                        fpath = getattr(inst, 'file_path', "N/A")
+                        # `source_path` first: it is the file `ingest()`
+                        # read, which is what the key documents, and
+                        # `redact()` leaves it in place while detaching
+                        # `file_path` (#794). `None` stays `None` (JSON
+                        # `null`), never the string `"None"`.
+                        fpath = inst.source_path or inst.file_path
 
                         item = ManifestItem(
                             patient_id=p.patient_id,
                             study_instance_uid=st.study_instance_uid,
                             series_instance_uid=se.series_instance_uid,
                             sop_instance_uid=inst.sop_instance_uid,
-                            file_path=str(fpath),
+                            file_path=None if fpath is None else str(fpath),
                             modality=modality,
                             manufacturer=manufacturer,
                             model_name=model,

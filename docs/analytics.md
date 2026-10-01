@@ -136,11 +136,11 @@ session.generate_manifest("manifest.html")
 session.generate_manifest("manifest.json", format="json")
 ```
 
-Each row holds the instance's Patient ID, its Study, Series and SOP Instance UIDs, its modality, the manufacturer and model name of its series' equipment, and the path of the file it was ingested from, unless redaction detached it (below). The values are the session's, as they stand when the manifest is written:
+Each row holds the instance's Patient ID, its Study, Series and SOP Instance UIDs, its modality, the manufacturer and model name of its series' equipment, and the path of the file it was ingested from. The values are the session's, as they stand when the manifest is written:
 
 - **After `anonymize()`**, the Patient ID is the replacement and the UIDs are the replacement UIDs, next to the source file path. The manifest is then a crosswalk from each source file to the identifiers its export carries. Keep it with the store, not with an export.
 - **A subject whose files carried no Patient ID** is listed under its key, the value `get_cohort_report()` shows in its `PatientID` column: `\no-patient-id\` followed by the subject's *source* Study Instance UID. No export writes that key.
-- **The file path** is the path as `ingest()` walked it, so it is relative when the directory you passed was relative. **After `redact()` changes an instance's pixels it is the string `"None"`**, in both formats: the instance no longer matches its source file, so the session stops pointing at it (`Instance.regenerate_uid()` does the same). The manifest then cannot say which file such an instance came from.
+- **The file path** is the path as `ingest()` walked it, so it is relative when the directory you passed was relative. It is still that path after `redact()` changes an instance's pixels: the instance no longer matches its source file, but the manifest names the file it was read from, which is kept in the store and survives a reopen. An instance with no source file (one built in code) has `null` in JSON and an empty cell in HTML.
 
 The **HTML** manifest is one page: the store file's name, when the manifest was generated, the number of instances, and a table with the columns Patient ID, Study UID, Series UID, Modality, Manufacturer, Model, SOP Instance UID and File Path. It has no column for `anonymized`.
 
@@ -151,7 +151,6 @@ The **JSON** manifest is one object. This one was written after `ingest()`, `aud
   "generated_at": "2026-09-23T21:03:55.218090",
   "project_name": "my_project.db",
   "total_files": 2,
-  "total_size_bytes": 0,
   "items": [
     {
       "patient_id": "ANON_28e5c87cd169c80d0dd05bfb",
@@ -159,7 +158,6 @@ The **JSON** manifest is one object. This one was written after `ingest()`, `aud
       "series_instance_uid": "2.25.188531152787603764149085731129800765062",
       "sop_instance_uid": "2.25.102433379052112046212620522432915392421",
       "file_path": "input/CT_small.dcm",
-      "file_size_bytes": 0,
       "modality": "CT",
       "manufacturer": "GE MEDICAL SYSTEMS",
       "model_name": "RHAPSODE",
@@ -171,7 +169,6 @@ The **JSON** manifest is one object. This one was written after `ingest()`, `aud
       "series_instance_uid": "2.25.163640163259226614858004570992412354281",
       "sop_instance_uid": "2.25.261339294768423179199607825024297936589",
       "file_path": "input/MR_noid.dcm",
-      "file_size_bytes": 0,
       "modality": "MR",
       "manufacturer": "TOSHIBA_MEC",
       "model_name": "MRT50H1",
@@ -183,7 +180,7 @@ The **JSON** manifest is one object. This one was written after `ingest()`, `aud
 
 The pseudonym and the replacement UIDs come from the store's project secret, so another store gives other values.
 
-`generated_at` is local time with no UTC offset, `project_name` is the store file's name, and `total_files` is the number of items. `file_size_bytes` and `total_size_bytes` are always `0`: nothing measures a file for the manifest.
+`generated_at` is local time with no UTC offset, `project_name` is the store file's name, and `total_files` is the number of items. The manifest carries no file sizes.
 
 An item's **`anonymized`** is `true` when the last tag-policy PHI scan left no identifier unremediated on the instance's patient, its study or the instance itself, and none of the three has been edited since. It is `false` when the scan never ran on one of them, when one was edited after it, or when a remediation on it was declined in its last pass. It does not mean "`anonymize()` ran": a file the scan found clean reads `true` after `audit()` alone. It says nothing about burned-in text in the pixels, which the tag scan does not read. The series is not consulted, because the scan records no status on a series. `session.phi_status_summary()` gives the same statuses as counts.
 
