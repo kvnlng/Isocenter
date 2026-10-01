@@ -169,6 +169,45 @@ def test_a_wide_ybr_rct_label_is_not_told_to_compress(tmp_path):
     assert "#771" in label[0], label[0]
 
 
+def test_a_16_bit_ybr_rct_label_under_readback_is_still_told_to_compress(tmp_path):
+    """The control: a frame J2K carries keeps the table's remedy, true for it."""
+    arr = _literal("uint16", 3)
+    inst = _image(arr, samples=3, label="YBR_RCT")
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=str(tmp_path / "out" / f"{inst.sop_instance_uid}.dcm"),
+        patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+        study_attributes={"0020,000d": "1.2.826.0.2.1"},
+        series_attributes={"0020,000e": "1.2.826.0.3.1"},
+        compression=None, verify_readback=True))
+    assert not outcome.ok
+    assert "Export with use_compression=True" in str(outcome.error)
+
+
+def test_a_wide_ybr_rct_label_under_readback_is_not_told_to_compress(tmp_path):
+    """The same remedy on the readback's ERROR, which reads only the file.
+
+    `verify_readback=True` judges the delivered label too, and its reason
+    took the table's ICT/RCT remedy (review of #900, F4). The file says
+    what it needs to: uncompressed syntax, 32 bits, three samples -- a
+    frame `_j2k_encodable` refuses.
+    """
+    arr = _literal("uint32", 3)
+    inst = _image(arr, samples=3, label="YBR_RCT")
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=str(tmp_path / "out" / f"{inst.sop_instance_uid}.dcm"),
+        patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+        study_attributes={"0020,000d": "1.2.826.0.2.1"},
+        series_attributes={"0020,000e": "1.2.826.0.3.1"},
+        compression="j2k", verify_readback=True))
+    assert not outcome.ok
+    error = str(outcome.error)
+    assert "YBR_RCT" in error, error
+    assert "Export with use_compression=True" not in error, error
+    assert "#771" in error, error
+
+
 # ---------------------------------------------------------------------------
 # The session door: ingest a real 32-bit file and export it by default.
 # ---------------------------------------------------------------------------

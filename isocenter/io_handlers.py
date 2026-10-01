@@ -6532,6 +6532,26 @@ def _readback_pixel_mismatch(decoded: np.ndarray, written: np.ndarray,
             f"{first} ({got!r} read back where {want!r} was written)")
 
 
+def _a_frame_compression_cannot_carry(readback, label) -> bool:
+    """Whether a delivered transform label sits on a frame #771 writes raw.
+
+    True for `YBR_ICT`/`YBR_RCT` on an integer `PixelData` whose
+    BitsAllocated and SamplesPerPixel `_j2k_encodable` refuses: compressing
+    would not apply the transform the label names, so the table's remedy
+    to compress is false for it.
+    """
+    if label not in ("YBR_ICT", "YBR_RCT") or "PixelData" not in readback:
+        return False
+    try:
+        bits = int(readback.BitsAllocated)
+        samples = int(readback.get("SamplesPerPixel", 1) or 1)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    if bits <= 0 or bits % 8:
+        return False
+    return not _j2k_encodable(bits // 8, samples > 1)
+
+
 def _readback_label_mismatch(readback) -> Optional[str]:
     """Why the delivered label is not one its syntax admits, or None.
 
@@ -6593,6 +6613,12 @@ def _readback_label_mismatch(readback) -> Optional[str]:
     # is offered only where the file has a pixel element.
     if not any(kw in readback for kw in _PIXEL_ELEMENTS):
         remedy = _PHOTOMETRIC_NO_PIXELS
+    elif _a_frame_compression_cannot_carry(readback, normalized):
+        # The table's ICT/RCT remedy says to compress, which is false for
+        # a frame the #771 fallback writes uncompressed under compression
+        # too; the warning's door passes the same remedy (review of #900,
+        # F4). Read off the file alone, as everything here is.
+        remedy = _PHOTOMETRIC_J2K_FALLBACK
     return (f"PhotometricInterpretation reads back as '{normalized}', "
             f"which the transfer syntax the file was written under does "
             f"not admit ({syntax}): {clause} {remedy}")
