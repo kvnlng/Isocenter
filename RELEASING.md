@@ -670,6 +670,10 @@ cut this way (#818, #821, #822).
      X.Y, so step 2 opened no PR, and no fix has added one), the release
      commit adds the `## [X.Y.Z] - YYYY-MM-DD` heading with the summary
      under it, together with any `**Output:**` line `compare` requires.
+     A major's highlights may instead be drafted under `main`'s
+     `[Unreleased]` before the cut; they reach the branch as a pick, step
+     2's last commit keeps them first, and the release commit retitles
+     them with the section.
    - Step 8 copies the new section to `main` as usual, and removes only
      that section's entries from `main`'s `[Unreleased]`; entries for
      left-out work stay there.
