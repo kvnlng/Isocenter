@@ -1738,7 +1738,8 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                    is_root: bool = True, unscanned: list = None,
                    nested: list = None, path: tuple = (),
-                   unconverted: list = None, waveform_bits=None):
+                   unconverted: list = None, waveform_bits=None,
+                   ambiguous: list = None):
     """Populate a DicomItem's attributes and sequences from a pydicom Dataset.
 
     A module-level function so it pickles into workers. Handles sequences
@@ -1799,6 +1800,11 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             Minimum or Maximum Value inside its Channel Definition
             Sequence. Set here when `ds` is itself a Waveform Sequence
             item and forwarded below it.
+        ambiguous (list, optional): Collects `(path, tag, values)` for
+            every standard `US or SS` element read under Implicit VR, with
+            no Pixel Representation anywhere in its chain, holding a value
+            at or above 32768 -- held unsigned where a signed reading
+            differs (#700). None records nothing.
     """
     # `nested` rather than appending to both lists and reconciling by
     # count: reconciling works only while one icon's `(tag, vr)` entry is
@@ -2018,7 +2024,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     process_sequence(tag, parsed, item, dropped, unscanned,
                                      nested=nested, path=path,
                                      unconverted=unconverted,
-                                     waveform_bits=waveform_bits)
+                                     waveform_bits=waveform_bits,
+                                     ambiguous=ambiguous)
                     continue
                 if (unscanned is not None
                         and len(raw) <= BINARY_RETENTION_MAX_BYTES):
@@ -2070,7 +2077,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             process_sequence(tag, elem, item, dropped, unscanned,
                              nested=nested, path=path,
                              unconverted=unconverted,
-                             waveform_bits=waveform_bits)
+                             waveform_bits=waveform_bits,
+                             ambiguous=ambiguous)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
@@ -2082,6 +2090,14 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 unconverted, waveform_bits,
                 _declared_width(ds, tag) if big_endian else None))
             _record_private_vr(item, tag, elem, implicit)
+            # `implicit` is this dataset's own: an item `_sequence_from_un_bytes`
+            # rebuilt is read by `read_sequence` as Implicit VR Little
+            # Endian and carries `original_encoding` (True, True) in
+            # pydicom 3.0.2, measured, so nothing is carried down for it.
+            if ambiguous is not None and implicit:
+                held = _held_unsigned_without_a_declarer(elem, ds)
+                if held:
+                    ambiguous.append((path, tag, held))
 
 
 def _read_element(ds, tag, little_endian=True):
@@ -2275,7 +2291,7 @@ def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
 def process_sequence(tag, elem, parent_item, dropped: list = None,
                      unscanned: list = None, nested: list = None,
                      path: tuple = (), unconverted: list = None,
-                     waveform_bits=None):
+                     waveform_bits=None, ambiguous: list = None):
     """Recursively parse a Sequence (SQ) element into `parent_item`.
 
     Adds the sequence to `parent_item` even when it has zero items (so an
@@ -2300,6 +2316,7 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
             collector.
         waveform_bits (int, optional): Waveform Bits Allocated of the
             nearest enclosing Waveform Sequence item, or None.
+        ambiguous (list, optional): `populate_attrs`'s #700 collector.
     """
     # Unconditional rather than guarded by `if not len(elem)`: the item
     # loop makes zero calls for "present, no items", and without this the
@@ -2316,7 +2333,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         populate_attrs(ds_item, seq_item, dropped, is_root=False,
                        unscanned=unscanned, nested=nested,
                        path=path + ((tag, index),),
-                       unconverted=unconverted, waveform_bits=waveform_bits)
+                       unconverted=unconverted, waveform_bits=waveform_bits,
+                       ambiguous=ambiguous)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -4313,9 +4331,13 @@ def ingest_worker(fp: str) -> Tuple:
         unscanned = []
         nested = []
         unconverted = []
+        # #700's values ride `meta` like the other collectors: ints and
+        # tuples only, so they pickle from a spawned worker.
+        ambiguous = []
         populate_attrs(ds, inst, dropped, unscanned=unscanned, nested=nested,
-                       unconverted=unconverted)
+                       unconverted=unconverted, ambiguous=ambiguous)
         meta['big_endian_unconverted'] = unconverted
+        meta['ambiguous_unsigned'] = ambiguous
         # Between the walk and `meta['dropped_private_binary']`, so the
         # candidates that failed to decode land in `dropped` before it is
         # handed over. `_decode_nested_pixels` appends them itself: it is
@@ -4904,6 +4926,7 @@ class DicomImporter:
         precision_rows = 0
         beyond_precision_rows = 0
         byte_order_rows = 0
+        ambiguous_unsigned_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -4982,6 +5005,21 @@ class DicomImporter:
                     "... (suppressing further per-element messages for "
                     "big-endian values whose byte order could not be "
                     "converted) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_ambiguous_unsigned(uid, detail):
+            """One #700 row, on its own log cap; the row is per element."""
+            nonlocal ambiguous_unsigned_rows
+            ambiguous_unsigned_rows += 1
+            if ambiguous_unsigned_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif ambiguous_unsigned_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-element messages for "
+                    "Implicit VR values held unsigned with no Pixel "
+                    "Representation) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -5590,6 +5628,16 @@ class DicomImporter:
                     for entry in meta.get('big_endian_unconverted', ()):
                         _record_byte_order(inst.sop_instance_uid,
                                            _byte_order_words(*entry))
+
+                    # A `US or SS` value an Implicit VR source left to the
+                    # unsigned default, where a signed reading differs
+                    # (#700, owner ruling Q6). WARNING: the bytes are
+                    # carried whole, and its Explicit VR twin draws the
+                    # export's row for the same value.
+                    for entry in meta.get('ambiguous_unsigned', ()):
+                        _record_ambiguous_unsigned(
+                            inst.sop_instance_uid,
+                            _ambiguous_unsigned_words(*entry))
 
                     # Persist Waveform Samples to Sidecar
                     #
@@ -10118,6 +10166,62 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
             f"Endian encoding, and this library reads them back under {vr} "
             f"(#692).")
+
+
+#: The lowest value whose signed and unsigned 16-bit readings differ.
+_US_SS_SIGN_BIT = 0x8000
+
+
+def _held_unsigned_without_a_declarer(elem, ds) -> List[int]:
+    """The values of a `US or SS` element read unsigned with nothing to say so (#700).
+
+    For an element read under Implicit VR -- the caller checks that -- whose
+    dictionary VR is `US or SS`, when neither `ds` nor any ancestor
+    (`_pixel_rep`, which pydicom and `populate_attrs` stamp into every
+    item) declares Pixel Representation: the values at or above 32768,
+    where the unsigned reading pydicom fell back to and a signed one
+    differ. Below that the two agree, and nothing was ambiguous.
+
+    Args:
+        elem: The element as read.
+        ds: The dataset holding it.
+
+    Returns:
+        List[int]: The values held unsigned that a signed reading takes
+        otherwise; empty when there is nothing to say.
+    """
+    if elem.tag.group % 2:
+        return []
+    try:
+        if dictionary_VR(elem.tag) != "US or SS":
+            return []
+    except KeyError:
+        return []
+    if ("PixelRepresentation" in ds
+            or getattr(ds, "_pixel_rep", None) is not None):
+        return []
+    values = (list(elem.value)
+              if isinstance(elem.value, (list, tuple, MultiValue))
+              else [elem.value])
+    return [int(v) for v in values
+            if isinstance(v, numbers.Integral) and int(v) >= _US_SS_SIGN_BIT]
+
+
+def _ambiguous_unsigned_words(path, tag, held) -> str:
+    """The ingest `WARNING` sentence for #700's values.
+
+    Opens as the export's ambiguous-VR row does, so the Explicit VR twin's
+    row and this one read alike in the report. No path to a file and no
+    identifier: the caller prefixes the SOP Instance UID.
+    """
+    where = f" in {_item_path_words(path)}" if path else ""
+    unsigned = ", ".join(str(v) for v in held)
+    signed = ", ".join(str(v - 0x10000) for v in held)
+    return (f"Ambiguous value representation ({tag}){where}: read from an "
+            f"Implicit VR source with no Pixel Representation declared "
+            f"anywhere above it, and held unsigned as {unsigned}, which a "
+            f"signed reading takes as {signed}. The bytes are exported "
+            f"unchanged (#700).")
 
 
 def _standard_un_decoded(elem, encoding):

@@ -459,6 +459,7 @@ TARGETS = {
                                   "tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py",
                                   "tests/test_a_float_in_a_ds_fits_sixteen_characters.py",
                                   "tests/test_an_over_long_short_length_value_round_trips.py",
+                                  "tests/test_an_implicit_ambiguous_value_is_said.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
                                   # `Session.export()` without naming it), and listed for a
@@ -751,6 +752,7 @@ TARGETS = {
                               "tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py",
                               "tests/test_a_float_in_a_ds_fits_sixteen_characters.py",
                               "tests/test_an_over_long_short_length_value_round_trips.py",
+                              "tests/test_an_implicit_ambiguous_value_is_said.py",
                               "tests/test_a_nested_item_status_survives_a_reopen.py",
                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
                               "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
