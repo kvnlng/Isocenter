@@ -48,7 +48,7 @@ import sys
 import hashlib
 import numbers
 import struct
-from math import ceil
+from math import ceil, isfinite
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
 from datetime import datetime, date
@@ -86,7 +86,7 @@ except ImportError:
 from pydicom.encaps import (generate_frames, parse_basic_offsets,
                             parse_fragments)
 from pydicom.multival import MultiValue
-from pydicom.valuerep import validate_value
+from pydicom.valuerep import format_number_as_ds, validate_value
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 from pydicom.charset import default_encoding
@@ -7272,9 +7272,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         revrs: List[_ReVr] = []
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
-                             revrs=revrs)
+                             revrs=revrs, corrections=corrections,
+                             warnings=warnings)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
-                                       revrs=revrs, corrections=corrections)
+                                       revrs=revrs, corrections=corrections,
+                                       warnings=warnings)
         re_vr = _re_vr_warning(revrs)
         if re_vr is not None:
             warnings.append(re_vr)
@@ -10000,6 +10002,98 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
     rows.append(_ambiguous_veto_clause(tag, other, named))
 
 
+#: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
+_DS_MAX = 16
+
+
+def _ds_text_that_fits(value):
+    """`value` with every caller's float spelled in 16 characters or fewer (#723).
+
+    pydicom writes a Python `float` with `repr`, so `0.1 + 0.2` set into a
+    DS went out as `'0.30000000000000004'`, 19 characters. Each value -- the
+    atom, or each member of a list -- is rewritten only when it is a
+    `float`, carries no `original_string`, and its text is longer than 16
+    characters:
+
+    - a whole number whose integer spelling fits is written that way, which
+      is exact (`1234567890123456.0` -> `'1234567890123456'`);
+    - anything else is rounded by pydicom's `format_number_as_ds`
+      (`'0.30000000000000'`).
+
+    A non-finite float has no DS spelling and raises.
+
+    Args:
+        value: The value about to be written under DS.
+
+    Returns:
+        Tuple: `(value, changes)`; `changes` lists `(set, written, exact)`
+        per rewritten value, and is empty when nothing was rewritten, in
+        which case `value` is returned unchanged.
+
+    Raises:
+        ValueError: A non-finite float. Raised inside `_merge`'s
+            per-element `try`, so it becomes that element's `DATA_LOSS` row.
+    """
+    # `original_string` is the exemption that keeps every source value as
+    # the file wrote it: pydicom keeps it on a DS it reads, #662's tagged
+    # text keeps it across a reopen, and a source value over 16 characters
+    # is the file's own statement, not ours to round. The length test alone
+    # would rewrite it. Non-finite before the length test: `'nan'` and
+    # `'inf'` fit, and neither is a DS value.
+    changes = []
+
+    def one(item):
+        if not isinstance(item, float) or getattr(item, "original_string", None):
+            return item
+        if not isfinite(item):
+            raise ValueError(f"{item!r} has no Decimal String spelling")
+        if len(str(item)) <= _DS_MAX:
+            return item
+        whole = str(int(item)) if item.is_integer() else None
+        if whole is not None and len(whole) <= _DS_MAX:
+            changes.append((item, whole, True))
+            return whole
+        # `format_number_as_ds` alone would write 1234567890123456.0 as
+        # '1.2345678901e+15', which is why the integer spelling comes first.
+        text = format_number_as_ds(item)
+        changes.append((item, text, float(text) == item))
+        return text
+
+    if isinstance(value, (list, tuple, MultiValue)):
+        written = [one(item) for item in value]
+    else:
+        written = one(value)
+    return (written if changes else value), changes
+
+
+def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
+    """The note for `_ds_text_that_fits`' rewrite, and whether it was exact.
+
+    Args:
+        tag (str): The element's `gggg,eeee` tag.
+        within (str): The enclosing sequence path, or "" at the top level.
+        changes (list): `(set, written, exact)` per rewritten value.
+
+    Returns:
+        Tuple[bool, str]: True when every value is the same number it was,
+        and the sentence. No path and no identifier: the parent prefixes
+        the SOP Instance UID.
+    """
+    exact = all(ok for _set, _written, ok in changes)
+    where = f"{within} > " if within else ""
+    pairs = ", ".join(f"{set_!r} as '{written}'"
+                      for set_, written, _ok in changes)
+    if exact:
+        return True, (
+            f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+            f"characters was written in its integer spelling, the same "
+            f"number: {pairs} (#723).")
+    return False, (
+        f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+        f"characters cannot be written exactly, and was rounded to fit: "
+        f"{pairs} (#723).")
+
+
 def _numeric_arm(vr, value):
     """The arm an ambiguous VR's `value` fits, or a refusal.
 
@@ -10662,7 +10756,8 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within=""):
+    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",
+               corrections=None, warnings=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         Keys that are not `gggg,eeee` (the `_`-prefixed bookkeeping keys)
@@ -10686,6 +10781,13 @@ class DicomExporter:
                 collapse is logged here instead.
             within (str): The sequence an item's element sits in, for the
                 re-VR sentence.
+            corrections (list, optional): Collects the INFO note for a
+                float set into a DS that was written in its integer
+                spelling (#723). With None, it is logged here instead.
+            warnings (list, optional): Collects the WARNING sentence for a
+                float set into a DS that was rounded to fit (#723). With
+                None, it is logged here instead. The three owner-stamp
+                merges pass neither.
         """
         # `losses` and `revrs` are accumulators rather than return values
         # because `_merge` is called five times per instance and once per
@@ -10811,6 +10913,18 @@ class DicomExporter:
                 # re-encoded silently instead of reported.
                 if vr is not None:
                     vr = _numeric_arm(vr, v)
+                # A caller's float in a standard DS, spelled to fit its 16
+                # characters (#723). Here, inside the loss arm's `try`, so
+                # a non-finite float is this element's DATA_LOSS row; and
+                # on the standard arm only (`encoded` is None): a private
+                # tag's float goes through the fallback encoder's own VR
+                # choice. The note is gathered rather than written now,
+                # because `add_new` can still refuse the element.
+                ds_note = None
+                if vr == "DS" and encoded is None:
+                    v, changes = _ds_text_that_fits(v)
+                    if changes:
+                        ds_note = _ds_fit_sentence(t, within, changes)
                 if vr is None:
                     if encoded is None:
                         raise ValueError(
@@ -10850,6 +10964,17 @@ class DicomExporter:
                 ds.add_new(Tag(g, e), vr, v)
                 if re_vr is not None and revrs is not None:
                     revrs.append(re_vr)
+                if ds_note is not None:
+                    # Exact: an INFO note, no row. Rounded: a WARNING row
+                    # naming both spellings (owner ruling Q3).
+                    exact, sentence = ds_note
+                    sink = corrections if exact else warnings
+                    if sink is not None:
+                        sink.append(sentence)
+                    elif exact:
+                        get_logger().info(sentence)
+                    else:
+                        get_logger().warning(sentence)
             except Exception as exc:
                 # Say "not exported": this is an element the caller asked
                 # for that will not be in the output, not an internal
@@ -11058,7 +11183,8 @@ class DicomExporter:
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
-                         revrs=None, within="", corrections=None):
+                         revrs=None, within="", corrections=None,
+                         warnings=None):
         """Write the graph's sequences into `ds`, recursing into each item.
 
         Args:
@@ -11071,7 +11197,10 @@ class DicomExporter:
             within (str): The enclosing sequence path, for that sentence.
             corrections (list, optional): Appended to with
                 `_label_as_written`'s note for every item whose
-                (0028,0004) was respelled, prefixed with the item.
+                (0028,0004) was respelled, prefixed with the item, and
+                handed to every item's `_merge` for its #723 notes.
+            warnings (list, optional): Handed to every item's `_merge`
+                for its #723 WARNING sentences.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
@@ -11094,10 +11223,13 @@ class DicomExporter:
                     corrections.append(f"{path} item {index}: {respelled}")
                 DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
-                                     revrs=revrs, within=path)
+                                     revrs=revrs, within=path,
+                                     corrections=corrections,
+                                     warnings=warnings)
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses,
                                                revrs=revrs, within=path,
-                                               corrections=corrections)
+                                               corrections=corrections,
+                                               warnings=warnings)
 
                 pydicom_seq.append(ds_item)
 
