@@ -205,13 +205,15 @@ def test_a_caller_us_list_is_said_and_round_trips(tmp_path, caplog):
     assert list(pydicom.dcmread(str(second))[0x00181310].value) == values
 
 
-def test_a_caller_lut_data_list_under_an_ambiguous_vr_round_trips(tmp_path, caplog):
+def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_path, caplog):
     """LUT Data (0028,3006) is `US or OW` in the dictionary.
 
-    Its long `US` list is written `UN`; re-ingest read nothing under an
-    ambiguous dictionary VR, so the `UN` size gate dropped it with a
-    `DATA_LOSS` row (review of #900, F2, the spec's repro row 2). It is now
-    read on its `US` arm, and the note says so.
+    A caller's 80,000-byte `US` list is written `UN` (#692). Re-ingest
+    weighs that `UN` against the binary retention limit, exactly as it
+    weighs the same bytes spelled `OW`, and drops it with a `DATA_LOSS`
+    row (owner ruling on the review of #900, F6); the note says so rather
+    than promising a read-back. Whether LUT Data should be exempt from the
+    limit is #902.
     """
     values = [(i * 7) % 65536 for i in range(40000)]
     with caplog.at_level(logging.INFO, logger="isocenter"):
@@ -223,19 +225,56 @@ def test_a_caller_lut_data_list_under_an_ambiguous_vr_round_trips(tmp_path, capl
                               i.set_attr("0028,3006", values)))
     notes = _notes(caplog)
     assert len(notes) == 1 and "0028,3006" in notes[0], notes
-    assert "reads them back under US" in notes[0]
+    assert "reads them back" not in notes[0], notes[0]
+    assert "65534" in notes[0], notes[0]
 
     (tmp_path / "again").mkdir()
     shutil.copy(first, tmp_path / "again" / "a.dcm")
-    second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
-                                    tmp_path / "out2", compress=False)
-    assert not [r for r in losses if "0028,3006" in r[2]], losses
-    # The words, whichever arm pydicom reads the Implicit VR file under (a
-    # 16-bit LUT Descriptor reads it `OW`, as bytes).
-    read = pydicom.dcmread(str(second))[0x00283006].value
-    words = (np.frombuffer(read, "<u2").tolist()
-             if isinstance(read, bytes) else list(read))
-    assert words == values
+    _second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
+                                     tmp_path / "out2", compress=False)
+    rows = [r for r in losses if "Standard tag 0028,3006 (UN)" in r[2]]
+    assert len(rows) == 1, losses
+
+
+def _lut_source(folder, vr, nbytes):
+    """An Explicit VR file whose LUT Data is `nbytes` spelled `vr`."""
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def lut(ds):
+        ds.add_new(0x00283002, "US", [nbytes // 2 % 65536, 0, 16])
+        ds.add_new(0x00283006, vr, (bytes(range(256)) * (nbytes // 256 + 1))[:nbytes])
+
+    _source(folder, syntax=ExplicitVRLittleEndian, extra=lut)
+
+
+@pytest.mark.parametrize("nbytes,kept", [(65532, True), (65534, True), (65536, False)],
+                         ids=["under", "at", "over"])
+@pytest.mark.parametrize("vr", ["OW", "UN"])
+def test_lut_data_meets_the_retention_limit_whichever_way_it_is_spelled(tmp_path, vr, nbytes, kept):
+    """The owner's ruling on F6: a `UN` LUT Data is gated as its `OW` twin.
+
+    At or below 65534 bytes both are kept, byte for byte; above it both
+    are dropped with one `DATA_LOSS` row naming the tag and the limit.
+    Before, the `UN` spelling of 65536 bytes was decoded on its `US` arm
+    and kept while the `OW` one was dropped.
+    """
+    _lut_source(tmp_path / "src", vr, nbytes)
+    with DicomSession(str(tmp_path / "s.db")) as s:
+        s.ingest(str(tmp_path / "src"))
+        (p,) = s.store.patients
+        attrs = dict(p.studies[0].series[0].instances[0].attributes)
+        losses = s.store_backend.get_audit_losses()
+    rows = [r for r in losses if "Standard tag 0028,3006" in r[2]]
+    if kept:
+        assert rows == [], losses
+        held = attrs["0028,3006"]
+        held = (bytes(held) if isinstance(held, (bytes, bytearray))
+                else np.asarray(held, dtype="<u2").tobytes())
+        assert held == (bytes(range(256)) * (nbytes // 256 + 1))[:nbytes]
+    else:
+        assert "0028,3006" not in attrs
+        assert len(rows) == 1, losses
+        assert "65534-byte retention threshold" in rows[0][2]
 
 
 def test_a_caller_private_list_note_says_it_is_dropped_on_re_ingest(tmp_path, caplog):
@@ -258,7 +297,7 @@ def test_a_caller_private_list_note_says_it_is_dropped_on_re_ingest(tmp_path, ca
     notes = _notes(caplog)
     assert len(notes) == 1 and "0009,1001" in notes[0], notes
     assert "reads them back" not in notes[0]
-    assert "drops a private UN over 65534 bytes at ingest" in notes[0]
+    assert "drops a UN over 65534 bytes with a DATA_LOSS row" in notes[0]
 
     (tmp_path / "again").mkdir()
     shutil.copy(first, tmp_path / "again" / "a.dcm")
