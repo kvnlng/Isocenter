@@ -153,6 +153,11 @@ ALLOWED = {
     "replace": {"action": "REPLACE"},
     # A null value is an absent one (#713): the keyed replacement.
     "replace-null-value": {"action": "REPLACE", "value": None},
+    # An empty value is value-less too, as everywhere else the loader and
+    # the scan read one: Patient ID's `or value`, the dummy's `value or`,
+    # and `privacy._is_uid_replacement`'s `rule.get("value")`. So it is
+    # the keyed replacement, and loads. Kills `value is not None`.
+    "replace-empty-value": {"action": "REPLACE", "value": ""},
     "keep": {"action": "KEEP"},
     "string-form": "Instance UID",
 }
@@ -163,7 +168,7 @@ ALLOWED = {
 @pytest.mark.parametrize("tag", sorted(UIDS))
 def test_value_less_replace_and_keep_still_load(tmp_path, door, case, tag):
     """Kills over-refusal: the arm refusing every action on the two tags,
-    or reading a null `value:` as a value."""
+    or reading a null or empty `value:` as a value."""
     _through(door, tmp_path, tag, ALLOWED[case])
 
 

@@ -423,17 +423,15 @@ def test_keep_on_the_uid_rows_retains_them_and_a_value_is_written(tmp_path):
 
 def test_a_value_on_an_owned_uid_leaves_the_owner_as_0_9_8_did(tmp_path):
     """`REPLACE value:` on SOP Instance UID is what it was in 0.9.8 (owner
-    ruling on Q-C): only a value-less REPLACE moves the owner, because one
-    literal written into every Study would collide on the store's UNIQUE
-    key. The SOP Instance UID element and the file meta take the value
-    while the file is still named by the instance's own UID. Measured at
-    b7462cd3 (0.9.8's behaviour), unchanged here. Kills the owner arm
-    taking a valued REPLACE.
+    ruling on Q-C): the SOP Instance UID element and the file meta take
+    the value, while the file is still named by the instance's own source
+    UID. Measured at b7462cd3 (0.9.8's behaviour), unchanged here.
 
     The same rule on Study or Series Instance UID loaded here until #877
     and exported the source UID, which the export stamps from the owner;
-    it is now refused at load (owner ruling (a) on #877,
-    `test_a_rule_cannot_remove_a_study_or_series_uid.py`)."""
+    it is now refused at load (owner ruling (a) on #877), which is all
+    this test says of those two. Their full door-by-door pins are in
+    `test_a_rule_cannot_remove_a_study_or_series_uid.py`."""
     src = tmp_path / "src"
     src.mkdir()
     shutil.copy(get_testdata_file("CT_small.dcm"), src / "CT_small.dcm")
