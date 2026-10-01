@@ -984,7 +984,10 @@ class PhiInspector:
                     action_type="REPLACE_TAG", target_attr="patient_name",
                     new_value="", original_value=patient.patient_name)
         elif name_action == "REPLACE":
-            if (patient.patient_name and patient.patient_name != "Unknown"
+            # No exemption of `Unknown` by name (#746): ingest no longer
+            # writes it for an absent name, so a patient holding it holds
+            # the name its file recorded.
+            if (patient.patient_name
                     and not _holds_owned_replacement(
                         self.phi_tags, "0010,0010", patient.patient_name)):
                 name_proposal = PhiRemediation(

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**rc testers: re-audit your stores.** The fixes below change what `audit()` raises for the same configuration and the same files: a patient named `Unknown` (#746) and a private element holding a UID of its own instance (#765). `CONFIG_VERSION` stays 2.0 (owner ruling Q4, 2026-10-01). A store audited under an earlier rc therefore keeps statuses its policy fingerprint still accepts, but they do not describe this release's scan. Run `audit()` and `anonymize()` again before exporting.
+
+### Breaking
+
+- **BREAKING: `lock_identities()` refuses a patient whose source file has no Patient's Name, under a rule of `EMPTY` or `REMOVE` on `0010,0010` (#746).** This follows from the #746 fix below. Ingest used to give such a patient the name `Unknown`, so the lock had a name to stash and wrote a token holding the placeholder: a restore would have written `Unknown` into the patient as though the file had said it. The patient's name is now `''`, so the existing refusal for a blank name under a blanking rule applies. That refusal already covered a source whose name was present and empty, so the two cases now behave the same.
+  - **What a previously-working call now raises.** `RuntimeError: lock_identities: this patient holds no value in 0010,0010 under a rule of EMPTY on it, and a blank Patient's Name is not locked under a rule that blanks it. To lock this patient without the name, call lock_identities(<its Patient ID>, tags_to_lock=['0010,0020', '0010,0030', '0010,0040', '0008,0050']); the token this call would have written is unchanged.` with the default `tags_to_lock` (`REMOVE` in place of `EMPTY` under that rule). To lock such a patient, leave `0010,0010` out of `tags_to_lock`, as the message says.
+  - Under the default floor (`REPLACE` on `0010,0010`) the lock still succeeds, and the token now holds `''` where it held `Unknown`, so a restore writes `''`.
+  - **Output:** none. A lock writes no exported value of its own.
+
+### Fixed
+
+- **A file with no Patient's Name is exported with an empty Patient's Name, not `Unknown` (#746).** `ingest()` filled an absent Patient's Name `(0010,0010)` with the placeholder `Unknown` and held it on the `Patient`. The export stamps `0010,0010` from the `Patient`, and the scan's `REPLACE` arm exempted the literal `Unknown` by name. A file with no name was therefore exported as `0010,0010 PN 'Unknown'` beside `(0012,0062) YES`, and the run graded `PASS`. That happened under the default floor as well as under `KEEP`, which is wider than the issue as filed. Measured on `main` at 7579d4df over CT_small with the element deleted. A placeholder cannot be told from a recorded name once it is in the graph: a file really naming its patient `Unknown` kept that name through `REPLACE`, and the export claimed a name that no file recorded.
+  - **Now** an absent name is held as `''`, which is what a Type 2 "unknown" value is and what #584 does for a Patient ID. The export writes a zero-length `PN`. The scan's exemption is gone, so a source whose name is literally `Unknown` is replaced like any other name, as #584 ruled for a Patient ID reading `UNKNOWN`. A patient merge (#548) now compares `''` where it compared `Unknown`.
+  - `tests/test_privacy.py::test_no_phi` built its already-de-identified patient with the name `Unknown`, which the exemption hid. With the exemption gone that patient raises a name finding, so the test now uses `ANONYMIZED`, the floor's replacement, which the scan exempts as this project's own output. #584 changed the same test's Patient ID for the same reason.
+  - `tests/test_an_absent_patient_name_exports_empty.py` covers `KEEP` and the floor, the stored value across a reopen, a source named `Unknown`, the lock refusal, and a WFDB export, which carries no `Unknown` anywhere.
+  - **Output:** see the `fingerprint/output.json` entry below.
+
 ## [1.0.0rc8] - 2026-10-01
 
 ### Breaking

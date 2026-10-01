@@ -4129,7 +4129,13 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Extract Linking Metadata
         meta = {
-            'pname': str(ds.get("PatientName", "Unknown")),
+            # Absent becomes empty, never a placeholder (#746). A placeholder
+            # cannot be told from a recorded name downstream: the export
+            # stamped `Unknown` from the Patient beside `(0012,0062) YES`,
+            # and the scan had to exempt the literal by name, so a file
+            # really carrying `Unknown` kept it. Empty is what Type 2
+            # "unknown" is, and what #584 does for a Patient ID.
+            'pname': str(ds.PatientName) if "PatientName" in ds else "",
             # Absent stays absent. A placeholder date cannot be told from a
             # real one downstream: SHIFT_DATE would jitter it and export
             # it as genuine study timing.
