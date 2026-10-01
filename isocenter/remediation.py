@@ -1714,6 +1714,8 @@ class RemediationService:
         read UNSCANNED): kept when vouched or empty, and otherwise set to
         IDENTIFIED and the instance named in `_declined_entities`, with no
         row, so later successes in the pass cannot leave it REMEDIATED.
+        A vouched write then returns `""`, as "already there" does: the
+        copy holds the owner's value with the record to say so (#894).
 
         Then, by whether the owner's finding was handed to this pass
         (`_owners_handed`, keyed `(id(owner), field)` or `(None, field)`):
@@ -1820,6 +1822,17 @@ class RemediationService:
                 # does not demote it -- an earlier pass already acted on
                 # this key. Not a decline: no row.
                 self._declined_entities.append(entity)
+            if vouched:
+                # The copy now holds what an owner's write left on its
+                # siblings, with the record to say so: the end state the
+                # check above reads as already there, so it is read the
+                # same way when this pass has just put it there. Without
+                # this, a file re-ingested into a study an earlier pass
+                # renamed, whose patient findings name the empty patient
+                # ingest created rather than this owner, fell to the
+                # not-handed branch below and read IDENTIFIED beside a
+                # re-audit that raised nothing (#894).
+                return ""
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
         if not {(id(owner), field), (None, field)} & self._owners_handed:
             if value == "" and entity.attributes.get(tag, "") == "":
