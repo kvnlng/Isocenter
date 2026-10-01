@@ -10184,8 +10184,31 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
-            f"Endian encoding, and this library reads them back under {vr} "
-            f"(#692).")
+            f"Endian encoding, {_read_back_words(elem.tag, vr)} (#692).")
+
+
+def _read_back_words(tag, vr) -> str:
+    """What the #692 note may say about re-ingesting a relabelled value.
+
+    Only what `populate_attrs` does with it: a standard tag is decoded
+    under its dictionary VR (`_standard_un_decoded`), an ambiguous one on
+    its `US` arm; a private tag has no dictionary VR, so the bytes stay
+    `UN` and take the size gate, which drops them (review of #900, F2).
+    """
+    if tag.group % 2:
+        return ("and a reader that does not know this private tag holds "
+                "them as UN bytes; this library drops a private UN over "
+                "65534 bytes at ingest, with a DATA_LOSS row")
+    try:
+        named = dictionary_VR(tag)
+    except KeyError:
+        named = None
+    if named in ("US or OW", "US or SS or OW"):
+        return ("and this library reads them back under US, the arm its "
+                "next export asks again")
+    if named == vr:
+        return f"and this library reads them back under {vr}"
+    return "and this library does not promise to read them back"
 
 
 #: The lowest value whose signed and unsigned 16-bit readings differ.
@@ -10262,13 +10285,23 @@ def _standard_un_decoded(elem, encoding):
         The decoded element, or None when the tag has no single dictionary
         VR that is not binary or a sequence, or the bytes do not decode.
     """
-    # Not for a private tag (no dictionary VR), an ambiguous VR (nothing
-    # here says which arm), a sequence (`_sequence_from_un_bytes` is the
+    # Not for a private tag (no dictionary VR), an ambiguous VR other than
+    # the two below (nothing here says which arm), a sequence (`_sequence_from_un_bytes` is the
     # private-sequence route) or a binary VR (the binary gate weighs it).
     try:
         vr = dictionary_VR(elem.tag)
     except KeyError:
         return None
+    # The two multi-valued ambiguous VRs a long list can carry, LUT Data
+    # (0028,3006) `US or OW` and the retired Gray LUT Data (0028,1200)
+    # `US or SS or OW`, are read on their `US` arm: the words are the
+    # bytes whichever arm wrote them, and the export asks the arm again
+    # (`_resolve_ambiguous_vrs`) from the dataset as it then stands. The
+    # `OW` arm is not taken, because a standard `OW` over 65534 bytes is
+    # dropped by the binary size gate, and this library's own export of a
+    # caller's long LUT Data list would not re-ingest (review of #900, F2).
+    if vr in ("US or OW", "US or SS or OW"):
+        vr = "US"
     if (vr in AMBIGUOUS_VR or vr == "SQ"
             or vr in ("OB", "OW", "OF", "OD", "OL", "OV", "UN")):
         return None

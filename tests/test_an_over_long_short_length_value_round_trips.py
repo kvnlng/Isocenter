@@ -205,6 +205,68 @@ def test_a_caller_us_list_is_said_and_round_trips(tmp_path, caplog):
     assert list(pydicom.dcmread(str(second))[0x00181310].value) == values
 
 
+def test_a_caller_lut_data_list_under_an_ambiguous_vr_round_trips(tmp_path, caplog):
+    """LUT Data (0028,3006) is `US or OW` in the dictionary.
+
+    Its long `US` list is written `UN`; re-ingest read nothing under an
+    ambiguous dictionary VR, so the `UN` size gate dropped it with a
+    `DATA_LOSS` row (review of #900, F2, the spec's repro row 2). It is now
+    read on its `US` arm, and the note says so.
+    """
+    values = [(i * 7) % 65536 for i in range(40000)]
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True,
+            mutate=lambda i: (i.set_attr("0028,3002", [0, 0, 16]),
+                              i.set_attr("0028,3006", values)))
+    notes = _notes(caplog)
+    assert len(notes) == 1 and "0028,3006" in notes[0], notes
+    assert "reads them back under US" in notes[0]
+
+    (tmp_path / "again").mkdir()
+    shutil.copy(first, tmp_path / "again" / "a.dcm")
+    second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
+                                    tmp_path / "out2", compress=False)
+    assert not [r for r in losses if "0028,3006" in r[2]], losses
+    # The words, whichever arm pydicom reads the Implicit VR file under (a
+    # 16-bit LUT Descriptor reads it `OW`, as bytes).
+    read = pydicom.dcmread(str(second))[0x00283006].value
+    words = (np.frombuffer(read, "<u2").tolist()
+             if isinstance(read, bytes) else list(read))
+    assert words == values
+
+
+def test_a_caller_private_list_note_says_it_is_dropped_on_re_ingest(tmp_path, caplog):
+    """A private tag has no dictionary VR: the narrowed promise, pinned.
+
+    The note says what happens -- a private `UN` over 65534 bytes is
+    dropped at ingest with a `DATA_LOSS` row -- and it is.
+    """
+    def private(i):
+        i.set_attr("0009,0010", "ACME")
+        # No recorded VR: the fallback writes the list as `LO` text,
+        # about 230 KB of it.
+        i.set_attr("0009,1001", list(range(40000)))
+
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True, mutate=private)
+    notes = _notes(caplog)
+    assert len(notes) == 1 and "0009,1001" in notes[0], notes
+    assert "reads them back" not in notes[0]
+    assert "drops a private UN over 65534 bytes at ingest" in notes[0]
+
+    (tmp_path / "again").mkdir()
+    shutil.copy(first, tmp_path / "again" / "a.dcm")
+    _second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
+                                     tmp_path / "out2", compress=False)
+    assert [r for r in losses if "0009,1001" in r[2]], losses
+
+
 def _explicit_bytes(ds):
     buffer = DicomBytesIO()
     buffer.is_little_endian = True
