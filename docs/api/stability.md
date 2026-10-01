@@ -5,14 +5,15 @@ frozen; the internal seams behind it are not.
 
 - **Frozen (tier 1)** names keep their spelling, their parameter names,
   their return shapes and their documented behaviour for every 1.x
-  release. A 1.x that renames or removes one keeps the old name working,
-  with a `DeprecationWarning`, until 2.0
+  release. A 1.x that renames or removes one, or a keyword parameter of
+  one, keeps the old spelling working, with a `DeprecationWarning`, until
+  2.0
   ([Renames and removals after 1.0](#renames-and-removals-after-10));
   any other change is a 2.0.
 - **Documented but internal (tier 2)** names are listed on this page,
   and rendered in the API reference or named by a guide where a reader
-  needs them. They are safe to call, and may change in a minor 1.x
-  release, never a patch, with a `Breaking` CHANGELOG entry that names
+  needs them. They are safe to call, and may change in a minor release
+  (1.x.0), never in a patch (1.x.y), with a `Breaking` CHANGELOG entry that names
   the old spelling and the new one. They exist so a
   reader can see the seams, not so a program can lean on them.
 - **Private (tier 3)** names — everything with a leading underscore, and
@@ -58,15 +59,23 @@ What a 1.x release may do to a name that 1.0 published, by tier.
   release that deprecates a name says so in its CHANGELOG, and this page
   lists the deprecated name in tier 1 beside its replacement until 2.0.
   A deprecation never changes what the old name does.
+- **Keyword parameters follow the same rule.** When a 1.x renames or
+  removes a keyword parameter of a tier-1 callable, the old keyword is
+  still accepted and does what it did, and passing it emits a
+  `DeprecationWarning` that names its replacement, or says it has none,
+  in every later 1.x; 2.0 removes it. The signature tables below list
+  the parameter's current name, and this page names the deprecated
+  keyword beside it until 2.0.
 - **What that covers.** The names the [Frozen at 1.0](#frozen-at-10)
   section lists: the package's names, `Session`'s methods, the other
-  frozen callables, the frozen classes' fields and the module-level
-  names. A frozen parameter list, a return shape and documented
-  behaviour are not renamed or removed with a warning: a change to any
-  of them is a 2.0.
+  frozen callables and their keyword parameters, the frozen classes'
+  fields and the module-level names. A parameter's position, a return
+  shape and documented behaviour are not changed with a warning: a
+  change to any of them is a 2.0.
 - **Tier 2: a minor release, with a `Breaking` entry.** A documented but
   internal name may be renamed, removed or changed in a minor release
-  (1.1.0, 1.2.0, …), never in a patch (1.0.1), with no alias promised.
+  (1.x.0: 1.1.0, 1.2.0, …), never in a patch (1.x.y: 1.0.1, 1.1.2, …),
+  with no alias promised.
   That release's CHANGELOG says so in a `Breaking` entry naming the old
   spelling and the new one.
 - **Tier 3: no notice.** A private name may change in any release.
@@ -584,8 +593,8 @@ interpreter; and the two below.
 ## Documented but internal
 
 Listed here, rendered in the API reference or named by a guide where a
-reader needs them, safe to call, and changeable in a minor 1.x release,
-never a patch, with a `Breaking` CHANGELOG entry naming both spellings
+reader needs them, safe to call, and changeable in a minor release (1.x.0),
+never in a patch (1.x.y), with a `Breaking` CHANGELOG entry naming both spellings
 ([Renames and removals after 1.0](#renames-and-removals-after-10)):
 
 - **`DicomSession`**, the class's own name. `isocenter.Session` is the
