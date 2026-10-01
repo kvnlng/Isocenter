@@ -554,8 +554,12 @@ cut this way (#818, #821, #822).
      - work for a later minor, which its PR's milestone names, or, when
        the PR has none, the milestone of any issue it closes by a closing
        link (`Fixes`/`Closes`/`Resolves`, never `Refs`); one later-minor
-       issue is enough. A PR with neither belongs to the next unreleased
-       line (the rc7 picks review, #875).
+       issue is enough. List them with
+       `gh pr view N --json milestone,closingIssuesReferences`, not by eye
+       (GitHub's list counts every closing keyword and an issue linked by
+       hand, and leaves out a `Refs`), then read each issue's milestone with
+       `gh issue view M --json milestone`. A PR with neither belongs to the next
+       unreleased line (the rc7 picks review, #875).
 
      **The line's left-out list** is every commit left out as later-minor
      work since the line was cut, in this PR and in every earlier pick PR
