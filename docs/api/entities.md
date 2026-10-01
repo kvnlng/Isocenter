@@ -84,8 +84,8 @@ file.
 
 ## Documented but internal (tier 2)
 
-Safe to call, and may change in a 1.x release with a CHANGELOG entry that
-names the old spelling and the new one.
+Safe to call, and may change in a minor 1.x release, never a patch, with a
+`Breaking` CHANGELOG entry that names the old spelling and the new one.
 
 ::: isocenter.entities.TrackedEntity
     handler: python
