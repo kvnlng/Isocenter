@@ -24,6 +24,7 @@ import copy
 
 import pytest
 
+from isocenter import config_manager
 from isocenter.config_manager import ConfigLoader
 from isocenter.configuration import IsocenterConfiguration
 from isocenter.entities import (DicomItem, DicomSequence, Instance, Patient,
@@ -81,8 +82,11 @@ def test_a_version_with_a_leading_zero_is_refused(tmp_path, version):
 
 
 @pytest.mark.parametrize("version", ["2.0", "2.10"])
-def test_a_canonical_version_loads(tmp_path, version):
-    """Kills a canonical check that refuses `0` or a two-digit minor."""
+def test_a_canonical_version_loads(tmp_path, monkeypatch, version):
+    """Kills a canonical check that refuses `0` or a two-digit minor. The
+    library's own minor is raised to 2.10 for the second row, since a
+    newer minor than the library's is refused (#784)."""
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.10")
     ConfigLoader.load_unified_config(_write(tmp_path, f'version: "{version}"\n'))
 
 

@@ -220,9 +220,11 @@ def test_no_uid_without_a_secret():
 # T8: the configuration vocabulary
 # --------------------------------------------------------------------
 
-@pytest.mark.parametrize("rule", [{"action": "REPLACE"}, {"action": "REPLACE", "value": ""},
+# `value: ''` was a row here until #883, which refuses it on a UI tag
+# (`test_an_empty_value_on_a_uid_is_refused.py`); `null` is the absent value.
+@pytest.mark.parametrize("rule", [{"action": "REPLACE"}, {"action": "REPLACE", "value": None},
                                   "Frame of Reference UID"],
-                         ids=["mapping", "empty-value", "string-form"])
+                         ids=["mapping", "null-value", "string-form"])
 @pytest.mark.parametrize("door", ["load_config", "audit_config_path", "set_phi_tag",
                                   "audit_assigned", "inspector"])
 def test_replace_without_a_value_loads_on_a_uid(tmp_path, door, rule):
@@ -546,7 +548,7 @@ def test_a_declined_finding_on_an_instance_whose_uid_moves_keeps_it_identified(
 
 @pytest.mark.parametrize("owner", ["study", "series"])
 def test_a_reloaded_owners_uid_replacement_is_saved(owner):
-    """Pins `entity.mark_modified()` at remediation.py line 291 for the
+    """Pins `entity.mark_modified()` at remediation.py line 299 for the
     owners' UIDs (#544), on a *reloaded* owner: one the store hands back
     REMEDIATED, where the status stamp at the end of the pass
     short-circuits and the bump is the only thing that makes the next save

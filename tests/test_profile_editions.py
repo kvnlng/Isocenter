@@ -235,21 +235,22 @@ def test_an_edition_shaped_name_is_never_read_as_a_file(tmp_path, monkeypatch):
 
 
 def test_an_unshipped_edition_from_a_newer_schema_says_so(tmp_path):
-    """Kills the newer-minor hint not wired to the profile value (L1
-    reviewer point 4): a `2.1` file naming an edition this version lacks
-    is told a newer isocenter may read it; a `2.0` file is not."""
+    """L1 reviewer point 4, as it stands after #784: a `2.1` file naming an
+    edition this version lacks is refused for its version, before the
+    profile is read, and told to upgrade; a `2.0` file is refused for the
+    edition alone, with no word about a version."""
     newer = _config(tmp_path, 'version: "2.1"\nprivacy_profile: basic@2027a\n',
                     name="newer.yaml")
     with pytest.raises(ValueError) as caught:
         ConfigLoader.load_unified_config(newer)
-    assert "declares version 2.1" in str(caught.value), str(caught.value)
-    assert "needs a newer isocenter" in str(caught.value), str(caught.value)
+    assert "version '2.1' is newer than" in str(caught.value), str(caught.value)
+    assert "upgrade isocenter" in str(caught.value), str(caught.value)
 
     same = _config(tmp_path, 'version: "2.0"\nprivacy_profile: basic@2027a\n',
                    name="same.yaml")
     with pytest.raises(ValueError) as caught:
         ConfigLoader.load_unified_config(same)
-    assert "declares version" not in str(caught.value), str(caught.value)
+    assert "is newer than" not in str(caught.value), str(caught.value)
 
 
 def test_the_floor_is_the_pinned_base_with_the_research_defaults(tmp_path):

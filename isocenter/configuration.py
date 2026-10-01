@@ -333,9 +333,12 @@ class IsocenterConfiguration:
         new file.
 
         Raises:
-            ValueError: With no `config_path`; and when `phi_tags` has no
+            ValueError: With no `config_path`; when `phi_tags` has no
                 rule for a tag its base supplies, because a file naming
-                that base would bring the rule back on reload. Nothing is
+                that base would bring the rule back on reload; and when
+                `date_jitter` is a range the loader would refuse (#731);
+                and when `config_path` is a file declaring a newer
+                `version` minor than this library's (#784). Nothing is
                 written.
             OSError: The write's own error, unchanged.
         """
@@ -346,6 +349,7 @@ class IsocenterConfiguration:
         # than through a temporary file and `os.replace`, which would turn
         # a symlinked config into a regular file and drop its mode.
         text = self._rendered()
+        config_manager._refuse_overwriting_a_newer_minor(self.config_path)
         with open(self.config_path, "w", encoding="utf-8") as handle:
             handle.write(text)
         self._file_in_sync = True
@@ -357,25 +361,18 @@ class IsocenterConfiguration:
             str: The document.
 
         Raises:
-            ValueError: When `phi_tags` lacks a rule its base supplies.
+            ValueError: When `phi_tags` lacks a rule its base supplies, or
+                `date_jitter` is a range the loader refuses (#731).
         """
+        # First, before the file is opened: a range the loader refuses
+        # would make a file that does not load (#731). Under auto-save this
+        # refuses every mutator while the range is wrong, which is right:
+        # the file each would write is that file.
+        config_manager._refuse_date_jitter_in_code(self.date_jitter)
         # The base lookup sits beside the loader's resolution, so the two
         # cannot resolve a name differently.
-        base = config_manager._policy_base_rules(self.privacy_profile, self._floor)
-        # Keys as the loader reads them, lowercase: `phi_tags` assigned in
-        # code can hold `0008,103E`, which the base spells `0008,103e`.
-        # Compared raw, that rule would read as missing and the save would
-        # refuse a policy that has it.
-        tags = config_manager._lowercase_tag_keys(self.phi_tags)
-
-        missing = [tag for tag in base if tag not in tags]
-        if missing:
-            raise ValueError(self._missing_base_rules_refusal(missing))
-
-        # Whole rules, not actions: an action-only diff (the scaffold's)
-        # drops a rule that keeps the base's action and adds a `value`.
-        overrides = {tag: rule for tag, rule in tags.items()
-                     if base.get(tag) != rule}
+        overrides = self._phi_tags_over(
+            config_manager._policy_base_rules(self.privacy_profile, self._floor))
 
         machines = []
         for rule in self.rules:
@@ -403,6 +400,41 @@ class IsocenterConfiguration:
         data["machines"] = machines
         return yaml.dump(data, sort_keys=False, default_flow_style=False,
                          width=float("inf"))
+
+    def _phi_tags_over(self, base: Dict[str, Any]) -> Dict[str, Any]:
+        """The rules of `phi_tags` a file naming `base` must carry.
+
+        The one diff both writers use: `save()` and `Session.create_config()`
+        (#741), so a scaffold and a saved file cannot disagree about what
+        to write.
+
+        Args:
+            base (Dict[str, Any]): The rules the file's `privacy_profile`
+                line brings in on reload (`config_manager._policy_base_rules`,
+                or, for the scaffold of the floor, its base profile's).
+
+        Returns:
+            Dict[str, Any]: Every rule, keys lowercased, that differs whole
+                from `base`'s rule for its tag, or that `base` lacks.
+
+        Raises:
+            ValueError: When `phi_tags` lacks a rule `base` supplies,
+                because the reload would bring it back.
+        """
+        # Keys as the loader reads them, lowercase: `phi_tags` assigned in
+        # code can hold `0008,103E`, which the base spells `0008,103e`.
+        # Compared raw, that rule would read as missing and the save would
+        # refuse a policy that has it.
+        tags = config_manager._lowercase_tag_keys(self.phi_tags)
+
+        missing = [tag for tag in base if tag not in tags]
+        if missing:
+            raise ValueError(self._missing_base_rules_refusal(missing))
+
+        # Whole rules, not actions: an action-only diff (the scaffold's
+        # until #741) drops a rule that keeps the base's action and adds a
+        # `value` or a `name`.
+        return {tag: rule for tag, rule in tags.items() if base.get(tag) != rule}
 
     def _missing_base_rules_refusal(self, missing: List[str]) -> str:
         """Why `save()` cannot write a policy that lacks rules its base
@@ -639,7 +671,10 @@ class IsocenterConfiguration:
             action (str): One of `KEEP`, `REMOVE`, `EMPTY`, `REPLACE`,
                 `SHIFT` and `JITTER` (`JITTER` is `SHIFT`).
             value (str, optional): The value `REPLACE` writes, stored as
-                the rule's `value`, the key a file spells it with.
+                the rule's `value`, the key a file spells it with. An empty
+                value is no value, on every tag: `value=""` stores no
+                `value` key, so on a UI tag it is the keyed replacement UID,
+                although a file's `value: ''` on a UI tag is refused (#883).
 
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
@@ -669,6 +704,9 @@ class IsocenterConfiguration:
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action
         }
+        # Truthiness on purpose: `""` is no value, so it stores no key and
+        # never meets the loader's #883 refusal of `value: ''` on a UI
+        # (owner ruling Q3 A).
         if value:
             val["value"] = value
 

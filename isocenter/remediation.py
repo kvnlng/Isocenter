@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from .parallel import progress_bar
 from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Series, Study
+from .config_manager import _refused_date_jitter
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -76,7 +77,9 @@ class RemediationService:
             store_backend (optional): The store the audit rows are written
                 to (`log_audit`, `log_audit_batch`). None writes no rows.
             date_jitter_config (dict, optional): The date shift range,
-                `{"min_days": ..., "max_days": ...}`. Defaults to -365 to -1.
+                `{"min_days": ..., "max_days": ...}`, `min_days` not greater
+                than `max_days`. Defaults to -365 to -1. A range the loader
+                would refuse in a file raises `ValueError` (#731).
             project_secret (bytes, optional): The store's project secret,
                 which keys the date offset and the UID and Patient ID
                 checks. Required at use: a keyed date shift without one
@@ -95,6 +98,11 @@ class RemediationService:
         # Reset by `apply_remediation`; read by `_folds_into_owner`.
         self._owner_copies: dict = {}
         self._pending_folds: dict = {}
+        # Judged here with the loader's words: `_get_date_shift` swapped a
+        # reversed range silently, which was the defect (#731).
+        reason = _refused_date_jitter(date_jitter_config)
+        if reason is not None:
+            raise ValueError(f"RemediationService: {reason}")
         self.jitter_config = date_jitter_config or {"min_days": -365, "max_days": -1}
 
     def apply_remediation(self, findings: List[PhiFinding]):
@@ -1114,14 +1122,24 @@ class RemediationService:
         # one raised in another store over the same files reaches this one;
         # this store's next `audit()` would not recognise those UIDs as its
         # own and would replace them a second time.
-        from .privacy import UID_REPLACEMENT, _replaced_uids  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            UID_REPLACEMENT, _replacement_uid_for, _uid_texts)
 
         if not (self.project_secret and (proposal.metadata or {}).get(UID_REPLACEMENT)):
             return None
 
-        # Both sides as the scan builds them: `_replaced_uids` gives a str,
-        # or a list for a multi-valued element, and a pickle keeps either.
-        if _replaced_uids(proposal.original_value, self.project_secret) == proposal.new_value:
+        # Value by value, on the texts both sides hold: a private copy
+        # (#765) keeps its own type, so a `bytes` original takes NUL-padded
+        # `bytes`, and keeps in place any value that is not a UID this
+        # instance replaces. A whole-value comparison with what the
+        # standard arm would write declines every such copy. A value left
+        # as it was links nothing; only a written value must be this
+        # store's replacement of the one it replaces.
+        old = _uid_texts(proposal.original_value)
+        new = _uid_texts(proposal.new_value)
+        if len(old) == len(new) and all(
+                n == o or n == _replacement_uid_for(o, self.project_secret)
+                for o, n in zip(old, new)):
             return None
         return (f"{proposal.target_attr}: the value is not this store's "
                 "replacement for the UID the scan saw, so it is not written")
@@ -1714,6 +1732,8 @@ class RemediationService:
         read UNSCANNED): kept when vouched or empty, and otherwise set to
         IDENTIFIED and the instance named in `_declined_entities`, with no
         row, so later successes in the pass cannot leave it REMEDIATED.
+        A vouched write then returns `""`, as "already there" does: the
+        copy holds the owner's value with the record to say so (#894).
 
         Then, by whether the owner's finding was handed to this pass
         (`_owners_handed`, keyed `(id(owner), field)` or `(None, field)`):
@@ -1820,6 +1840,17 @@ class RemediationService:
                 # does not demote it -- an earlier pass already acted on
                 # this key. Not a decline: no row.
                 self._declined_entities.append(entity)
+            if vouched:
+                # The copy now holds what an owner's write left on its
+                # siblings, with the record to say so: the end state the
+                # check above reads as already there, so it is read the
+                # same way when this pass has just put it there. Without
+                # this, a file re-ingested into a study an earlier pass
+                # renamed, whose patient findings name the empty patient
+                # ingest created rather than this owner, fell to the
+                # not-handed branch below and read IDENTIFIED beside a
+                # re-audit that raised nothing (#894).
+                return ""
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
         if not {(id(owner), field), (None, field)} & self._owners_handed:
             if value == "" and entity.attributes.get(tag, "") == "":
@@ -2194,8 +2225,8 @@ class RemediationService:
         jitter range, and cannot be computed from anything an export
         carries. With no secret, `canonical_patient_key` raises
         `RuntimeError` for a keyed patient; there is no unkeyed fallback.
-        The offset is `key % span + min_days`, with the range's bounds
-        swapped if given reversed.
+        The offset is `key % span + min_days`; a reversed range never
+        reaches here (`__init__` refuses it, #731).
 
         Args:
             patient_id (str): The seed Patient ID, original or pseudonym.
@@ -2213,9 +2244,6 @@ class RemediationService:
 
         min_days = self.jitter_config.get("min_days", -365)
         max_days = self.jitter_config.get("max_days", -1)
-
-        if min_days > max_days:
-            min_days, max_days = max_days, min_days
 
         span = max_days - min_days + 1
         if span < 1:

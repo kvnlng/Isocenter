@@ -9,7 +9,10 @@ class IODValidator:
     Minimal IOD (Information Object Definition) Validator for DICOM compliance.
 
     Checks for the presence of Type 1 and Type 2 attributes based on SOP Class rules.
-    Currently implements a subset of "Common" and "CTImage" modules.
+    Knows three SOP classes: CT Image Storage (a subset of "Common" and
+    "CTImage"), and MR Image Storage and PET Image Storage (the Type 1
+    geometry of "ImagePlane", #879). Every other SOP class, the Enhanced and
+    multi-frame IODs included, is not checked.
 
     The export worker calls `absent_type2` before `validate`, and writes
     each tag it names zero-length. Type 1 is never filled.
@@ -47,11 +50,29 @@ class IODValidator:
             '0018,0050': '2', '0018,0060': '2',  # SliceThickness, KVP
             '0020,0032': '1', '0020,0037': '1',  # Pos, Orient
             '0028,0030': '1',  # Pixel Spacing
-        }
+        },
+        # The Type 1 geometry of PS3.3 C.7.6.2 Image Plane, Mandatory for
+        # MR (A.4) and PET (A.21) Image Storage (#879). Type 1 alone, on
+        # purpose: Slice Thickness (0018,0050) is Type 2 there, and listed
+        # here `absent_type2` would write it zero-length into every MR or
+        # PET that lacks it, an output change beyond the refusal. 'Common'
+        # is not added to those SOP classes for the same reason (its Type 2
+        # Study Date), and its Type 1 rows are stamped on every file anyway.
+        # CT keeps 'CTImage', so the error text the docs quote does not move.
+        'ImagePlane': {
+            '0020,0032': '1', '0020,0037': '1',  # Pos, Orient
+            '0028,0030': '1',  # Pixel Spacing
+        },
     }
 
     _SOP_RULES = {
         '1.2.840.10008.5.1.4.1.1.2': ['Common', 'CTImage'],  # CT Image Storage
+        # Not Enhanced MR/CT/PET or Legacy Converted Enhanced: they keep
+        # their geometry in the functional groups, not at the top level,
+        # and every one in pydicom-data lacks the top-level elements, so
+        # listed here each would be withheld (#879).
+        '1.2.840.10008.5.1.4.1.1.4': ['ImagePlane'],  # MR Image Storage
+        '1.2.840.10008.5.1.4.1.1.128': ['ImagePlane'],  # PET Image Storage
     }
 
     @staticmethod

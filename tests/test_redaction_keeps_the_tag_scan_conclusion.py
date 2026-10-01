@@ -193,7 +193,11 @@ def test_an_edit_during_the_pass_is_not_carried(tmp_path, threads, monkeypatch,
 
 
 def test_an_instance_never_scanned_stays_unscanned(tmp_path, threads):
-    """Only an assurance is carried, and there was none to carry."""
+    """UNSCANNED is never carried: there is no scan result to carry.
+
+    Adding UNSCANNED to the carried statuses is an equivalent mutant:
+    recording UNSCANNED over an entity that reads UNSCANNED short-circuits
+    in `record_phi_status`, so this pins the outcome, not the tuple."""
     session, instance = _session(tmp_path)
     with session:
         assert instance.phi_status is PhiStatus.UNSCANNED
@@ -306,18 +310,43 @@ def test_redact_carries_remediated(tmp_path, threads):
         assert instance.phi_status is PhiStatus.REMEDIATED
 
 
-def test_redact_does_not_carry_identified(tmp_path, threads):
-    """IDENTIFIED is not an assurance, and is left to the revision rule.
+@pytest.mark.parametrize("path", ["session", "serial"])
+def test_redact_carries_identified(tmp_path, threads, path):
+    """IDENTIFIED is carried, as REMEDIATED and CLEARED are (owner ruling on
+    #896, option a). Redaction never writes an attribute the scan read, so
+    the scan's conclusion still holds, and `audit()`, `redact()`,
+    `anonymize(report)` settles the instance. This test asserted UNSCANNED
+    until then ("IDENTIFIED is not an assurance").
 
-    Kills: IDENTIFIED added to the carried statuses.
+    Kills: IDENTIFIED left out of the carried statuses.
     """
     session, instance, config = _with_a_tag_on_the_instance(tmp_path)
     with session:
         session.audit(config)
         assert instance.phi_status is PhiStatus.IDENTIFIED
-        session.redact()
+        _redact_by(path, session, instance)
+        assert _redacted(instance), instance.attributes
+        assert instance.phi_status is PhiStatus.IDENTIFIED
+
+
+@pytest.mark.parametrize("path", ["session", "serial"])
+def test_an_identified_status_an_edit_left_stale_is_not_carried(tmp_path, threads, path):
+    """Carried only when current before the redaction (#486's guard, kept
+    for IDENTIFIED by the #896 ruling): an edit after the audit leaves the
+    status stale, redaction leaves it so, and the raw status is still the
+    scan's, so condition 8 still counts the edit.
+
+    Kills: the carry reading the raw `_phi_status` instead of `phi_status`.
+    """
+    session, instance, config = _with_a_tag_on_the_instance(tmp_path)
+    with session:
+        session.audit(config)
+        instance.set_attr("0008,1030", "Edited^After^Audit")
+        assert instance.phi_status is PhiStatus.UNSCANNED
+        _redact_by(path, session, instance)
         assert _redacted(instance), instance.attributes
         assert instance.phi_status is PhiStatus.UNSCANNED
+        assert instance._phi_status is PhiStatus.IDENTIFIED
 
 
 def test_a_failed_instance_does_not_cost_the_others_their_status(

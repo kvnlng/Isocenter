@@ -381,8 +381,8 @@ COHORT_REPORT_COLUMNS = [
     "DeviceSerial",
 ]
 
-# The header written above every scaffolded config.
-_CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
+# The header above every scaffold; `<CONFIG_VERSION>` is filled at render (#782).
+_CONFIG_HEADER = """# Isocenter Privacy Configuration (v<CONFIG_VERSION>)
 # ==========================================
 #
 #
@@ -601,7 +601,9 @@ def _render_config_yaml(data: Dict[str, Any]) -> str:
             rendered.append("")
         rendered.append(line)
 
-    return _CONFIG_HEADER + "\n" + "\n".join(rendered) + "\n"
+    # The constant, read now: a literal here went stale on a bump (#782).
+    header = _CONFIG_HEADER.replace("<CONFIG_VERSION>", config_manager.CONFIG_VERSION)
+    return header + "\n" + "\n".join(rendered) + "\n"
 
 
 class _ExportOptions(NamedTuple):
@@ -2225,6 +2227,14 @@ class DicomSession:
         recorded as imported, so ingesting the same folder again declines
         it again.
 
+        **A study another patient holds.** A file carrying a Patient ID,
+        whose Study Instance UID a patient with a different Patient ID
+        already holds, is declined the same way, and in the same order
+        (#745). Its `WARNING` row names the file and the instance, never a
+        Patient ID. A file carrying the original ID of the patient whose
+        study `anonymize()` renamed is that patient's, and is linked; so
+        is a file with no Patient ID.
+
         **Byte order.** A big-endian source's values in words wider than a
         byte (`OW`, `OL`, `OF`, `OD`, `OV` and the waveform samples) are
         stored little-endian, as its pixels are. What cannot be converted
@@ -2463,23 +2473,59 @@ class DicomSession:
         Args:
             output_path (str): Where to write the generated YAML. A
                 `.yaml` suffix is appended if missing.
+
+        The `phi_tags` section names the session's own base, as `save()`
+        does, and holds every rule that differs from that base's, compared
+        whole (#741): `privacy_profile: none` for a session under `none`,
+        the external file's path for an external profile, and the pinned
+        name for a built-in. The floor is the one exception, spelled
+        `privacy_profile: basic@2026c` with the research defaults as
+        editable lines, which loads to the same rules. The file loads to
+        the session's `phi_tags`.
+
+        Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in the file (#731), and `save()`'s
+                refusal when `phi_tags` lacks a rule its base supplies
+                (#741), or when `output_path` is a file declaring a newer
+                `version` minor than this library's (#784). Nothing is
+                written.
+            OSError: The write's own error, after it is logged (#741).
         """
+        # First: the scaffold carries the range, and a range the loader
+        # refuses would make a file that does not load (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
         if not (output_path.endswith(".yaml") or output_path.endswith(".yml")):
             output_path += ".yaml"
             print(f"Note: Appending .yaml extension -> {output_path}")
 
+        configuration = self.configuration
+        # The session's own base, diffed whole by `save()`'s helper (#741).
+        # The floor alone is spelled as its base profile, so the scaffold
+        # shows the research defaults as lines to edit; it reloads to the
+        # same rules, and so the same policy fingerprint. Every other base
+        # is written as `save()` writes it. One name, read once, for the
+        # line and the table diffed, so the file cannot name one table and
+        # carry the overrides of another.
+        if configuration._floor and not configuration.privacy_profile:
+            base = profiles.FLOOR_BASE
+            base_rules = profiles.PRIVACY_PROFILES[base]
+        else:
+            base = configuration.privacy_profile or "none"
+            base_rules = config_manager._policy_base_rules(
+                configuration.privacy_profile, configuration._floor)
+        # Before the machine scaffold and the write: a refusal writes
+        # nothing.
+        phi_tags = configuration._phi_tags_over(base_rules)
+
         machine_rules = self._scaffold_machine_rules()
-        base = profiles.FLOOR_BASE
 
         data = {
             # The module attribute, read now: one home for the number both
             # writers stamp.
             "version": config_manager.CONFIG_VERSION,
-            # The floor's base, which `_scaffold_phi_tags` diffs against:
-            # one constant, read once, so the file cannot name one table
-            # and carry the overrides of another.
             "privacy_profile": base,
-            "phi_tags": self._scaffold_phi_tags(base),
+            "phi_tags": phi_tags,
             "date_jitter": self.configuration.date_jitter,
             "remove_private_tags": self.configuration.remove_private_tags,
             "machines": machine_rules + self.configuration.rules
@@ -2488,6 +2534,9 @@ class DicomSession:
         if not machine_rules and not self.configuration.rules:
             print("No machines detected to scaffold.")
 
+        # `save()`'s refusal, for the same reason (owner ruling on #895):
+        # writing over a newer isocenter's file erases what it declared.
+        config_manager._refuse_overwriting_a_newer_minor(output_path)
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(_render_config_yaml(data))
@@ -2497,7 +2546,10 @@ class DicomSession:
                 output_path, len(machine_rules))
             print(f"Scaffolded Unified Config to {output_path}")
         except OSError as exc:
+            # Logged, then raised, as `save()` raises (#741, owner ruling Q7
+            # A): returning let a script go on as though the file existed.
             get_logger().error("Failed to write scaffold: %s", describe_exception(exc))
+            raise
 
     def _scaffold_machine_rules(self) -> List[Dict[str, Any]]:
         """Build a redaction rule for every machine not already configured.
@@ -2574,43 +2626,6 @@ class DicomSession:
         return (f"WARNING: {flagged} images have 'Burned In Annotation' "
                 f"flag. Verify pixel redaction.")
 
-    def _scaffold_phi_tags(self, base: str) -> Dict[str, Any]:
-        """The PHI tag section of a scaffolded config.
-
-        Every entry of the session's policy whose action differs from the
-        built-in profile `base`'s: the scaffold names `base` as its
-        `privacy_profile`, so a line repeating the profile would change
-        nothing. On a bare session the policy is the floor, and the difference
-        is exactly `profiles.RESEARCH_DEFAULTS`.
-
-        Args:
-            base (str): The pinned profile name the scaffold writes as its
-                `privacy_profile`; `create_config` passes
-                `profiles.FLOOR_BASE`.
-
-        Returns:
-            Dict[str, Any]: Tag to rule, each written structured.
-        """
-        # Derived rather than listed, so a bare session's scaffold loads back
-        # to exactly the floor. It is exact only because the policy it diffs is
-        # a superset of the basic profile: a session under `privacy_profile:
-        # none` is still scaffolded under `basic@2026c`, and its file reloads
-        # with that profile beneath its own tags -- more protection than the
-        # session had, never less.
-        #
-        # A plain-string value is a tag's display name and leaves the
-        # inspector's action at REPLACE (`PhiInspector.__init__`), so it is
-        # written structured, as the REPLACE it is.
-        table = profiles.PRIVACY_PROFILES[base]
-        structured = {}
-        for tag, val in self.configuration.phi_tags.items():
-            rule = dict(val) if isinstance(val, dict) else {
-                "name": str(val), "action": "REPLACE"}
-            action = table.get(tag, {}).get("action")
-            if str(rule.get("action", "REPLACE")).upper() != action:
-                structured[tag] = rule
-        return structured
-
     # =========================================================================
     # AUDIT & ANALYSIS
     # =========================================================================
@@ -2645,7 +2660,10 @@ class DicomSession:
             ValueError: When the file at `config_path` fails any check
                 `load_config()` makes, or the policy (that file's, or
                 `configuration.phi_tags`) holds a rule the pipeline cannot
-                honour. Raised before a project secret is created.
+                honour, or, with no `config_path`, when
+                `configuration.date_jitter` is a range the loader would
+                refuse in a file (#731). Raised before a project secret
+                is created.
             RuntimeError: When patients sharing a Patient ID were
                 de-identified under different date-offset schemes, so they
                 cannot be merged; raised after the policy is validated and
@@ -2693,6 +2711,11 @@ class DicomSession:
             # the project secret below, so a refused policy leaves no new
             # secret in the store.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+            # Likewise `configuration.date_jitter` (#731): the range
+            # `anonymize()` would shift by, judged as the loader judges a
+            # file's, before the secret. With `config_path` the file's own
+            # range was judged by the loader above.
+            config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         # Two `Patient` objects holding one Patient ID are merged before the
         # scan, as `anonymize()` and a restore merge them. The scan
@@ -2819,8 +2842,8 @@ class DicomSession:
         studies and instances only.
 
         `redact()` is the one edit that keeps an instance's status: an
-        instance REMEDIATED or CLEARED before the pass reads the same after
-        it, provided nothing but redaction's own writes changed it. See
+        instance REMEDIATED, CLEARED or IDENTIFIED before the pass reads the
+        same after it, provided nothing but redaction's own writes changed it. See
         `PhiStatus`.
 
         A status is counted whatever policy it was recorded under;
@@ -3885,10 +3908,14 @@ class DicomSession:
         - a value it would capture is one no token can hold (`bytes`),
           naming the tag;
         - Patient's Name is blank under a rule of EMPTY or REMOVE on it;
+        - the patient holds a Patient ID (or a Patient's Name) and every
+          instance's copy of `0010,0020` (or `0010,0010`) is present and
+          blank, naming the tag: the token would restore the patient
+          without it (#761);
         - the patient has instances and any of them holds no value in any
           tag `tags_to_lock` names (or it names none), counted. A tag held
-          blank is a value, and a patient with no instances locks as 0
-          instances.
+          blank is a value, except as the refusal above says, and a
+          patient with no instances locks as 0 instances.
 
         Each of these is judged on every instance's own values: a value a
         pass wrote on any study refuses the lock. An existing token is
@@ -3901,9 +3928,11 @@ class DicomSession:
 
         No message carries a Patient ID: a message says "this patient", its
         advice spells the ID `<its Patient ID>`, and a replaced Patient ID
-        is described, not quoted. When the lock creates the key file (the
-        first lock under a path with none), the file is created already
-        written, with mode 0600.
+        is described, not quoted. The key file is created only by a lock
+        that writes a token (the first under a path with none), after every
+        patient is planned, already written and with mode 0600; a lock that
+        writes no token (refused, no patient found, or none with an
+        instance) creates no key file (#813).
 
         Args:
             patient_id (str): The ID of the patient to lock; anything that
@@ -3991,11 +4020,13 @@ class DicomSession:
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
-        """Load the lock's key, creating it if allowed, and build its engine.
+        """Choose the key the lock plans under, and build its engine.
 
-        Call it before any patient's lock is planned. The key is created only
-        when no file exists at the path and no instance in the session carries
-        a token this library wrote. Writes no token.
+        Call it before any patient's lock is planned. The key is the file's;
+        when no file exists and no instance in the session carries a token
+        this library wrote, it is a key held in memory, which
+        `_commit_lock_key` writes only once a plan carries a token (#813).
+        Writes no token and no file.
 
         Raises:
             RuntimeError: No key file at the path, and an instance in the
@@ -4015,12 +4046,14 @@ class DicomSession:
         # scope, not the patient's: a key minted here would be the session's
         # key from then on.
         #
-        # The single lock calls this only once its patient is found, so a lock
-        # of an ID no patient holds creates no key file. The batch calls it
-        # after reading its selection and before it plans, found or not,
-        # because it cannot plan without the engine; a batch of IDs that match
-        # no patient therefore creates the key, as does a lock then refused
-        # for any other reason.
+        # Nothing is written here (#813). The batch calls this after reading
+        # its selection and before it plans, found or not, because it cannot
+        # plan without the engine; were the key written here, a batch of IDs
+        # matching no patient, an empty report, or a lock then refused would
+        # each leave a key file that opens nothing, and every later
+        # `Session()` in that directory would turn reversible anonymization
+        # on by itself. The file is written by `_commit_lock_key`, after
+        # every plan has succeeded.
         try:
             self.key_manager.load_key()
         except FileNotFoundError:
@@ -4040,8 +4073,36 @@ class DicomSession:
                     "reversible anonymization with the key the identities "
                     "were locked with; no key was created, and the token this "
                     "call would have written is unchanged.") from None
-            self.key_manager.load_or_generate_key()
-        self.reversibility_service.engine  # pylint: disable=pointless-statement
+        self.reversibility_service._use_key(self.key_manager._key_for_planning())
+
+    def _commit_lock_key(self, plans) -> bool:
+        """Write the key the plans were made under, when any carries a token.
+
+        Call it after every plan of the call has succeeded and before the
+        first token is embedded. Writes nothing unless some value-set has
+        both a token and an instance to embed it in (#813).
+
+        Args:
+            plans: Each `_planned_identity_lock` result of the call.
+
+        Returns:
+            bool: True when another session wrote a key first: the engine
+                is now built over that key, and the caller must plan every
+                patient again before embedding anything.
+        """
+        # A token embedded somewhere: a patient with no instances plans a
+        # token from the patient's own values and embeds it on nothing.
+        if not any(token and members for _, value_sets in plans
+                   for _, token, members in value_sets):
+            return False
+        planned = self.reversibility_service._engine_key
+        key = self.key_manager._commit_planned_key()
+        if key == planned:
+            return False
+        # Lost the race to another session's key: a token built under the
+        # planned key would open under no key anyone holds.
+        self.reversibility_service._use_key(key)
+        return True
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
                                verbose: bool, tags_to_lock: Optional[List[str]]
@@ -4064,6 +4125,8 @@ class DicomSession:
                 persist `_write_identity_lock` cannot complete.
         """
         plan = self._planned_identity_lock(patient, tags_to_lock)
+        if self._commit_lock_key([plan]):
+            plan = self._planned_identity_lock(patient, tags_to_lock)
         return self._write_identity_lock(patient, plan, persist, verbose)
 
     def _planned_identity_lock(self, patient: "Patient",
@@ -4520,6 +4583,37 @@ class DicomSession:
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
 
+        # Every copy of an owner-stamped tag blanked while the owner holds
+        # a value (#761). A token keeps what each instance held (the L8
+        # ruling), so it would hold `''`, the lock would report success,
+        # and a restore would write the blank over the patient -- for the
+        # ID, an ID-less patient, and the original unrecoverable. Refused
+        # rather than read from the patient, which would reverse the
+        # ruling; only when *every* copy is present and blank, because
+        # recovery takes the first non-blank token, and a copy that is
+        # absent is already read from the patient (`captured`). A subject
+        # with no Patient ID exports `''`, so its blank is the truth.
+        owned = (("0010,0020", exported_patient_id(patient), "Patient ID"),
+                 ("0010,0010", patient.patient_name, "Patient's Name"))
+        for tag, held, what in owned:
+            if (tag not in tags_to_lock or not instances
+                    or not str(held or "").strip()):
+                continue
+            copies = [captured(inst, tag) for inst in instances]
+            if all(not from_patient and not str(val if val is not None else "").strip()
+                   for val, from_patient in copies):
+                rest = [t for t in tags_to_lock if t != tag]
+                advice = (f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: this patient holds a {what}, and every "
+                    f"instance's copy of {tag} is blank, so the token would "
+                    f"restore the patient with no {what}. Put the value back "
+                    f"on its instances, or {advice}; the token this call would "
+                    "have written is unchanged.")
+
         # Instances to secure and nothing to stash. An empty record
         # builds no token (`generate_identity_token` returns `b""`) and
         # `embed_identity_token` embeds nothing for it, so the lock
@@ -4795,6 +4889,13 @@ class DicomSession:
                 "Each is numbered by its place among the patients found, in "
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
+
+        # The key file is written only now, every plan having succeeded,
+        # and only when one carries a token (#813). If another session
+        # wrote its key first, every patient is planned again under it.
+        if self._commit_lock_key(plans.values()):
+            plans = {pid: self._planned_identity_lock(patient_map[pid], tags_to_lock)
+                     for pid in plans}
 
         # Drained after every plan and before the first token is embedded,
         # for the reason `lock_identities` gives. Once, here: nothing
@@ -5310,7 +5411,7 @@ class DicomSession:
 
         Loads the key when a file is there. This call never creates the
         key file, and neither does recovery: the first `lock_identities()`
-        creates it when none exists. So a mistyped path before
+        that writes a token creates it when none exists. So a mistyped path before
         `recover_patient_identity()` fails there with `FileNotFoundError`
         rather than minting a key the data was never locked under.
 
@@ -5985,6 +6086,11 @@ class DicomSession:
         own scheme), and declines otherwise. The findings passed are not
         modified.
 
+        A patient, study or instance edited after its last scan and before
+        this pass is not stamped by it: it keeps the status that scan left
+        and still reads `UNSCANNED` afterwards, so it grades under
+        condition 8 until `audit()` reads the edit (#752).
+
         Two patients left holding one Patient ID (a study ingested under a
         patient's original ID after that patient was anonymized) are merged
         into whichever was in the session first, and the other is removed
@@ -5999,6 +6105,9 @@ class DicomSession:
                 one.
 
         Raises:
+            ValueError: When `configuration.date_jitter` is a range the
+                loader would refuse in a file (#731); raised first, before
+                anything is scanned or shifted.
             RuntimeError: When two patients left holding one Patient ID
                 were de-identified under different date-offset schemes.
                 Raised at the merge, after the remediations are applied.
@@ -6006,6 +6115,11 @@ class DicomSession:
                 one built in user code.
         """
         from .remediation import RemediationService
+
+        # First, before the blind `audit()` and before the secret: the
+        # findings-given path never enters `audit()`, and a range the
+        # loader would refuse used to be swapped silently (#731).
+        config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
         if findings is None:
             # Blind execution: scan with the current configuration, then
@@ -6052,6 +6166,15 @@ class DicomSession:
             # so the statuses the pass records can be told from the rest.
             recorded_at = {id(entity): entity._phi_status_revision
                            for entity in self._status_bearers()}
+            # The entities whose status was already stale -- recorded, then
+            # edited with no scan since -- with the status and policy the
+            # scan left (#752). The pass reads none of the edit, so its
+            # stamps would vouch for content no scan saw; `_keep_stale`
+            # puts them back after it.
+            stale_at_start = [
+                (entity, entity._phi_status, entity._phi_status_policy)
+                for entity in self._status_bearers()
+                if _edited_since_its_status(entity)]
             # The entities the report's scan raised under, read before the
             # pass can replace a patient's ID. Only when the tally settling
             # this pass is the report's own: under another audit's tally,
@@ -6105,6 +6228,7 @@ class DicomSession:
                 PASS_WRITING.reset(passing)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)
+            self._keep_stale(stale_at_start, recorded_at)
 
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
@@ -7712,6 +7836,36 @@ class DicomSession:
             status, recorded = entity._phi_status_record()
             if status is not PhiStatus.UNSCANNED and recorded is None:
                 entity.record_phi_status(status, policy=policy)
+
+    @staticmethod
+    def _keep_stale(stale_at_start, recorded_at):
+        """Leave stale an entity that was stale when the pass began (#752).
+
+        For each entity in `stale_at_start` whose status this pass recorded
+        (its status revision moved), re-record the status and policy the
+        scan left and then mark it modified. It reads UNSCANNED again,
+        grade condition 8 counts it, the export withholds the
+        de-identification markers, and the store keeps the left-behind
+        status in `phi_status_edited` (#767). An entity the pass did not
+        record a status on is left exactly as it is.
+
+        Args:
+            stale_at_start (list): `(entity, status, policy)` for each
+                entity `_edited_since_its_status` before the pass.
+            recorded_at (dict): `id(entity) -> status revision` before the
+                pass.
+        """
+        # Re-recorded rather than only marked modified: that would leave
+        # REMEDIATED as the status "left behind", a claim about content no
+        # scan read. Record, then move the revision, is hydration's shape
+        # (`_restore_statuses`). Never-scanned entities (raw status None or
+        # UNSCANNED) are not stale, so a pass over hand-built findings
+        # still stamps them REMEDIATED.
+        for entity, status, policy in stale_at_start:
+            if recorded_at.get(id(entity)) == entity._phi_status_revision:
+                continue
+            entity.record_phi_status(status, policy=policy)
+            entity.mark_modified()
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
         """The instance holding each finding raised inside a sequence.
