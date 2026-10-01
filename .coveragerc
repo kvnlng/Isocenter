@@ -5,12 +5,19 @@
 # and pickles the configuration into the spawn preparation data so the
 # child starts measuring before it runs a task.
 #
-# `sigterm = True` is what saves the recycling pool's data: `with
-# ctx.Pool(...)` exits through terminate(), which SIGTERMs idle workers
-# before their _bootstrap `finally` can run, and a killed worker writes
-# nothing without a handler. Measured over ten export test files on 3.14t
-# (#796): 152 functions recorded as run in a worker with it, 84 without,
-# and every export-worker function lost.
+# `sigterm = True` was what saved the recycling pool's data while that
+# pool exited through terminate(), which SIGTERMed idle workers before
+# their _bootstrap `finally` could run; a killed worker writes nothing
+# without a handler. Measured over ten export test files on 3.14t (#796):
+# 152 functions recorded as run in a worker with it, 84 without, and every
+# export-worker function lost. Since #860 a recycling pool that finishes
+# exits through close() and join(), so its workers leave by their sentinel
+# and write their data without the handler (measured: 8 of 8 workers ran
+# a slow atexit, against 4 of 8 through terminate()). The handler still
+# matters on every other way out: a reader that stops, a task's exception
+# and Ctrl-C still reach terminate(), and so does a ProcessPoolExecutor
+# that breaks. It stays until a map build is measured without it, which
+# is a follow-up of #860 (owner ruling Q4).
 #
 # The handler is not re-entrant (coveragepy/coveragepy#2310), and it can
 # keep a worker alive. It runs stop() and save() at whatever bytecode the
@@ -32,15 +39,17 @@
 # (python/cpython#158413), which hung the test-map build. Since #796 the
 # package's pools SIGKILL a worker still running 10 s after its pool is
 # found broken (parallel._BROKEN_POOL_GRACE_S), which costs that worker's
-# data.
-# Export's recycling pool is not covered by that (#860).
+# data. Since #860 the recycling pool's exit is bounded the same way: its
+# workers get the same 10 s after the pool is told to stop, then SIGKILL
+# (parallel._end_recycling_pool), which also costs a killed worker's data.
 #
 # `core = ctrace` is load-bearing on 3.14. coverage defaults to the
 # sys.monitoring core there (env.SYSMON_DEFAULT), whose callback holds a
 # non-reentrant threading.Lock on the first sight of every code object,
 # and stop() takes the same lock; a SIGTERM handler that runs while the
 # main thread is inside that region self-deadlocks the worker, and the
-# parent then waits forever in Pool._terminate_pool -> p.join().
+# parent then waited forever in Pool._terminate_pool -> p.join() (since
+# #860 it SIGKILLs the worker after the grace instead).
 # Measured once in ~460 spawned workers on 3.14.6. The C tracer is not
 # free of locks either: it takes the collector's data_lock on every call
 # into a measured file, not only for a new file, and that lock is real

@@ -1811,6 +1811,50 @@ def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
         "a re-inlined literal is what this family exists to stop (#368)")
 
 
+def test_the_recycling_pools_bounded_exit_sits_below_the_stall_watchdog():
+    """`_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S` is below `_STALL_S`
+    and the faulthandler window, and the exit reads both by name (#860).
+
+    The recycling pool's exit waits the grace for its workers, SIGKILLs the
+    rest, and waits the second constant more for the stdlib's exit before
+    it lets the caller go. Their sum is the longest a caller can be held,
+    so it must stay below the watchdog and the faulthandler window: a
+    bounded exit must never be reported as a stall, or dumped as a hang.
+    The after-kill wait is not zero: the stdlib's exit still has to join
+    the killed workers and its own threads.
+    """
+    import inspect
+    import textwrap
+
+    from isocenter import parallel
+
+    threshold, _step_seconds, _ = _faulthandler_threshold_and_step_seconds()
+    source = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    match = re.search(r"^_STALL_S = ([0-9.]+)$", source, re.MULTILINE)
+    assert match, "tests/conftest.py no longer defines _STALL_S (#250)"
+    stall_s = float(match.group(1))
+    after_kill = parallel._POOL_EXIT_AFTER_KILL_S
+    bound = parallel._BROKEN_POOL_GRACE_S + after_kill
+
+    assert after_kill > 0, (
+        "_POOL_EXIT_AFTER_KILL_S is not positive: the stdlib's exit would "
+        "be left behind on every kill, with its pipes (#860)")
+    assert bound < stall_s, (
+        f"the recycling pool's exit can hold its caller {bound:g}s, not "
+        f"below the stall watchdog's {stall_s:g}s (#860)")
+    assert bound < threshold, (
+        f"the recycling pool's exit can hold its caller {bound:g}s, beyond "
+        f"the faulthandler window ({threshold:g}s) (#860)")
+
+    helper = inspect.getsource(parallel._end_recycling_pool)
+    names = {node.id for node in ast.walk(ast.parse(textwrap.dedent(helper)))
+             if isinstance(node, ast.Name)}
+    for name in ("_BROKEN_POOL_GRACE_S", "_POOL_EXIT_AFTER_KILL_S"):
+        assert name in names, (
+            f"_end_recycling_pool no longer reads {name}; a re-inlined "
+            "literal is what this family exists to stop (#368)")
+
+
 # ---------------------------------------------------------------------------
 # The documentation deploy (#635) -- the one workflow that publishes to a
 # live site, and until this test nothing in the suite read it at all
