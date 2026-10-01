@@ -1022,6 +1022,14 @@ _DEFAULT_TAGS_TO_LOCK = (
 )
 
 
+# `redact()`'s two fixed sentences for a pass with nothing to do (#807);
+# the third, the zoneless count, is built in `_why_no_redaction_task`.
+_NO_REDACTION_RULES = (
+    "No redaction rules: the configuration names no machines. Load one "
+    "with load_config(), or add machines to its rules.")
+_NO_IMAGE_MATCHED = "No image matched any loaded rule's serial_number."
+
+
 def _redaction_worker_count() -> int:
     """How many workers to redact pixels with.
 
@@ -5679,8 +5687,13 @@ class DicomSession:
                 `WARNING` names the variable instead.
         """
         if not self.configuration.rules:
-            get_logger().warning("No configuration loaded. Use .load_config() first.")
-            print("No configuration loaded. Use .load_config() first.")
+            # True whether or not a file was loaded (#807): a scaffold over
+            # a cohort with no Device Serial Number loads with no machines.
+            # Not branched on `configuration.config_path`, which only
+            # `load_config()` sets, so rules assigned in code and then
+            # emptied would take the wrong branch.
+            get_logger().warning(_NO_REDACTION_RULES)
+            print(_NO_REDACTION_RULES)
             return 0
 
         # A redaction pass must not run concurrently with a background
@@ -5766,6 +5779,39 @@ class DicomSession:
                 "in memory; the rest are untouched.")
             raise
 
+    def _why_no_redaction_task(self, service) -> str:
+        """The sentence for a pass whose rules prepared no task (#807).
+
+        Asks the predicates task preparation asks, never a second reading:
+        `RedactionService._targets_for` for which instances a rule covers,
+        and `zone_rois` for whether it holds a zone. `prepare_redaction_tasks`
+        returns a task for every target of a rule with a valid ROI, so a
+        pass with no task has either no covered instance or only covered
+        instances whose every rule is zoneless. Reads only the index the
+        service built: no pixel I/O, no sqlite, no lock.
+
+        Args:
+            service (RedactionService): The pass's service.
+
+        Returns:
+            str: The no-match sentence, or the count of covered instances
+                with no zone.
+        """
+        # Keyed by `id()`: two rules can cover one instance (an exact rule
+        # and `"*"`), and it is one instance. True once any covering rule
+        # holds a valid zone.
+        zoned = {}
+        for rule in self.configuration.rules:
+            has_zone = bool(zone_rois(rule.get("redaction_zones")))
+            for inst in service._targets_for(rule.get("serial_number")):
+                zoned[id(inst)] = zoned.get(id(inst), False) or has_zone
+        if not zoned:
+            return _NO_IMAGE_MATCHED
+        count = sum(1 for has_zone in zoned.values() if not has_zone)
+        noun = "instance" if count == 1 else "instances"
+        return (f"{count} {noun} matched rules with no redaction zones; "
+                f"nothing to redact.")
+
     def _apply_redaction_rules(self, service, strategy, force=False,
                                project_secret=None):
         """Run every loaded rule and apply the results to the store.
@@ -5808,8 +5854,9 @@ class DicomSession:
             tasks.extend(rule_tasks)
 
         if not tasks:
-            get_logger().warning("No matching images found for any loaded rules.")
-            print("No matching images found for any loaded rules.")
+            message = self._why_no_redaction_task(service)
+            get_logger().warning(message)
+            print(message)
             return 0
 
         print(f"Queued {len(tasks)} redaction tasks across "
