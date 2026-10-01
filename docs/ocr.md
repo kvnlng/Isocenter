@@ -245,7 +245,7 @@ After changing the zones, scan again: a report with no findings means every text
 
 ## Automated Remediation
 
-`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it, in place (a `{roi: [...]}` zone keeps its `note`). A `NEW_LEAK` on a machine that only a `"*"` rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on `"*"`, which would redact that region on every machine's images. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.
+`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it, in place (a `{roi: [...]}` zone keeps its `note`). A `NEW_LEAK` on a machine that only a `"*"` rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on `"*"`, which would redact that region on every machine's images. A `PARTIAL_LEAK` whose zone is the `"*"` rule's does the same with the grown zone: `"*"` is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.
 
 ```python
 import isocenter

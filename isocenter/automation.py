@@ -6,6 +6,35 @@ from collections import defaultdict
 from isocenter.privacy import PhiReport
 from isocenter.services import zone_rois
 
+def _rule_for_machine(finding, meta, zone):
+    """An `ADD_RULE` suggestion for the finding's machine, or None.
+
+    For a leak whose zone would otherwise go to, or grow on, the `"*"`
+    rule, which every machine reads (owner rulings Q2-B and on #899).
+
+    Args:
+        finding (PhiFinding): The leak, for its text.
+        meta (dict): Its metadata, carrying `machine_serial`,
+            `manufacturer` and `model_name`.
+        zone (list): `[y1, y2, x1, x2]` for the new rule.
+
+    Returns:
+        Optional[dict]: The suggestion; None with no machine serial.
+    """
+    machine = meta.get("machine_serial")
+    if not machine:
+        return None
+    return {
+        "serial": machine,
+        "action": "ADD_RULE",
+        "zone": list(zone),
+        "manufacturer": meta.get("manufacturer") or "",
+        "model_name": meta.get("model_name") or "",
+        "reason": (f"{meta.get('leak_type')} detected ({finding.value}) on a "
+                   f"machine only the '*' rule covers. Added a rule for it."),
+    }
+
+
 class ConfigAutomator:
     """
     Analyzes OCR findings and generates suggestions to update the redaction configuration.
@@ -21,7 +50,9 @@ class ConfigAutomator:
         machine's serial instead (`ADD_RULE`), never a zone on `"*"`,
         which every machine reads. A `PARTIAL_LEAK` finding suggests
         growing its best-matching zone to cover the text, on the rule
-        that holds it. A finding with no `rule_serial` in its metadata
+        that holds it; when that rule is `"*"`, it suggests a new exact
+        rule carrying the grown zone instead (`ADD_RULE`), and `"*"` is
+        never widened. A finding with no `rule_serial` in its metadata
         gets no suggestion. Zones are in config space, (y1, y2, x1, x2),
         the order every consumer of ``redaction_zones`` reads; OCR boxes
         arrive as (x, y, w, h) and are converted.
@@ -86,6 +117,17 @@ class ConfigAutomator:
                             int(max(tx + tw, zx2)),
                         ]
 
+                        if serial == "*":
+                            # The zone is the wildcard's: growing it would
+                            # redact the grown region on every machine's
+                            # images for a leak seen on one. A rule for
+                            # this machine carries the grown zone instead,
+                            # as for a NEW_LEAK (owner ruling on #899).
+                            rule = _rule_for_machine(f, meta, union_zone)
+                            if rule is not None:
+                                suggestions.append(rule)
+                            continue
+
                         suggestions.append({
                             "serial": serial,
                             "action": "EXPAND_ZONE",
@@ -106,19 +148,9 @@ class ConfigAutomator:
                         # "*" would redact that region on every machine's
                         # images, so a rule for this one is suggested
                         # instead (owner ruling Q2-B, #808).
-                        machine = meta.get("machine_serial")
-                        if not machine:
-                            continue
-                        suggestions.append({
-                            "serial": machine,
-                            "action": "ADD_RULE",
-                            "zone": list(zone),
-                            "manufacturer": meta.get("manufacturer") or "",
-                            "model_name": meta.get("model_name") or "",
-                            "reason": (f"New leak detected ({f.value}) on a "
-                                       f"machine only the '*' rule covers. "
-                                       f"Added a rule for it."),
-                        })
+                        rule = _rule_for_machine(f, meta, zone)
+                        if rule is not None:
+                            suggestions.append(rule)
                         continue
 
                     suggestions.append({

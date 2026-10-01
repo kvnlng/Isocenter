@@ -183,6 +183,30 @@ def test_a_leak_covered_only_by_the_wildcard_suggests_a_rule_for_its_machine(
         session.close()
 
 
+def test_a_partial_leak_on_a_wildcard_zone_suggests_a_rule_and_never_widens_it(
+        tmp_path):
+    """Owner ruling on #899: the grown zone goes to a rule for the serial.
+
+    Widening the `"*"` zone would redact the grown region on every
+    machine's images, for a leak seen on one.
+    """
+    session = _session(tmp_path)
+    wildcard = {"serial_number": "*", "redaction_zones": [list(PARTIAL)]}
+    try:
+        findings, _, _ = _scan(session, [dict(wildcard,
+                                              redaction_zones=[list(PARTIAL)])])
+        assert _leaks(findings) == ["PARTIAL_LEAK"]
+        assert findings[0].metadata["rule_serial"] == "*"
+
+        assert session.auto_remediate_config(findings) == 1
+        assert session.configuration.rules == [
+            wildcard,
+            {"serial_number": SERIAL, "manufacturer": MAKER,
+             "model_name": MODEL, "redaction_zones": [[0, 30, 0, 110]]}]
+    finally:
+        session.close()
+
+
 def test_a_series_with_no_serial_is_not_scanned_by_the_wildcard(tmp_path, capsys):
     """6: `rule_applies_to` matches no serial-less series, as `redact()` reads it."""
     session = _session(tmp_path, serials=("",))
