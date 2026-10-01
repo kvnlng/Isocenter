@@ -16,6 +16,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Under the default floor (`REPLACE` on `0010,0010`) the lock still succeeds, and the token now holds `''` where it held `Unknown`, so a restore writes `''`.
   - **Output:** none. A lock writes no exported value of its own.
 
+- **BREAKING: `lock_identities()` refuses a patient that holds a Patient ID (or a Patient's Name) when every instance's copy of `0010,0020` (or `0010,0010`) is present and blank (#761, owner ruling Q2 A).** A token keeps what each instance held (the L8 ruling). So when every copy had been blanked before the lock, the token held `''`, the lock still reported success, and the original was unrecoverable. Measured on `main` at 7579d4df with two CT_small files of patient `PA`, each instance's `0010,0020` set to `''`:
+  - The lock returned `<LockingResult: 2 instances secured>`.
+  - `recover_patient_identity(..., restore=True)` wrote `''`, which made the patient ID-less.
+  - On the reopen, the only thing keeping the next run from `PASS` was a false WARNING row saying a pre-1.0 release had grouped the patient.
+
+  The refusal keeps the L8 ruling and loses nothing: the caller puts the copies back, or leaves the tag out, and locks.
+  - **What a previously-working call now raises.** `RuntimeError: lock_identities: this patient holds a Patient ID, and every instance's copy of 0010,0020 is blank, so the token would restore the patient with no Patient ID. Put the value back on its instances, or call lock_identities(<its Patient ID>, tags_to_lock=['0010,0010', '0010,0030', '0010,0040', '0008,0050']); the token this call would have written is unchanged.` with the default `tags_to_lock`. The same shape, naming a Patient's Name and `0010,0010`, is raised for the name. The batch form collects it like every refusal (`[n of m]`, no patient locked). The message names no ID and no name.
+  - **Not refused:** mixed copies where only some are blank, since recovery already takes the first non-blank token. Also not refused: a subject with no Patient ID, whose blank is the truth; copies that are absent, which the lock reads from the patient; and a patient whose own value is blank. The refusals that name what `anonymize()` wrote or emptied are judged first and keep their messages.
+  - The `lock_identities` docstring's refusal list and `docs/api/stability.md` now carry the exception to "a tag held blank is a value".
+  - `tests/test_a_lock_of_blanked_owner_copies_is_refused.py`.
+  - **Output:** none.
+
+### Changed
+
+- **`lock_identities()` creates `isocenter.key` only when it writes a token (#813, owner ruling Q1 A).** Four doors created a key file and locked nothing. Measured on `main` at 7579d4df:
+  - `lock_identities(report)` after `anonymize()`. The report names the source IDs, which no patient holds any more.
+  - A list of IDs that matches no patient. The single-ID form created no key in that case, so the two forms disagreed.
+  - An empty report.
+  - Any refused lock, single or batch, because the key was created before the plan.
+
+  Each left a key that opened nothing, and every later `Session()` in that directory then turned reversible anonymization on by itself, by the frozen rule that loads `./isocenter.key`.
+  - **Now** the lock plans under the key file's key, or under a key held in memory only when there is no file. It writes the file (mode 0600, created exclusively, as before) only after every plan has succeeded and at least one plan carries a token. A refusal, no patient found, or a patient with no instances writes no file. If another session links its key into place between the plan and the write, that key is the one on disk: the engine is rebuilt under it and every patient is planned again, so no token is embedded under a key nobody holds.
+  - `docs/api/stability.md`'s sentence "The first `lock_identities()` creates the key" now reads "The first `lock_identities()` that writes a token creates the key". `docs/quickstart.md` and `docs/tutorials/reversible-anonymization.md` no longer say that a lock after `anonymize()` creates the key file.
+  - The "token of ours and no key file" refusal still raises before any key exists. A `TypeError` for a bad selection still comes before any key work. A `ValueError` for an empty or malformed key file is unchanged. `enable_reversible_anonymization()` and `recover_patient_identity()` still create no key.
+  - `tests/test_a_lock_that_secures_nothing_creates_no_key.py`.
+  - **Output:** none.
+
 ### Fixed
 
 - **A file with no Patient's Name is exported with an empty Patient's Name, not `Unknown` (#746).** `ingest()` filled an absent Patient's Name `(0010,0010)` with the placeholder `Unknown` and held it on the `Patient`. The export stamps `0010,0010` from the `Patient`, and the scan's `REPLACE` arm exempted the literal `Unknown` by name. A file with no name was therefore exported as `0010,0010 PN 'Unknown'` beside `(0012,0062) YES`, and the run graded `PASS`. That happened under the default floor as well as under `KEEP`, which is wider than the issue as filed. Measured on `main` at 7579d4df over CT_small with the element deleted. A placeholder cannot be told from a recorded name once it is in the graph: a file really naming its patient `Unknown` kept that name through `REPLACE`, and the export claimed a name that no file recorded.

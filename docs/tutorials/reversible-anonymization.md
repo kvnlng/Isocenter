@@ -99,8 +99,8 @@ locked = session.lock_identities(report)
 - **`lock_identities(report)`** writes an identity token into every
   instance of those patients: Patient's Name, Patient ID, Birth Date, Sex
   and Accession Number, encrypted, in the Encrypted Attributes Sequence
-  `(0400,0500)`. The first lock creates the key file, readable only by
-  you (mode 0600).
+  `(0400,0500)`. The first lock that writes a token creates the key
+  file, readable only by you (mode 0600).
 
 ```python
 >>> len(locked)
@@ -116,10 +116,10 @@ True
     Called after `anonymize()`, `lock_identities(report)` does not
     raise. It looks for the report's patients by their original Patient
     IDs, and after `anonymize()` no patient holds them, so it logs one
-    `ERROR` line saying the IDs matched no patient, returns an empty
-    result, and still creates the key file. The count is 0, and the key
-    opens nothing. (Passing one patient's new `ANON_` ID instead raises
-    `RuntimeError`.)
+    `ERROR` line saying the IDs matched no patient, and returns an empty
+    result. The count is 0, and no key file is created: only a lock that
+    writes a token creates one. (Passing one patient's new `ANON_` ID
+    instead raises `RuntimeError`, and creates no key file either.)
 
 The key is a file of its own. Here it sits next to the store; step 6
 moves it where it belongs. Keep its contents to yourself: anyone who

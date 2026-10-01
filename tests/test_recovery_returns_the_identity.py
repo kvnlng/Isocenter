@@ -232,6 +232,9 @@ def test_a_pre_0_9_8_shared_token_is_returned_whole(tmp_path):
     with _session(tmp_path) as session:
         patient, instances = _patient(session, [[(A, "ACC-1")], [(D, "ACC-2")]])
         rs = session.reversibility_service
+        # The key on disk, as the 0.9.7 lock left it: since #813
+        # `_key_for_locking()` alone plans under a key held in memory.
+        session.key_manager.load_or_generate_key()
         session._key_for_locking()
         token = rs.engine.encrypt(json.dumps(_held("ACC-1")).encode("utf-8"))
         for inst in instances:

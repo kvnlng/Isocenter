@@ -24,6 +24,10 @@ class KeyManager:
         """
         self.key_path = os.path.abspath(key_path)
         self.key: Optional[bytes] = None
+        # A key generated for a lock to plan under, held in memory only
+        # until the lock commits it (`_commit_planned_key`); never on
+        # `self.key`, which means "the key on disk" (#813).
+        self._planned_key: Optional[bytes] = None
 
     def load_key(self) -> bytes:
         """
@@ -97,49 +101,94 @@ class KeyManager:
                 errno against `key_path`.
             ValueError: An existing file at the path is empty or malformed.
         """
-        if self.key is None:
+        self._key_for_planning()
+        return self._commit_planned_key()
+
+    def _key_for_planning(self) -> bytes:
+        """The key a lock plans its tokens under; writes nothing.
+
+        The file's key when one exists (loaded and cached as `load_key()`
+        does); otherwise a key generated in memory, the same one on every
+        call until `_commit_planned_key` writes it or finds another
+        session's key in its place.
+
+        Returns:
+            bytes: The key.
+
+        Raises:
+            ValueError: An existing file at the path is empty or malformed.
+        """
+        # Split from the write so a lock that writes no token -- refused,
+        # or matching no patient, or none with an instance -- leaves no
+        # key file behind (#813): a key file in the working directory turns
+        # reversible anonymization on in every later `Session()` there.
+        if self.key is not None:
+            return self.key
+        try:
+            return self.load_key()
+        except FileNotFoundError:
+            pass
+        if self._planned_key is None:
+            self._planned_key = Fernet.generate_key()
+        return self._planned_key
+
+    def _commit_planned_key(self) -> bytes:
+        """Write the planned key to `key_path` unless a key is there, and
+        return the key now on disk.
+
+        Returns:
+            bytes: The key at `key_path`: this one's, or the key another
+                session wrote first, which the caller must then plan under
+                again.
+
+        Raises:
+            OSError: As `load_or_generate_key()`.
+            ValueError: The file another session wrote is empty or
+                malformed.
+        """
+        if self.key is not None:
+            return self.key
+        key = self._planned_key or Fernet.generate_key()
+        # Written to a temporary file in the key's own directory
+        # (`mkstemp` creates at 0600 whatever the umask) and hard-linked
+        # into place, so the key file is never seen empty. `os.link`
+        # refuses to replace an existing path, so of two sessions
+        # creating the key at once exactly one wins.
+        directory = os.path.dirname(self.key_path) or "."
+        try:
+            fd, temp_path = tempfile.mkstemp(
+                prefix=os.path.basename(self.key_path) + ".", dir=directory)
+        except OSError as exc:
+            # A missing or read-only directory is reported against
+            # the path the caller gave, not the temporary name nobody
+            # asked for. Same type, same errno.
+            raise type(exc)(exc.errno, exc.strerror, self.key_path) from None
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(key)
             try:
+                os.link(temp_path, self.key_path)
+            except FileExistsError:
+                # The other session won; its file is complete, because
+                # it too was linked into place already written.
+                self._planned_key = None
                 return self.load_key()
-            except FileNotFoundError:
-                pass
-            key = Fernet.generate_key()
-            # Written to a temporary file in the key's own directory
-            # (`mkstemp` creates at 0600 whatever the umask) and hard-linked
-            # into place, so the key file is never seen empty. `os.link`
-            # refuses to replace an existing path, so of two sessions
-            # creating the key at once exactly one wins.
-            directory = os.path.dirname(self.key_path) or "."
-            try:
-                fd, temp_path = tempfile.mkstemp(
-                    prefix=os.path.basename(self.key_path) + ".", dir=directory)
-            except OSError as exc:
-                # A missing or read-only directory is reported against
-                # the path the caller gave, not the temporary name nobody
-                # asked for. Same type, same errno.
-                raise type(exc)(exc.errno, exc.strerror, self.key_path) from None
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(key)
+            except OSError:
+                # No hard links here: fall back to an exclusive create.
+                # A reader between it and the write can find an empty
+                # file on such a filesystem.
                 try:
-                    os.link(temp_path, self.key_path)
+                    exclusive = os.open(
+                        self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 except FileExistsError:
-                    # The other session won; its file is complete, because
-                    # it too was linked into place already written.
+                    self._planned_key = None
                     return self.load_key()
-                except OSError:
-                    # No hard links here: fall back to an exclusive create.
-                    # A reader between it and the write can find an empty
-                    # file on such a filesystem.
-                    try:
-                        exclusive = os.open(
-                            self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                    except FileExistsError:
-                        return self.load_key()
-                    with os.fdopen(exclusive, "wb") as f:
-                        f.write(key)
-            finally:
-                os.unlink(temp_path)
-            self.key = key
+                with os.fdopen(exclusive, "wb") as f:
+                    f.write(key)
+        finally:
+            os.unlink(temp_path)
+        self.key = key
+        self._planned_key = None
         return self.key
 
     def get_key(self) -> bytes:

@@ -3913,9 +3913,11 @@ class DicomSession:
 
         No message carries a Patient ID: a message says "this patient", its
         advice spells the ID `<its Patient ID>`, and a replaced Patient ID
-        is described, not quoted. When the lock creates the key file (the
-        first lock under a path with none), the file is created already
-        written, with mode 0600.
+        is described, not quoted. The key file is created only by a lock
+        that writes a token (the first under a path with none), after every
+        patient is planned, already written and with mode 0600; a lock that
+        writes no token (refused, no patient found, or none with an
+        instance) creates no key file (#813).
 
         Args:
             patient_id (str): The ID of the patient to lock; anything that
@@ -4003,11 +4005,13 @@ class DicomSession:
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
-        """Load the lock's key, creating it if allowed, and build its engine.
+        """Choose the key the lock plans under, and build its engine.
 
-        Call it before any patient's lock is planned. The key is created only
-        when no file exists at the path and no instance in the session carries
-        a token this library wrote. Writes no token.
+        Call it before any patient's lock is planned. The key is the file's;
+        when no file exists and no instance in the session carries a token
+        this library wrote, it is a key held in memory, which
+        `_commit_lock_key` writes only once a plan carries a token (#813).
+        Writes no token and no file.
 
         Raises:
             RuntimeError: No key file at the path, and an instance in the
@@ -4027,12 +4031,14 @@ class DicomSession:
         # scope, not the patient's: a key minted here would be the session's
         # key from then on.
         #
-        # The single lock calls this only once its patient is found, so a lock
-        # of an ID no patient holds creates no key file. The batch calls it
-        # after reading its selection and before it plans, found or not,
-        # because it cannot plan without the engine; a batch of IDs that match
-        # no patient therefore creates the key, as does a lock then refused
-        # for any other reason.
+        # Nothing is written here (#813). The batch calls this after reading
+        # its selection and before it plans, found or not, because it cannot
+        # plan without the engine; were the key written here, a batch of IDs
+        # matching no patient, an empty report, or a lock then refused would
+        # each leave a key file that opens nothing, and every later
+        # `Session()` in that directory would turn reversible anonymization
+        # on by itself. The file is written by `_commit_lock_key`, after
+        # every plan has succeeded.
         try:
             self.key_manager.load_key()
         except FileNotFoundError:
@@ -4052,8 +4058,36 @@ class DicomSession:
                     "reversible anonymization with the key the identities "
                     "were locked with; no key was created, and the token this "
                     "call would have written is unchanged.") from None
-            self.key_manager.load_or_generate_key()
-        self.reversibility_service.engine  # pylint: disable=pointless-statement
+        self.reversibility_service._use_key(self.key_manager._key_for_planning())
+
+    def _commit_lock_key(self, plans) -> bool:
+        """Write the key the plans were made under, when any carries a token.
+
+        Call it after every plan of the call has succeeded and before the
+        first token is embedded. Writes nothing unless some value-set has
+        both a token and an instance to embed it in (#813).
+
+        Args:
+            plans: Each `_planned_identity_lock` result of the call.
+
+        Returns:
+            bool: True when another session wrote a key first: the engine
+                is now built over that key, and the caller must plan every
+                patient again before embedding anything.
+        """
+        # A token embedded somewhere: a patient with no instances plans a
+        # token from the patient's own values and embeds it on nothing.
+        if not any(token and members for _, value_sets in plans
+                   for _, token, members in value_sets):
+            return False
+        planned = self.reversibility_service._engine_key
+        key = self.key_manager._commit_planned_key()
+        if key == planned:
+            return False
+        # Lost the race to another session's key: a token built under the
+        # planned key would open under no key anyone holds.
+        self.reversibility_service._use_key(key)
+        return True
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
                                verbose: bool, tags_to_lock: Optional[List[str]]
@@ -4076,6 +4110,8 @@ class DicomSession:
                 persist `_write_identity_lock` cannot complete.
         """
         plan = self._planned_identity_lock(patient, tags_to_lock)
+        if self._commit_lock_key([plan]):
+            plan = self._planned_identity_lock(patient, tags_to_lock)
         return self._write_identity_lock(patient, plan, persist, verbose)
 
     def _planned_identity_lock(self, patient: "Patient",
@@ -4839,6 +4875,13 @@ class DicomSession:
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
 
+        # The key file is written only now, every plan having succeeded,
+        # and only when one carries a token (#813). If another session
+        # wrote its key first, every patient is planned again under it.
+        if self._commit_lock_key(plans.values()):
+            plans = {pid: self._planned_identity_lock(patient_map[pid], tags_to_lock)
+                     for pid in plans}
+
         # Drained after every plan and before the first token is embedded,
         # for the reason `lock_identities` gives. Once, here: nothing
         # below enqueues a save, so the
@@ -5353,7 +5396,7 @@ class DicomSession:
 
         Loads the key when a file is there. This call never creates the
         key file, and neither does recovery: the first `lock_identities()`
-        creates it when none exists. So a mistyped path before
+        that writes a token creates it when none exists. So a mistyped path before
         `recover_patient_identity()` fails there with `FileNotFoundError`
         rather than minting a key the data was never locked under.
 
