@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Now** the later file is declined above the sidecar write, as a duplicate SOP Instance UID is (#431), so no frame is stranded. "Later" means later in path order among the files new to the call, and a study the store already holds beats every new file. One `WARNING` row per file names the file path and the instance, and never a Patient ID: `Not importing <path>: its Study Instance UID is held by a patient with a different Patient ID, and one study belongs to one patient. Instance <uid> was not read into the store (#745).` `IngestSummary.declined` counts it, and the row grades the run `REVIEW_REQUIRED`.
   - **Not declined:** a file carrying the patient's original ID, of a study `anonymize()` already moved under the pseudonym. That is the same patient, recognised by the key the date shift already uses (`canonical_patient_key` under the holder's scheme), and the patient merge (#548) folds it back as before. Also not declined: a file with no Patient ID, or a study held by an ID-less patient. Both stay #584's linkage.
   - `tests/test_two_patients_sharing_a_study_uid_are_declined.py`.
+  - **Output:** none in the fingerprint, where no member shares a Study UID across two Patient IDs. Where two real Patient IDs share one Study UID, the later file is no longer exported, and the run grades `REVIEW_REQUIRED` where it graded `PASS`.
 
 - **An entity edited between `audit()` and `anonymize()` is no longer stamped `REMEDIATED` by the pass (#752, owner ruling Q3 A).** The pass's success stamps recorded `REMEDIATED` whatever status the entity had held. An instance whose status the edit had left stale (recorded, then edited, with no scan since) therefore came out of the pass with a current `REMEDIATED` over content no scan had read. Measured on `main` at 7579d4df over CT_small:
   - `audit()`, then `inst.set_attr("0008,0090", "Real^Referrer")`, then `anonymize(report)`.
@@ -91,7 +92,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The copy then holds its owner's vouched value. That is the end state `RemediationService._owner_stamps_copy` already reads as satisfied when it finds it there, so it is now satisfied when the pass has just put it there. The new instance ends `REMEDIATED`, and the run grades `PASS` with no decline row. An owner still holding a source value is unchanged: the copy is set to it, the instance reads `IDENTIFIED`, and the not-handed-in and declined branches behave as before.
   - `tests/test_a_file_reingested_into_an_anonymized_study_is_settled.py`.
   - **Output:** none in the fingerprint, which never ingests twice. On this path the new file now carries the de-identification markers, and the run grades `PASS` where it graded `REVIEW_REQUIRED`. The file's values are unchanged.
-  - **Output:** none in the fingerprint, where no member shares a Study UID across two Patient IDs. Where two real Patient IDs share one Study UID, the later file is no longer exported, and the run grades `REVIEW_REQUIRED` where it graded `PASS`.
+
+- **`fingerprint/output.json` retaken for the fixes above (#746, #745, #894, #752, #765).** It was retaken on 3.12 at e238b31f and checked clean on 3.14t. Against the recording it replaces (39fe6e94, 1.0.0rc6), there are 55 differences in 1 group, all in section 6 (Elements). No cohort row, outcome, accounting row, path or WFDB record changes.
+  - **Output:** `0010,0010` changes from `PN 'Unknown'` to `PN ''` (`PN/implicit` in the implicit-VR arms) in every DICOM arm (`A.dicom`, `A.dicom-j2k`, `A.reopened.dicom`, `B.dicom`, `B.dicom-j2k`) of the 11 members whose source has no Patient's Name (#746):
+    - `pydicom-data:HTJ2KLossless_08_RGB.dcm`
+    - `pydicom-data:HTJ2K_08_RGB.dcm`
+    - `pydicom-data:JLSL_08_07_0_1F.dcm`
+    - `pydicom-data:JLSL_16_15_1_1F.dcm`
+    - `pydicom:test_files/ExplVR_BigEndNoMeta.dcm`
+    - `pydicom:test_files/ExplVR_LitEndNoMeta.dcm`
+    - `pydicom:test_files/GDCMJ2K_TextGBR.dcm`
+    - `pydicom:test_files/JPEGLSNearLossless_08.dcm`
+    - `pydicom:test_files/JPEGLSNearLossless_16.dcm`
+    - `pydicom:test_files/SC_rgb_jls_lossy_line.dcm`
+    - `pydicom:test_files/SC_rgb_jls_lossy_sample.dcm`
+
+    Their folders stay `Subject_UnknownPatient`: that folder name comes from the empty Patient ID (#584), not from the name.
+  - **Nothing else moved.** #745: no member shares a Study UID across two Patient IDs. #894: the tool never ingests twice. #752: it never edits between `audit()` and `anonymize()`. #765: configuration B keeps private tags, but no member's private element equals a UID replaced in its own instance. #761 and #813 change no output. `CONFIG_VERSION` stays 2.0, so no `(0012,0063)` hash and no `phi_policy` fingerprint moves.
 
 ## [1.0.0rc8] - 2026-10-01
 
