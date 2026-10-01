@@ -208,3 +208,38 @@ def test_an_edit_saved_across_a_reopen_stays_stale(tmp_path):
         assert conn.execute(
             "SELECT phi_status, phi_status_edited FROM instances").fetchall() == [
                 ("unscanned", "identified")]
+
+
+@pytest.mark.skip(reason="awaiting the owner's call on #896 review finding 1: "
+                         "(a) redaction carries IDENTIFIED, (b) pin "
+                         "REVIEW_REQUIRED, or (c) refuse the order")
+def test_audit_then_redact_then_anonymize_over_that_report(tmp_path):
+    """`audit()`, then `redact()`, then `anonymize(report)` (review of #896,
+    finding 1). Redaction carries only an assured status
+    (`services._CARRIED_STATUSES`), so the instance the audit left
+    IDENTIFIED reads stale once redacted, and `_keep_stale` holds it stale
+    through the pass. On 7579d4df the run graded PASS with the markers
+    written; at 3dd3e64e it grades REVIEW_REQUIRED and the markers are
+    withheld. The final assertion waits for the owner's call:
+      (a) REMEDIATED, `(0012,0062)` YES, PASS;
+      (b) UNSCANNED over IDENTIFIED, no markers, condition 8;
+      (c) `redact()` raises before writing anything.
+    """
+    path = write_ct(tmp_path / "in" / "a.dcm", "PA", 7520, name="Alpha^Ann")
+    ds = pydicom.dcmread(path)
+    ds.DeviceSerialNumber = "B1-REDACT"
+    ds.save_as(path)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        _patient, _study, inst = _only(session)
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.configuration.add_rule("B1-REDACT", redaction_zones=[[0, 4, 0, 4]])
+        assert session.redact() == 1
+        session.anonymize(report)
+        out, text = _export_and_report(session, tmp_path)
+        status, raw = inst.phi_status, inst._phi_status
+    measured = (status, raw, "markers" if out.get((0x0012, 0x0062)) else "no markers",
+                _basis(text))
+    # The final assertion goes here once the owner rules; see the docstring.
+    del measured
