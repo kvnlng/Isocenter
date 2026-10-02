@@ -2399,7 +2399,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
 
 
 def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
-                   number_of_frames=None) -> Tuple[np.ndarray, str]:
+                   number_of_frames=None,
+                   beyond=None) -> Tuple[np.ndarray, str]:
     """The array `Dataset.pixel_array` returns, and the colour space it is in.
 
     Every door that decodes a file's pixels calls this -- ingest at the top
@@ -2438,6 +2439,11 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
             With `allow_excess_frames=False`, the excess is then dropped
             here, keeping `declared_frame_count(ds)` frames; a single kept
             frame has no leading axis.
+        beyond (dict, optional): Filled by the imagecodecs fallback's
+            JPEG Lossless decode when a sample above the stream's own
+            precision is read from its low bits under PixelRepresentation
+            1 (#682); see `imagecodecs_handler._masked_beyond_precision`.
+            Only `ingest_worker` passes it. Never filled on pydicom's route.
 
     Returns:
         Tuple[np.ndarray, str]: The contiguous, native-byte-order array in
@@ -2580,7 +2586,7 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         # do, so it would change what pydicom decodes.
         _validate_like_pydicom(ds, ts)
         arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
-                                                    exc)
+                                                    exc, beyond)
     else:
         # pydicom's decode only, outside the `try`: the fallback extends
         # its own (`_decode_frame`), and a refusal here is not a reason to
@@ -2735,7 +2741,7 @@ def _validate_like_pydicom(ds, ts) -> None:
 
 
 def _decode_with_imagecodecs(ds, allow_excess_frames,
-                             pydicom_error) -> Tuple[np.ndarray, str]:
+                             pydicom_error, beyond=None) -> Tuple[np.ndarray, str]:
     """`_decode_pixels`' fallback: decode with imagecodecs, then refuse what does not fit.
 
     The decode is accepted only when it matches the header, and refused
@@ -2753,6 +2759,7 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
             declared frames; anything else refuses it.
         pydicom_error (Exception): pydicom's failure, which every refusal
             names first and chains from.
+        beyond (dict, optional): Handed to `decode_declared_frames` (#682).
 
     Returns:
         Tuple[np.ndarray, str]: The array in the shape `pixel_array`
@@ -2839,7 +2846,10 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
               else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
 
     try:
-        arr = decode_declared_frames(ds, frames)
+        # `beyond` is filled only here, on the fallback route: a pydicom
+        # plugin decodes before this is asked, and that route's clamp is
+        # what #671 accepted as route-dependent (#682).
+        arr = decode_declared_frames(ds, frames, beyond)
     except Exception as exc:  # pylint: disable=broad-except
         raise refused(describe_exception(exc)) from exc
 
@@ -3210,7 +3220,9 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     #   `2^P - 1`, so the unsigned bound's low half is a true proxy for
     #   over-precision (a precision-12 stream reads `[-3992, 3570]` at
     #   BitsStored 13 and `[0, 4970]` at 16, against `[0, 4095]` on the
-    #   plugin route; at BitsStored 12 it is masked and not visible).
+    #   plugin route; at BitsStored 12 it is masked and not visible
+    #   here, which is why the fallback's decode reports it from the
+    #   codec's array instead, `_masked_beyond_precision`, #682).
     # * `.50`/`.51` are in `T81_SYNTAXES` too, but their `_decode_frame` arm
     #   does no sign extension and no container widening. The arm is inert
     #   for them: the fallback's dtype check refuses a `uint8`/`uint16`
@@ -3260,11 +3272,15 @@ def _beyond_precision_words(facts) -> str:
     """The over-precision row, from `_samples_beyond_stream_precision`'s facts.
 
     Args:
-        facts (dict): `_samples_beyond_stream_precision`'s return value.
+        facts (dict): `_samples_beyond_stream_precision`'s return value,
+            or `imagecodecs_handler._masked_beyond_precision`'s (it carries
+            `reads`), which `_masked_beyond_precision_words` speaks for.
 
     Returns:
         str: One sentence for the `WARNING` row.
     """
+    if "reads" in facts:
+        return _masked_beyond_precision_words(facts)
     # The words must not contain `precision is`, which is how
     # `_precision_words`' row is told apart, and do not repeat its opening.
     #
@@ -3286,6 +3302,31 @@ def _beyond_precision_words(facts) -> str:
             f"declared precision reads a value inside the range "
             f"{precision} bits can hold, so another reader may see "
             f"different values.")
+
+
+def _masked_beyond_precision_words(facts) -> str:
+    """The #682 row: a sample above the stream's precision, read from its low bits.
+
+    "Read as decoded, and exported as read" would be false here: the codec
+    returned the sample, and the sign extension read it from its low bits.
+    Keeps "declares a sample precision of", which is how `_beyond_rows`
+    and the report find the row, and never "precision is" (#622's).
+
+    Args:
+        facts (dict): `_masked_beyond_precision`'s, with `reads` and
+            `width`.
+
+    Returns:
+        str: One sentence for the `WARNING` row.
+    """
+    precision, width = facts["precision"], facts["width"]
+    return (f"The {facts['stream']} declares a sample precision of "
+            f"{precision}, and encodes a sample of {facts['sample']}, which "
+            f"{precision} bits cannot hold. Under Pixel Representation 1 "
+            f"every sample is read from its low {width} bits and "
+            f"sign-extended, so it reads {facts['reads']} here; a decoder "
+            f"that clamps to the declared precision reads another value, "
+            f"so another reader may see different values.")
 
 
 #: The two transfer syntaxes whose frames are read for a DCT frame header.
@@ -4574,10 +4615,15 @@ def ingest_worker(fp: str) -> Tuple:
             # An overlay kept in Pixel Data's unused high bits (#755), asked
             # of the header before the decode like the two above.
             in_pixel_overlays = _in_pixel_overlays(ds)
+            # Filled by the fallback's T.81 decode when a sample above the
+            # stream's precision is read from its low bits (#682); read
+            # below only if the decoded array says nothing.
+            masked_beyond = {}
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
-                arr, decoded_pi = _decode_pixels(ds, **decode_kwargs)
+                arr, decoded_pi = _decode_pixels(ds, beyond=masked_beyond,
+                                                 **decode_kwargs)
                 p_bytes = arr.tobytes()
                 p_alg = 'zlib'  # Always compress the raw bytes
                 # The label has to say what the bytes are, and the bytes
@@ -4615,6 +4661,12 @@ def ingest_worker(fp: str) -> Tuple:
                 # answers it. Plain types, so it rides `meta` out of a
                 # spawned worker.
                 beyond_precision = _samples_beyond_stream_precision(ds, arr)
+                # The masked half (#682), only when the array says
+                # nothing: one row per instance, and where BitsStored is
+                # wider than the precision the array's own facts, and
+                # their words, are the ones that hold.
+                if beyond_precision is None and masked_beyond:
+                    beyond_precision = dict(masked_beyond)
                 if beyond_precision is not None:
                     meta['beyond_precision'] = beyond_precision
                 # The decode reads BitsStored bits: pydicom's

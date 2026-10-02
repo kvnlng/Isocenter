@@ -1390,13 +1390,18 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     return None
 
 
-def _decode_frame(transfer_syntax, bitstream, ds):
+def _decode_frame(transfer_syntax, bitstream, ds, beyond=None):
     """One frame's codestream to an array, by the codec its syntax names.
 
     Args:
         transfer_syntax (UID): The file's transfer syntax.
         bitstream (bytes): One frame's codestream.
         ds (pydicom.Dataset): The dataset.
+        beyond (dict, optional): For `.57`/`.70` under PixelRepresentation
+            1: filled with `_masked_beyond_precision`'s facts when the
+            codec returns a sample above the stream's own precision, which
+            the sign extension then reads from its low bits (#682). Holds
+            the widest frame's, and its largest sample, across calls.
 
     Returns:
         np.ndarray: The frame.
@@ -1429,10 +1434,12 @@ def _decode_frame(transfer_syntax, bitstream, ds):
         # its refusal words ("from BitsStored") are the ones that run.
         precision = _jpeg_precision(bitstream)
         bits_stored = int(getattr(ds, "BitsStored", 0) or 0)
-        return _sign_extend(
-            _in_declared_container(imagecodecs.ljpeg_decode(bitstream), ds),
-            ds, precision if precision is not None
-            and precision > bits_stored else None)
+        width = (precision if precision is not None
+                 and precision > bits_stored else None)
+        raw = _in_declared_container(imagecodecs.ljpeg_decode(bitstream), ds)
+        if beyond is not None:
+            _masked_beyond_precision(raw, ds, precision, width, beyond)
+        return _sign_extend(raw, ds, width)
     if transfer_syntax in [JPEGBaseline, JPEGExtended]:
         # Reached through the fallback, monochrome only
         # (`io_handlers._FALLBACK_JPEG`): 12-bit JPEG Extended, which
@@ -1489,7 +1496,49 @@ def _decode_frame(transfer_syntax, bitstream, ds):
     raise RuntimeError(f"Unsupported syntax: {transfer_syntax}")
 
 
-def decode_declared_frames(ds, number_of_frames):
+def _masked_beyond_precision(raw, ds, precision, width, beyond):
+    """Record a lossless T.81 sample above its stream's precision, before the sign extension (#682).
+
+    Under PixelRepresentation 1, `_sign_extend` reads each sample from
+    its low `max(precision, BitsStored)` bits. Where BitsStored is no wider
+    than the stream's precision, a sample the codec returns above
+    `2^precision - 1` is read from its low bits -- 4970 at precision 12
+    reads 874 -- and the stored array's range is a conformant stream's, so
+    `io_handlers._samples_beyond_stream_precision`, which reads only the
+    array after this, cannot see it. This reads the codec's own array,
+    before the extension.
+
+    Args:
+        raw (np.ndarray): The codec's decode, in its declared container.
+        ds (pydicom.Dataset): The dataset.
+        precision (Optional[int]): The stream's declared precision.
+        width (Optional[int]): What `_sign_extend` is passed.
+        beyond (dict): Filled in place with ``{precision, stream, sample,
+            reads, width}``, plain ints and a string so they ride `meta`
+            out of a spawned worker, when this frame's are wider, or the
+            same width with a larger sample, than what it holds.
+    """
+    # PixelRepresentation 0 is not hooked: `_sign_extend` returns the array
+    # untouched there, and the post-decode bound already sees the sample.
+    # `reads` is the extension itself on that one sample, so there is no
+    # second formula for the arithmetic (a `& mask` would agree at
+    # PixelRepresentation 1, and is not used for that reason).
+    if (precision is None or raw.size == 0
+            or int(getattr(ds, "PixelRepresentation", 0) or 0) != 1):
+        return
+    sample = int(raw.max())
+    if sample <= (1 << precision) - 1:
+        return
+    if beyond and (beyond["precision"], beyond["sample"]) >= (precision, sample):
+        return
+    reads = int(_sign_extend(np.array([sample], dtype=raw.dtype), ds, width)[0])
+    beyond.clear()
+    beyond.update(precision=precision, stream="JPEG Lossless stream",
+                  sample=sample, reads=reads,
+                  width=width or int(getattr(ds, "BitsStored", 0) or 0))
+
+
+def decode_declared_frames(ds, number_of_frames, beyond=None):
     """Decode the first `number_of_frames` frames, and ask nothing else.
 
     For `io_handlers._decode_pixels`' fallback. **It does not compare
@@ -1499,6 +1548,8 @@ def decode_declared_frames(ds, number_of_frames):
     Args:
         ds (pydicom.Dataset): The dataset.
         number_of_frames (int): How many frames to decode, from the first.
+        beyond (dict, optional): Handed to every frame's `_decode_frame`
+            (#682).
 
     Returns:
         np.ndarray: the frame for one, the frames stacked for more. The
@@ -1520,7 +1571,7 @@ def decode_declared_frames(ds, number_of_frames):
     if not is_available():
         raise _unavailable() from IMPORT_ERROR
     transfer_syntax = ds.file_meta.TransferSyntaxUID
-    frames = [_decode_frame(transfer_syntax, bitstream, ds)
+    frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
               for bitstream in islice(
                   generate_frames(ds.PixelData,
                                   number_of_frames=number_of_frames,
