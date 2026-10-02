@@ -32,17 +32,19 @@ def test_tooling_artifacts_are_not_reported(tmp_path):
     assert root_guard.new_entries(tmp_path, before) == []
 
 
-def test_the_packaging_builds_directories_are_allowed_by_exact_name(tmp_path):
-    """`build/` and `isocenter.egg-info/` are setuptools' working
-    directories for test_packaging_contract.py's build; a test's own
-    `build.db` is still a stray."""
+def test_setuptools_working_directories_are_strays_like_any_other(tmp_path):
+    """`build/` and `isocenter.egg-info/` new in the root are named (#859).
+
+    They were allowed by name while test_packaging_contract.py's build ran
+    in the root. It builds in a copy of the tracked tree now, so a run that
+    leaves either behind wrote into the root.
+    """
     before = root_guard.snapshot(tmp_path)
     (tmp_path / "build").mkdir()
     (tmp_path / "isocenter.egg-info").mkdir()
     (tmp_path / "build.db").write_bytes(b"")
-    (tmp_path / "isocenter.egg-info.bak").write_bytes(b"")
     assert root_guard.new_entries(tmp_path, before) == [
-        "build.db", "isocenter.egg-info.bak"]
+        "build", "build.db", "isocenter.egg-info"]
 
 
 def test_a_rewritten_file_that_was_already_there_is_named_as_modified(tmp_path):

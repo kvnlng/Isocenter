@@ -17,8 +17,6 @@ that only the export's pool gets it.
 import filecmp
 import functools
 import logging
-import multiprocessing
-import multiprocessing.pool
 import sqlite3
 
 from isocenter import parallel
@@ -73,7 +71,8 @@ def test_an_export_returns_its_files_though_a_worker_cannot_leave(
                         raising=False)
     started = []
     monkeypatch.setattr(_RecordedPool, "started", started)
-    monkeypatch.setattr(multiprocessing.pool, "Pool", _RecordedPool)
+    # The class `_run_on_recycling_pool` builds, by its module name (#887).
+    monkeypatch.setattr(parallel, "_RecyclingPool", _RecordedPool)
     for index in range(3):
         write_ct(tmp_path / "in" / f"{index}.dcm", f"P860{index}",
                  f"860{index}")

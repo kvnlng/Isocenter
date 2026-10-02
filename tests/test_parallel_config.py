@@ -1,3 +1,4 @@
+import collections
 import os
 import unittest
 from unittest.mock import patch
@@ -61,37 +62,45 @@ class TestParallelConfig(unittest.TestCase):
     # mp_context -- parks `Future.result()` on a queue that is a
     # MagicMock and hangs pytest until the probe's 900 s timeout (#365,
     # spec §3.3). Patching both turns that mutant into a red assertion in
-    # milliseconds. The two are asymmetric on purpose: `get_context` is
-    # called on the executor path too (for `mp_context`), so its *Pool*
-    # is what must not be called there, not `get_context` itself.
+    # milliseconds. The recycling pool is `parallel._RecyclingPool` (#887),
+    # patched whole: a real pool handed a Mock context, as patching
+    # `multiprocessing.get_context` did when the pool was `ctx.Pool()`,
+    # builds MagicMock queues whose `poll()` is always truthy, and its
+    # `_help_stuff_finish` then spins for good on the exit's helper thread.
 
-    @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
-    @patch('multiprocessing.get_context')
-    def test_run_parallel_maxtasksperchild(self, mock_get_context, mock_executor):
-        """Test that ISOCENTER_MAX_TASKS_PER_CHILD triggers multiprocessing.Pool."""
-        os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"] = "10"
+    @staticmethod
+    def _recycling_pool_returning(mock_pool_class, results):
+        """Make the patched `_RecyclingPool` yield `results` from
+        `imap_unordered`, with the fields the stream's watch reads."""
+        mock_pool = mock_pool_class.return_value
+        mock_pool._started = collections.deque()
+        mock_pool._pool = []
+        mock_pool._exit_grace = parallel._WORKER_EXIT_GRACE_S
 
-        mock_ctx = mock_get_context.return_value
-        mock_pool = mock_ctx.Pool.return_value
-        mock_pool.__enter__.return_value = mock_pool
-
-        # Mock iterator with next(timeout) support
         class MockIterator:
+            """`IMapIterator`'s `next(timeout=)`, over a list."""
             def __init__(self, items):
                 self._iter = iter(items)
-            def __next__(self):
+            def next(self, timeout=None):  # pylint: disable=unused-argument
                 return next(self._iter)
-            def __iter__(self):
-                return self
 
-        mock_pool.imap_unordered.return_value = MockIterator([1, 2, 3])
+        mock_pool.imap_unordered.return_value = MockIterator(results)
+        return mock_pool
 
-        parallel.run_parallel(identity, [1, 2, 3], show_progress=False)
+    @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
+    @patch('isocenter.parallel._RecyclingPool')
+    def test_run_parallel_maxtasksperchild(self, mock_pool_class, mock_executor):
+        """Test that ISOCENTER_MAX_TASKS_PER_CHILD triggers the recycling pool."""
+        os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"] = "10"
+        self._recycling_pool_returning(mock_pool_class, [1, 2, 3])
+
+        self.assertEqual(sorted(parallel.run_parallel(
+            identity, [1, 2, 3], show_progress=False)), [1, 2, 3])
 
         # check that Pool was initialized with maxtasksperchild=10
-        mock_ctx.Pool.assert_called()
+        mock_pool_class.assert_called()
         mock_executor.assert_not_called()
-        call_kwargs = mock_ctx.Pool.call_args[1]
+        call_kwargs = mock_pool_class.call_args[1]
         self.assertEqual(call_kwargs.get('maxtasksperchild'), 10)
 
     def _assert_disables_gc(self, initializer):
@@ -109,8 +118,8 @@ class TestParallelConfig(unittest.TestCase):
         self.assertTrue(initializer.keywords.get('disable_gc'))
 
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
-    @patch('multiprocessing.get_context')
-    def test_run_parallel_disable_gc_maxtasks(self, mock_get_context, mock_executor):
+    @patch('isocenter.parallel._RecyclingPool')
+    def test_run_parallel_disable_gc_maxtasks(self, mock_pool_class, mock_executor):
         """Test ISOCENTER_DISABLE_GC with maxtasksperchild path.
 
         This is the test that hung for 900 s under the line-259 mutant
@@ -120,32 +129,18 @@ class TestParallelConfig(unittest.TestCase):
         """
         os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"] = "5"
         os.environ["ISOCENTER_DISABLE_GC"] = "1"
-
-        mock_ctx = mock_get_context.return_value
-        mock_pool = mock_ctx.Pool.return_value
-        mock_pool.__enter__.return_value = mock_pool
-
-        # Mock iterator
-        class MockIterator:
-            def __init__(self, items):
-                self._iter = iter(items)
-            def __next__(self):
-                return next(self._iter)
-            def __iter__(self):
-                return self
-
-        mock_pool.imap_unordered.return_value = MockIterator([1])
+        self._recycling_pool_returning(mock_pool_class, [1])
 
         parallel.run_parallel(identity, [1], show_progress=False)
 
-        mock_ctx.Pool.assert_called()
+        mock_pool_class.assert_called()
         mock_executor.assert_not_called()
-        call_kwargs = mock_ctx.Pool.call_args[1]
+        call_kwargs = mock_pool_class.call_args[1]
         self._assert_disables_gc(call_kwargs.get('initializer'))
 
-    @patch('multiprocessing.get_context')
+    @patch('isocenter.parallel._RecyclingPool')
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
-    def test_run_parallel_disable_gc_executor(self, mock_executor, mock_get_context):
+    def test_run_parallel_disable_gc_executor(self, mock_executor, mock_pool_class):
         """Test ISOCENTER_DISABLE_GC with standard ProcessPoolExecutor."""
         os.environ["ISOCENTER_DISABLE_GC"] = "1"
         # Ensure we don't trigger maxtasks path
@@ -159,14 +154,14 @@ class TestParallelConfig(unittest.TestCase):
         parallel.run_parallel(identity, [1], show_progress=False)
 
         mock_executor.assert_called()
-        mock_get_context.return_value.Pool.assert_not_called()
+        mock_pool_class.assert_not_called()
         call_kwargs = mock_executor.call_args[1]
         self._assert_disables_gc(call_kwargs.get('initializer'))
 
-    @patch('multiprocessing.get_context')
+    @patch('isocenter.parallel._RecyclingPool')
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
     def test_disable_gc_as_an_argument_alone_reaches_the_initializer(
-            self, mock_executor, mock_get_context):
+            self, mock_executor, mock_pool_class):
         """`disable_gc=True` with no environment variable set (#365).
 
         Every existing test set `ISOCENTER_DISABLE_GC=1`, and the
@@ -190,14 +185,14 @@ class TestParallelConfig(unittest.TestCase):
                               disable_gc=True)
 
         mock_executor.assert_called()
-        mock_get_context.return_value.Pool.assert_not_called()
+        mock_pool_class.assert_not_called()
         call_kwargs = mock_executor.call_args[1]
         self._assert_disables_gc(call_kwargs.get('initializer'))
 
-    @patch('multiprocessing.get_context')
+    @patch('isocenter.parallel._RecyclingPool')
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
     def test_without_any_lever_run_parallel_hands_the_pool_no_initializer(
-            self, mock_executor, mock_get_context):
+            self, mock_executor, mock_pool_class):
         """`run_parallel`'s own `disable_gc=False` default is exercised (#365).
 
         `test_without_the_env_var_no_initializer_is_forced_on_workers`

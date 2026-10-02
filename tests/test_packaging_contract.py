@@ -14,8 +14,10 @@ import ast
 import fnmatch
 import importlib.util
 import json
+import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -423,6 +425,61 @@ def _data_files_in_package():
     return walked & tracked_relative
 
 
+#: What the fallback copy leaves out when git cannot say what is tracked:
+#: the build residue, caches and test artefacts a checkout accumulates.
+_NOT_SOURCE = (".git", ".venv*", "build", "dist", "*.egg-info", "__pycache__",
+               ".pytest_cache", ".coverage*", "*.db*", "*_pixels.bin*", "site")
+
+
+def _tree_to_build(dest, root=REPO):
+    """Copy the source tree at `root` into `dest`, to build from (#859).
+
+    Each path `git ls-files` lists, from the working tree, not the index,
+    so an uncommitted edit is built as it was when the build ran in the
+    root; a tracked path deleted on disk is skipped. When git cannot answer
+    (an unpacked sdist, no git), the whole tree minus `_NOT_SOURCE`.
+
+    Returns:
+        pathlib.Path: `dest`.
+    """
+    # Why a copy, and not the root (#859): setuptools makes `build/`,
+    # `isocenter.egg-info/` and, for the sdist, a release tree
+    # `isocenter-<version>/` beside `setup.py`, and deletes that tree
+    # again. Another run in the same checkout whose closing root-guard
+    # snapshot fell inside that window exited 1 (#849). And the sdist
+    # depended on the checkout's leftovers: `manifest_maker` reads an
+    # existing `isocenter.egg-info/SOURCES.txt`, and `graft tests` sweeps
+    # untracked files under `tests/`.
+    #
+    # The trade, as `_data_files_in_package` states for resources: a new
+    # file not yet `git add`ed is not in the copy, so not in the sdist
+    # under test. That is what a clean tag checkout (`publish.yml`)
+    # builds from. The comparison holds only while no revision-control
+    # plugin such as setuptools-scm is installed: with one, a build in a
+    # git directory takes its file list from git, and the copy is not one.
+    dest = pathlib.Path(dest)
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=root, capture_output=True,
+            check=False)
+    except (OSError, subprocess.SubprocessError):
+        listed = None
+    if listed is None or listed.returncode != 0 or not listed.stdout:
+        shutil.copytree(root, dest, symlinks=True, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(*_NOT_SOURCE))
+        return dest
+    for name in listed.stdout.decode("utf-8").split("\0"):
+        if not name:
+            continue
+        source = pathlib.Path(root) / name
+        if not os.path.lexists(source):
+            continue
+        target = dest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=False)
+    return dest
+
+
 @pytest.fixture(scope="module")
 def built(tmp_path_factory):
     """The wheel and sdist setup.py actually produces.
@@ -431,6 +488,11 @@ def built(tmp_path_factory):
     couple of seconds. `--dist-dir` is repeated per command on purpose --
     distutils applies an option to the command it follows, so a single
     trailing `--dist-dir` would send the sdist to the repo's own dist/.
+
+    Built in a copy of the git-tracked tree (`_tree_to_build`), never in
+    the repository root (#859): the build sees each tracked file with its
+    working-tree content, which is what a clean tag checkout builds from,
+    and an untracked file is not in it. `"tree"` is where it ran.
     """
     if importlib.util.find_spec("setuptools") is None:
         pytest.fail(
@@ -440,11 +502,12 @@ def built(tmp_path_factory):
             'install with `pip install -e ".[tests]"`.')
 
     out = tmp_path_factory.mktemp("dist")
+    tree = _tree_to_build(tmp_path_factory.mktemp("tree"))
     result = subprocess.run(
         [sys.executable, "setup.py", "-q",
          "sdist", "--dist-dir", str(out),
          "bdist_wheel", "--dist-dir", str(out)],
-        cwd=REPO, capture_output=True, text=True, check=False)
+        cwd=tree, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         pytest.fail(f"building the distributions failed:\n{result.stderr}")
 
@@ -473,7 +536,63 @@ def built(tmp_path_factory):
         "sdist": sdist_names,
         "metadata": metadata,
         "top_level": top_level,
+        "tree": tree,
     }
+
+
+def test_the_distributions_are_built_outside_the_repository_root(built):
+    """P1: the build ran in the copy, not in the root (#859).
+
+    `isocenter.egg-info/SOURCES.txt` in the copy is the evidence that
+    setuptools ran there, not merely that a directory was made somewhere.
+    The root's own `isocenter.egg-info` (the editable install's) is not in
+    the copy: `_tree_to_build` copies tracked files only.
+    """
+    tree = built["tree"]
+    assert REPO not in tree.resolve().parents and tree.resolve() != REPO, tree
+    assert (tree / "isocenter.egg-info" / "SOURCES.txt").is_file(), sorted(
+        p.name for p in tree.iterdir())
+
+
+def test_the_sdist_still_carries_its_metadata(built):
+    """P2: `PKG-INFO` and `isocenter.egg-info/SOURCES.txt` are in the sdist,
+    built in the copy as in the root (#859).
+
+    A build that dropped `egg-info` from the sdist is the shape #707
+    measured for a redirected `--egg-base` (397 entries where 403 were
+    expected); the copy must not do the same.
+    """
+    assert "PKG-INFO" in built["sdist"], built["sdist"][:20]
+    assert "isocenter.egg-info/SOURCES.txt" in built["sdist"]
+
+
+def test_the_tree_to_build_is_the_tracked_files_as_they_are_on_disk(tmp_path):
+    """P4: `_tree_to_build` copies a tracked file, its uncommitted edit, and
+    not an untracked file (#859).
+
+    Killing mutation: a bare `copytree` with no git filter (N21).
+    """
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "tracked.py").write_text("committed\n")
+    (repo / "gone.txt").write_text("tracked, then deleted\n")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    for command in (["git", "init", "-q"], ["git", "add", "-A"],
+                    ["git", "commit", "-q", "-m", "one"]):
+        subprocess.run(command, cwd=repo, env=env, check=True,
+                       capture_output=True)
+    (repo / "pkg" / "tracked.py").write_text("edited, not committed\n")
+    (repo / "pkg" / "untracked.py").write_text("never added\n")
+    (repo / "gone.txt").unlink()
+
+    copy = _tree_to_build(tmp_path / "copy", root=repo)
+
+    assert (copy / "pkg" / "tracked.py").read_text() == (
+        "edited, not committed\n")
+    assert not (copy / "pkg" / "untracked.py").exists()
+    assert not (copy / "gone.txt").exists()
+    assert not (copy / ".git").exists()
 
 
 def test_the_wheel_ships_every_resource_the_package_reads(built):
@@ -1798,8 +1917,9 @@ def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
     assert grace >= 5, (
         f"_BROKEN_POOL_GRACE_S={grace:g}s is below the few seconds its "
         "comment sets as the floor: a worker that saves its state on SIGTERM "
-        "must get to finish, and coverage's `sigterm = True` handler takes "
-        "up to 0.8 s under load to write the worker's data file (#796)")
+        "must get to finish: coverage's `sigterm = True` handler, which "
+        ".coveragerc set until #886, took up to 0.8 s under load to write "
+        "the worker's data file (#796)")
 
     # By AST, as the gate's deadline is read above: the docstring names
     # the constant in prose.
@@ -1853,6 +1973,62 @@ def test_the_recycling_pools_bounded_exit_sits_below_the_stall_watchdog():
         assert name in names, (
             f"_end_recycling_pool no longer reads {name}; a re-inlined "
             "literal is what this family exists to stop (#368)")
+
+
+def test_a_workers_exit_bound_waits_for_the_recycling_pools_own_exit():
+    """`_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S <= _WORKER_EXIT_GRACE_S
+    < _STALL_S`, below the faulthandler window, and each is read by name
+    (#888, #844).
+
+    A worker of the recycling pool arms its own SIGALRM once it leaves its
+    task loop, however it left, the pool's own close and terminate
+    included. Below the pool's exit bound, the worker's alarm would race
+    the parent's kill, and #860's WARNING lines would say whichever won.
+    Below the stall watchdog and the faulthandler window, a bounded exit is
+    never reported as a stall or dumped as a hang. The watch's period is
+    read by name too: it is the latency of seeing a dead worker (#887).
+    """
+    import inspect
+    import textwrap
+
+    from isocenter import parallel
+
+    threshold, _step_seconds, _ = _faulthandler_threshold_and_step_seconds()
+    source = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    match = re.search(r"^_STALL_S = ([0-9.]+)$", source, re.MULTILINE)
+    assert match, "tests/conftest.py no longer defines _STALL_S (#250)"
+    stall_s = float(match.group(1))
+    exit_bound = parallel._WORKER_EXIT_GRACE_S
+    pool_exit = parallel._BROKEN_POOL_GRACE_S + parallel._POOL_EXIT_AFTER_KILL_S
+
+    assert pool_exit <= exit_bound, (
+        f"_WORKER_EXIT_GRACE_S={exit_bound:g}s is below the recycling pool's "
+        f"own exit bound ({pool_exit:g}s): a worker's alarm would race the "
+        "parent's kill (#888)")
+    assert exit_bound < stall_s, (
+        f"_WORKER_EXIT_GRACE_S={exit_bound:g}s is not below the stall "
+        f"watchdog's {stall_s:g}s (#888)")
+    assert exit_bound < threshold, (
+        f"_WORKER_EXIT_GRACE_S={exit_bound:g}s outlasts the faulthandler "
+        f"window ({threshold:g}s) (#888)")
+    assert exit_bound < parallel._WORKER_FAULTHANDLER_TIMEOUT_S, (
+        "the exit bound outlasts the worker's own traceback dump (#844)")
+
+    def names_in(function):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        return {node.id for node in ast.walk(tree)
+                if isinstance(node, ast.Name)}
+
+    assert "_WORKER_EXIT_GRACE_S" in names_in(
+        parallel._run_on_recycling_pool), (
+        "_run_on_recycling_pool no longer reads _WORKER_EXIT_GRACE_S; a "
+        "re-inlined literal is what this family exists to stop (#368)")
+    assert "_WORKER_EXIT_GRACE_S" in names_in(
+        parallel.resolve_worker_initializer), (
+        "resolve_worker_initializer no longer reads _WORKER_EXIT_GRACE_S "
+        "(#844)")
+    assert "_POOL_WATCH_S" in names_in(parallel._watched), (
+        "_watched no longer reads _POOL_WATCH_S (#887)")
 
 
 # ---------------------------------------------------------------------------
