@@ -1101,19 +1101,21 @@ LUT_DATA_TAGS = frozenset({
     "0028,1221", "0028,1222", "0028,1223",
 })
 
-#: 65536 entries of 16 bits: the most a LUT Descriptor can declare, so the
-#: largest expanded table, and exact for the five non-segmented tags. For
-#: the three segmented ones it is a chosen cap, not a bound the standard
-#: gives: PS3.3 C.7.9.2 fixes the expanded table's entry count and says
-#: nothing that bounds the segments encoding it. A segmented table exists
-#: to be smaller than its expansion, so one larger than this is
-#: pathological, and it is dropped with its row. The cost is bounded too:
-#: three palettes at the cap are 384 KiB raw per instance, about 512 KiB
-#: as base64 in `attributes_json`. These are what decide how an image's
-#: pixels display; dropping one left a colour image with one palette of
-#: three, or a VOI LUT item with a descriptor and no data, both under PASS
-#: (a STANDARD loss does not grade).
-LUT_RETENTION_MAX_BYTES = 131072
+#: 65536 entries x 3 words x 2 bytes, one ceiling for all eight tags (owner
+#: ruling on #902, Q4 A, reconfirmed after review). A LUT Descriptor
+#: declares at most 65536 entries, so a conformant non-segmented table is
+#: at most 131072 bytes and never reaches this. For the segmented tags the
+#: figure assumes each segment covers at least one entry for at most three
+#: words; PS3.3 C.7.9.2 fixes the expanded table's entry count and does not
+#: itself bound the segments, so this is a ruled cap, not the standard's
+#: number. Do not "tighten" it to 131072: that was tried and overruled.
+#: The cost is bounded: three tables at the cap are 1.125 MiB raw per
+#: instance, about 1.5 MiB as base64 in `attributes_json`; three full
+#: non-segmented palettes are 384 KiB, about 512 KiB. These are what decide
+#: how an image's pixels display; dropping one left a colour image with one
+#: palette of three, or a VOI LUT item with a descriptor and no data, both
+#: under PASS (a STANDARD loss does not grade).
+LUT_RETENTION_MAX_BYTES = 393216
 
 
 def _retention_limit_for(tag: str) -> int:

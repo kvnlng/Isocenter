@@ -206,9 +206,10 @@ def lut_ambiguous(out: Path):
 
 def big_lut(out: Path):
     """A VOI LUT of 65536 16-bit entries (descriptor first value 0), 131072
-    bytes of LUT Data, in an explicit source: #902. Kept up to that size,
-    where above 65534 bytes it was dropped; no member reached the
-    non-segmented LUT Data arm (ALOKA's are segmented palettes)."""
+    bytes of LUT Data, in an explicit source: #902. The largest table a
+    descriptor can declare; above 65534 bytes it was dropped. No other
+    member reaches the non-segmented LUT Data arm (ALOKA's are segmented
+    palettes)."""
     ds = ct("big_lut")
     item = Dataset()
     item.add_new(0x00283002, "US", [0, 0, 16])

@@ -113,7 +113,7 @@ LUT_SHAPES = [
     pytest.param(dict(seq=None), id="top-level"),
     pytest.param(dict(seq=MODALITY_LUT, entries=()), id="empty"),
     pytest.param(dict(seq=MODALITY_LUT,
-                      entries=tuple(range(LUT_RETENTION_MAX_BYTES // 2))),
+                      entries=tuple(i % 65536 for i in range(LUT_RETENTION_MAX_BYTES // 2))),
                  id="at-the-retention-threshold"),
 ]
 
@@ -140,7 +140,7 @@ def test_an_oversized_implicit_lut_with_no_descriptor_is_dropped_as_its_explicit
     implicit = _ingest(tmp_path, ds, True, "implicit")
     explicit = _ingest(tmp_path, ds, False, "explicit")
     loss = ["Standard tag 0028,3006 (OW) was not ingested; its value exceeds "
-            "the 131072-byte retention threshold, so it is not held in the "
+            "the 393216-byte retention threshold, so it is not held in the "
             "object graph, so it is not in the exported file."]
     assert _rows(explicit[3], "DATA_LOSS") == loss
     # Red on main: the file is refused, and no DATA_LOSS row is written.

@@ -14,11 +14,12 @@ Each draws a STANDARD `DATA_LOSS` row, which does not grade, so all of them
 were PASS.
 
 The owner's ruling (Q4, A): LUT Data, Gray LUT Data and the six palette
-data elements are kept up to 131072 bytes, and the limit is unchanged for
-everything else. 131072 is the expanded table's most (65536 entries of 16
-bits); for the three segmented elements it is a chosen cap, since PS3.3
-C.7.9.2 bounds the expanded table and not its encoding (the spec's 393216
-did not survive reading the standard; arch-b7's correction).
+data elements are kept up to 393216 bytes (65536 entries x 3 words x 2
+bytes), one ceiling for all eight, and the limit is unchanged for everything
+else. A conformant non-segmented table is at most 131072 bytes (65536
+entries of 16 bits), so it never reaches the ceiling; PS3.3 C.7.9.2 does not
+itself bound a segmented encoding, so 393216 is a ruled cap. 131072 was
+tried for all eight after review and overruled.
 """
 import shutil
 
@@ -32,8 +33,11 @@ from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
 
-#: The ceiling for all eight: 65536 entries of 16 bits.
-LUT_MAX = 131072
+#: The ceiling for all eight: 65536 entries x 3 words x 2 bytes.
+LUT_MAX = 393216
+
+#: The largest table a LUT Descriptor can declare: 65536 entries of 16 bits.
+TABLE_MAX = 131072
 
 
 def _pattern(nbytes):
@@ -98,18 +102,18 @@ def test_a_full_voi_lut_is_exported_as_ow_through_export(tmp_path):
     `_resolve_ambiguous_vrs` asks pydicom, which decides `US or OW` from
     the descriptor. `OW` has a 4-byte length, so #692's relabel does not
     touch it."""
-    _inst, ds, losses = _run(tmp_path, _voi_lut(LUT_MAX))
+    _inst, ds, losses = _run(tmp_path, _voi_lut(TABLE_MAX))
     item = ds.VOILUTSequence[0]
     elem = item[0x00283006]
     assert elem.VR == "OW"
-    assert bytes(elem.value) == _pattern(LUT_MAX)
+    assert bytes(elem.value) == _pattern(TABLE_MAX)
     assert list(item.LUTDescriptor) == [0, 0, 16]
     assert _lut_rows(losses, "0028,3006") == []
 
 
 @pytest.mark.parametrize("syntax", [ExplicitVRLittleEndian, ImplicitVRLittleEndian],
                          ids=["explicit", "implicit"])
-@pytest.mark.parametrize("nbytes", [80000, LUT_MAX], ids=["40000", "65536"])
+@pytest.mark.parametrize("nbytes", [80000, TABLE_MAX], ids=["40000", "65536"])
 def test_a_voi_lut_over_the_vendor_limit_is_kept(tmp_path, syntax, nbytes):
     inst, ds, losses = _run(tmp_path, _voi_lut(nbytes), syntax=syntax)
     (held_item,) = inst.sequences["0028,3010"].items
@@ -134,12 +138,12 @@ def _palette(sizes, *, segmented):
 
 
 def test_full_16_bit_palettes_are_all_exported(tmp_path):
-    _inst, ds, losses = _run(tmp_path, _palette([LUT_MAX] * 3, segmented=False),
+    _inst, ds, losses = _run(tmp_path, _palette([TABLE_MAX] * 3, segmented=False),
                              compress=False)
     assert ds.PhotometricInterpretation == "PALETTE COLOR"
     for offset in range(3):
         tag = 0x00281201 + offset
-        expected = _pattern(LUT_MAX)[::-1] if offset % 2 else _pattern(LUT_MAX)
+        expected = _pattern(TABLE_MAX)[::-1] if offset % 2 else _pattern(TABLE_MAX)
         assert bytes(ds[tag].value) == expected, hex(tag)
         assert _lut_rows(losses, f"0028,{0x1201 + offset:04x}") == []
 
@@ -166,6 +170,26 @@ def test_a_segmented_palette_at_its_ceiling_is_kept_and_over_it_dropped(tmp_path
     (row,) = _lut_rows(losses, "0028,1222")
     assert f"exceeds the {LUT_MAX}-byte retention threshold" in row[2]
     assert row[3] == "STANDARD"
+
+
+@pytest.mark.parametrize("tag", ["0028,1201", "0028,3006", "0028,1200"])
+def test_a_non_segmented_lut_between_the_table_and_the_ceiling_is_kept(tmp_path, tag):
+    """One ceiling for all eight, by ruling: a non-segmented value past a
+    conformant table's 131072 bytes, at the ceiling, is still kept. A
+    helper that gave the non-segmented tags 131072 is red here."""
+    if tag == "0028,3006":
+        extra = _voi_lut(LUT_MAX)
+    elif tag == "0028,1200":
+        def extra(ds):
+            ds.add_new(0x00281100, "US", [0, 0, 16])
+            ds.add_new(0x00281200, "OW", _pattern(LUT_MAX))
+    else:
+        extra = _palette([LUT_MAX, 2, 2], segmented=False)
+    _inst, ds, losses = _run(tmp_path, extra, compress=False)
+    assert _lut_rows(losses, tag) == []
+    group, element = (int(x, 16) for x in tag.split(","))
+    found = (ds.VOILUTSequence[0] if tag == "0028,3006" else ds)[(group << 16) | element]
+    assert bytes(found.value) == _pattern(LUT_MAX)
 
 
 @pytest.mark.parametrize("tag", ["0028,1201", "0028,3006"])
