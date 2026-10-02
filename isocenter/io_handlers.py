@@ -10734,10 +10734,18 @@ def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
                              for set_, _written, _ok in changes)
             else "a value")
     if exact:
+        # "integer spelling" only when every value written is one. For a
+        # float an exact rewrite always is (repr is already the shortest
+        # round-tripping spelling), but a caller's text can be exact and
+        # fractional: '1.50000000000000000' is written '1.5' (#924 review).
+        spelling = ("in its integer spelling, the same number"
+                    if all(written.lstrip("-").isdigit()
+                           for _set, written, _ok in changes)
+                    else f"as the same number in {_DS_MAX} characters or "
+                         f"fewer")
         return True, (
             f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
-            f"characters was written in its integer spelling, the same "
-            f"number: {pairs}.")
+            f"characters was written {spelling}: {pairs}.")
     return False, (
         f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
         f"characters cannot be written exactly, and was rounded to fit: "
@@ -10790,7 +10798,9 @@ def _is_value_that_fits(value):
         if (not isinstance(item, numbers.Real) or isinstance(item, (bool, str))
                 or getattr(item, "original_string", None)):
             return item
-        if not isfinite(item):
+        # An integer is always finite, and `isfinite` of one past a float's
+        # range (`10**400`) raises OverflowError instead of the range words.
+        if not isinstance(item, numbers.Integral) and not isfinite(item):
             raise ValueError(f"{item!r} has no Integer String spelling")
         # `int(...)` around `round` is for numpy 1.x, which `setup.py`
         # admits (`numpy>=1.26.0`): there `round()` of a numpy float is a

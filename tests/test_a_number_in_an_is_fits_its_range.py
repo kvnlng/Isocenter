@@ -147,6 +147,19 @@ def test_a_numpy_number_is_written_as_an_integer(value, text):
     assert len(warnings) == (0 if text == "7" else 1), warnings
 
 
+def test_an_int_past_a_float_is_dropped_with_the_range_words():
+    """`10**400` cannot become a float; it is outside IS's range like any
+    other, and the row says so rather than an OverflowError (#924 review)."""
+    from isocenter.io_handlers import DicomExporter
+
+    ds, losses = pydicom.Dataset(), []
+    DicomExporter._merge(ds, {"0018,1150": 10 ** 400}, losses)
+    assert 0x00181150 not in ds
+    (loss,) = losses
+    assert "is outside IS's range, -2147483648 to 2147483647" in loss[1], losses
+    assert "OverflowError" not in loss[1]
+
+
 def test_a_numpy_integer_past_the_range_is_dropped():
     from isocenter.io_handlers import DicomExporter
 

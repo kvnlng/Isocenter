@@ -347,6 +347,27 @@ def test_a_long_text_naming_no_finite_number_is_dropped_with_a_row(tmp_path, cap
     assert 0x00180088 not in ds
     rows = [r for r in losses if "Tag 0018,0088 not exported" in r[2]]
     assert len(rows) == 1, losses
+    # The text path's own guard says why; without it `format_number_as_ds`
+    # raises on `inf` with words of its own (#924 review).
+    assert "'1e400000000000000' has no Decimal String spelling" in rows[0][2], rows
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+@pytest.mark.parametrize("text", ["1.50000000000000000", "0000000000000001.5"])
+def test_an_exact_fractional_text_is_not_called_an_integer_spelling(
+        tmp_path, caplog, reopen, text):
+    """An exact rewrite of a caller's text need not be a whole number:
+    the note says it is the same number, not that it is an integer."""
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", text),
+        reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"1.5 "
+    assert len(notes) == 1, notes
+    assert notes[0].endswith(
+        ": Tag 0018,0050 (DS): a value longer than DS's 16 characters was "
+        "written as the same number in 16 characters or fewer: "
+        f"'{text}' as '1.5'."), notes
+    assert warnings == []
 
 
 @pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
