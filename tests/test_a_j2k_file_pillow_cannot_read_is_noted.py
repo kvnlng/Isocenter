@@ -129,7 +129,7 @@ def _grade(report):
 
 
 def _notes(corrections):
-    return [c for c in corrections if "#670" in c]
+    return [c for c in corrections if "pydicom's Pillow plugin" in c]
 
 
 def _codestream_samples(path):
@@ -284,7 +284,7 @@ def test_a_16_bit_ybr_full_file_keeps_the_596_note_and_not_this_one(
 
     assert outcome.ok, outcome.error
     assert len(outcome.corrections) == 1, outcome.corrections
-    assert "#461" in outcome.corrections[0], outcome.corrections
+    assert "this library cannot read such a file back" in outcome.corrections[0], outcome.corrections
     assert _notes(outcome.corrections) == [], outcome.corrections
 
 
@@ -339,7 +339,7 @@ def test_the_note_writes_no_row_and_the_grade_stays_pass(
 
     assert rows == [], rows
     assert "PASS" in _grade(report), _grade(report)
-    lines = [r for r in caplog.records if "#670" in r.getMessage()]
+    lines = [r for r in caplog.records if "pydicom's Pillow plugin" in r.getMessage()]
     assert len(lines) == 1, [r.getMessage() for r in caplog.records]
     assert lines[0].levelno == logging.INFO
     assert lines[0].getMessage().startswith(f"{uid}: "), lines[0].getMessage()
@@ -356,7 +356,7 @@ def test_write_tree_notes_it_too(tmp_path, caplog):
         DicomExporter.write_tree(_graph([inst]), str(tmp_path / "out"),
                                  compression="j2k", show_progress=False)
 
-    lines = [r for r in caplog.records if "#670" in r.getMessage()]
+    lines = [r for r in caplog.records if "pydicom's Pillow plugin" in r.getMessage()]
     assert len(lines) == 1, [r.getMessage() for r in caplog.records]
     assert lines[0].levelno == logging.INFO
     assert lines[0].getMessage().startswith(f"{inst.sop_instance_uid}: ")
@@ -477,4 +477,4 @@ def test_an_icon_is_not_noted(tmp_path, monkeypatch, caplog):
     assert ds.pixel_array.tolist() == (
         np.arange(16, dtype=np.uint16) * 1000).reshape(4, 4).tolist()
     assert [r.getMessage() for r in caplog.records
-            if "#670" in r.getMessage()] == []
+            if "pydicom's Pillow plugin" in r.getMessage()] == []

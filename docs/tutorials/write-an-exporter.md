@@ -166,7 +166,7 @@ def exceptions(path):
 | **Validation Status** | **REVIEW_REQUIRED** |
 >>> exceptions("report.md")
 1 row(s)
-Export to export in format 'patient-ids' ran ...PatientIdCsv, an exporter Isocenter does not ship: its output is not attested by Isocenter. None of the export gates ran for it (...), so this report does not know what it wrote (#527).
+Export to export in format 'patient-ids' ran ...PatientIdCsv, an exporter Isocenter does not ship: its output is not attested by Isocenter. None of the export gates ran for it (...), so this report does not know what it wrote.
 ```
 
 This is by design, and it is the same for every exporter Isocenter does

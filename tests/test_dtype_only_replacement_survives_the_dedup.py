@@ -309,7 +309,7 @@ def test_the_same_export_compressed_writes_integers_instead_of_a_float_file(
     assert ds.pixel_array.dtype == np.dtype("int32")
     assert np.array_equal(ds.pixel_array.reshape(want.shape), want)
     notes = [r.getMessage() for r in caplog.records
-             if "#771" in r.getMessage()]
+             if "written uncompressed" in r.getMessage()]
     assert len(notes) == 1, [r.getMessage() for r in caplog.records]
     # `\b` on purpose, and this one assertion is the whole kill for a
     # `pixel_dtype`-only fix: `"int32" in "uint32"` is True, so a bare

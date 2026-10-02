@@ -254,7 +254,7 @@ def test_a_mask_takes_only_remove_or_keep(tmp_path, door, case):
     message = str(caught.value)
     assert (f"phi_tags['60xx,xxxx'] is {action}; a repeating-group key (50xx "
             f"or 60xx) takes REMOVE or KEEP, because it names elements of "
-            f"many VRs (#556)") in message, message
+            f"many VRs") in message, message
     db = tmp_path / "s.db"
     if db.exists():
         with sqlite3.connect(str(db)) as conn:
@@ -266,7 +266,7 @@ def test_set_phi_tag_leaves_the_policy_unchanged_when_a_mask_is_refused(tmp_path
     """Kills the mask check placed after the store."""
     with DicomSession(str(tmp_path / "s.db")) as session:
         before = dict(session.configuration.phi_tags)
-        with pytest.raises(ValueError, match="#556"):
+        with pytest.raises(ValueError, match="because it names elements of many VRs"):
             session.configuration.set_phi_tag("60xx,xxxx", "EMPTY")
         assert session.configuration.phi_tags == before
 

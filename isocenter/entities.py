@@ -2768,7 +2768,7 @@ class Study(TrackedEntity):
                 ".date() on it, and put the time of day in Study Time "
                 "(0008,0030) -- Study.study_time -- instead. A datetime "
                 "here comes back from the store as an ISO string and "
-                "exports as an illegal DA value (#188).")
+                "exports as an illegal DA value.")
         # ...and the DA-string boundary, for the same reason. Hydration
         # turns a DA value into a `date`, so a DA-spelled string left as a
         # string here would make `export_folder_names` -- which builds the

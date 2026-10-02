@@ -100,7 +100,8 @@ def test_an_empty_value_on_a_uid_is_refused(tmp_path, door, tag):
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is REPLACE with value '';" in message, message
     assert "Omit the value: key" in message, message
-    assert "(#883)" in message, message
+    assert message.endswith("for this project's keyed replacement UID, or "
+                            "use EMPTY or REMOVE"), message
 
 
 @pytest.mark.parametrize("door", ("load_config", "load_config_basic", "audit_config_path"))
@@ -112,7 +113,7 @@ def test_a_refused_load_leaves_the_configuration_unchanged(tmp_path, door):
         before = {t: dict(r) if isinstance(r, dict) else r
                   for t, r in session.configuration.phi_tags.items()}
         profile = session.configuration.privacy_profile
-        with pytest.raises(ValueError, match=r"\(#883\)"):
+        with pytest.raises(ValueError, match=r"or use EMPTY or REMOVE$"):
             if door == "audit_config_path":
                 session.audit(config_path=_yaml(tmp_path, {"0020,0052": dict(EMPTY)}))
             else:
@@ -132,7 +133,7 @@ def test_the_message():
         "an empty value: is still a value, and no UID is empty, so the scan "
         "would propose nothing a UI can hold and the export would carry the "
         "source UID. Omit the value: key (or write value: null) for this "
-        "project's keyed replacement UID (#544), or use EMPTY or REMOVE (#883)")
+        "project's keyed replacement UID, or use EMPTY or REMOVE")
 
 
 def test_the_owned_uids_keep_their_own_refusal():
@@ -142,7 +143,8 @@ def test_the_owned_uids_keep_their_own_refusal():
         validate_phi_policy({"0020,000e": dict(EMPTY)}, "cfg.yaml")
     message = str(caught.value)
     assert "is REPLACE with value ''; Series Instance UID" in message
-    assert "(#877)" in message and "(#883)" not in message
+    assert "can only be kept (KEEP) or replaced" in message, message
+    assert "Omit the value: key" not in message, message
 
 
 ALLOWED = {
@@ -218,10 +220,10 @@ def test_no_shipped_table_carries_an_empty_uid_value():
 def test_a_refused_audit_mints_no_secret(tmp_path):
     db = tmp_path / "s.db"
     with DicomSession(str(db)) as session:
-        with pytest.raises(ValueError, match=r"\(#883\)"):
+        with pytest.raises(ValueError, match=r"or use EMPTY or REMOVE$"):
             session.audit(config_path=_yaml(tmp_path, {"0020,0052": dict(EMPTY)}))
         session.configuration.phi_tags = {"0008,0018": dict(EMPTY)}
-        with pytest.raises(ValueError, match=r"\(#883\)"):
+        with pytest.raises(ValueError, match=r"or use EMPTY or REMOVE$"):
             session.audit()
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
@@ -233,7 +235,7 @@ def test_an_external_profiles_row_is_refused_unless_the_file_overrides_it(tmp_pa
     profile.write_text(yaml.safe_dump(
         {"phi_tags": {"0020,0052": dict(EMPTY)}}), encoding="utf-8")
     with DicomSession(str(tmp_path / "s.db")) as session:
-        with pytest.raises(ValueError, match=r"\(#883\)"):
+        with pytest.raises(ValueError, match=r"or use EMPTY or REMOVE$"):
             session.load_config(_yaml(tmp_path, {}, profile=str(profile)))
         session.load_config(_yaml(
             tmp_path, {"0020,0052": {"action": "REPLACE"}}, profile=str(profile)))

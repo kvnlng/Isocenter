@@ -176,7 +176,7 @@ def test_every_accepted_value_writes_the_pixels_the_arm_judged(
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
     assert "PixelData" in written
-    assert len([c for c in outcome.corrections if "#461" in c]) == 1, \
+    assert len([c for c in outcome.corrections if "this library cannot read such a file back" in c]) == 1, \
         outcome.corrections
 
     report = Instance(f"1.2.826.0.1.605.{next(_serial)}", SR_STORAGE, 1)
@@ -191,4 +191,4 @@ def test_every_accepted_value_writes_the_pixels_the_arm_judged(
     assert "PixelData" not in written
     assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
     assert len(outcome.warnings) == 1, outcome.warnings
-    assert not [c for c in outcome.corrections if "#461" in c]
+    assert not [c for c in outcome.corrections if "this library cannot read such a file back" in c]

@@ -18,6 +18,11 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 - `my_project_pixels.bin`, the pixel and waveform data (two `.lock` files appear beside it at the first `ingest()`);
 - `isocenter.log` in the current directory.
 
+!!! warning "Keep the store on local disk"
+    Keep the store (the `.db` with its `-wal` and `-shm` files, the `_pixels.bin` and its two `.lock` files) on a filesystem local to the machine running the session, and open a store from one host at a time. The store uses SQLite's WAL mode, which SQLite documents as not working over a network filesystem, and its locks are `flock`, whose behaviour on NFS, SMB, Lustre and GPFS depends on the mount. Isocenter has not been tested on one. When `Session()` recognises the store's filesystem as a network type (NFS, SMB, AFP, WebDAV, Lustre, GPFS, Ceph, BeeGFS, GlusterFS, SSHFS and a few others), it logs one `WARNING` saying so and opens the store anyway; it cannot recognise every network filesystem, so no warning is not proof the disk is local. With `Session(":memory:")` the pixel file goes in the temporary directory (`$TMPDIR`), which should be local too.
+
+    The source files `ingest()` reads, and the folder `export()` writes, may be on network storage: ingest only reads, and export writes each file under a temporary name beside its target and renames it, with no lock.
+
 !!! warning "The session store holds PHI"
     `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report, a manifest or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
 
@@ -37,11 +42,11 @@ Ingest reads your folders recursively and indexes every DICOM file into the stor
 summary = session.ingest("/path/to/dicom/data")
 session.save()
 
-print(summary)      # IngestSummary(ingested=..., failures=[...], declined=..., skipped=...)
+print(summary)      # IngestSummary(ingested=..., failures=[...], declined=..., skipped=..., hidden=...)
 session.examine()   # the cohort and its equipment
 ```
 
-`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of four places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session, or its Study Instance UID belongs to a patient with a different Patient ID) and `skipped` (an earlier `ingest()` already read it). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
+`ingest()` does not raise for a file it cannot read. It returns an `IngestSummary` that puts every file in one of five places: `ingested`, `failures` (one `(path, reason)` pair per rejected file), `declined` (its SOP Instance UID is already in the session, or its Study Instance UID belongs to a patient with a different Patient ID), `skipped` (an earlier `ingest()` already read it) and `hidden` (its name starts with `.`, such as `.DS_Store`, so it was not read; a directory whose name starts with `.` is still walked). A rejected or declined file also writes an audit row, so the report grades `REVIEW_REQUIRED` and names it. Check the summary; the [`ingest()` reference](api/session.md) has the details.
 
 ## 3. Configure & Audit
 
