@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A test fails a branch whose CHANGELOG.md has added a line to a released section.** At rc10 and rc11 a bunch PR took `main`'s release record-back by a merge that raised no conflict, and its new entries landed under the released `## [1.0.0rcN]` heading instead of `[Unreleased]`. Only the reviews caught it. `tests/test_released_changelog_sections_stay_as_released.py` compares each released section with the same section in the newest present tag whose CHANGELOG.md has that heading. A section may be byte-identical, or rewritten in place (the same number of lines, the same heading); any added or removed line is red, with the diff. Reproduced red by merging the rc10 record-back (beab1a99) into a branch at 6d5eafd1 that had added an entry at the end of `[Unreleased]`: git merged it cleanly and the entry landed in `[1.0.0rc10]`.
+  - **Why not each section's own tag.** Released sections are amended on purpose: fd77f8f0 struck #765's limit inside `[1.0.0rc1]` and b223f6ab corrected a citation inside `[0.9.0]`, and every section at 0.7.0 and before was reformatted after its tag. 13 of 31 tagged sections differ from their own tag. Every one equals its text in v1.0.0rc11, and both amendments rewrote one line in place. So an amendment keeps the section's line count and passes, and once a release carries it, it is the new base.
+  - A version whose tag is not present is skipped, naming the tag: a clone without tags, CI's shallow checkout, and 0.6.1, 0.5.4, 0.5.1 and 0.4.0, which were never tagged. It does not see a misplaced entry that rewrites an existing line instead of adding one. Test-only: no library code changes.
+  - **Output:** none.
+
 ## [1.0.0rc11] - 2026-10-02
 
 ### Changed

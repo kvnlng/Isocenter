@@ -453,7 +453,10 @@ fixes, never features.
    (see "Never merge a release branch into `main`"). It:
    - copies the `## [X.Y.Z] - YYYY-MM-DD` section into `main`'s
      `CHANGELOG.md`, below `[Unreleased]`, and removes the entries it
-     contains from `[Unreleased]`;
+     contains from `[Unreleased]`. A branch that takes this by merge can
+     find its own new entries under the released heading with no
+     conflict; `tests/test_released_changelog_sections_stay_as_released.py`
+     fails a released section that has a line its newest tag lacks;
    - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that
