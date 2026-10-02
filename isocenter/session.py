@@ -1481,13 +1481,24 @@ class DicomSession:
         """Log one WARNING when the store sits on a known network
         filesystem; never refuses the open, and never raises (#839).
 
-        The directory asked about is the pixel sidecar's: beside the
-        database for a file store, and the temporary directory for a
-        `:memory:` one. A type the detector cannot read, or does not know
-        as a network type, draws nothing.
+        The directories asked about are the database file's and the pixel
+        sidecar's, each with symlinks resolved first: a `.db` that is a
+        link onto NFS is opened there by SQLite, while its sidecar, named
+        after the link, sits beside the link. A `:memory:` store has only
+        its sidecar, in the temporary directory. A type the detector
+        cannot read, or does not know as a network type, draws nothing.
         """
-        where = os.path.dirname(os.path.abspath(self.store_backend.sidecar_path))
-        fstype = _network_filesystem_type(where)
+        paths = [self.store_backend.sidecar_path]
+        if self.persistence_file != ":memory:":
+            paths.insert(0, self.persistence_file)
+        fstype = None
+        for path in paths:
+            # `realpath` of the file, not of its directory: the link is the
+            # file, and its directory is where the link sits.
+            where = os.path.dirname(os.path.realpath(path))
+            fstype = _network_filesystem_type(where)
+            if fstype is not None:
+                break
         if fstype is None:
             return
         what = ("the session store's pixel file"

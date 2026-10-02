@@ -91,7 +91,7 @@ def test_a_memory_store_asks_about_its_pixel_file(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="isocenter"):
         with Session(":memory:") as session:
             sidecar_dir = os.path.dirname(
-                os.path.abspath(session.store_backend.sidecar_path))
+                os.path.realpath(session.store_backend.sidecar_path))
     warnings = _network_warnings(caplog)
     assert seen == [sidecar_dir]
     assert os.path.realpath(sidecar_dir) == os.path.realpath(
@@ -202,3 +202,37 @@ def test_the_quickstart_names_what_may_be_on_network_storage():
     body = " ".join(block.group(1).split())
     assert "WAL" in body and "flock" in body
     assert "export()" in body and "ingest()" in body
+
+
+def test_the_warning_writes_no_audit_row(monkeypatch, caplog):
+    """A log line, not a row: a row would grade every such run
+    REVIEW_REQUIRED, and the ruling asked for a WARNING log line only."""
+    monkeypatch.setattr(persistence, "_filesystem_type", lambda path: "nfs")
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        with Session("s.db") as session:
+            assert len(_network_warnings(caplog)) == 1
+            session.store_backend.flush_audit_queue()
+            with sqlite3.connect("s.db") as conn:
+                rows = conn.execute(
+                    "SELECT action_type, details FROM audit_log").fetchall()
+    assert not [r for r in rows if "network filesystem" in (r[1] or "")], rows
+
+
+def test_a_symlinked_database_on_a_network_filesystem_warns(monkeypatch, caplog):
+    """The database is a link into a directory on NFS while its link (and
+    the sidecar, named after the link) sit on local disk. SQLite opens the
+    target, so the target's directory is the one asked about."""
+    os.makedirs("remote")
+    remote = os.path.realpath("remote")
+    with Session(os.path.join("remote", "s.db")):
+        pass
+    os.symlink(os.path.join(remote, "s.db"), "link.db")
+    monkeypatch.setattr(persistence, "_filesystem_type",
+                        lambda path: "nfs" if os.path.realpath(path) == remote
+                        else "apfs")
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        with Session("link.db"):
+            pass
+    warnings = _network_warnings(caplog)
+    assert len(warnings) == 1, warnings
+    assert warnings[0].startswith(f"{remote} holds the session store"), warnings

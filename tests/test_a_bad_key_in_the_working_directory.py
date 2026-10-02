@@ -277,3 +277,38 @@ def test_the_key_file_mode_is_untouched_by_the_check():
     with Session("s.db") as session:
         assert session.key_manager is not None
     assert stat.S_IMODE(os.stat("isocenter.key").st_mode) == 0o640
+
+
+def test_a_symlink_to_a_directory_is_refused_as_valueerror(tmp_path):
+    """`isfile` follows the link, so a link to a directory is not a file."""
+    target = tmp_path / "keydir"
+    target.mkdir()
+    os.symlink(str(target), "isocenter.key")
+    with pytest.raises(ValueError) as exc_info:
+        with Session("s.db"):
+            pass
+    assert os.path.abspath("isocenter.key") in str(exc_info.value)
+    assert "is not a regular file" in str(exc_info.value)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs only")
+def test_a_symlink_to_a_fifo_is_refused_not_waited_on(tmp_path):
+    """In a subprocess, as for a FIFO itself: `open()` through the link
+    would block for good."""
+    os.mkfifo(str(tmp_path / "pipe"))
+    os.symlink(str(tmp_path / "pipe"), "isocenter.key")
+    expected = os.path.abspath("isocenter.key")
+    code = (
+        "from isocenter import Session\n"
+        "try:\n"
+        "    with Session('s.db'):\n"
+        "        print('NO RAISE')\n"
+        "except ValueError as exc:\n"
+        "    print('VALUEERROR', exc)\n")
+    done = subprocess.run([sys.executable, "-c", code], cwd=os.getcwd(),
+                          env=_child_env(), capture_output=True, text=True,
+                          timeout=60, check=False)
+    assert done.returncode == 0, done.stderr
+    assert "VALUEERROR" in done.stdout, done.stdout + done.stderr
+    assert expected in done.stdout
+    assert "is not a regular file" in done.stdout
