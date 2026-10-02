@@ -5889,8 +5889,9 @@ class DicomSession:
 
         # One task per instance (#908): an image two rules cover is redacted
         # with both rules' zones in one task, attested and given its UID
-        # over the whole set. Two tasks made its UID the last one's, and,
-        # under processes, its frame one rule's.
+        # over the whole set. Two tasks made its UID the last one's, and its
+        # frame one rule's: every time under processes, by a race under
+        # threads.
         tasks = service._one_task_per_instance(  # pylint: disable=protected-access
             tasks, project_secret=project_secret)
 

@@ -820,11 +820,15 @@ class RedactionService:
         An image an exact rule and `"*"` both cover had a task from each.
         Each task derived the redacted UID from its own rule's zones, so the
         image kept the UID of whichever mutation the parent applied last,
-        which under threads is the order the workers finish in. Under
-        processes each worker zeroed a copy loaded from the frame before the
-        pass, so the frame the parent kept carried one rule's zones and not
-        the other's. And the image's attestation was one rule's hash, so a
-        second pass re-redacted it under the other rule's.
+        which under threads is the order the workers finish in. The pixels
+        lost a rule's zones the same way. Under processes each worker
+        zeroed a copy loaded from the frame before the pass, every time.
+        Under threads both workers could read that frame before either
+        wrote, so it was a race, and the loser could also leave the loader
+        and the pixel hash from different workers. The frame kept carried
+        one rule's zones and not the other's. And the image's attestation
+        was one rule's hash, so a second pass re-redacted it under the
+        other rule's.
 
         One task per instance applies every zone in one call, attests the
         whole set (`_redaction_config_hash` over every rule's serial and
