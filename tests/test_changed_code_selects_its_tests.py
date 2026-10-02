@@ -385,6 +385,48 @@ def test_a_test_with_a_wide_fixture_takes_its_whole_file(tmp_path):
     assert not test_map.has_wide_fixture(tmp_path, "tests/test_absent.py")
 
 
+def test_a_selection_reads_each_test_file_once_however_many_paths_changed(
+        tmp_path, monkeypatch):
+    # The detectors read every tests/test_*.py, and asked once per changed
+    # path they read the suite again for each: release/1.0's 213 paths
+    # cost 86k regex searches over 405 files, 40 of `select`'s 45 s, and
+    # past 120 s under a four-shard release run (#914). The bound is on
+    # reads, not seconds: a read per path per file is the cost that grew.
+    import io
+    star, md = "*", "." + "md"
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_walks.py").write_text(
+        f'for p in root.rglob("{star}{md}"): pass\n')
+    (tests / "test_names.py").write_text("import helper_mod\n")
+    (tests / "test_wide.py").write_text(
+        '@pytest.fixture(scope="module")\ndef built(): pass\n'
+        'def test_x(): pass\n')
+    mapping = {"functions": {"isocenter/a.py": {
+        "f": ["tests/test_wide.py::test_x"]}}, "workers": {}}
+    other = [f"docs/page{i}{md}" for i in range(6)] + [
+        "scripts/helper_mod.py", "scripts/other_mod.py", "tests/test_names.py"]
+    reads, real_open = {}, io.open
+    # In pieces: a whole Python-suffix literal here would make this file a
+    # reader of every module (`glob_readers`), and every package edit would
+    # select it (test_the_selector_reads_the_live_source.py pins that).
+    py = "." + "py"
+
+    def counting_open(file, *args, **kwargs):
+        name = Path(os.fspath(file)).name if isinstance(
+            file, (str, os.PathLike)) else None
+        if name and name.startswith("test_") and name.endswith(py):
+            reads[name] = reads.get(name, 0) + 1
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(io, "open", counting_open)
+    sel = test_map.select(mapping, {C("isocenter/a.py", "f")}, other, {},
+                          tmp_path, dispatching={})
+    # What the reads were for, so a selection that read nothing cannot pass.
+    assert {"tests/test_walks.py", "tests/test_wide.py"} <= sel.files
+    assert reads == {"test_walks.py": 1, "test_names.py": 1, "test_wide.py": 1}
+
+
 def test_rule_7_matches_a_python_file_by_its_stem_and_nothing_else_by_it(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text("import helper_mod\nsession = 1\n")
