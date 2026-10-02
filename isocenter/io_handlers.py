@@ -10617,6 +10617,81 @@ def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
         f"{pairs}.")
 
 
+#: PS3.5 Table 6.2-1 (2026d), IS: "The integer, n, represented shall be in
+#: the range: -2^31 <= n <= (2^31-1)", in "12 bytes maximum".
+_IS_MIN, _IS_MAX = -2 ** 31, 2 ** 31 - 1
+
+
+def _is_value_that_fits(value):
+    """`value` with every caller's number written as an integer in IS's range (#897).
+
+    pydicom writes whatever number an IS is handed: `1e20` as 21 digits,
+    `1.5` as `'1.5'`. Each value -- the atom, or each member of a list --
+    is rewritten only when it is a real number (numpy's included), not a
+    `bool` or a `str`, and carries no `original_string`:
+
+    - a non-integer is rounded half-to-even (`1.5` -> `'2'`), and said;
+    - the integer is then checked against IS's range, and a value outside
+      it raises. So `2147483647.4` is written and `2147483647.6` is not.
+
+    An integral value in range is written as pydicom wrote it (`7.0` ->
+    `'7'`), with nothing said.
+
+    Args:
+        value: The value about to be written under IS.
+
+    Returns:
+        Tuple: `(value, changes)`; `changes` lists `(set, written)` per
+        rounded value, and is empty when nothing was rounded.
+
+    Raises:
+        ValueError: A non-finite number, or one outside IS's range after
+            rounding. Raised inside `_merge`'s per-element `try`, so it
+            becomes that element's `DATA_LOSS` row: clamping would write a
+            number with no relation to the one set.
+    """
+    # Numbers only, never `str`: a configuration writes strings, and a
+    # range check on one would change what a loaded file exports, a
+    # `CONFIG_VERSION` minor (#762). `original_string` is #723's exemption:
+    # a source IS is the file's statement, live and across a reopen.
+    changes = []
+
+    def one(item):
+        if (not isinstance(item, numbers.Real) or isinstance(item, (bool, str))
+                or getattr(item, "original_string", None)):
+            return item
+        if not isfinite(item):
+            raise ValueError(f"{item!r} has no Integer String spelling")
+        # `int(...)` around `round` is load-bearing: `round()` of a numpy
+        # float is a numpy float, whose text is `'2.0'`.
+        number = int(item) if item == int(item) else int(round(item))
+        if not _IS_MIN <= number <= _IS_MAX:
+            raise ValueError(
+                f"{item!r} is outside IS's range, {_IS_MIN} to {_IS_MAX}")
+        if number != item:
+            changes.append((item, str(number)))
+            return number
+        return item
+
+    if isinstance(value, (list, tuple, MultiValue)):
+        written = [one(item) for item in value]
+    else:
+        written = one(value)
+    return (written if changes else value), changes
+
+
+def _is_fit_sentence(tag, within, changes) -> str:
+    """The `WARNING` sentence for `_is_value_that_fits`' rounding.
+
+    No path and no identifier: the parent prefixes the SOP Instance UID.
+    """
+    where = f"{within} > " if within else ""
+    pairs = ", ".join(f"{set_!r} as '{written}'" for set_, written in changes)
+    return (f"Tag {where}{tag} (IS): a number that is not an integer "
+            f"cannot be written in an Integer String, and was rounded: "
+            f"{pairs}.")
+
+
 def _numeric_arm(vr, value):
     """The arm an ambiguous VR's `value` fits, or a refusal.
 
@@ -11450,6 +11525,13 @@ class DicomExporter:
                     v, changes = _ds_text_that_fits(v)
                     if changes:
                         ds_note = _ds_fit_sentence(t, within, changes)
+                # Its IS sibling (#897): a caller's number rounded to an
+                # integer (a WARNING row), or outside IS's range and raised
+                # here, so it is this element's DATA_LOSS row.
+                if vr == "IS" and encoded is None:
+                    v, changes = _is_value_that_fits(v)
+                    if changes:
+                        ds_note = (False, _is_fit_sentence(t, within, changes))
                 if vr is None:
                     if encoded is None:
                         raise ValueError(
