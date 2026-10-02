@@ -102,6 +102,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A compressed stream wider than BitsStored (JPEG 2000 or JPEG-LS by its precision, a wide T.81 stream) is read at its own width: the bits become sample values, the export widens BitsStored to 16, and the existing precision `WARNING` grades the run `REVIEW_REQUIRED`. It gets no overlay row. Carrying the overlay into Overlay Data instead was weighed and not chosen for 1.0, since it would change exported bytes.
   - `tests/test_an_overlay_in_unused_pixel_bits_is_not_exported.py` pins the library default on the raw exported buffer (never `pixel_array`, which would mask again), after asserting the source holds the 550 bits, for all three encodings, and the JPEG 2000 case; turning `correct_unused_bits` off for every decode makes it red. `docs/configuration.md` said such overlays survive ingest, which was false; it now says what happens.
   - **Output:** none. Exported files are byte-identical; the row is in the report only, and no file in the fingerprint cohort declares an in-pixel overlay.
+- **Burned-in text inside a redaction zone could be exported unredacted when two rules covered one image (#908).** This exposed anyone whose rules put two rules on one image: an exact rule plus `"*"`, or two rules on one serial (`load_config` de-duplicates nothing). `redact()` built one task per rule, so such an image got two tasks. Each task zeroed only its own rule's zones on a frame read before the other task's write landed, and the store kept one task's frame. The other rule's zones stayed in the store's pixels. Per-rule tasks go back to 0.7.0.
+  - **Under processes** (the default on a GIL build: 3.12, 3.13, 3.14; or `ISOCENTER_FORCE_PROCESSES`), the loss happened every time. Each worker redacts a pickled copy loaded from the pre-pass frame, and every rule's zones were lost except the last applied task's.
+  - **Under threads** (3.14t's default, or `ISOCENTER_FORCE_THREADS`), it was a race: both workers could read the pre-pass frame before either wrote. The review of #909 measured one 2048x2048 image on `main`:
+    - 3.12 with threads forced, 40 runs: 38 lost a zone.
+    - 3.14t with threads forced, 40 runs: 13 lost a zone and 25 failed the next read with `Pixel data hash mismatch`, because the loader and the pixel hash came from different workers.
+    - 3.14t's default strategy, 20 runs: 3 lost a zone and 16 hit the mismatch.
+  - **When it reached a file.**
+    - **Up to 0.9.7**, an ordinary export in the same session leaked: export applied only the first exact rule's zones (#580). Measured on v0.9.7 with `"*"` listed first. Earlier releases are inferred from the code, not measured.
+    - **From 0.9.8 through 1.0.0rc9**, an export zeroes every matching rule's zones from the rules loaded when it runs. That re-zeroed the lost zone, so only an export without those rules leaked: a session reopened without `load_config()` (the documented two-session workflow), rules changed or cleared before the export, or `DicomExporter.write_tree()`. Measured on `main` at 21351b8b with the store reopened before the export: under processes, the zone of whichever rule's task was applied first was exported with its pixels. With three rules, two of them on one serial, both exact rules' zones were.
+  - **The UID depended on the same order.** Each task derived the redacted SOP Instance UID from its own rule's zones (`privacy._redaction_uid_for`, #544), and the image kept the last task's. Under threads, the last task is whichever worker finished last. The behaviour digest's `"*"` scenario (#899) gave one UID on 3.12 and another on 3.14t.
+  - **A second `redact()`** found one rule's attestation hash, redacted the image again and moved its UID.
+  - **The count.** `redact()` returned 2 for the one image, though its docstring says it counts instances with a zone applied.
+  - **Now** `Session.redact()` folds every rule's task for one instance into one task (`RedactionService._one_task_per_instance`). That task applies every zone in one call, attests the whole set and derives the UID from it. No two workers touch one image, under either strategy.
+    - `services._redaction_config_hash` is the one spelling of the hash input. For one serial it is `{"serial", "rois"}`, as before, so an image one rule covers keeps its hash, UID and skip. Several distinct serials are a `"serials"` list instead.
+    - Each rule-pass still writes its own `REDACTION` row and counts the image once. `redact()` returns 1 for the image, and the console's "Queued N redaction tasks" counts images.
+  - **What a caller sees.** A store redacted before this under two rules for one image holds one rule's attestation. The next `redact()` therefore redacts that image again with every matching rule's zones, which restores any zone the store lost, and gives it the UID that names them. Re-run `redact()` before exporting from such a store.
+    - `RedactionService.prepare_redaction_tasks`, `execute_redaction_task` and `process_machine_rules` still work one rule at a time. They run in process, on the live instance, so their pixels are complete; only `Session.redact()` folds.
+    - A worker's mutation carries `pass_keys` (a list) where it carried `pass_key`.
+  - **Tests.** `tests/test_two_rules_on_one_image_redact_it_one_way.py` forces both task orders, on the live instance and on a pickled copy, rather than relying on timing. It covers:
+    - the UID, both rules' zones and the count;
+    - the second pass's skip;
+    - a rule added after an earlier pass;
+    - a UID distinct from each rule's alone;
+    - one UID however the zones or rules are listed (the hash's sort, which nothing pinned before);
+    - one row per rule;
+    - an export from the reopened store with no rules loaded, which is red before this change.
+
+    `test_redaction_uid_capture.py` and `test_redaction_audit_accounting.py` asserted `applied == 2` for one image and now assert 1; their rows are unchanged.
+  - **The behaviour digest's 2.0 row moves (#782).** Its `"*"` scenario now redacts after the suggestions are applied, under `"*"` and the exact rule added for the synthetic image's serial: two rules on one image, the case this fixes. It used to redact before them because that image's UID depended on the task order (#899). `CONFIG_VERSION` stays 2.0, which has not shipped: rows freeze at final tags only (owner ruling Q9). The new pin is the same on 3.12 and 3.14t.
+  - **Output:** an image two rules cover is exported with every zone of every matching rule zeroed, under a UID derived from all of them. Before, it took one rule's UID; and, exported without the rules loaded, it could carry only one rule's zones. An image one rule covers is unchanged. No golden-cohort file changes.
 
 ## [1.0.0rc9] - 2026-10-02
 

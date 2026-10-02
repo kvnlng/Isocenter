@@ -142,9 +142,11 @@ def test_two_rules_sharing_a_serial_write_two_rows(
          "redaction_zones": [[0, 4, 0, 4], [8, 12, 8, 12]]})
 
     applied = session.redact(show_progress=False)
-    assert applied == 2, (
-        "both rules' zones land and the second rule's config hash "
-        "differs from the first's, so both passes must apply")
+    # One image, redacted once with both rules' zones (#908); `redact()`
+    # counts instances, and each pass's row below counts it once.
+    assert applied == 1, (
+        "one image with both rules' zones applied; redact() counts "
+        "instances, not rule applications (#908)")
     session.close()
 
     rows = _redaction_rows(db_path)

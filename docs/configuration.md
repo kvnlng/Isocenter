@@ -551,7 +551,7 @@ machines:
 ```
 
 * **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
-* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. The export applies them whether or not `redact()` has run.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
   * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
@@ -666,7 +666,7 @@ A de-identification run depends on three things, and the configuration file is o
 
 **A copy of the store is the same store, secret included.** The store is both files: copy `my_project.db` and `my_project_pixels.bin` together, and keep them under the same basename, because the session finds its sidecar by the `.db` file's name. A copy of the `.db` alone keeps the pseudonyms and offsets; for the instances ingested before the copy, their pixels are not in the copy, and export fails for them. Isocenter does not detect copies or refuse them. Treat every copy as the project itself: back it up as you back up `isocenter.key`, and never send it, or any copy of it, with an export. Whoever holds the store can recover every shifted date, and its audit log records each offset.
 
-**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`, because a new secret would not recognise them and would replace them a second time.
+**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and the zones of every rule that matches it, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`, because a new secret would not recognise them and would replace them a second time.
 
 ## Auto-Discovery of Redaction Zones
 

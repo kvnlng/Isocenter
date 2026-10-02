@@ -166,6 +166,38 @@ def _report_redaction_failures(failures, store_backend=None):
     return reported
 
 
+def _redaction_config_hash(serials, rois) -> str:
+    """The attestation hash of the zones one image is redacted with.
+
+    Over the rules' serials and every zone applied, both sorted, so the
+    hash names the set and never the order it was listed or applied in.
+    Zeroing is commutative and idempotent: two orderings of one set of
+    zones cannot give different pixels, so the sort is correct and not a
+    collision.
+
+    **Do not change the one-serial input.** It is `{"serial", "rois"}`,
+    which every store's attestation and every redacted SOP Instance UID
+    (`_redacted_uid_for`) was derived from. A changed input moves both on
+    the next ordinary `redact()`, and a store whose zones are listed out
+    of sorted order would re-redact while the others would not. `force=`
+    is the announced lever. Several distinct serials (an exact rule and
+    `"*"` on one image, #908) are a `"serials"` list instead, which no
+    one-serial input can equal.
+
+    Args:
+        serials (Iterable[str]): The `serial_number` of each rule whose
+            zones are applied, duplicates allowed.
+        rois (Iterable): Every zone applied, `[y1, y2, x1, x2]`.
+
+    Returns:
+        str: 32 hex digits.
+    """
+    distinct = sorted(set(serials))
+    key = {"serial": distinct[0]} if len(distinct) == 1 else {"serials": distinct}
+    key["rois"] = sorted(list(roi) for roi in rois)
+    return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
+
+
 def _redacted_uid_for(inst, config_hash, secret) -> str:
     """The SOP Instance UID `inst` takes when redacted under `config_hash`.
 
@@ -744,13 +776,10 @@ class RedactionService:
         if not valid_rois:
             return []
 
-        # Compute Hash. `sorted` for the reason `redact_machine_instances`
-        # gives at length: zeroing is commutative, so zone order cannot
-        # change the pixels, and the sort is therefore correct rather than
-        # a collision. Do not change this input.
-        rois_stable = sorted(valid_rois)
-        config_str = json.dumps({"serial": serial, "rois": rois_stable}, sort_keys=True)
-        config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
+        # This rule's hash. An image another rule also covers gets one task
+        # carrying both rules' zones and a hash over both, from
+        # `_one_task_per_instance` (#908).
+        config_hash = _redaction_config_hash([serial], valid_rois)
 
         # The redacted UIDs are derived here, in the parent: the secret is
         # read once and never put on a task or on the service.
@@ -783,6 +812,66 @@ class RedactionService:
             })
 
         return tasks
+
+    def _one_task_per_instance(self, tasks: List[dict],
+                               project_secret: Optional[bytes] = None) -> List[dict]:
+        """Fold every rule's task for one instance into one task (#908).
+
+        An image an exact rule and `"*"` both cover had a task from each.
+        Each task derived the redacted UID from its own rule's zones, so the
+        image kept the UID of whichever mutation the parent applied last,
+        which under threads is the order the workers finish in. The pixels
+        lost a rule's zones the same way. Under processes each worker
+        zeroed a copy loaded from the frame before the pass, every time.
+        Under threads both workers could read that frame before either
+        wrote, so it was a race, and the loser could also leave the loader
+        and the pixel hash from different workers. The frame kept carried
+        one rule's zones and not the other's. And the image's attestation
+        was one rule's hash, so a second pass re-redacted it under the
+        other rule's.
+
+        One task per instance applies every zone in one call, attests the
+        whole set (`_redaction_config_hash` over every rule's serial and
+        zones) and derives the UID from that hash. An instance one rule
+        covers keeps its task unchanged, hash and UID included.
+
+        Args:
+            tasks (List[dict]): `prepare_redaction_tasks` output for every
+                rule, in rule order, each carrying `pass_keys`.
+            project_secret (bytes, optional): What a folded task's
+                `new_sop_uid` is derived under, as for
+                `prepare_redaction_tasks`.
+
+        Returns:
+            List[dict]: One task per instance, in first-seen order. A folded
+                task carries every rule's zones in rule order and every
+                rule's `pass_keys`, and no `machine_sn`: it is no one
+                rule's.
+        """
+        grouped = {}
+        for task in tasks:
+            grouped.setdefault(id(task["instance"]), []).append(task)
+        if all(len(group) == 1 for group in grouped.values()):
+            return list(tasks)
+        secret = self._redaction_secret(project_secret)
+        folded = []
+        for group in grouped.values():
+            if len(group) == 1:
+                folded.append(group[0])
+                continue
+            first = group[0]
+            rois = [roi for task in group for roi in task["rois"]]
+            config_hash = _redaction_config_hash(
+                [task["machine_sn"] for task in group], rois)
+            task = {key: value for key, value in first.items() if key != "machine_sn"}
+            task.update({
+                "rois": rois,
+                "config_hash": config_hash,
+                "new_sop_uid": _redacted_uid_for(first["instance"], config_hash, secret),
+                "pass_keys": [key for task in group for key in task.get("pass_keys", ())],
+            })
+            folded.append(task)
+        return folded
 
     def execute_redaction_task(self, task: dict):  # pylint: disable=missing-raises-doc
         # The bare `raise` below re-raises into this method's own
@@ -915,19 +1004,18 @@ class RedactionService:
             # Prepare Mutated State to return (for Process Isolation)
             mutation = {
                 "original_sop_uid": original_uid,  # the parent's map key
-                # The rule-pass this application belongs to, for the
-                # parent's REDACTION audit row. Carried on the
-                # mutation rather than joined back through a UID map in
-                # the parent, because one instance matched by two rules
-                # produces two mutations under one pre-redaction UID --
-                # a map keyed on the UID would attribute both to
-                # whichever rule built it first. The key is the rule's
-                # index (set by `_apply_redaction_rules`), not the
-                # serial: two rules can share one serial spelling, and
-                # each pass accounts for itself. `.get` because tests
-                # drive this worker on bare `prepare_redaction_tasks`
-                # output, which does not carry the key.
-                "pass_key": task.get("pass_key"),
+                # The rule-passes this application belongs to, for the
+                # parent's REDACTION audit rows: one per rule whose zones
+                # the task carries, since an instance two rules cover is
+                # one task (`_one_task_per_instance`, #908). Carried on
+                # the mutation rather than joined back through a UID map
+                # in the parent. Each key is the rule's index (set by
+                # `_apply_redaction_rules`), not the serial: two rules can
+                # share one serial spelling, and each pass accounts for
+                # itself. `.get` because tests drive this worker on bare
+                # `prepare_redaction_tasks` output, which does not carry
+                # the keys.
+                "pass_keys": list(task.get("pass_keys", ())),
                 # The post-redaction UID, and the parent **assigns** it
                 # (`_apply_redaction_outcomes`). Reaching this line
                 # means `regenerate_uid()` ran a few lines above, so this
@@ -1177,21 +1265,9 @@ class RedactionService:
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")
 
-        # 1. Compute Hash for this Config
-        #
-        # Sorted, and the sort is *correct*, not merely stable: redaction
-        # zeroes, and zeroing is commutative and idempotent, so two
-        # orderings of one zone list cannot produce different pixels.
-        #
-        # **Do not change this input.** Every store whose config order
-        # differs from its sorted order would find its attestation moved,
-        # re-redact, and take a new SOP Instance UID and a new exported
-        # filename on the next ordinary call -- and every other store
-        # would not. That is an unannounced partial migration delivered to
-        # an arbitrary subset. `force=` is the announced lever.
-        rois_stable = sorted(rois)
-        config_str = json.dumps({"serial": machine_sn, "rois": rois_stable}, sort_keys=True)
-        config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
+        # 1. Compute Hash for this Config. `_redaction_config_hash` says
+        # why its one-serial input must not change.
+        config_hash = _redaction_config_hash([machine_sn], rois)
 
         failures = []
         applied = 0

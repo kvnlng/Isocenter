@@ -17,11 +17,12 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
   `VR_DUMMY` string VR, and a repeating-group mask key;
 - `basic@2026c` with a dict zone on a `"*"` rule beside an exact rule for
-  another machine (`STAR_CONFIG`). The store is audited, anonymized and
-  redacted under the file's rules. Then fixed text regions on the synthetic
-  image are classified against the rules covering it, and the suggestions
-  `ConfigAutomator` makes are applied (#808, #814, #899). Redaction under
-  the rules the suggestions leave is not seen until #908.
+  another machine (`STAR_CONFIG`). The store is audited and anonymized.
+  Then fixed text regions on the synthetic image are classified against the
+  rules covering it, and the suggestions `ConfigAutomator` makes are
+  applied (#808, #814, #899). Then the store is redacted under the rules
+  the suggestions leave: `"*"` and a new exact rule both cover the
+  synthetic image (#908).
 
 The files are CT_small and MR_small (bundled with pydicom) and five
 synthetic images built from CT_small. One holds an element of every
@@ -295,13 +296,12 @@ def _leaks_on_the_synthetic_image(session):
     fixed, so this is the classification against the covering rules' zones
     and `ConfigAutomator`, the config-driven half of `scan_pixel_content()`.
 
-    Run after `redact()`, so the file's rules redact. Applied first, the
-    suggestions put an exact rule for `SERIAL` beside `"*"`, and two rules on
-    one instance each mint a redacted SOP UID; which one the instance keeps
-    depends on which task finishes last, which threads do not fix. That is
-    `redact()`'s behaviour on main, not this scenario's to pin. The image
-    is found by the serial ingest indexed, since its UIDs are replaced by
-    now."""
+    Run before `redact()`, so the rules the suggestions leave redact: an
+    exact rule for `SERIAL` beside `"*"`, two rules on one image, which
+    `redact()` applies as one task with both rules' zones and one UID over
+    them (#908). Before #908 that image's UID was the last task's, which
+    threads do not fix, so this ran after `redact()`. The image is found by
+    the serial ingest indexed, since its UIDs are replaced by now."""
     found = [(inst, series.equipment)
              for patient in session.store.patients
              for study in patient.studies
@@ -327,8 +327,8 @@ def _leaks_on_the_synthetic_image(session):
 
 def _scenario(root, name, configure, redact=False, inspect=None):
     """Ingest the files into a fresh store and reopen it, apply
-    `configure`, audit and anonymize twice (and redact), run `inspect` (its
-    record kept under `"inspected"`), and return what was found and
+    `configure`, audit and anonymize twice, run `inspect` (its record kept
+    under `"inspected"`), redact if asked, and return what was found and
     written."""
     directory = os.path.join(root, name)
     _inputs(os.path.join(directory, "input"))
@@ -351,6 +351,8 @@ def _scenario(root, name, configure, redact=False, inspect=None):
         record["second_findings"] = _findings(again)
         session.anonymize(again)
         record["graph_after_second"] = _graph(session)
+        if inspect:
+            record["inspected"] = inspect(session)
         if redact:
             session.redact(show_progress=False)
             # Every frame, not only the zone's: the zone matches by the
@@ -366,8 +368,6 @@ def _scenario(root, name, configure, redact=False, inspect=None):
                                 pixels.tobytes()).hexdigest()
             record["frames_after_redact"] = frames
             record["sop_after_redact"] = _graph(session)
-        if inspect:
-            record["inspected"] = inspect(session)
     return record
 
 
@@ -410,8 +410,8 @@ def behaviour(root):
             _load("privacy_profile: basic\nremove_private_tags: false\n")),
         "floor": _scenario(root, "floor", _floor, redact=True),
         "none-kitchen-sink": _scenario(root, "none", _none),
-        # Redacts under the file's rules, before the suggestions are
-        # applied; `_leaks_on_the_synthetic_image` says why (#908).
+        # Redacts under the rules the suggestions leave, two of which
+        # cover the synthetic image (#908).
         "star-zone": _scenario(root, "star", _load(STAR_CONFIG), redact=True,
                                inspect=_leaks_on_the_synthetic_image),
     }
