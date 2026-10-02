@@ -6,6 +6,7 @@ setup and its own reading of the environment. These tests state the
 behaviour those copies were supposed to share, so the copies can be
 removed.
 """
+import collections
 import concurrent.futures
 import contextlib
 import functools
@@ -2862,6 +2863,105 @@ def test_an_exit_code_read_after_another_caller_reaped_is_none():
         # good (its `poll` keeps answering None), and every later test
         # asserting no child is left would fail on it.
         multiprocessing.process._children.discard(process)
+
+
+class _EndedButUnreadProcess:
+    """A process whose sentinel is ready and whose exit code reads None and
+    then its real code: the watch losing the reap race to the pool's worker
+    handler, as U8c shows the stdlib answers it."""
+
+    def __init__(self, codes):
+        self._read, self._write = os.pipe()
+        os.close(self._write)  # the read end is ready from now on
+        self._codes = list(codes)
+        self.pid = 4242
+
+    @property
+    def sentinel(self):
+        return self._read
+
+    @property
+    def exitcode(self):
+        return self._codes.pop(0) if len(self._codes) > 1 else self._codes[0]
+
+    def close(self):
+        os.close(self._read)
+
+
+def test_an_ended_worker_whose_exit_code_reads_none_is_read_again():
+    """U8d: a ready sentinel with an exit code of None is kept and read at
+    the next check, never taken as a death (#887, review of #913).
+
+    The pool's worker handler can reap a worker before the watch reads it,
+    and then `exitcode` is None (U8c). Read as a death, that race fails a
+    healthy export with `BrokenProcessPool`. Killing mutation: None read as
+    abnormal (N5).
+    """
+    process = _EndedButUnreadProcess([None, 0])
+
+    class _Pool:
+        _started = collections.deque([process])
+        _exit_grace = 15.0
+
+    try:
+        watch = parallel._RecyclingWatch(_Pool())
+        watch.check()
+        assert watch._live == [process]
+        watch.check()
+        assert watch._live == []
+    finally:
+        process.close()
+
+
+def test_a_ctrl_c_while_the_sentinels_are_asked_reaches_the_caller(
+        monkeypatch):
+    """U8e: `_still_running_or_all` lets a `KeyboardInterrupt` through; only
+    a handle that cannot be asked falls back to every process (#862).
+
+    Killing mutation: the readiness check catching `BaseException` (N16),
+    which would swallow a second Ctrl-C.
+    """
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(multiprocessing.connection, "wait", interrupted)
+    process = _EndedButUnreadProcess([0])
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            parallel._still_running_or_all([process])
+    finally:
+        process.close()
+
+
+class _KillRecorded:
+    """A process that records `kill()`; its sentinel is never asked."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.sentinel = pid
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+
+def test_a_ctrl_c_while_the_sentinels_are_asked_still_kills_them_all(
+        monkeypatch):
+    """U8f: an interrupt in the readiness check kills every process, then
+    is raised (review of #913).
+
+    Raised out of the kill's `finally` before any `kill()`, it let the
+    caller's next step wait on a running worker for good, against the
+    comment's own rule: never skip the kill.
+    """
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(multiprocessing.connection, "wait", interrupted)
+    processes = [_KillRecorded(1), _KillRecorded(2)]
+    with pytest.raises(KeyboardInterrupt):
+        parallel._kill_still_running(processes)
+    assert [p.killed for p in processes] == [True, True]
 
 
 def test_a_worker_that_cannot_leave_at_its_quota_ends_itself(

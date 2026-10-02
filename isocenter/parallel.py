@@ -748,13 +748,7 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
         # Never catch `BaseException` around this check: a second Ctrl-C
         # here must still reach the caller, and the fallback for a handle
         # that cannot be asked is to kill them all, never to skip the kill.
-        killed = []
-        for process in _still_running_or_all(waiting.values()):
-            try:
-                process.kill()
-            except (OSError, ValueError):
-                continue
-            killed.append(process.pid)
+        killed = _kill_still_running(waiting.values())
         if killed:
             # Two `ingest()` calls on one broken pool can both get here and
             # both kill: `kill()` skips a worker already reaped and swallows
@@ -867,6 +861,36 @@ def _still_running_or_all(processes) -> list:
         return processes
 
 
+def _kill_each(processes) -> list[int]:
+    """SIGKILL each process; return the pids the signal was sent to."""
+    killed = []
+    for process in processes:
+        try:
+            process.kill()
+        except (OSError, ValueError):
+            continue
+        killed.append(process.pid)
+    return killed
+
+
+def _kill_still_running(processes) -> list[int]:
+    """SIGKILL the processes still running; return their pids.
+
+    A Ctrl-C (or anything else) raised while the sentinels are asked is
+    not swallowed: every process is killed, then it is raised. Skipping
+    the kill there let the caller's next step wait on a running worker for
+    good (review of #913); killing one that already ended costs nothing,
+    because `kill()` skips a reaped process and swallows a gone one.
+    """
+    processes = list(processes)
+    try:
+        targets = _still_running_or_all(processes)
+    except BaseException:
+        _kill_each(processes)
+        raise
+    return _kill_each(targets)
+
+
 def _end_recycling_pool(pool, finished: bool) -> list[int]:
     """End a recycling `multiprocessing.Pool`, holding the caller no longer
     than `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`.
@@ -968,12 +992,7 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
         if not exited.is_set():
             # The live list, read only now: nothing grows it once the pool
             # is closed or terminating.
-            for process in _still_running_or_all(list(pool._pool)):
-                try:
-                    process.kill()
-                except (OSError, ValueError):
-                    continue
-                killed.append(process.pid)
+            killed = _kill_still_running(list(pool._pool))
             if killed:
                 # The time measured, not the grace: an interrupt ends the
                 # wait early. The cause by path: a finished pool is closed
