@@ -25,7 +25,7 @@ from pydicom.sequence import Sequence
 from pydicom.uid import generate_uid
 
 from isocenter.entities import Instance, iter_item_tree
-from isocenter.io_handlers import BINARY_RETENTION_MAX_BYTES, populate_attrs
+from isocenter.io_handlers import LUT_RETENTION_MAX_BYTES, populate_attrs
 from isocenter.session import DicomSession
 
 CT_IMAGE = "1.2.840.10008.5.1.4.1.1.2"
@@ -113,7 +113,7 @@ LUT_SHAPES = [
     pytest.param(dict(seq=None), id="top-level"),
     pytest.param(dict(seq=MODALITY_LUT, entries=()), id="empty"),
     pytest.param(dict(seq=MODALITY_LUT,
-                      entries=tuple(range(BINARY_RETENTION_MAX_BYTES // 2))),
+                      entries=tuple(range(LUT_RETENTION_MAX_BYTES // 2))),
                  id="at-the-retention-threshold"),
 ]
 
@@ -136,11 +136,11 @@ def test_an_implicit_lut_with_no_descriptor_is_held_as_its_explicit_twin_is(
 def test_an_oversized_implicit_lut_with_no_descriptor_is_dropped_as_its_explicit_twin_is(
         tmp_path):
     ds = _lut(_dataset(),
-              entries=tuple(range(BINARY_RETENTION_MAX_BYTES // 2 + 1)))
+              entries=tuple(i % 65536 for i in range(LUT_RETENTION_MAX_BYTES // 2 + 1)))
     implicit = _ingest(tmp_path, ds, True, "implicit")
     explicit = _ingest(tmp_path, ds, False, "explicit")
     loss = ["Standard tag 0028,3006 (OW) was not ingested; its value exceeds "
-            "the 65534-byte retention threshold, so it is not held in the "
+            "the 131072-byte retention threshold, so it is not held in the "
             "object graph, so it is not in the exported file."]
     assert _rows(explicit[3], "DATA_LOSS") == loss
     # Red on main: the file is refused, and no DATA_LOSS row is written.

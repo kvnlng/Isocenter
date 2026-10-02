@@ -52,7 +52,7 @@ The index runs in SQLite's WAL mode and the sidecar's locks are `flock`, so the 
 - **Private tags** (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.
 - **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more.
 
-Binary values other than pixel and waveform data are kept only up to 65534 bytes; larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
+Binary values other than pixel and waveform data are kept only up to 65534 bytes, or 131072 bytes for the pixel lookup tables (LUT Data and the palette data); larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
 
 The table layout is described for contributors in [Contributing](developer_guide.md#storage-schema). It is not part of the frozen API.
 

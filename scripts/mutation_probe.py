@@ -462,6 +462,7 @@ TARGETS = {
                                   "tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py",
                                   "tests/test_a_float_in_a_ds_fits_sixteen_characters.py",
                                   "tests/test_a_number_in_an_is_fits_its_range.py",
+                                  "tests/test_a_pixel_lut_is_kept_beyond_the_vendor_blob_limit.py",
                                   "tests/test_an_over_long_short_length_value_round_trips.py",
                                   "tests/test_an_implicit_ambiguous_value_is_said.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",

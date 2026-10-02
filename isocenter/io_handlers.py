@@ -1089,6 +1089,51 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 BINARY_RETENTION_MAX_BYTES = 65534
 
 
+#: The pixel-interpretation lookup tables, which `_retention_limit_for`
+#: keeps up to `LUT_RETENTION_MAX_BYTES` rather than
+#: `BINARY_RETENTION_MAX_BYTES` (#902): LUT Data (Modality and VOI LUT
+#: sequences, at any nesting), the retired Gray LUT Data, the Red, Green and
+#: Blue Palette Color LUT Data, and their Segmented twins. All even group,
+#: so never private.
+LUT_DATA_TAGS = frozenset({
+    "0028,3006", "0028,1200",
+    "0028,1201", "0028,1202", "0028,1203",
+    "0028,1221", "0028,1222", "0028,1223",
+})
+
+#: 65536 entries of 16 bits: the most a LUT Descriptor can declare, so the
+#: largest expanded table, and exact for the five non-segmented tags. For
+#: the three segmented ones it is a chosen cap, not a bound the standard
+#: gives: PS3.3 C.7.9.2 fixes the expanded table's entry count and says
+#: nothing that bounds the segments encoding it. A segmented table exists
+#: to be smaller than its expansion, so one larger than this is
+#: pathological, and it is dropped with its row. The cost is bounded too:
+#: three palettes at the cap are 384 KiB raw per instance, about 512 KiB
+#: as base64 in `attributes_json`. These are what decide how an image's
+#: pixels display; dropping one left a colour image with one palette of
+#: three, or a VOI LUT item with a descriptor and no data, both under PASS
+#: (a STANDARD loss does not grade).
+LUT_RETENTION_MAX_BYTES = 131072
+
+
+def _retention_limit_for(tag: str) -> int:
+    """The most bytes an unrouted binary value of `tag` is retained at (#902).
+
+    `LUT_RETENTION_MAX_BYTES` for the pixel-interpretation LUTs
+    (`LUT_DATA_TAGS`), `BINARY_RETENTION_MAX_BYTES` for everything else.
+    Read at both gates in `populate_attrs` -- the binary-VR arm and the
+    `UN` arm, so a `UN` LUT Data is still gated as its `OW` twin (review
+    of #900, F6) -- and by the drop row, so the row names the limit that
+    applied.
+
+    Args:
+        tag (str): The element's `gggg,eeee` tag, lowercase.
+    """
+    if tag in LUT_DATA_TAGS:
+        return LUT_RETENTION_MAX_BYTES
+    return BINARY_RETENTION_MAX_BYTES
+
+
 #: Private VRs whose Python value must be an integer, mapped to the
 #: inclusive range each can actually encode (PS3.5 Table 6.2-1; `AT` is
 #: a four-byte tag, so it takes `UL`'s range).
@@ -1765,8 +1810,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     are skipped as indices into those bytes (`_DERIVED_PIXEL_INDEX_TAGS`).
     Every other bulk value -- private vendor blocks, Overlay Data, the
     palette LUTs, and the `UN` spelling all of them take under Implicit VR
-    -- is retained at or below `BINARY_RETENTION_MAX_BYTES` and dropped
-    above it, whatever its wire VR. A retained value in words wider than a
+    -- is retained at or below its tag's limit (`_retention_limit_for`:
+    `BINARY_RETENTION_MAX_BYTES`, or `LUT_RETENTION_MAX_BYTES` for the
+    pixel lookup tables, #902) and dropped above it, whatever its wire VR. A retained value in words wider than a
     byte, read from a big-endian dataset, is stored little-endian (see
     `_stored_byte_order`); an `OB` value is never converted. A private
     `UN` value that re-parses byte-exactly as a sequence
@@ -1952,17 +1998,18 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             # vendor blob, and the outcome does not depend on the
             # transfer syntax, because the implicit-VR spelling of the
             # same element (`UN`, gated below) takes the same rule.
-            # Above it, DATA_LOSS: Overlay Data and the palette LUTs
-            # (`OW`, standard, routed nowhere) and the megabyte private
-            # blocks all vanish loudly, whatever their group.
+            # Above it, DATA_LOSS: Overlay Data (`OW`, standard, routed
+            # nowhere) and the megabyte private blocks vanish loudly,
+            # whatever their group. The pixel lookup tables meet their own,
+            # higher limit here and at the `UN` gate (#902).
             value = elem.value
             if value is None:
                 # A zero-length element. Nothing to lose and nothing to
                 # weigh; retained as empty bytes so it round-trips.
                 value = b""
+            b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
             if isinstance(value, (bytes, bytearray, memoryview)) \
-                    and len(value) <= BINARY_RETENTION_MAX_BYTES:
-                b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+                    and len(value) <= _retention_limit_for(b_tag):
                 item.set_attr(b_tag, _stored_byte_order(
                     bytes(value), elem.VR, b_tag, path, big_endian,
                     unconverted, waveform_bits,
@@ -2081,7 +2128,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         # blob is treated exactly as its explicit-VR twin.
         if (elem.VR == 'UN'
                 and isinstance(elem.value, (bytes, bytearray, memoryview))
-                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+                and len(elem.value) > _retention_limit_for(tag)):
             if dropped is not None:
                 dropped.append((tag, 'UN'))
             continue
@@ -5733,7 +5780,7 @@ class DicomImporter:
                                       "held in the object graph")
                         else:
                             reason = (f"its value exceeds the "
-                                      f"{BINARY_RETENTION_MAX_BYTES}-byte "
+                                      f"{_retention_limit_for(tag)}-byte "
                                       f"retention threshold, so it is not "
                                       f"held in the object graph")
                         if scope == LOSS_SCOPE_PRIVATE:
@@ -10383,20 +10430,22 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
-            f"Endian encoding, {_read_back_words(elem.tag, vr)}.")
+            f"Endian encoding, {_read_back_words(elem.tag, vr, len(value))}.")
 
 
-def _read_back_words(tag, vr) -> str:
+def _read_back_words(tag, vr, length) -> str:
     """What the #692 note may say about re-ingesting a relabelled value.
 
     Only what `populate_attrs` does with it. A standard tag whose
     dictionary VR is the one written, and not binary, is decoded under it
     (`_standard_un_decoded`) and kept: no size limit applies to a numeric
     or text value. Anything else stays `UN` bytes and meets the binary
-    retention limit, which a value relabelled here always exceeds -- a
-    private tag other than `LO` (no dictionary VR, review of #900 F2; a
-    private `LO` is written `UC` instead, #901, and has its own note) and
-    an ambiguous one such as LUT Data (gated as its `OW` twin, F6, #902).
+    retention limit for its tag (`_retention_limit_for`): a private tag
+    other than `LO` (no dictionary VR, review of #900 F2; a private `LO` is
+    written `UC` instead, #901, and has its own note) always exceeds the
+    65534 bytes it meets; an ambiguous one such as LUT Data (gated as its
+    `OW` twin, F6) is kept up to its own ceiling (#902), which `length`
+    may or may not exceed.
     """
     try:
         named = None if tag.group % 2 else dictionary_VR(tag)
@@ -10404,8 +10453,12 @@ def _read_back_words(tag, vr) -> str:
         named = None
     if named == vr:
         return f"and this library reads them back under {vr}"
+    limit = _retention_limit_for(f"{tag.group:04x},{tag.element:04x}")
+    if length <= limit:
+        return ("and this library keeps them on re-ingest as bytes, up to "
+                f"{limit} bytes for this tag")
     return ("and this library holds them as UN bytes on re-ingest, which "
-            "drops a UN over 65534 bytes with a DATA_LOSS row")
+            f"drops a UN over {limit} bytes with a DATA_LOSS row")
 
 
 #: The lowest value whose signed and unsigned 16-bit readings differ.
@@ -10495,8 +10548,9 @@ def _standard_un_decoded(elem, encoding):
     # over the limit then meets the `UN` size gate below, and is dropped
     # with the same `DATA_LOSS` row its `OW` spelling draws from the
     # binary gate. Decoding it on the `US` arm kept 80,000 bytes spelled
-    # `UN` that the same bytes spelled `OW` lost. Whether LUT Data should
-    # be exempt from the limit at all is #902.
+    # `UN` that the same bytes spelled `OW` lost. Both gates read LUT
+    # Data's own ceiling (`_retention_limit_for`, #902), so the two
+    # spellings still meet one limit.
     if (vr in AMBIGUOUS_VR or vr == "SQ"
             or vr in ("OB", "OW", "OF", "OD", "OL", "OV", "UN")):
         return None

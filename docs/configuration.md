@@ -405,13 +405,24 @@ private attribute and the entry reads `removed before export` (grading
     those bytes, keep your source files -- Isocenter never modifies them,
     so the vendor block is still there to go back to.
 
-!!! note "Standard binary elements follow the same size rule"
+!!! note "Standard binary elements follow the same size rule, except the pixel lookup tables"
 
-    Overlay Data `(60xx,3000)` and the palette color LUTs `(0028,120x)`
-    are `OW`. At or below 65534 bytes they are carried into the export --
-    a 256-entry palette LUT is 512 bytes -- and above it they are dropped
-    and reported. `PixelData` and `WaveformData` are the only binary
-    elements stored in the pixel sidecar, and the size rule does not apply to them.
+    Overlay Data `(60xx,3000)` is `OW`. At or below 65534 bytes it is
+    carried into the export, and above it it is dropped and reported.
+    `PixelData` and `WaveformData` are the only binary elements stored in
+    the pixel sidecar, and the size rule does not apply to them.
+
+    The tables that say how an image's pixels display are kept up to
+    131072 bytes instead: LUT Data `(0028,3006)` (in the Modality and VOI
+    LUT sequences), the retired Gray LUT Data `(0028,1200)`, the Red, Green
+    and Blue Palette Color LUT Data `(0028,1201)`–`(0028,1203)`, and their
+    segmented twins `(0028,1221)`–`(0028,1223)`. 131072 bytes is 65536
+    entries of 16 bits, the largest table a LUT Descriptor can declare; for
+    segmented data, which the standard does not bound, it is a chosen cap.
+    Dropping one of these left an image that cannot be displayed as its
+    source was -- a colour image with one palette of three, or a VOI LUT
+    with no data -- so they are not held to the vendor-blob limit. Above
+    131072 bytes they are dropped and reported, the row naming that limit.
 
     Under `basic@2026c` and the floor the whole overlay group is removed,
     so the size rule matters only where a policy keeps it (`"60xx,xxxx":

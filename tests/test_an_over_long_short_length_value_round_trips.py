@@ -205,15 +205,13 @@ def test_a_caller_us_list_is_said_and_round_trips(tmp_path, caplog):
     assert list(pydicom.dcmread(str(second))[0x00181310].value) == values
 
 
-def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_path, caplog):
+def test_a_caller_lut_data_list_is_said_and_kept_on_re_ingest(tmp_path, caplog):
     """LUT Data (0028,3006) is `US or OW` in the dictionary.
 
     A caller's 80,000-byte `US` list is written `UN` (#692). Re-ingest
-    weighs that `UN` against the binary retention limit, exactly as it
-    weighs the same bytes spelled `OW`, and drops it with a `DATA_LOSS`
-    row (owner ruling on the review of #900, F6); the note says so rather
-    than promising a read-back. Whether LUT Data should be exempt from the
-    limit is #902.
+    weighs that `UN` as it weighs the same bytes spelled `OW` (owner ruling
+    on the review of #900, F6), against LUT Data's own ceiling of 131072
+    bytes (#902), so it is kept, and the note says so.
     """
     values = [(i * 7) % 65536 for i in range(40000)]
     with caplog.at_level(logging.INFO, logger="isocenter"):
@@ -225,8 +223,32 @@ def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_pa
                               i.set_attr("0028,3006", values)))
     notes = _notes(caplog)
     assert len(notes) == 1 and "0028,3006" in notes[0], notes
-    assert "reads them back" not in notes[0], notes[0]
-    assert "65534" in notes[0], notes[0]
+    assert notes[0].endswith(
+        "and this library keeps them on re-ingest as bytes, up to 131072 "
+        "bytes for this tag."), notes[0]
+
+    (tmp_path / "again").mkdir()
+    shutil.copy(first, tmp_path / "again" / "a.dcm")
+    _second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
+                                     tmp_path / "out2", compress=False)
+    assert not [r for r in losses if "0028,3006" in r[2]], losses
+
+
+def test_a_caller_lut_data_list_over_its_ceiling_is_said_to_drop(tmp_path, caplog):
+    """70000 entries, 140000 bytes: over LUT Data's 131072, so the note
+    names that limit and re-ingest drops it with its row."""
+    values = [i % 65536 for i in range(70000)]
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True,
+            mutate=lambda i: (i.set_attr("0028,3002", [0, 0, 16]),
+                              i.set_attr("0028,3006", values)))
+    notes = _notes(caplog)
+    assert len(notes) == 1, notes
+    assert notes[0].endswith("which drops a UN over 131072 bytes with a "
+                             "DATA_LOSS row."), notes[0]
 
     (tmp_path / "again").mkdir()
     shutil.copy(first, tmp_path / "again" / "a.dcm")
@@ -234,6 +256,7 @@ def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_pa
                                      tmp_path / "out2", compress=False)
     rows = [r for r in losses if "Standard tag 0028,3006 (UN)" in r[2]]
     assert len(rows) == 1, losses
+    assert "exceeds the 131072-byte retention threshold" in rows[0][2]
 
 
 def _lut_source(folder, vr, nbytes):
@@ -247,16 +270,17 @@ def _lut_source(folder, vr, nbytes):
     _source(folder, syntax=ExplicitVRLittleEndian, extra=lut)
 
 
-@pytest.mark.parametrize("nbytes,kept", [(65532, True), (65534, True), (65536, False)],
-                         ids=["under", "at", "over"])
+@pytest.mark.parametrize("nbytes,kept", [(65534, True), (65536, True),
+                                         (131072, True), (131074, False)],
+                         ids=["vendor-limit", "past-vendor-limit", "at", "over"])
 @pytest.mark.parametrize("vr", ["OW", "UN"])
 def test_lut_data_meets_the_retention_limit_whichever_way_it_is_spelled(tmp_path, vr, nbytes, kept):
     """The owner's ruling on F6: a `UN` LUT Data is gated as its `OW` twin.
 
-    At or below 65534 bytes both are kept, byte for byte; above it both
-    are dropped with one `DATA_LOSS` row naming the tag and the limit.
-    Before, the `UN` spelling of 65536 bytes was decoded on its `US` arm
-    and kept while the `OW` one was dropped.
+    At or below LUT Data's ceiling, 131072 bytes (#902; 65534 before), both
+    are kept, byte for byte; above it both are dropped with one `DATA_LOSS`
+    row naming the tag and that ceiling. The ceiling is read at both gates,
+    so neither spelling can be kept while the other is dropped.
     """
     _lut_source(tmp_path / "src", vr, nbytes)
     with DicomSession(str(tmp_path / "s.db")) as s:
@@ -274,7 +298,7 @@ def test_lut_data_meets_the_retention_limit_whichever_way_it_is_spelled(tmp_path
     else:
         assert "0028,3006" not in attrs
         assert len(rows) == 1, losses
-        assert "65534-byte retention threshold" in rows[0][2]
+        assert "131072-byte retention threshold" in rows[0][2]
 
 
 def _uc_notes(caplog):
