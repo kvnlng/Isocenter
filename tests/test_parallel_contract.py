@@ -1672,6 +1672,12 @@ def test_a_worker_that_outlives_the_grace_is_killed_and_named(
         r.getMessage() for r in caplog.records]
     message = records[0].getMessage()
     assert str(survivor) in message
+    # The time measured, and a full grace never logs less than the grace:
+    # the wait leaves only once it has run out (#862; mutant M31, a line
+    # that always says 0.0 s, survived without this).
+    running = re.search(r"still running ([0-9.]+) s after", message)
+    assert running, message
+    assert float(running.group(1)) >= parallel._BROKEN_POOL_GRACE_S, message
     # Other tests count the dead-worker retry's lines and the recycling
     # override's by these phrases; this line must not be counted as either.
     assert "worker process ended" not in message
@@ -1713,14 +1719,16 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
     waits_here = []
 
     def interrupted_here(object_list, timeout=None):
-        """Ctrl-C, in the second wait on this thread. `Connection.poll()`
-        reads the module's `wait` too, so any other thread's wait goes on
-        as it was; and the helper is called on this thread, never under
-        `_bounded`."""
+        """Ctrl-C, in the second wait on this thread, and that one only.
+        `Connection.poll()` reads the module's `wait` too, so any other
+        thread's wait goes on as it was; and the helper is called on this
+        thread, never under `_bounded`. The third call is the `finally`'s
+        readiness check (#862), which must return: a wait that raised there
+        too would skip the kill, which no real Ctrl-C does twice."""
         if threading.get_ident() != here:
             return real_wait(object_list, timeout)
         waits_here.append(len(object_list))
-        if len(waits_here) == 1:
+        if len(waits_here) != 2:
             return real_wait(object_list, timeout)
         raise KeyboardInterrupt
 
@@ -1743,8 +1751,9 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
             "shutdown(wait=True) after a Ctrl-C during the grace waited on a "
             "worker that outlives SIGTERM (#796)")
     # The premise: the first wait held both workers and returned the dead
-    # one's sentinel, and the interrupt came in the next, on the survivor's.
-    assert waits_here == [2, 1], waits_here
+    # one's sentinel, the interrupt came in the next, on the survivor's, and
+    # the `finally` asked once more which of the survivors still runs.
+    assert waits_here == [2, 1, 1], waits_here
     records = _sigkill_records(caplog)
     assert len(records) == 1 and records[0].levelno == logging.WARNING, [
         r.getMessage() for r in caplog.records]
@@ -1756,6 +1765,67 @@ def test_a_ctrl_c_during_the_grace_kills_the_workers_it_waited_on(
     running = re.search(r"still running ([0-9.]+) s after", message)
     assert running, message
     assert float(running.group(1)) < parallel._BROKEN_POOL_GRACE_S, message
+
+
+def test_an_interrupt_before_the_dead_worker_is_seen_names_only_the_survivor(
+        tmp_path, monkeypatch, caplog):
+    """A Ctrl-C that lands before the wait has returned the dead worker's
+    sentinel kills, and names, only the worker still running (#862).
+
+    The `finally` killed and named every process left in the wait set. An
+    interrupt in the first wait leaves the worker that had already ended
+    there, so the WARNING named it as still running and the helper
+    returned its pid. The kill was harmless (`kill()` skips a reaped
+    worker, and a zombie takes the signal); the record was wrong.
+
+    Killing mutation: the readiness check before the kill removed (N15).
+    """
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 30.0)
+    real_wait = multiprocessing.connection.wait
+    here = threading.get_ident()
+    waits_here = []
+
+    def interrupted_first(object_list, timeout=None):
+        """Ctrl-C in the first wait on this thread only; every later call,
+        and every other thread's, goes through."""
+        if threading.get_ident() != here:
+            return real_wait(object_list, timeout)
+        waits_here.append(len(object_list))
+        if len(waits_here) == 1:
+            raise KeyboardInterrupt
+        return real_wait(object_list, timeout)
+
+    with _two_worker_pool(functools.partial(
+            _outlive_sigterm, str(markers))) as pool:
+        _start_two_workers(pool)
+        processes = dict(pool._processes)
+        survivor = _break_while_idle(pool, str(markers))
+        (victim,) = set(processes) - {survivor}
+        # The premise: the dead worker has ended before the helper asks.
+        assert multiprocessing.connection.wait(
+            [processes[victim].sentinel], timeout=30)
+        with monkeypatch.context() as interrupt, caplog.at_level(
+                logging.WARNING, logger="isocenter"):
+            interrupt.setattr(multiprocessing.connection, "wait",
+                              interrupted_first)
+            with pytest.raises(KeyboardInterrupt):
+                parallel._end_broken_pool_stragglers(pool)
+        assert multiprocessing.connection.wait(
+            [processes[survivor].sentinel], timeout=30), (
+            "the worker still running was not killed")
+        hung, _ = _bounded(lambda: pool.shutdown(wait=True), 30)
+        assert not hung
+    assert waits_here and waits_here[0] == 2, waits_here
+    records = _sigkill_records(caplog)
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    message = records[0].getMessage()
+    assert message.startswith("1 worker process(es) "), message
+    assert f"(pid {survivor})" in message, message
+    assert not re.search(rf"\b{victim}\b", message), (
+        f"the worker that had already ended (pid {victim}) was named as "
+        f"still running: {message}")
 
 
 def test_the_pool_internals_the_straggler_helper_reads_are_there():

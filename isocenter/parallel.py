@@ -655,8 +655,15 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
         # `shutdown()`, which then waited on them for good (review of
         # #861). A `finally` and not an `except`, so nothing is swallowed,
         # and never a `return` in it, which would swallow the interrupt.
+        #
+        # Only the ones still running: an interrupt that lands before a
+        # `wait()` has returned an ended worker's sentinel leaves that
+        # worker in `waiting`, and it was named as still running (#862).
+        # Never catch `BaseException` around this check: a second Ctrl-C
+        # here must still reach the caller, and the fallback for a handle
+        # that cannot be asked is to kill them all, never to skip the kill.
         killed = []
-        for process in waiting.values():
+        for process in _still_running_or_all(waiting.values()):
             try:
                 process.kill()
             except (OSError, ValueError):
@@ -760,6 +767,20 @@ def _still_running(processes) -> list:
             if sentinel not in ready]
 
 
+def _still_running_or_all(processes) -> list:
+    """`_still_running(processes)`, or every one of them when the sentinels
+    cannot be asked.
+
+    For a kill: a handle that cannot be waited on must never skip the kill
+    of a worker that may still be running (#862).
+    """
+    processes = list(processes)
+    try:
+        return _still_running(processes)
+    except (OSError, ValueError):
+        return processes
+
+
 def _end_recycling_pool(pool, finished: bool) -> list[int]:
     """End a recycling `multiprocessing.Pool`, holding the caller no longer
     than `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`.
@@ -860,7 +881,7 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
         if not exited.is_set():
             # The live list, read only now: nothing grows it once the pool
             # is closed or terminating.
-            for process in _still_running(list(pool._pool)):
+            for process in _still_running_or_all(list(pool._pool)):
                 try:
                     process.kill()
                 except (OSError, ValueError):
