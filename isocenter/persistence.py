@@ -10,6 +10,8 @@ import fcntl
 import sqlite3
 import contextlib
 import os
+import re
+import sys
 import tempfile
 import json
 import queue
@@ -347,6 +349,129 @@ _SIDECAR_GATE_TIMEOUT_S = 180.0
 #: the lock on the first attempt; a contended one pays at most one
 #: interval on top of the hold it waited for.
 _LOCK_POLL_INTERVAL_S = 0.01
+
+
+#: Filesystem types that are network filesystems, as the kernel names
+#: them, matched whole (#839). The store opens SQLite in WAL mode, which
+#: SQLite documents as not working over a network filesystem, and its
+#: locks are `flock`, whose behaviour there depends on the mount. A type
+#: missing from this list is not warned about; the open is never refused.
+_NETWORK_FILESYSTEM_TYPES = frozenset({
+    # NFS: macOS and Linux.
+    "nfs", "nfs4",
+    # SMB/CIFS: macOS `smbfs`; Linux `cifs`, `smb3`.
+    "smbfs", "cifs", "smb3",
+    # macOS: AFP and WebDAV.
+    "afpfs", "webdav",
+    # Cluster and parallel filesystems.
+    "lustre", "gpfs", "ceph", "beegfs", "glusterfs", "fuse.glusterfs",
+    "fuse.ceph",
+    # Other remote mounts.
+    "fuse.sshfs", "9p", "afs",
+})
+
+# `struct statfs` on macOS (the 64-bit-inode layout): offsets of the fields
+# read. A layout read wrong gives garbage, not a crash, because the buffer
+# is several times the struct's 2168 bytes; the garbage is caught by
+# checking two fields against `os.statvfs` before the type is believed.
+_DARWIN_STATFS_BUFFER = 8192
+_DARWIN_F_BSIZE = slice(0, 4)
+_DARWIN_F_FSID0 = slice(48, 52)
+_DARWIN_F_FSTYPENAME = slice(72, 88)
+
+
+def _darwin_filesystem_type(path):
+    """The `f_fstypename` macOS reports for `path`, or None.
+
+    `statfs(2)` through ctypes rather than parsing `mount`'s output, so a
+    `Session()` open spawns no process. `statfs$INODE64` is the 64-bit
+    layout's symbol on x86_64; arm64 exports that layout as plain `statfs`.
+    """
+    import ctypes  # pylint: disable=import-outside-toplevel
+    libc = ctypes.CDLL(None, use_errno=True)
+    statfs = None
+    for name in ("statfs$INODE64", "statfs"):
+        try:
+            statfs = getattr(libc, name)
+            break
+        except AttributeError:
+            continue
+    if statfs is None:
+        return None
+    statfs.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+    statfs.restype = ctypes.c_int
+    buf = ctypes.create_string_buffer(_DARWIN_STATFS_BUFFER)
+    if statfs(os.fsencode(path), buf) != 0:
+        return None
+    raw = buf.raw
+    vfs = os.statvfs(path)
+    # `statvfs` widens the int32 `f_fsid.val[0]` to an unsigned long, so
+    # compare the low 32 bits.
+    if (int.from_bytes(raw[_DARWIN_F_FSID0], "little")
+            != vfs.f_fsid & 0xFFFFFFFF
+            or int.from_bytes(raw[_DARWIN_F_BSIZE], "little") != vfs.f_frsize):
+        return None
+    return raw[_DARWIN_F_FSTYPENAME].split(b"\0", 1)[0].decode("ascii")
+
+
+def _unescape_mountinfo(field):
+    # The kernel writes a space, tab, newline or backslash in a mount
+    # point as a three-digit octal escape (`\040` for a space).
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def _mountinfo_filesystem_type(text, path):
+    """The type of the mount holding `path`, from `/proc/self/mountinfo`
+    text, or None.
+
+    The mount is the one whose mount point is the longest whole-component
+    prefix of `path` (`/mnt/nfs` holds `/mnt/nfs/a`, not `/mnt/nfsdata`);
+    of two at the same point, the later line, which is mounted over the
+    earlier.
+    """
+    best, best_len = None, -1
+    for line in text.splitlines():
+        fields = line.split()
+        if "-" not in fields or len(fields) < 5:
+            continue
+        sep = fields.index("-")
+        if sep + 1 >= len(fields):
+            continue
+        mount_point = _unescape_mountinfo(fields[4])
+        if mount_point != "/":
+            mount_point = mount_point.rstrip("/")
+        if not (mount_point == "/" or path == mount_point
+                or path.startswith(mount_point + "/")):
+            continue
+        if len(mount_point) >= best_len:
+            best, best_len = fields[sep + 1], len(mount_point)
+    return best
+
+
+def _filesystem_type(path):
+    """The filesystem type of the directory `path` sits on, or None when
+    it cannot be told: a platform other than macOS or Linux, or any error
+    reading it. Never raises."""
+    try:
+        real = os.path.realpath(path)
+        if sys.platform == "darwin":
+            fstype = _darwin_filesystem_type(real)
+        elif sys.platform.startswith("linux"):
+            with open("/proc/self/mountinfo", encoding="utf-8",
+                      errors="replace") as fh:
+                fstype = _mountinfo_filesystem_type(fh.read(), real)
+        else:
+            return None
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return fstype or None
+
+
+def _network_filesystem_type(path):
+    """`path`'s filesystem type when it is a known network filesystem,
+    else None (#839)."""
+    fstype = _filesystem_type(path)
+    return fstype if fstype in _NETWORK_FILESYSTEM_TYPES else None
 
 
 @contextlib.contextmanager

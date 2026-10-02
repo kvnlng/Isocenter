@@ -46,7 +46,7 @@ from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_RE
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
-from .persistence import SqliteStore
+from .persistence import SqliteStore, _network_filesystem_type
 from .crypto import KeyManager
 from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
                             _TokenOfALaterScheme, _TokenOfAnEarlierLayout)
@@ -1408,8 +1408,13 @@ class DicomSession:
         The store is the SQLite file and a pixel file beside it
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
         original identifiers and pixels** of everything ingested; keep it where
-        you keep the source data. Until `export()`, the session writes only the
-        store, `isocenter.log` and files you ask for (a configuration, a key).
+        you keep the source data, on a local filesystem: the store uses
+        SQLite's WAL mode and `flock` locks, which a network filesystem does
+        not dependably support. When the store's filesystem is a known
+        network type (NFS, SMB, Lustre, GPFS and others), one `WARNING` log
+        line says so and the store opens anyway. Until `export()`, the
+        session writes only the store, `isocenter.log` and files you ask
+        for (a configuration, a key).
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`
@@ -1472,6 +1477,29 @@ class DicomSession:
                 "Closing a session whose construction failed raised "
                 f"{describe_exception(exc)}; the construction error follows")
 
+    def _warn_on_a_network_filesystem(self):
+        """Log one WARNING when the store sits on a known network
+        filesystem; never refuses the open, and never raises (#839).
+
+        The directory asked about is the pixel sidecar's: beside the
+        database for a file store, and the temporary directory for a
+        `:memory:` one. A type the detector cannot read, or does not know
+        as a network type, draws nothing.
+        """
+        where = os.path.dirname(os.path.abspath(self.store_backend.sidecar_path))
+        fstype = _network_filesystem_type(where)
+        if fstype is None:
+            return
+        what = ("the session store's pixel file"
+                if self.persistence_file == ":memory:" else "the session store")
+        get_logger().warning(
+            f"{where} holds {what} and is on a {fstype} filesystem, a "
+            "network filesystem. The store uses SQLite's WAL mode, which "
+            "does not work over a network filesystem, and flock locks, "
+            "whose behaviour there depends on the mount; keep the store on "
+            "a local disk (see the quickstart). The session is opened "
+            "anyway.")
+
     def _open_after_the_store(self, db_exists):
         """The rest of `__init__`, after the store is open.
 
@@ -1479,6 +1507,7 @@ class DicomSession:
         raises (#791).
         """
         self.persistence_manager = PersistenceManager(self.store_backend)
+        self._warn_on_a_network_filesystem()
 
         # Hydrate memory from DB
         self.store = DicomStore()
