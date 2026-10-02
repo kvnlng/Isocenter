@@ -2948,8 +2948,13 @@ against configured redaction zones.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Finds the redaction rule that applies to this equipment.</p>
-<p>Exact Serial Number match only; the first matching rule wins.</p>
+        <p>Finds the first redaction rule that applies to this equipment.</p>
+<p>A rule applies when its <code>serial_number</code> is the equipment's Device
+Serial Number or <code>"*"</code>, as <code>redact()</code> reads it
+(<code>services.rule_applies_to</code>); the first in rule order wins, so a
+<code>"*"</code> rule listed before an exact one is returned. Until #808 only
+an exact serial matched. The scan itself reads every applying
+rule's zones, not this one rule's.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3298,9 +3303,15 @@ instead.</p>
     <div class="doc doc-contents ">
 
         <p>Generates a list of suggested configuration changes.</p>
-<p>A <code>NEW_LEAK</code> finding suggests its text box as a new zone; a
-<code>PARTIAL_LEAK</code> finding suggests growing its best-matching zone to
-cover the text. A finding with no <code>rule_serial</code> in its metadata
+<p>A <code>NEW_LEAK</code> finding suggests its text box as a new zone on the
+machine's exact rule; when only a <code>"*"</code> rule covers the machine
+(<code>rule_serial</code> is <code>"*"</code>), it suggests a new exact rule for the
+machine's serial instead (<code>ADD_RULE</code>), never a zone on <code>"*"</code>,
+which every machine reads. A <code>PARTIAL_LEAK</code> finding suggests
+growing its best-matching zone to cover the text, on the rule
+that holds it; when that rule is <code>"*"</code>, it suggests a new exact
+rule carrying the grown zone instead (<code>ADD_RULE</code>), and <code>"*"</code> is
+never widened. A finding with no <code>rule_serial</code> in its metadata
 gets no suggestion. Zones are in config space, (y1, y2, x1, x2),
 the order every consumer of <code>redaction_zones</code> reads; OCR boxes
 arrive as (x, y, w, h) and are converted.</p>
@@ -3328,7 +3339,8 @@ arrive as (x, y, w, h) and are converted.</p>
               <div class="doc-md-description">
                 <p>Findings from a pixel scan, each carrying
 <code>leak_type</code>, <code>text_box</code>, <code>best_zone</code> and <code>rule_serial</code> in
-its metadata.</p>
+its metadata, and <code>machine_serial</code>, <code>manufacturer</code> and
+<code>model_name</code> for an <code>ADD_RULE</code>.</p>
               </div>
             </td>
             <td>
@@ -3357,7 +3369,9 @@ its metadata.</p>
                 <p>One dict per suggestion, with <code>serial</code>,
 <code>action</code> and <code>reason</code>; an <code>ADD_ZONE</code> suggestion carries
 <code>zone</code>, an <code>EXPAND_ZONE</code> one <code>original_zone</code> and
-<code>new_zone</code>, each <code>[y1, y2, x1, x2]</code>.</p>
+<code>new_zone</code>, each <code>[y1, y2, x1, x2]</code>. An <code>ADD_RULE</code>
+suggestion carries <code>zone</code>, <code>manufacturer</code> and
+<code>model_name</code>, and its <code>serial</code> is the machine's.</p>
               </div>
             </td>
           </tr>

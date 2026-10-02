@@ -1970,7 +1970,7 @@ beside it. The source files are never modified.</p>
 </code></pre></div>
 <p><code>ingest()</code> tells you what it read, and what it could not:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">summary</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">IngestSummary</span><span class="p">(</span><span class="n">ingested</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">failures</span><span class="o">=</span><span class="p">[],</span> <span class="n">declined</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">skipped</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">IngestSummary</span><span class="p">(</span><span class="n">ingested</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">failures</span><span class="o">=</span><span class="p">[],</span> <span class="n">declined</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">skipped</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">hidden</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="2-write-a-configuration">2. Write a configuration</h2>
 <p>The configuration is your protocol, written down. This one starts from
@@ -2026,11 +2026,10 @@ findings as a table
 <li><strong><code>use_compression=False</code>.</strong> <code>rtdose.dcm</code> stores 32-bit dose values,
   and Isocenter's JPEG 2000 encoder is exact only to 25 bits, so with
   compression on
-  <a href="../../export-output/">that instance fails to export</a>
-  rather than be written wrong
-  (<a href="https://github.com/kvnlng/Isocenter/issues/771">#771</a> tracks writing
-  it uncompressed instead). A failure is an <code>ERROR</code> row in the audit log,
-  and a row, once written, stays in the store for good.</li>
+  <a href="../../export-output/#compression">that instance is written uncompressed</a>
+  rather than be written wrong, with an INFO note
+  (<a href="https://github.com/kvnlng/Isocenter/issues/771">#771</a>). Turning
+  compression off writes every file in one transfer syntax.</li>
 <li><strong>The report comes last,</strong> after <code>export()</code>. Export writes rows of its
   own (anything it lost or could not write), and the report grades only
   the rows that exist when you call it.</li>
@@ -2237,7 +2236,7 @@ That is the shortcut when you are holding nothing back.) The second
 visit gets the first visit's pseudonym, and its date moves by the same
 offset, so the 42 days between the two scans survive:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">batch</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">IngestSummary</span><span class="p">(</span><span class="n">ingested</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">failures</span><span class="o">=</span><span class="p">[],</span> <span class="n">declined</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">skipped</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">IngestSummary</span><span class="p">(</span><span class="n">ingested</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">failures</span><span class="o">=</span><span class="p">[],</span> <span class="n">declined</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">skipped</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">hidden</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
 <a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">second_visit</span><span class="o">.</span><span class="n">PatientID</span> <span class="o">==</span> <span class="n">ct</span><span class="o">.</span><span class="n">PatientID</span>
 <a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="kc">True</span>
 <a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">study_date</span><span class="p">(</span><span class="n">later</span><span class="p">)</span> <span class="o">-</span> <span class="n">study_date</span><span class="p">(</span><span class="n">second_visit</span><span class="p">)</span> <span class="o">==</span> <span class="n">shift</span>

@@ -1934,11 +1934,11 @@ not. Write and load a configuration, audit, anonymize, then export with
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"challenge"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">sync</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p><code>create_config()</code> writes a configuration built on the DICOM Basic Profile
-(<a href="../../configuration/">Configuration</a>). A WFDB export does not save the
-session, so <code>save(sync=True)</code> keeps the de-identified graph in the store.</p>
+(<a href="../../configuration/">Configuration</a>). A WFDB export saves the session
+before it writes, as a DICOM export does, so the de-identified graph is
+already in the store.</p>
 <p><code>export()</code> returns the path of each record's header:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">records</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="p">[</span><span class="s1">'challenge/Subject_ANON_.../Study_..._..._.../Series_NoNumber_ECG_Series_.../ANON_..._0_1.hea'</span><span class="p">]</span>

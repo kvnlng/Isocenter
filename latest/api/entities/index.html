@@ -3282,7 +3282,8 @@ and <code>redact()</code> can replace it.</p>
             <td>
               <div class="doc-md-description">
                 <p>Instance Number (0020,0013). Not unique
-within a series.</p>
+within a series. 0 for an ingested file that has none, and
+<code>0020,0013</code> is then absent from <code>attributes</code> (#870).</p>
               </div>
             </td>
           </tr>

@@ -2664,14 +2664,14 @@ is refused, whatever it contains, because this release cannot apply it
 the way it was written for: <code>ValueError: cfg.yaml: version '2.1' is newer
 than this isocenter's configuration version 2.0, which may apply it
 differently than it was written for; upgrade isocenter, or set version:
-'2.0' to apply it as 2.0 does (#784)</code> (<a href="https://github.com/kvnlng/Isocenter/issues/784">#784</a>).
+'2.0' to apply it as 2.0 does</code> (<a href="https://github.com/kvnlng/Isocenter/issues/784">#784</a>).
 An external profile file declaring a newer minor is refused the same way. So
 is a <code>save()</code> over one, by a session whose <code>config_path</code> was assigned
 rather than loaded, plainly or under <code>auto_save</code>, and a <code>create_config()</code>
 onto one: <code>ValueError: cfg.yaml:
 declares version '2.1', newer than this isocenter's configuration version
 2.0; saving would rewrite it as 2.0. Nothing was written: upgrade
-isocenter, or save to another path (#784)</code>. A target that is missing,
+isocenter, or save to another path</code>. A target that is missing,
 cannot be read, or declares no newer minor is written as before.</p>
 <p>When the way a file is applied changes, a store scanned under the older
 minor is not treated as scanned under the new one. The minor is part of
@@ -2943,7 +2943,7 @@ decided by its <strong>size</strong>, not its VR:</p>
 <td style="text-align: left;"><strong>Kept</strong>, and written to the exported file</td>
 </tr>
 <tr>
-<td style="text-align: left;">Binary value (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>, or <code>UN</code>) of 65534 bytes or less</td>
+<td style="text-align: left;">Binary value (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>, <code>OV</code>, or <code>UN</code>) of 65534 bytes or less</td>
 <td style="text-align: left;">Removed</td>
 <td style="text-align: left;"><strong>Kept</strong>, and written to the exported file under the VR it was read with (<code>UN</code> when the source was Implicit VR, which states none)</td>
 </tr>
@@ -3015,13 +3015,17 @@ so the size rule matters only where a policy keeps it (<code>"60xx,xxxx":
 <em>descriptors</em> (<code>OverlayRows</code>, <code>OverlayColumns</code>, <code>OverlayBitPosition</code>
 and friends) are <code>US</code>, so they survive, and an export from which a
 large overlay plane was dropped declares a plane it does not carry.
-The descriptors are not stripped by the size rule: an overlay may
-legitimately live in the unused high bits of <code>PixelData</code> (addressed
-by <code>OverlayBitPosition</code>), and since Isocenter preserves <code>PixelData</code>
-intact, those overlays survive and their descriptors are the only
-pointer to them. When the group rule removes the descriptors, such
-high-bit overlay bits stay in <code>PixelData</code>, with
-nothing left that points to them.</p>
+The descriptors are not stripped by the size rule. An overlay
+declared in the unused high bits of <code>PixelData</code> (Overlay Bits
+Allocated above 1, no Overlay Data, <code>OverlayBitPosition</code> at or above
+BitsStored) does not survive ingest: the decode reads BitsStored bits
+and clears the rest, so neither the store nor any export holds them,
+whatever the policy. Ingest writes one <code>DATA_LOSS</code> row for such an
+instance, scoped <code>STANDARD</code>, naming the group and its bit; under a
+policy that keeps <code>60xx</code>, the exported descriptors point at bits that
+are no longer there. A compressed stream wider than BitsStored is read
+at its own width, so its high bits are kept as sample values, and its
+own <code>WARNING</code> row says so.</p>
 <p>A dropped <em>standard</em> element is listed in the report's Data Loss
 section but does not change the grade.</p>
 </div>
@@ -3151,7 +3155,7 @@ section but does not change the grade.</p>
 </code></pre></div>
 <ul>
 <li><strong><code>serial_number</code></strong> (Required): Exact match for <code>0018,1000</code>, or <code>"*"</code> for every series that has one. A series with no Device Serial Number matches no rule.</li>
-<li><strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones. The export applies them whether or not <code>redact()</code> has run.</li>
+<li><strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones. <code>redact()</code> redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in (<a href="https://github.com/kvnlng/Isocenter/issues/908">#908</a>). The export applies them whether or not <code>redact()</code> has run.</li>
 <li><strong><code>redaction_zones</code></strong>: List of regions to zero out.</li>
 <li>Format: <code>[y1, y2, x1, x2]</code> (Row Start, Row End, Col Start, Col End), or <code>{"roi": [y1, y2, x1, x2]}</code>, the shape the shipped knowledge base uses and <code>create_config()</code> copies for a machine it recognises.</li>
 <li>Coordinates are 0-indexed.</li>
@@ -3236,7 +3240,7 @@ section but does not change the grade.</p>
 <tr>
 <td style="text-align: left;"><strong>The store</strong> (<code>Session("my_project.db")</code>) and its <strong>project secret</strong></td>
 <td style="text-align: left;">Each patient's <code>ANON_</code> pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time <code>audit()</code>, <code>anonymize()</code> or <code>redact()</code> needs one, and keeps inside itself.</td>
-<td style="text-align: left;">Two files that belong together: the session file (<code>my_project.db</code>) and the pixel sidecar beside it, named after it (<code>my_project_pixels.bin</code>).</td>
+<td style="text-align: left;">Two files that belong together: the session file (<code>my_project.db</code>) and the pixel sidecar beside it, named after it (<code>my_project_pixels.bin</code>), on a local disk (<a href="../quickstart/#1-initialize-a-session">why</a>).</td>
 <td style="text-align: left;">The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a <strong>new</strong> pseudonym and a <strong>new</strong> offset, and every study, series and instance <strong>new</strong> UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost.</td>
 </tr>
 <tr>
@@ -3250,7 +3254,7 @@ section but does not change the grade.</p>
 <p><strong>The configuration does not reproduce pseudonyms or date shifts.</strong> They belong to the store they were made in. A later batch for the same patients goes into the same store: <code>ingest()</code> adds to it, and a patient ingested under the same original Patient ID gets the same pseudonym and the same offset.</p>
 <p><strong>A project secret cannot be moved to another store.</strong> Isocenter has no way to export one or to load one. Every session that opens a store uses that store's secret; a session on a different store uses a different one.</p>
 <p><strong>A copy of the store is the same store, secret included.</strong> The store is both files: copy <code>my_project.db</code> and <code>my_project_pixels.bin</code> together, and keep them under the same basename, because the session finds its sidecar by the <code>.db</code> file's name. A copy of the <code>.db</code> alone keeps the pseudonyms and offsets; for the instances ingested before the copy, their pixels are not in the copy, and export fails for them. Isocenter does not detect copies or refuse them. Treat every copy as the project itself: back it up as you back up <code>isocenter.key</code>, and never send it, or any copy of it, with an export. Whoever holds the store can recover every shifted date, and its audit log records each offset.</p>
-<p><strong>Replacement UIDs belong to the store as well.</strong> A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses <code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code>, because a new secret would not recognise them and would replace them a second time.</p>
+<p><strong>Replacement UIDs belong to the store as well.</strong> A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and the zones of every rule that matches it, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses <code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code>, because a new secret would not recognise them and would replace them a second time.</p>
 <h2 id="auto-discovery-of-redaction-zones">Auto-Discovery of Redaction Zones</h2>
 <p>To find where a machine draws its burned-in text, <code>discover_redaction_zones()</code> runs OCR over a sample of that machine's images and reports where text was found. It needs the <code>ocr</code> extra and the Tesseract binary; see <a href="../ocr/#prerequisites">Burned-in text (OCR)</a>.</p>
 <p><code>discover_redaction_zones()</code> returns a <code>DiscoveryResult</code> holding the raw text

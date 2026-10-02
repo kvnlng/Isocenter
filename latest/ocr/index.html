@@ -2133,9 +2133,9 @@ not from a candidate's <code>box</code>, which is <code>[x, y, w, h]</code>.</p>
 <p><code>scan_pixel_content()</code> runs OCR over the images of the machines you configured and reports the text your zones do not cover. It does not report text inside a zone, so labels your zones already black out do not appear.</p>
 <h3 id="how-it-works">How it works</h3>
 <ol>
-<li><strong>Match</strong>: each instance is matched to a rule by its series' Device Serial Number.</li>
+<li><strong>Match</strong>: each instance is matched to every rule that covers its series' Device Serial Number, exactly or by <code>"*"</code>, as <code>redact()</code> reads them.</li>
 <li><strong>Scan</strong>: OCR finds every text region in the image.</li>
-<li><strong>Filter</strong>: each region is compared with the rule's <code>redaction_zones</code>:<ul>
+<li><strong>Filter</strong>: each region is compared with the <code>redaction_zones</code> of every matching rule:<ul>
 <li><strong>Covered</strong>: at least 80% of the region lies in one zone. Not reported.</li>
 <li><strong><code>PARTIAL_LEAK</code></strong>: more than 0% and less than 80% covered. Reported.</li>
 <li><strong><code>NEW_LEAK</code></strong>: not covered at all. Reported.</li>
@@ -2143,17 +2143,11 @@ not from a candidate's <code>box</code>, which is <code>[x, y, w, h]</code>.</p>
 </li>
 </ol>
 <p>Text of two characters or fewer is skipped as noise.</p>
-<p><strong>Zones the scan reads.</strong> The scan reads only zones written as a list,
-<code>[y1, y2, x1, x2]</code>. A zone written as <code>{roi: [...]}</code>, the other form a rule
-accepts, counts as no zone: text inside it is reported as a leak
-(<a href="https://github.com/kvnlng/Isocenter/issues/814">#814</a>). And when two rules
-share a serial, the scan reads only the first rule's zones, while <code>redact()</code>
-applies the zones of every matching rule.</p>
-<p><strong>What is scanned.</strong> Only instances whose Device Serial Number equals a rule's <code>serial_number</code> exactly, and only when that rule has at least one zone. So:</p>
+<p><strong>Zones the scan reads.</strong> The zones <code>redact()</code> and <code>export()</code> apply: both forms a rule accepts, <code>[y1, y2, x1, x2]</code> and <code>{roi: [y1, y2, x1, x2]}</code>, from every rule that covers the instance's machine, an exact rule and a <code>"*"</code> rule alike. A zone that does not hold exactly four values is not a zone here either.</p>
+<p><strong>What is scanned.</strong> Only instances of a machine a rule covers, by exact serial or <code>"*"</code>, and only when at least one of the rules covering it has a zone. So:</p>
 <ul>
-<li>a session that has loaded no configuration, or whose rules are all fresh from <code>create_config()</code> with empty <code>redaction_zones</code>, scans nothing: it prints "No matching configured instances found to scan." and returns an empty report;</li>
-<li>a <code>"*"</code> rule is applied by <code>redact()</code> and <code>export()</code>, but the scan never selects instances by it;</li>
-<li>a series with no Device Serial Number is never scanned.</li>
+<li>a session that has loaded no configuration, or whose rules are all fresh from <code>create_config()</code> with empty <code>redaction_zones</code>, scans nothing: it prints "No matching configured instances found to scan." with how many instances it skipped, counting those of machines no rule names apart from those whose rules have no zone, and returns an empty report;</li>
+<li>a series with no Device Serial Number is never scanned, not even by a <code>"*"</code> rule, as <code>redact()</code> never redacts one.</li>
 </ul>
 <p>Load a configuration whose rules have zones first:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">machines</span><span class="p">:</span>
@@ -2183,7 +2177,7 @@ applies the zones of every matching rule.</p>
 <p><code>finding.value</code> is the text OCR read, which may be misread (<code>SMITH4JOHN</code> for <code>SMITH^JOHN</code>), and <code>finding.entity_uid</code> is the SOP Instance UID. Text the scan finds is counted in section 5 of the compliance report and does not change the grade; an instance it could not read does.</p>
 <p>After changing the zones, scan again: a report with no findings means every text region OCR found is at least 80% covered.</p>
 <h2 id="automated-remediation">Automated Remediation</h2>
-<p><code>auto_remediate_config()</code> turns a scan's findings into zone changes: a <code>NEW_LEAK</code> becomes a new zone around its text, and a <code>PARTIAL_LEAK</code> grows the zone that covers most of it. It changes the configuration in memory and returns the number of changes.</p>
+<p><code>auto_remediate_config()</code> turns a scan's findings into zone changes: a <code>NEW_LEAK</code> becomes a new zone around its text, and a <code>PARTIAL_LEAK</code> grows the zone that covers most of it, in place (a <code>{roi: [...]}</code> zone keeps its <code>note</code>). A <code>NEW_LEAK</code> on a machine that only a <code>"*"</code> rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on <code>"*"</code>, which would redact that region on every machine's images. A <code>PARTIAL_LEAK</code> whose zone is the <code>"*"</code> rule's does the same with the grown zone: <code>"*"</code> is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>

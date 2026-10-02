@@ -2489,8 +2489,13 @@ or call <code>close()</code>: an open session holds a worker pool and two thread
 <p>The store is the SQLite file and a pixel file beside it
 (by default <code>isocenter.db</code> and <code>isocenter_pixels.bin</code>). <strong>It holds the
 original identifiers and pixels</strong> of everything ingested; keep it where
-you keep the source data. Until <code>export()</code>, the session writes only the
-store, <code>isocenter.log</code> and files you ask for (a configuration, a key).</p>
+you keep the source data, on a local filesystem: the store uses
+SQLite's WAL mode and <code>flock</code> locks, which a network filesystem does
+not dependably support. When the store's filesystem is a known
+network type (NFS, SMB, Lustre, GPFS and others), one <code>WARNING</code> log
+line says so and the store opens anyway. Until <code>export()</code>, the
+session writes only the store, <code>isocenter.log</code> and files you ask
+for (a configuration, a key).</p>
 <p>When a file named <code>isocenter.key</code> exists in the current working
 directory, the session calls <code>enable_reversible_anonymization()</code>
 with it, resolved to an absolute path now. With no such file,
@@ -2553,8 +2558,11 @@ Environment Variables page.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>isocenter.key</code> in the working directory is empty or
-is not a Fernet key.</p>
+                <p><code>isocenter.key</code> in the working directory is empty,
+is not a Fernet key, or is not a regular file (a directory,
+a FIFO). The message names its absolute path, and the
+threads the session had started are released before it
+raises, as they are for any exception from construction.</p>
               </div>
             </td>
           </tr>
@@ -2601,6 +2609,12 @@ session when it finishes.</p>
 returned summary and gets an <code>ERROR</code> audit row naming the path and
 the reason, which bars a <code>PASS</code> grade. Check the return value: a
 run that rejected files completes normally.</p>
+<p><strong>Hidden files.</strong> A file found walking <code>directory</code> whose name
+starts with <code>.</code> (<code>.DS_Store</code>, AppleDouble <code>._*</code>) is not read. It is
+counted in <code>IngestSummary.hidden</code>, and the console summary prints
+the count, with no audit row. A directory whose name starts with
+<code>.</code> is walked, and a file named directly as <code>directory</code> is read
+whatever its name.</p>
 <p><strong>A file that ends the worker process reading it</strong> (the
 out-of-memory killer, a decoder crash, <code>SIGKILL</code>) is read again
 alone on a fresh worker, and rejected only if it ends that worker
@@ -3441,8 +3455,10 @@ rather than minting a key the data was never locked under.</p>
             <td>
               <div class="doc-md-description">
                 <p>The file at <code>key_path</code> is not a Fernet key, or is
-empty (the message names the path). Nothing is cached by a
-failed enable: fix the file and enable again.</p>
+empty, or the path is not a regular file (a directory, a
+FIFO); the message names the path. Nothing is cached by a
+failed enable, and the session stays open and usable: fix
+the file and enable again.</p>
               </div>
             </td>
           </tr>
@@ -4179,9 +4195,11 @@ before anything is restored).</p>
 <p>Uses <code>session.configuration.rules</code>: every image of a series whose
 Device Serial Number a rule matches has each of the rule's zones
 set to zero. This changes pixel data in memory (and the sidecar,
-for persistence); call <code>save()</code> afterwards to persist it. A
-redacted instance takes a new SOP Instance UID, derived from its
-source SOP Instance UID and the rule's zones.</p>
+for persistence); call <code>save()</code> afterwards to persist it. An image
+several rules match (an exact rule and <code>"*"</code>) is redacted once, with
+every matching rule's zones. A redacted instance takes a new SOP
+Instance UID, derived from its source SOP Instance UID and the zones
+of every rule that matches it, whatever order the work runs in.</p>
 <p><strong>Concurrency.</strong> <code>compact()</code> on any thread of this session raises
 while a pass runs. While a <code>compact()</code> is saving or rewriting, this
 call waits (bounded, see <code>Raises</code>) and then proceeds. A worker whose
@@ -4229,7 +4247,7 @@ with an <code>ERROR</code> audit row.</p>
 this configuration, instead of skipping them. Every
 instance the rules match is redacted again, and its SOP
 Instance UID is derived again from its source SOP Instance
-UID and the rule's zones: unchanged zones give the UID and
+UID and its matching rules' zones: unchanged zones give the UID and
 exported filename it already has, and other zones give
 another. <code>file_path</code> becomes None either way. To repair a
 store redacted by 0.9.0 or earlier, see Upgrading from
@@ -4476,9 +4494,15 @@ rules are restored first.</p>
 
         <p>Scan instances for burned-in text with OCR, and report the text no
 configured redaction zone covers.</p>
-<p>Only instances of machines (by Device Serial Number) the current
-configuration has a rule for are scanned; other machines are
-skipped.</p>
+<p>Only instances of machines a rule covers, by exact Device Serial
+Number or <code>"*"</code> (as <code>redact()</code> reads it), and whose covering rules
+hold at least one valid zone, are scanned. Each instance is
+checked against the zones of every rule that covers it, <code>[y1, y2,
+x1, x2]</code> and <code>{"roi": [...]}</code> alike, the zones <code>redact()</code> and
+<code>export()</code> apply. A series with no Device Serial Number is never
+scanned. When nothing is scanned, the printed line counts the
+instances of machines no rule names apart from those whose rules
+hold no zone.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4796,6 +4820,9 @@ empty value is one row. 0 means nothing changed.</p>
     <div class="doc doc-contents ">
 
         <p>Export the session to a directory in the requested format.</p>
+<p>Both built-in formats save the session (<code>save(sync=True)</code>) before
+they write, after any refusal listed under <code>Raises:</code>; a refused
+call saves nothing.</p>
 <p>Either format writes one <code>WARNING</code> audit row, and changes nothing it
 writes, when the instances it writes carry PHI statuses recorded
 under a policy that is neither the one in force nor one this
@@ -5007,6 +5034,14 @@ where it lands is the caller's to name. Use <code>get_cohort_report()</code>
 for the frame alone, with no file.</p>
 <p>It reports the session's in-memory graph and does not <code>save()</code>
 first: pending edits are not committed as a side effect.</p>
+<p>Parquet holds a column of sequences (a multi-valued tag such as
+Image Type) as a list column when its values are uniform: every
+non-null cell a sequence whose non-null elements are all of one
+scalar family. A column that is neither that nor scalars of one
+family (a tag single-valued in one file and multi-valued in
+another, or a <code>str</code> beside an <code>int</code>) is written as text, each
+value as the CSV writes it. Missing values stay null in both.
+Other columns are written as they are.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5092,7 +5127,8 @@ line.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The frame that was written.</p>
+                <p>The frame as built, before any Parquet
+conversion; the same frame for either format.</p>
               </div>
             </td>
           </tr>
@@ -5778,7 +5814,9 @@ read from the format's own method, which is private: pass the options to
 JPEG 2000 (lossless). A 16-bit image with more than one
 sample is written this way too, and pydicom with only its
 Pillow plugin cannot decode it; the export names each such
-instance at INFO.</p>
+instance at INFO. An image of 32- or 64-bit integer
+samples, which JPEG 2000 here cannot carry exactly, is
+written uncompressed instead, also named at INFO (#771).</p>
               </div>
             </td>
             <td>

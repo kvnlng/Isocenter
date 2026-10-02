@@ -2052,10 +2052,10 @@
 <p>The path the file handler writes to. The file handler takes <code>DEBUG</code> and above; the console handler takes <code>WARNING</code> and above and is unaffected by this variable. An explicit <code>log_file</code> argument to <code>configure_logger()</code> wins over it.</p>
 <h2 id="isocenter_db_path"><code>ISOCENTER_DB_PATH</code></h2>
 <p><strong>Default:</strong> <code>isocenter.db</code>.</p>
-<p>The path to the SQLite session database, read when <code>Session()</code> is given no <code>persistence_file</code>.</p>
+<p>The path to the SQLite session database, read when <code>Session()</code> is given no <code>persistence_file</code>. Name a path on a local disk: the store uses SQLite's WAL mode and <code>flock</code> locks, neither of which is dependable over a network filesystem (see <a href="../quickstart/#1-initialize-a-session">Keep the store on local disk</a>).</p>
 <p><code>:memory:</code> is accepted, here or as <code>Session(":memory:")</code>:</p>
 <ul>
-<li>the index lives in memory, and the pixel sidecar in a temporary file the store removes on <code>close()</code>;</li>
+<li>the index lives in memory, and the pixel sidecar in a temporary file the store removes on <code>close()</code>, under <code>$TMPDIR</code>, which should be local too;</li>
 <li><code>redact()</code> runs in threads on every interpreter, or refuses if worker recycling is asked for (see <a href="#isocenter_force_processes"><code>ISOCENTER_FORCE_PROCESSES</code></a> and <a href="#isocenter_max_tasks_per_child"><code>ISOCENTER_MAX_TASKS_PER_CHILD</code></a>).</li>
 </ul>
 <h2 id="isocenter_max_workers"><code>ISOCENTER_MAX_WORKERS</code></h2>

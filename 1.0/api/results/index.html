@@ -2272,7 +2272,7 @@ page lists them as tier 2.</p>
 
 
         <p>What <code>ingest()</code> did with each file it found.</p>
-<p>A file takes exactly one of four routes. A declined file is not
+<p>A file takes exactly one of five routes. A declined file is not
 recorded as imported, so offering it again declines it again.</p>
 
 
@@ -2333,6 +2333,20 @@ read into the store.</p>
             <td>
               <div class="doc-md-description">
                 <p>Files already in the store, not read again.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="isocenter.io_handlers.IngestSummary.hidden">hidden</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Files found walking the directory whose name starts
+with <code>.</code> (<code>.DS_Store</code>, AppleDouble <code>._*</code>), which are not read
+(#795). A directory whose name starts with <code>.</code> is walked, and
+a file named directly is read whatever its name.</p>
               </div>
             </td>
           </tr>

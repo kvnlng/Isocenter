@@ -1947,10 +1947,11 @@ then acts on every finding.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
 </code></pre></div>
 <p>Now pass the rows you chose as <code>subset=</code>. <code>rtdose.dcm</code> stores 32-bit
-dose values, which Isocenter's JPEG 2000 encoder cannot write exactly,
-so every export on this page uses <code>use_compression=False</code>
-(<a href="https://github.com/kvnlng/Isocenter/issues/771">#771</a> tracks writing
-such an instance uncompressed on its own).</p>
+dose values, which Isocenter's JPEG 2000 encoder cannot write exactly, so
+with compression on that one instance would be written uncompressed, with
+an INFO note (<a href="https://github.com/kvnlng/Isocenter/issues/771">#771</a>).
+Every export on this page uses <code>use_compression=False</code>, so every file it
+writes is in the same transfer syntax.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export-images"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">images</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report-images.md"</span><span class="p">)</span>
 </code></pre></div>

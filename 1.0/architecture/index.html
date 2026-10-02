@@ -1847,7 +1847,7 @@
 <h2 id="1-the-session-facade">1. The Session facade</h2>
 <p>The <code>Session</code> object is your single entry point. It manages:</p>
 <ul>
-<li><strong>The store</strong>: <code>&lt;name&gt;.db</code> and <code>&lt;name&gt;_pixels.bin</code>, created by <code>Session("&lt;name&gt;.db")</code>. <code>ingest()</code> saves when it finishes and a DICOM <code>export()</code> saves before it writes; otherwise call <code>save()</code> yourself. <code>close()</code> does not save: it warns, naming the instances whose edits would be lost.</li>
+<li><strong>The store</strong>: <code>&lt;name&gt;.db</code> and <code>&lt;name&gt;_pixels.bin</code>, created by <code>Session("&lt;name&gt;.db")</code>. <code>ingest()</code> saves when it finishes and <code>export()</code> (either built-in format) saves before it writes; otherwise call <code>save()</code> yourself. <code>close()</code> does not save: it warns, naming the instances whose edits would be lost.</li>
 <li><strong>Inventory</strong>: the patients, studies, series and instances the store holds.</li>
 <li><strong>Workers</strong>: a process pool and two background threads. Use <code>with Session(...) as session:</code> or call <code>close()</code>, or the worker processes outlive your script.</li>
 </ul>
@@ -1880,6 +1880,7 @@
 </ol>
 <h2 id="4-storage">4. Storage</h2>
 <p>The store is a SQLite index plus an append-only sidecar file. Keep <code>&lt;name&gt;.db</code> and <code>&lt;name&gt;_pixels.bin</code> together: a copy of both, under the same base name, is the same project, and either alone is incomplete.</p>
+<p>The index runs in SQLite's WAL mode and the sidecar's locks are <code>flock</code>, so the store belongs on a local disk, opened from one host at a time. <code>Session()</code> logs a <code>WARNING</code> when it recognises the store's filesystem as a network type, and opens it anyway (<a href="../quickstart/#1-initialize-a-session">Keep the store on local disk</a>).</p>
 <ul>
 <li><strong>Standard tags</strong> (even groups), and every binary value small enough to keep, are stored as one JSON document per instance and read back whole. Reopening a session loads the cohort's metadata in one pass, not one file at a time.</li>
 <li><strong>Private tags</strong> (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.</li>

@@ -1888,7 +1888,10 @@ current working directory at construction, <code>Session()</code> calls
 path then, so a later change of directory does not move it; a key
 beside the store in another directory is not looked for. With no such
 file, reversible anonymization stays off and no key is created. A
-malformed one makes <code>Session()</code> raise its <code>ValueError</code>. Keeping the key
+malformed one makes <code>Session()</code> raise its <code>ValueError</code>. So does anything
+at that path that is not a regular file, such as a directory. The
+message names the path, and the threads the session had started are
+released first. Keeping the key
 in the directory you run from, beside the store and the exported data,
 is not advised: whoever holds the key and an export can read the
 identities it carries.</p>
@@ -2187,7 +2190,7 @@ other from <code>store.patients</code>; <code>audit()</code> runs inside
 <p><strong>Shapes the frozen methods return</strong> (attribute names; each is
 rendered on <a href="../results/">Results and errors</a>, except <code>DiscoveryResult</code>,
 on <a href="../ocr/">OCR API</a>).
-<code>IngestSummary(ingested, failures, declined, skipped)</code> plus <code>failed</code>;
+<code>IngestSummary(ingested, failures, declined, skipped, hidden)</code> plus <code>failed</code>;
 <code>ExportSummary(written_uids, failures)</code> plus <code>written</code>, <code>failed</code>;
 <code>written_uids</code> holds the SOP Instance UID of each written instance and
 nothing else: an instance with no UID is not written and is in
@@ -2362,7 +2365,8 @@ otherwise.</p>
   prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.</li>
 <li><code>enable_reversible_anonymization()</code>: <code>ValueError</code> for a malformed key
-  file, creating none. The first <code>lock_identities()</code> that writes a token
+  file, or a path that is not a regular file, creating none; the session
+  stays open (#791). The first <code>lock_identities()</code> that writes a token
   creates the key, exclusively and with mode 0600; a lock that writes
   none (a refusal, or no patient found, or none with an instance) creates
   no key file (#813). When no key file exists and the session holds an

@@ -1877,16 +1877,14 @@ to read. Isocenter does not read WFDB back in.</p>
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="n">session</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">sync</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p><a href="../tutorials/physionet-challenge-ecgs/">Prepare your own ECGs for a PhysioNet Challenge</a>
 walks this path end to end, and then shapes each header the way the
 Challenge's code reads it.</p>
 <p>Run it as a script: the <code>if __name__ == "__main__":</code> guard is required,
 because ingest starts worker processes that re-import the script. A WFDB
-export does not save the session (a DICOM export does), so call
-<code>save(sync=True)</code> before the block ends if you want the de-identified graph
-kept in the store; otherwise <code>close()</code> warns that the edits were not saved.</p>
+export saves the session before it writes, as a DICOM export does, so the
+de-identified graph is in the store when the block ends.</p>
 <p>Each waveform instance becomes one WFDB record, written into the same
 directory tree the DICOM exporter uses, so a record's <code>.hea</code>/<code>.dat</code> files
 sit alongside that series' <code>.dcm</code> files if you also export

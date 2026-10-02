@@ -1847,7 +1847,7 @@
 <h2 id="what-the-export-writes">What the export writes</h2>
 <p>The export writes two transfer syntaxes and no others:</p>
 <ul>
-<li>Implicit VR Little Endian, with <code>use_compression=False</code>, and for every file with no pixel data.</li>
+<li>Implicit VR Little Endian, with <code>use_compression=False</code>, and for every file with no pixel data, floating-point pixels, or 32- or 64-bit integer samples, which JPEG 2000 Lossless here cannot carry exactly (#771).</li>
 <li>JPEG 2000 Lossless (<code>1.2.840.10008.1.2.4.90</code>), with <code>use_compression=True</code>, the default.</li>
 </ul>
 <p>A source in any other syntax is decoded at ingest and re-encoded into one of those two. Nothing writes High-Throughput JPEG 2000: an HTJ2K source exports uncompressed or as JPEG 2000. <a href="../export-output/#compression">What the export writes</a> covers what compression does to colour images and lossy sources.</p>
