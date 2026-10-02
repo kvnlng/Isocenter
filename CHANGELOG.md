@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Measured with three 3.14t map builds of one commit (faa2118c, 2026-10-02), run one after another: with the handler, without it, and with it again. Every run had 6989 passed and 22 skipped.
   - The run without the handler lost three functions recorded as run in a worker: `parallel._RecyclingWatch.check`, `parallel._checked` and `builders.InstanceContextBuilder.set_attribute`. The second run with the handler lost the same three, so they are noise between runs, not the handler's work.
   - `--changed`'s selection for every function of `io_handlers.py` and `parallel.py` lost nothing beyond that noise.
+  - The two runs with the handler each left worker data files that coverage could not read when it combined them ("isn't a coverage data file"): 3 in the first run and 5 in the second. The run without it left none. That is the half-written save the non-re-entrant handler produces.
   - The prose that named the handler as live (`parallel.py`, the packaging contract's grace message, `RELEASING.md`'s "If the map build hangs") now says it was set until #886. The shard fallback stays for anything else that hangs a build.
   - **Output:** none.
 

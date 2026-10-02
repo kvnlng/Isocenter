@@ -21,8 +21,10 @@
 # (parallel._RecyclingWatch.check, parallel._checked,
 # builders.InstanceContextBuilder.set_attribute), all three of them code
 # the parent runs -- and `--changed`'s selection for every function of
-# io_handlers.py and parallel.py lost nothing beyond the same noise. So
-# the handler bought nothing the map reads, and it was dropped. Should a
+# io_handlers.py and parallel.py lost nothing beyond the same noise. The
+# two builds with it also left 3 and 5 worker data files coverage could
+# not read at combine; the build without it left none. So the handler
+# bought nothing the map reads, and it was dropped. Should a
 # later map lose worker functions on the other ways out (a reader that
 # stops, a task's exception, Ctrl-C, a broken ProcessPoolExecutor, a dead
 # recycling worker's BrokenProcessPool, #887), measure again before adding
