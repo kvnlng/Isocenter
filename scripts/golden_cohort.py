@@ -204,6 +204,21 @@ def lut_ambiguous(out: Path):
     write(ds, out / "lut_ambiguous-1.dcm")
 
 
+def big_lut(out: Path):
+    """A VOI LUT of 65536 16-bit entries (descriptor first value 0), 131072
+    bytes of LUT Data, in an explicit source: #902. Kept up to that size,
+    where above 65534 bytes it was dropped; no member reached the
+    non-segmented LUT Data arm (ALOKA's are segmented palettes)."""
+    ds = ct("big_lut")
+    item = Dataset()
+    item.add_new(0x00283002, "US", [0, 0, 16])
+    item.add_new(0x00283003, "LO", "GOLD VOI LUT")
+    item.add_new(0x00283006, "OW", (np.arange(65536, dtype=np.uint32) * 7 % 65536)
+                 .astype("<u2").tobytes())
+    ds.VOILUTSequence = Sequence([item])
+    write(ds, out / "big_lut-1.dcm")
+
+
 def big_endian_words(out: Path):
     """Explicit VR Big Endian with an OW palette table and a private OW:
     the J7 byte order and VR arms."""
@@ -330,7 +345,7 @@ def graphic_annotation(out: Path):
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id, withheld, prior_markers, graphic_annotation)}
+    no_patient_id, withheld, prior_markers, graphic_annotation, big_lut)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
