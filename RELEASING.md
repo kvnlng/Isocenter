@@ -94,19 +94,10 @@ minor's work. A PR with neither is the next unreleased line's work.
    run as shards, `pytest -v --changed --shard=I/N` for I in 1..N, so each
    run is short enough to watch; record every shard's line.
 
-   **Runs in one checkout go one after the other** (#849). Each test runs
-   in its own directory (#707), but two runs in one checkout still meet
-   in its root: `tests/test_packaging_contract.py`'s `built` fixture
-   builds the distributions there, and the sdist makes and then deletes
-   a release tree, `isocenter-<version>/`. Another run whose closing
-   root-guard snapshot falls inside that window exits 1 naming the tree,
-   though every test passed (seen at #847's gate). The packaging test is
-   in nearly every selection: it reads every `*.py` (#744) and names
-   files such as `RELEASING.md`. To run shards or both interpreters at
-   once, give each run its own worktree: `git worktree add --detach <dir>
-   <sha>`, then `cp .test-map.json <dir>/` if the checkout has a map (it
-   is gitignored, and without it `--changed` falls back to `TARGETS`
-   rows). **Any run in a worktree**, made for this or because the branch
+   Runs at different SHAs each get their own worktree: `git worktree add
+   --detach <dir> <sha>`, then `cp .test-map.json <dir>/` if the checkout
+   has a map (it is gitignored, and without it `--changed` falls back to
+   `TARGETS` rows). **Any run in a worktree**, made for this or because the branch
    lives in one, is run from `<dir>` as `PYTHONPATH=<dir> python -m
    pytest …`, never the `pytest` script, after `PYTHONPATH=<dir> python
    -c 'import isocenter; print(isocenter.__file__)'`, which must print a
@@ -276,7 +267,9 @@ fixes, never features.
    sent the other workers SIGTERM and waited for each with no timeout,
    and coverage's own SIGTERM handler could keep one of them running for
    good. Since #796 was fixed, a worker still running 10 s after its pool
-   is found broken is sent SIGKILL. A stall shows as the conftest watchdog's
+   is found broken is sent SIGKILL, and since #886 `.coveragerc` no longer
+   installs that handler; this fallback stays for whatever else hangs a
+   build. A stall shows as the conftest watchdog's
    `ISOCENTER STALL WATCHDOG: nothing has happened for Ns (#250)` banner,
    repeated every 120 s. It never ends the run, so kill only that run's
    processes. faulthandler's `Timeout (0:05:00)!` dump is printed once
