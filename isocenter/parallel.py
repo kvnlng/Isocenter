@@ -662,8 +662,9 @@ def _tracked(iterator, items, strategy) -> Iterator:
 #: holds no sqlite handle and no gate, and the only lock around it is the
 #: shared pass-lock of `ingest()` and `redact()`, which `compact()` refuses
 #: on rather than waits for. Not below a few seconds: a worker that saves
-#: its state on SIGTERM must get to finish, and coverage's `sigterm = True`
-#: handler takes up to 0.8 s under load to write the worker's data file.
+#: its state on SIGTERM must get to finish: coverage's `sigterm = True`
+#: handler, which this repository's `.coveragerc` set until #886, took up
+#: to 0.8 s under load to write the worker's data file.
 #: `test_packaging_contract.py` pins both ends, the floor at 5 s.
 _BROKEN_POOL_GRACE_S = 10.0
 
@@ -680,7 +681,8 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
     SIGTERM when something in it handles the signal: a script's
     module-level handler, which spawn runs again in every worker; a handler
     that calls `sys.exit()`, which a worker running a task catches as that
-    task's failure; coverage's `sigterm = True`.
+    task's failure; coverage's `sigterm = True` (this repository's
+    `.coveragerc` set it until #886).
 
     Does nothing unless `executor` is a broken process pool. Otherwise gives
     its workers `_BROKEN_POOL_GRACE_S` from now to end, SIGKILLs each one
@@ -875,7 +877,8 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
     or a recycled replacement) can never read its sentinel; then it SIGTERMs
     each worker and joins every one with no timeout. A worker that also
     outlives SIGTERM (a handler a script installs at module level runs again
-    in every spawned worker; coverage's `sigterm = True` can deadlock) hung
+    in every spawned worker; coverage's `sigterm = True`, set here until
+    #886, can deadlock) hung
     `export()` for good after every file was written (#860).
 
     So the stdlib's whole exit runs on a daemon helper thread: on success,

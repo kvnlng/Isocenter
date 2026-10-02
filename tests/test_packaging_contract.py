@@ -1917,8 +1917,9 @@ def test_the_broken_pool_grace_sits_below_the_stall_watchdog():
     assert grace >= 5, (
         f"_BROKEN_POOL_GRACE_S={grace:g}s is below the few seconds its "
         "comment sets as the floor: a worker that saves its state on SIGTERM "
-        "must get to finish, and coverage's `sigterm = True` handler takes "
-        "up to 0.8 s under load to write the worker's data file (#796)")
+        "must get to finish: coverage's `sigterm = True` handler, which "
+        ".coveragerc set until #886, took up to 0.8 s under load to write "
+        "the worker's data file (#796)")
 
     # By AST, as the gate's deadline is read above: the docstring names
     # the constant in prose.

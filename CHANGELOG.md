@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `build/` and `isocenter.egg-info/` leave the root guard's allowed names (`tests/support/root_guard.py`); `.DS_Store` stays.
   - `RELEASING.md` no longer requires runs in one checkout to go one after the other; runs at different SHAs still each get a worktree, and a worktree run is still `PYTHONPATH=<dir> python -m pytest`.
   - **Output:** none.
+- **`.coveragerc` no longer sets `sigterm = True` (#886, a follow-up of #860 owner ruling Q4).** The handler saved a worker's coverage data when a pool's exit SIGTERMed it, and it was kept until a test-map build was measured without it. It cost something to keep: it is not re-entrant (coveragepy/coveragepy#2310), it can deadlock a worker on the tracer's lock, and it was what hung the map builds of rc1 to rc5 (#796).
+  - Measured with three 3.14t map builds of one commit (faa2118c, 2026-10-02), run one after another: with the handler, without it, and with it again. Every run had 6989 passed and 22 skipped.
+  - The run without the handler lost three functions recorded as run in a worker: `parallel._RecyclingWatch.check`, `parallel._checked` and `builders.InstanceContextBuilder.set_attribute`. The second run with the handler lost the same three, so they are noise between runs, not the handler's work.
+  - `--changed`'s selection for every function of `io_handlers.py` and `parallel.py` lost nothing beyond that noise.
+  - The prose that named the handler as live (`parallel.py`, the packaging contract's grace message, `RELEASING.md`'s "If the map build hangs") now says it was set until #886. The shard fallback stays for anything else that hangs a build.
+  - **Output:** none.
 
 ### Added
 
