@@ -5,14 +5,18 @@ goes through -- scanning, exporting, verification. It picks between three
 execution strategies and adapts to a set of `ISOCENTER_*` environment
 variables, so that tuning a cohort run never means editing code.
 """
+import collections
 import concurrent.futures
 import functools
 import os
+import signal
 import sys
 import multiprocessing
 import multiprocessing.connection
+import multiprocessing.pool
 import threading
 import time
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from typing import (Callable, Iterable, Iterator, Any, NamedTuple,
                     Optional, TypeVar)
@@ -35,8 +39,71 @@ _FALSEY = ("0", "false", "off", "no")
 #: when `ISOCENTER_WORKER_FAULTHANDLER` is set, which only tests.yml does.
 _WORKER_FAULTHANDLER_TIMEOUT_S = 240
 
+#: How long a worker process may take to end once its exit has begun,
+#: before the kernel ends it with SIGALRM (#888, #844). No environment
+#: variable: tests patch it. Resolved in the parent and handed to the
+#: worker as an argument, so a patched value reaches a spawned child.
+#:
+#: Armed by a recycling-pool worker once it leaves its task loop, however
+#: it left: at its quota, by the pool's sentinel on `close()`, or on
+#: `terminate()`. So it must be at least `_BROKEN_POOL_GRACE_S +
+#: _POOL_EXIT_AFTER_KILL_S`: inside #860's bounded exit the parent's own
+#: kill then always acts first, and that exit's WARNING lines are
+#: unchanged. Below conftest's `_STALL_S`, pytest's faulthandler window and
+#: `_WORKER_FAULTHANDLER_TIMEOUT_S`. `test_packaging_contract.py` pins all
+#: of it.
+_WORKER_EXIT_GRACE_S = 15.0
 
-def _worker_init(disable_gc=False, faulthandler_timeout=None):
+
+def _arm_exit_bound(seconds):
+    """End this worker process with SIGALRM if it is still running
+    `seconds` from now. Does nothing in a process that is not a
+    multiprocessing child.
+
+    Args:
+        seconds (float): The bound.
+    """
+    # Three traps, each a reason this is not something tidier:
+    #
+    # 1. SIGALRM with its default action, not a `threading.Timer` that calls
+    #    `os._exit`. No Python thread runs once `Py_FinalizeEx` has marked
+    #    the interpreter finalizing, and #844's worker was stuck past
+    #    `atexit`, in `_PyFaulthandler_Fini`. The kernel's default action
+    #    ends a process blocked anywhere (measured on 3.12 and 3.14t: a
+    #    child stuck after `atexit` and one stuck in `threading._shutdown`
+    #    both ended with -14 about 1.05 s after a 1 s bound). The handler
+    #    is reset first, because the worker's own code may have taken it.
+    # 2. Never in the parent: a SIGALRM in the caller's own process would
+    #    end their program.
+    # 3. No log call here or after it: the process being bounded may hold
+    #    the logging lock (#434's lesson). The parent reports, from the
+    #    exit code.
+    if multiprocessing.parent_process() is None:
+        return
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+
+
+def _end_the_dump_within(seconds):
+    """At a worker's exit: bound the exit, then cancel any pending
+    traceback dump (#844). Registered with `atexit` by `_worker_init`.
+
+    Args:
+        seconds (float): The exit bound.
+    """
+    # The bound first. A dump already spinning makes the cancel itself wait
+    # for good, which is how the 1.0.0rc4 worker's exit hung (in
+    # `_PyFaulthandler_Fini`, which runs after `atexit`), so the alarm must
+    # already be set when the cancel is called. Cancelling also stops a dump
+    # from starting while the interpreter tears down. `faulthandler` is read
+    # at call time, on purpose: a test replaces its cancel.
+    _arm_exit_bound(seconds)
+    import faulthandler  # pylint: disable=import-outside-toplevel
+    faulthandler.cancel_dump_traceback_later()
+
+
+def _worker_init(disable_gc=False, faulthandler_timeout=None,
+                 exit_bound=None):
     """Configure one freshly spawned or recycled worker process.
 
     Args:
@@ -44,6 +111,9 @@ def _worker_init(disable_gc=False, faulthandler_timeout=None):
         faulthandler_timeout (float, optional): Seconds after which the
             worker dumps every thread's traceback to stderr, without
             exiting. None arms nothing.
+        exit_bound (float, optional): With `faulthandler_timeout`, the
+            seconds the worker's exit may take before SIGALRM ends it
+            (#844). None bounds nothing.
     """
     # Module scope because it must pickle into the child. The imports sit
     # inside because they act on the worker's collector and faulthandler,
@@ -59,6 +129,14 @@ def _worker_init(disable_gc=False, faulthandler_timeout=None):
         # long task, which under the recycling pool is a hang. Each child
         # arms its own timer, so worker recycling re-arms it.
         faulthandler.dump_traceback_later(faulthandler_timeout, exit=False)
+        if exit_bound is not None:
+            # An exit handler, so it runs in `Py_FinalizeEx` before
+            # `_PyFaulthandler_Fini`, the frame the rc4 worker never left.
+            # Under coverage's `concurrency = multiprocessing` a worker's
+            # data is saved in its patched `_bootstrap`, before `sys.exit`,
+            # so before this bound is armed.
+            import atexit
+            atexit.register(_end_the_dump_within, exit_bound)
 
 
 def resolve_worker_initializer(disable_gc: bool = False):
@@ -67,7 +145,8 @@ def resolve_worker_initializer(disable_gc: bool = False):
     Call it in the parent, when the pool is built: the settings travel to
     the child as pickled arguments. `ISOCENTER_DISABLE_GC=1` also disables
     the collector, and `ISOCENTER_WORKER_FAULTHANDLER=1` arms a traceback
-    dump after `_WORKER_FAULTHANDLER_TIMEOUT_S` seconds.
+    dump after `_WORKER_FAULTHANDLER_TIMEOUT_S` seconds and bounds the
+    worker's exit at `_WORKER_EXIT_GRACE_S` (#844).
 
     Args:
         disable_gc (bool): Disable the garbage collector in each worker.
@@ -88,8 +167,13 @@ def resolve_worker_initializer(disable_gc: bool = False):
         if _env_is("ISOCENTER_WORKER_FAULTHANDLER", ("1",)) else None)
     if not disable_gc and faulthandler_timeout is None:
         return None
-    return functools.partial(_worker_init, disable_gc=disable_gc,
-                             faulthandler_timeout=faulthandler_timeout)
+    settings = {"disable_gc": disable_gc,
+                "faulthandler_timeout": faulthandler_timeout}
+    if faulthandler_timeout is not None:
+        # Only beside the dump: the bound exists for a dump that can hold
+        # the worker's exit (#844), and production never arms one.
+        settings["exit_bound"] = _WORKER_EXIT_GRACE_S
+    return functools.partial(_worker_init, **settings)
 
 
 class _ExceptionAsResult:
@@ -578,8 +662,9 @@ def _tracked(iterator, items, strategy) -> Iterator:
 #: holds no sqlite handle and no gate, and the only lock around it is the
 #: shared pass-lock of `ingest()` and `redact()`, which `compact()` refuses
 #: on rather than waits for. Not below a few seconds: a worker that saves
-#: its state on SIGTERM must get to finish, and coverage's `sigterm = True`
-#: handler takes up to 0.8 s under load to write the worker's data file.
+#: its state on SIGTERM must get to finish: coverage's `sigterm = True`
+#: handler, which this repository's `.coveragerc` set until #886, took up
+#: to 0.8 s under load to write the worker's data file.
 #: `test_packaging_contract.py` pins both ends, the floor at 5 s.
 _BROKEN_POOL_GRACE_S = 10.0
 
@@ -596,7 +681,8 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
     SIGTERM when something in it handles the signal: a script's
     module-level handler, which spawn runs again in every worker; a handler
     that calls `sys.exit()`, which a worker running a task catches as that
-    task's failure; coverage's `sigterm = True`.
+    task's failure; coverage's `sigterm = True` (this repository's
+    `.coveragerc` set it until #886).
 
     Does nothing unless `executor` is a broken process pool. Otherwise gives
     its workers `_BROKEN_POOL_GRACE_S` from now to end, SIGKILLs each one
@@ -655,13 +741,14 @@ def _end_broken_pool_stragglers(executor) -> list[int]:
         # `shutdown()`, which then waited on them for good (review of
         # #861). A `finally` and not an `except`, so nothing is swallowed,
         # and never a `return` in it, which would swallow the interrupt.
-        killed = []
-        for process in waiting.values():
-            try:
-                process.kill()
-            except (OSError, ValueError):
-                continue
-            killed.append(process.pid)
+        #
+        # Only the ones still running: an interrupt that lands before a
+        # `wait()` has returned an ended worker's sentinel leaves that
+        # worker in `waiting`, and it was named as still running (#862).
+        # Never catch `BaseException` around this check: a second Ctrl-C
+        # here must still reach the caller, and the fallback for a handle
+        # that cannot be asked is to kill them all, never to skip the kill.
+        killed = _kill_still_running(waiting.values())
         if killed:
             # Two `ingest()` calls on one broken pool can both get here and
             # both kill: `kill()` skips a worker already reaped and swallows
@@ -760,6 +847,50 @@ def _still_running(processes) -> list:
             if sentinel not in ready]
 
 
+def _still_running_or_all(processes) -> list:
+    """`_still_running(processes)`, or every one of them when the sentinels
+    cannot be asked.
+
+    For a kill: a handle that cannot be waited on must never skip the kill
+    of a worker that may still be running (#862).
+    """
+    processes = list(processes)
+    try:
+        return _still_running(processes)
+    except (OSError, ValueError):
+        return processes
+
+
+def _kill_each(processes) -> list[int]:
+    """SIGKILL each process; return the pids the signal was sent to."""
+    killed = []
+    for process in processes:
+        try:
+            process.kill()
+        except (OSError, ValueError):
+            continue
+        killed.append(process.pid)
+    return killed
+
+
+def _kill_still_running(processes) -> list[int]:
+    """SIGKILL the processes still running; return their pids.
+
+    A Ctrl-C (or anything else) raised while the sentinels are asked is
+    not swallowed: every process is killed, then it is raised. Skipping
+    the kill there let the caller's next step wait on a running worker for
+    good (review of #913); killing one that already ended costs nothing,
+    because `kill()` skips a reaped process and swallows a gone one.
+    """
+    processes = list(processes)
+    try:
+        targets = _still_running_or_all(processes)
+    except BaseException:
+        _kill_each(processes)
+        raise
+    return _kill_each(targets)
+
+
 def _end_recycling_pool(pool, finished: bool) -> list[int]:
     """End a recycling `multiprocessing.Pool`, holding the caller no longer
     than `_BROKEN_POOL_GRACE_S + _POOL_EXIT_AFTER_KILL_S`.
@@ -770,7 +901,8 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
     or a recycled replacement) can never read its sentinel; then it SIGTERMs
     each worker and joins every one with no timeout. A worker that also
     outlives SIGTERM (a handler a script installs at module level runs again
-    in every spawned worker; coverage's `sigterm = True` can deadlock) hung
+    in every spawned worker; coverage's `sigterm = True`, set here until
+    #886, can deadlock) hung
     `export()` for good after every file was written (#860).
 
     So the stdlib's whole exit runs on a daemon helper thread: on success,
@@ -860,12 +992,7 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
         if not exited.is_set():
             # The live list, read only now: nothing grows it once the pool
             # is closed or terminating.
-            for process in _still_running(list(pool._pool)):
-                try:
-                    process.kill()
-                except (OSError, ValueError):
-                    continue
-                killed.append(process.pid)
+            killed = _kill_still_running(list(pool._pool))
             if killed:
                 # The time measured, not the grace: an interrupt ends the
                 # wait early. The cause by path: a finished pool is closed
@@ -901,6 +1028,267 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
     return killed
 
 
+#: How often the recycling pool's stream checks its workers while it waits
+#: for a result, and at most how often while results flow (#887). It is
+#: the latency of seeing a dead worker; it costs nothing while results
+#: flow, and a check is one zero-timeout `select()` over the sentinels of
+#: the workers still running, at most about twice the pool's width. No
+#: environment variable: tests patch it.
+_POOL_WATCH_S = 1.0
+
+
+def _recycling_worker(inqueue, outqueue, initializer, initargs, maxtasks,
+                      wrap_exception, exit_grace):
+    """`multiprocessing.pool.worker`, then a bound on this process's exit.
+
+    The target of every worker `_RecyclingPool` starts. Module scope: it
+    pickles into the spawned child by reference.
+
+    Args:
+        inqueue, outqueue, initializer, initargs, maxtasks, wrap_exception:
+            `multiprocessing.pool.worker`'s own arguments, passed on.
+        exit_grace (float): Seconds this process may take to end once the
+            loop has returned (#888), resolved in the parent.
+    """
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    multiprocessing.pool.worker(inqueue, outqueue, initializer, initargs,
+                                maxtasks, wrap_exception)
+    # A worker that ran its quota leaves the loop and exits, and the pool
+    # replaces it only once it has ended; one whose exit does not finish (a
+    # non-daemon thread, an `atexit` that never returns) was never replaced,
+    # and with every worker so, the pool stalled with tasks queued (#888).
+    #
+    # Ending it here does not break #860's rule 2 (never kill while the
+    # pool is RUN, because the replacements starve behind a lock the dead
+    # held): the loop returned after its last `put` released the outqueue's
+    # write lock and without calling `get` again, so this process holds
+    # none of the pool's locks. A worker #860 kills, or one #887 sees die,
+    # can die inside either lock, which is why those paths keep their rules.
+    # Armed however the loop ended, since the worker cannot tell why: hence
+    # `_WORKER_EXIT_GRACE_S` sits above #860's own exit bound.
+    _arm_exit_bound(exit_grace)
+
+
+class _RecyclingPool(multiprocessing.pool.Pool):  # pylint: disable=abstract-method
+    """`multiprocessing.Pool` that records every worker it starts, and starts
+    each as `_recycling_worker`, so its exit is bounded (#887, #888).
+
+    Args:
+        exit_grace (float): Keyword-only: each worker's exit bound.
+        *args, **kwargs: `multiprocessing.pool.Pool`'s.
+    """
+    # The hook is `Pool.Process`: `__init__` starts the first workers
+    # through `self.Process`, and hands `self.Process` to the worker-handler
+    # thread, which starts every replacement. A bound method holds the pool,
+    # so that thread keeps it alive until it exits; nothing here relies on
+    # the pool being collected, because `_end_recycling_pool`'s helper runs
+    # `terminate()` itself (#860's rule 1).
+
+    def __init__(self, *args, exit_grace, **kwargs):
+        # Before `super().__init__()`, which starts the first workers
+        # through `self.Process`: set after it, these do not exist yet when
+        # those workers start.
+        # `deque` because the worker-handler thread appends and the stream's
+        # thread pops; both are atomic.
+        self._started = collections.deque()
+        self._exit_grace = exit_grace
+        super().__init__(*args, **kwargs)
+
+    # An instance method where the base class has a staticmethod, so it sees
+    # the pool: hence `arguments-differ`, which counts `self`.
+    def Process(self, ctx, *args, **kwds):  # pylint: disable=invalid-name,arguments-differ
+        """Start one worker, as `_recycling_worker`, and record it.
+
+        A target other than `multiprocessing.pool.worker` passes through
+        unbounded; `test_parallel_contract.py` pins that the stdlib's target
+        is that one.
+
+        Args:
+            ctx: The pool's multiprocessing context.
+            *args, **kwds: `ctx.Process`'s.
+
+        Returns:
+            multiprocessing.process.BaseProcess: The worker, not yet started.
+        """
+        if kwds.get("target") is multiprocessing.pool.worker:
+            kwds["target"] = _recycling_worker
+            kwds["args"] = tuple(kwds.get("args", ())) + (self._exit_grace,)
+        process = ctx.Process(*args, **kwds)
+        self._started.append(process)
+        return process
+
+
+class _RecyclingWatch:
+    """Reads how each worker of a `_RecyclingPool` ended (#887, #888).
+
+    `check()` raises `BrokenProcessPool` on a worker that ended abnormally,
+    and both it and `sweep()` log the workers their exit bound ended.
+    """
+
+    def __init__(self, pool):
+        self._pool = pool
+        # The processes still running, or just ended and not yet read. Only
+        # those: each process held keeps its sentinel's file descriptor
+        # open, so holding every worker of a long export would hold
+        # thousands. A process is dropped once its exit code is read.
+        self._live = []
+        self._next = time.monotonic() + _POOL_WATCH_S
+
+    def due(self) -> bool:
+        """Whether `_POOL_WATCH_S` has passed since the last check."""
+        return time.monotonic() >= self._next
+
+    def _read(self):
+        """Read every worker that has ended since the last read.
+
+        Returns:
+            tuple: `(broken, late)`: the first abnormal `(pid, exitcode)` or
+            None, and the pids the exit bound ended.
+        """
+        started = self._pool._started  # pylint: disable=protected-access
+        while True:
+            try:
+                self._live.append(started.popleft())
+            except IndexError:
+                break
+        keep = []
+        waiting = {}
+        for process in self._live:
+            try:
+                waiting[process.sentinel] = process
+            except ValueError:
+                # Recorded before `start()`: no sentinel yet. Kept, and read
+                # at the next check; dropping it would leave it unwatched.
+                keep.append(process)
+        ready = (set(multiprocessing.connection.wait(list(waiting), timeout=0))
+                 if waiting else set())
+        broken, late = None, []
+        for sentinel, process in waiting.items():
+            if sentinel not in ready:
+                keep.append(process)
+                continue
+            # `exitcode` and not `join()` or `is_alive()` (#861's rule): it is
+            # read only once the sentinel is ready, so the process has ended,
+            # and it is `Popen.poll(WNOHANG)`, which never blocks. When the
+            # worker handler's `_join_exited_workers` reaped it first,
+            # `poll` catches ECHILD and returns None; the `Popen` is the one
+            # the handler holds, so its `returncode` is cached for both, and
+            # the race costs one re-read at the next check, never a wrong
+            # answer. `test_parallel_contract.py` pins the None.
+            code = process.exitcode
+            if code is None:
+                keep.append(process)
+            elif code == -signal.SIGALRM:
+                late.append(process.pid)
+            elif code != 0 and broken is None:
+                # 0 is a worker that left at its quota or by its sentinel.
+                broken = (process.pid, code)
+        self._live = keep
+        return broken, late
+
+    def _report(self, late):
+        if not late:
+            return
+        # The bound, not a measurement: the parent does not see when the
+        # worker's loop ended, so nothing here can time it. Do not "fix" it
+        # into a measured time. A log line and no audit row, as #860's
+        # ruling Q3 has for a kill: the worker had sent every result. Its
+        # words must not include "recycling pool" or "SIGKILL", by which
+        # tests count #860's lines.
+        get_logger().warning(
+            "%d worker process(es) had finished their tasks but were still "
+            "running %.1f s later, and were ended by their own exit bound "
+            "(SIGALRM) (pid %s). A worker cannot end while a non-daemon "
+            "thread is still running or an exit handler does not return; a "
+            "pool that recycles its workers replaces it only once it has "
+            "ended.",
+            len(late), self._pool._exit_grace,  # pylint: disable=protected-access
+            ", ".join(str(pid) for pid in late))
+
+    def check(self):
+        """Read the workers; raise if one ended abnormally.
+
+        Raises:
+            BrokenProcessPool: A worker ended with a nonzero exit code or a
+                signal other than its exit bound's.
+        """
+        self._next = time.monotonic() + _POOL_WATCH_S
+        broken, late = self._read()
+        self._report(late)
+        if broken is not None:
+            # Any death, not only one mid-task (owner ruling Q1 on #887): an
+            # idle worker always holds the inqueue's read lock while it
+            # waits for work (measured, #860), and one killed while sending
+            # can hold the outqueue's write lock, so no death can be judged
+            # harmless. Its words must not include "recycling pool" or
+            # "SIGKILL", by which tests count #860's lines.
+            raise BrokenProcessPool(
+                f"A worker process of a pool that recycles its workers ended "
+                f"abruptly (pid {broken[0]}, exit code {broken[1]}) while the "
+                f"pool was running; the task it held, if any, cannot finish, "
+                f"and a worker that ends while it holds one of the pool's "
+                f"locks stops every other worker, so the pool was stopped.")
+
+    def sweep(self):
+        """After the pool's exit, log the workers their bound ended that no
+        check saw. Raises nothing: the stream is over."""
+        # Required: a worker that reaches its quota just before the stream
+        # ends has its bound fire inside #860's exit, where no check runs.
+        # A -SIGKILL here is the parent's own kill and a -SIGTERM is
+        # `terminate()`'s, so the abnormal half is not read.
+        _, late = self._read()
+        self._report(late)
+
+
+def _watched(iterator, watch):
+    """Yields from a pool's result iterator, checking its workers while it
+    waits (#887).
+
+    Args:
+        iterator: `Pool.imap`'s or `imap_unordered`'s iterator.
+        watch (_RecyclingWatch): The pool's watch.
+
+    Yields:
+        Each result. A task's own exception propagates as before.
+
+    Raises:
+        BrokenProcessPool: From `watch.check()`, once every result already
+            delivered has been yielded.
+    """
+    # `next(timeout=)` wakes on a timer with no second thread. Without it
+    # the read waits for good on the task a dead worker held: the worker
+    # handler replaces the dead worker and records nothing about its task.
+    while True:
+        try:
+            value = iterator.next(timeout=_POOL_WATCH_S)
+        except multiprocessing.TimeoutError:
+            yield from _checked(iterator, watch)
+            continue
+        except StopIteration:
+            return
+        yield value
+        if watch.due():
+            yield from _checked(iterator, watch)
+
+
+def _checked(iterator, watch):
+    """`watch.check()`; on a failure, yield the results already delivered
+    first, then raise."""
+    try:
+        watch.check()
+    except BrokenProcessPool:
+        # Results the result handler has already taken off the pipe are not
+        # lost. On the ordered path (`imap`), results held behind the lost
+        # task's index are not delivered, and are lost.
+        while True:
+            try:
+                value = iterator.next(timeout=0)
+            except (multiprocessing.TimeoutError, StopIteration):
+                break
+            yield value
+        raise
+
+
 def _run_on_recycling_pool(func, items, strategy, ordered=False):
     """Runs in a spawned pool whose workers are replaced every N tasks.
 
@@ -924,10 +1312,15 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
     #
     # Spawn, not fork: a forked worker inherits the parent's open SQLite
     # handles and its sidecar file position.
+    #
+    # `_RecyclingPool`, not `ctx.Pool`, so every worker it starts is watched
+    # and bounds its own exit (#887, #888).
     ctx = multiprocessing.get_context("spawn")
-    pool = ctx.Pool(processes=strategy.max_workers,
-                    maxtasksperchild=strategy.maxtasksperchild,
-                    initializer=strategy.worker_initializer)
+    pool = _RecyclingPool(processes=strategy.max_workers,
+                          maxtasksperchild=strategy.maxtasksperchild,
+                          initializer=strategy.worker_initializer,
+                          context=ctx, exit_grace=_WORKER_EXIT_GRACE_S)
+    watch = _RecyclingWatch(pool)
     # No `with`: its exit is `terminate()`, on every way out, which can
     # wait for good (#860). `_end_recycling_pool` bounds it, and lets the
     # workers of a run that finished leave by their sentinel.
@@ -942,13 +1335,18 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
         # holding them behind a slow instance buys nothing.
         mapper = pool.imap if ordered else pool.imap_unordered
         iterator = mapper(func, items, chunksize=strategy.chunksize)
-        yield from _tracked(iterator, items, strategy)
+        yield from _tracked(_watched(iterator, watch), items, strategy)
         # Only once every result has been read: any other way out (a
-        # reader that stops, a task's exception, Ctrl-C) leaves tasks
-        # queued or running, which `close()` and `join()` would wait for.
+        # reader that stops, a task's exception, a dead worker, Ctrl-C)
+        # leaves tasks queued or running, which `close()` and `join()`
+        # would wait for.
         finished = True
     finally:
         _end_recycling_pool(pool, finished)
+        # After the exit, for the bounds that fired inside it. An interrupt
+        # propagating out of `_end_recycling_pool` skips it, which costs
+        # only a log line; no `try` for it.
+        watch.sweep()
 
 
 def _run_on_new_executor(func, items, strategy):
@@ -1050,12 +1448,14 @@ def run_parallel(
             pool can no longer deliver are over. Only for callers that
             branch on `isinstance(result, Exception)`; by default a raise
             is a raise, because a caller with no such arm must never
-            receive an exception as data. One promise the recycling
-            pool cannot keep: `multiprocessing.Pool` answers a *killed*
-            worker by respawning it and waiting forever for the lost task,
-            so under `maxtasksperchild` that case hangs rather than
-            yielding -- ordinary task exceptions still come back as values
-            there. The recycling pool's exit is bounded: a worker still
+            receive an exception as data. Under `maxtasksperchild`, a
+            worker that ends abnormally while the pool runs (killed, or
+            its initializer raised) fails the pool with
+            `BrokenProcessPool`, yielded last after the results already
+            delivered, within about `_POOL_WATCH_S` (1 s) (#887); a
+            worker whose exit does not finish after its last task is ended
+            by SIGALRM `_WORKER_EXIT_GRACE_S` (15 s) later and named in a
+            WARNING log line (#888). The recycling pool's exit is bounded: a worker still
             running `_BROKEN_POOL_GRACE_S` (10 s) after the pool is told
             to stop is sent SIGKILL and named in one WARNING log line, and
             the call waits at most `_POOL_EXIT_AFTER_KILL_S` (5 s) more

@@ -18,20 +18,19 @@ ALLOWED_PREFIXES = (
     ".test-map.json",     # scripts/test_map.py (#707)
 )
 
-#: Entries allowed by exact name, for the one test that builds in the
-#: root. test_packaging_contract.py's `built` fixture runs `setup.py
-#: sdist bdist_wheel` with cwd=REPO; its outputs go to tmp_path, and these
-#: are setuptools' working directories. Measured, #707: pointing
-#: `egg_info --egg-base` elsewhere drops `isocenter.egg-info/` from the
-#: sdist (397 entries, not 403), so the build stays in the root and the
-#: directories are named here instead. Exact, not prefix: a test's own
-#: `build.db` is still a stray.
-#: Plus one that no test writes: macOS's Finder rewrites `.DS_Store` in
-#: any folder a window has shown, at times of its own choosing, so a run
-#: in a main checkout open in Finder went red for nothing (#720 review).
+#: Entries allowed by exact name: one, which no test writes. macOS's
+#: Finder rewrites `.DS_Store` in any folder a window has shown, at times
+#: of its own choosing, so a run in a main checkout open in Finder went red
+#: for nothing (#720 review). Exact, not prefix.
+#:
+#: `build/` and `isocenter.egg-info/` were here until #859, for
+#: test_packaging_contract.py's `built` fixture, which ran `setup.py sdist
+#: bdist_wheel` in the root. It now builds in a copy of the git-tracked
+#: tree under `tmp_path`, so a run that leaves either in the root is a
+#: stray like any other. The guard reports only new entries, so a checkout
+#: that already holds either (the editable install's `isocenter.egg-info`)
+#: is unaffected. Do not add them back for a test's build: build in a copy.
 ALLOWED_NAMES = frozenset({
-    "build",               # test_packaging_contract.py::built (bdist)
-    "isocenter.egg-info",  # test_packaging_contract.py::built (egg_info)
     ".DS_Store",           # Finder, not a test (#707)
 })
 
