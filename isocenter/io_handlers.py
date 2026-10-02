@@ -48,6 +48,7 @@ import sys
 import hashlib
 import numbers
 import struct
+from decimal import Decimal
 from math import ceil, isfinite
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
@@ -10495,20 +10496,23 @@ _DS_MAX = 16
 
 
 def _ds_text_that_fits(value):
-    """`value` with every caller's float spelled in 16 characters or fewer (#723).
+    """`value` with every caller's float or text spelled in 16 characters or fewer (#723, #898).
 
     pydicom writes a Python `float` with `repr`, so `0.1 + 0.2` set into a
-    DS went out as `'0.30000000000000004'`, 19 characters. Each value -- the
-    atom, or each member of a list -- is rewritten only when it is a
-    `float`, carries no `original_string`, and its text is longer than 16
-    characters:
+    DS went out as `'0.30000000000000004'`, 19 characters; and it writes a
+    `str` as the text given, so `'0.30000000000000004'` went out the same.
+    Each value -- the atom, or each member of a list, or each
+    backslash-separated part of a `str` -- is rewritten only when it is a
+    `float` carrying no `original_string`, or a `str`, and its text (a
+    `str`'s stripped, as pydicom writes it) is longer than 16 characters:
 
     - a whole number whose integer spelling fits is written that way, which
       is exact (`1234567890123456.0` -> `'1234567890123456'`);
     - anything else is rounded by pydicom's `format_number_as_ds`
       (`'0.30000000000000'`).
 
-    A non-finite float has no DS spelling and raises.
+    A non-finite number has no DS spelling and raises, and so does a long
+    `str` that names no number.
 
     Args:
         value: The value about to be written under DS.
@@ -10519,8 +10523,9 @@ def _ds_text_that_fits(value):
         which case `value` is returned unchanged.
 
     Raises:
-        ValueError: A non-finite float. Raised inside `_merge`'s
-            per-element `try`, so it becomes that element's `DATA_LOSS` row.
+        ValueError: A non-finite float, or a long `str` that is not a finite
+            number. Raised inside `_merge`'s per-element `try`, so it
+            becomes that element's `DATA_LOSS` row.
     """
     # `original_string` is the exemption that keeps every source value as
     # the file wrote it: pydicom keeps it on a DS it reads, #662's tagged
@@ -10528,24 +10533,49 @@ def _ds_text_that_fits(value):
     # is the file's own statement, not ours to round. The length test alone
     # would rewrite it. Non-finite before the length test: `'nan'` and
     # `'inf'` fit, and neither is a DS value.
+    #
+    # A `str` is only ever a caller's (#898): a source DS is a `DSfloat`
+    # carrying `original_string`, never a `str`, live and across a reopen,
+    # and a configuration's valued REPLACE over 16 characters is refused at
+    # load. Its exactness is judged on the decimal text, not on floats:
+    # `'0.10000000000000001'` parses to the float 0.1, which is written
+    # `'0.1'`; the floats are equal and the numbers are not, so a float
+    # comparison would call the rewrite exact and say nothing.
     changes = []
 
+    def fit(item, number, exact_against):
+        whole = str(int(number)) if number.is_integer() else None
+        if whole is not None and len(whole) <= _DS_MAX:
+            changes.append((item, whole, exact_against(whole)))
+            return whole
+        # `format_number_as_ds` alone would write 1234567890123456.0 as
+        # '1.2345678901e+15', which is why the integer spelling comes first.
+        text = format_number_as_ds(number)
+        changes.append((item, text, exact_against(text)))
+        return text
+
+    def one_text(item):
+        if "\\" in item:
+            return "\\".join(one_text(part) for part in item.split("\\"))
+        text = item.strip()
+        if len(text) <= _DS_MAX:
+            return item
+        number = float(text)
+        if not isfinite(number):
+            raise ValueError(f"{item!r} has no Decimal String spelling")
+        return fit(item, number,
+                   lambda written: Decimal(written) == Decimal(text))
+
     def one(item):
+        if isinstance(item, str):
+            return one_text(item)
         if not isinstance(item, float) or getattr(item, "original_string", None):
             return item
         if not isfinite(item):
             raise ValueError(f"{item!r} has no Decimal String spelling")
         if len(str(item)) <= _DS_MAX:
             return item
-        whole = str(int(item)) if item.is_integer() else None
-        if whole is not None and len(whole) <= _DS_MAX:
-            changes.append((item, whole, True))
-            return whole
-        # `format_number_as_ds` alone would write 1234567890123456.0 as
-        # '1.2345678901e+15', which is why the integer spelling comes first.
-        text = format_number_as_ds(item)
-        changes.append((item, text, float(text) == item))
-        return text
+        return fit(item, item, lambda written: float(written) == item)
 
     if isinstance(value, (list, tuple, MultiValue)):
         written = [one(item) for item in value]
@@ -10571,13 +10601,18 @@ def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
     where = f"{within} > " if within else ""
     pairs = ", ".join(f"{set_!r} as '{written}'"
                       for set_, written, _ok in changes)
+    # "a float" only when every value set was one: a caller's text (#898)
+    # is "a value", so the sentence never calls a `str` a float.
+    noun = ("a float" if all(isinstance(set_, float)
+                             for set_, _written, _ok in changes)
+            else "a value")
     if exact:
         return True, (
-            f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+            f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
             f"characters was written in its integer spelling, the same "
             f"number: {pairs}.")
     return False, (
-        f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+        f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
         f"characters cannot be written exactly, and was rounded to fit: "
         f"{pairs}.")
 
