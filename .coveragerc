@@ -5,21 +5,33 @@
 # and pickles the configuration into the spawn preparation data so the
 # child starts measuring before it runs a task.
 #
-# `sigterm = True` was what saved the recycling pool's data while that
-# pool exited through terminate(), which SIGTERMed idle workers before
-# their _bootstrap `finally` could run; a killed worker writes nothing
-# without a handler. Measured over ten export test files on 3.14t (#796):
-# 152 functions recorded as run in a worker with it, 84 without, and every
-# export-worker function lost. Since #860 a recycling pool that finishes
-# exits through close() and join(), so its workers leave by their sentinel
-# and write their data without the handler (measured: 8 of 8 workers ran
-# a slow atexit, against 4 of 8 through terminate()). The handler still
-# matters on every other way out: a reader that stops, a task's exception
-# and Ctrl-C still reach terminate(), and so does a ProcessPoolExecutor
-# that breaks. It stays until a map build is measured without it, which
-# is a follow-up of #860 (owner ruling Q4).
+# No `sigterm = True`, by measurement (#886). It was what saved the
+# recycling pool's data while that pool exited through terminate(), which
+# SIGTERMed idle workers before their _bootstrap `finally` could run; a
+# killed worker writes nothing without a handler. Measured over ten export
+# test files on 3.14t (#796): 152 functions recorded as run in a worker
+# with it, 84 without, and every export-worker function lost. Since #860 a
+# recycling pool that finishes exits through close() and join(), so its
+# workers leave by their sentinel and write their data without the
+# handler (measured: 8 of 8 workers ran a slow atexit, against 4 of 8
+# through terminate()). Then three test-map builds of one commit
+# (faa2118c, 3.14.7t, 2026-10-02) were compared: with it, without it, and
+# with it again. With and without differed in exactly what the two builds
+# with it differed in -- three functions recorded as run in a worker
+# (parallel._RecyclingWatch.check, parallel._checked,
+# builders.InstanceContextBuilder.set_attribute), all three of them code
+# the parent runs -- and `--changed`'s selection for every function of
+# io_handlers.py and parallel.py lost nothing beyond the same noise. The
+# two builds with it also left 3 and 5 worker data files coverage could
+# not read at combine; the build without it left none. So the handler
+# bought nothing the map reads, and it was dropped. Should a
+# later map lose worker functions on the other ways out (a reader that
+# stops, a task's exception, Ctrl-C, a broken ProcessPoolExecutor, a dead
+# recycling worker's BrokenProcessPool, #887), measure again before adding
+# it back, and read what follows first.
 #
-# The handler is not re-entrant (coveragepy/coveragepy#2310), and it can
+# What the handler cost while it was set. It is not re-entrant
+# (coveragepy/coveragepy#2310), and it can
 # keep a worker alive. It runs stop() and save() at whatever bytecode the
 # worker's main thread is on, then kills the process again. When a
 # ProcessPoolExecutor worker ends outright, CPython sends every other
@@ -42,6 +54,11 @@
 # data. Since #860 the recycling pool's exit is bounded the same way: its
 # workers get the same 10 s after the pool is told to stop, then SIGKILL
 # (parallel._end_recycling_pool), which also costs a killed worker's data.
+# Since #887 and #888 two more ends lose a worker's data the same way: a
+# recycling pool that fails on a dead worker exits through terminate(),
+# and a recycling worker whose exit has not finished 15 s after it left its
+# task loop is ended by its own SIGALRM (parallel._WORKER_EXIT_GRACE_S),
+# as is any worker's exit under ISOCENTER_WORKER_FAULTHANDLER=1 (#844).
 #
 # `core = ctrace` is load-bearing on 3.14. coverage defaults to the
 # sys.monitoring core there (env.SYSMON_DEFAULT), whose callback holds a
@@ -68,7 +85,6 @@ source = isocenter
 parallel = True
 concurrency = multiprocessing
 core = ctrace
-sigterm = True
 
 [report]
 show_missing = False
