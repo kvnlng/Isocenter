@@ -9,13 +9,18 @@ the behaviour half: `test_config_behaviour_is_versioned.py` pins it per
 version, and a change that moves it must either bump the minor or, before
 the version ships, say in the CHANGELOG why it is not a behaviour change.
 
-**What it runs.** Four policies, each over the same seven files:
+**What it runs.** Five policies, each over the same seven files:
 
 - `basic@2026c`, the floor, and `basic@2026c` with `remove_private_tags:
   false`;
 - `none` with a kitchen-sink policy: each action on a tag of each VR
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
-  `VR_DUMMY` string VR, and a repeating-group mask key.
+  `VR_DUMMY` string VR, and a repeating-group mask key;
+- `basic@2026c` with a dict zone on a `"*"` rule beside an exact rule for
+  another machine (`STAR_CONFIG`). Fixed text regions on the synthetic
+  image are classified against the rules covering it, and the suggestions
+  `ConfigAutomator` makes are applied (#808, #814, #899). Then the store is
+  audited, anonymized and redacted under the rules the suggestions left.
 
 The files are CT_small and MR_small (bundled with pydicom) and five
 synthetic images built from CT_small. One holds an element of every
@@ -34,23 +39,26 @@ every UID the first pass minted verifies under this store's secret.
 
 **What it cannot see** (a change to any of these moves no digest, so its
 PR must say whether it is a behaviour change): pixel-zone matching beyond
-one zone matched by exact serial (no `"*"` serial, no manufacturer or model
-match, no zone overlapping the frame edge, no multi-frame image); external
+an exact serial and one `"*"` rule (no manufacturer or model match, no zone
+overlapping the frame edge, no multi-frame image); external
 profile files; `SHIFT` and `JITTER` on TM; date ranges other than the one
 `JITTER` fixes; `remove_private_tags: false` under the floor or `none`;
 nested sequences deeper than one item; private sequences; UIDs only another
 instance carries; a re-key of an ID-less subject by a later file
 carrying its Patient ID (#584's `_its_key_is_in_use`); a patient merge
 (#548); a pass after a reopen with statuses the store holds; the
-reversible lock; WFDB and waveform scenarios; burned-in
-text detection (OCR); and every behaviour at export (markers, the Type 1
+reversible lock; WFDB and waveform scenarios; reading burned-in text (OCR
+itself, and which instances `scan_pixel_content()` selects); and every
+behaviour at export (markers, the Type 1
 gates, owner stamps), which `fingerprint/output.json` measures instead.
 
 **What it records,** per policy: each finding as `(entity_type, path, tag,
 action, new value)`; after `anonymize()`, every patient, study, series and
 instance as the graph holds it (attributes and sequences, the tags reached
 and the values written, the shifted dates); the second pass's findings and
-graph; and, for the floor, the redacted frame's sha256.
+graph; for the floor and `"*"`, each redacted frame's sha256; and for
+`"*"`, each leak (its text, reason and metadata), each suggestion, and the
+rules once applied.
 
 **Fixed state:** the secret is `FIXED_A` (`load_fixed_secret`), the range
 is a fixed `date_jitter`, and the caller sets `ISOCENTER_FORCE_THREADS=1`.
@@ -73,8 +81,12 @@ from pydicom.data import get_testdata_file
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 
+from isocenter.automation import ConfigAutomator
 from isocenter.entities import JITTER_SCHEME_UNKEYED
+from isocenter.pixel_analysis import TextRegion
+from isocenter.privacy import PhiReport
 from isocenter.session import DicomSession
+from isocenter.verification import RedactionVerifier
 from support.project_secret import load_fixed_secret
 
 SERIAL = "B3-DIGEST-SN"
@@ -83,6 +95,27 @@ ZONE = [10, 30, 12, 40]
 #: The patient the store classes legacy (#903): its pseudonym and date
 #: offset are the unkeyed pre-0.9.7 derivations (`patients.jitter_scheme`).
 LEGACY_ID = "DIGEST-782-7"
+
+#: The `"*"` scenario's file (#808, #814, #899): `ZONE` on the wildcard
+#: rule, written as a dict, beside an exact rule for a machine none of the
+#: files is. No file names `SERIAL`, so only `"*"` covers the synthetic
+#: image.
+STAR_CONFIG = (
+    "privacy_profile: basic\n"
+    "machines:\n"
+    "  - serial_number: \"*\"\n"
+    "    redaction_zones:\n"
+    f"      - roi: {ZONE}\n"
+    "        note: wildcard\n"
+    "  - serial_number: B4-OTHER-SN\n"
+    "    redaction_zones:\n"
+    "      - [0, 5, 0, 5]\n")
+
+#: Text regions, `(x, y, w, h)`, as OCR would hand them for the synthetic
+#: image: one inside `ZONE`, one across its edge, one outside every zone,
+#: and one short enough to be noise.
+STAR_REGIONS = (("COVERED", (14, 12, 20, 10)), ("PARTIAL", (30, 20, 20, 8)),
+                ("NEWLEAK", (60, 50, 20, 8)), ("ab", (60, 5, 4, 4)))
 
 #: `none`'s whole policy. One rule per line of the action x VR grid the
 #: scan and the remediation distinguish.
@@ -254,9 +287,48 @@ def _findings(report):
     return sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
 
 
-def _scenario(root, name, configure, redact=False):
-    """Ingest the three files into a fresh store, apply `configure`, audit,
-    anonymize (and redact), and return what was found and written."""
+def _leaks_on_the_synthetic_image(session):
+    """What the OCR check makes of `STAR_REGIONS` on the synthetic image
+    under the session's rules, the suggestions it leads to, and the rules
+    once they are applied (#808, #814, #899). No OCR runs: the regions are
+    fixed, so this is the classification against the covering rules' zones
+    and `ConfigAutomator`, the config-driven half of `scan_pixel_content()`.
+
+    Run after `redact()`, so the file's rules redact. Applied first, the
+    suggestions put an exact rule for `SERIAL` beside `"*"`, and two rules on
+    one instance each mint a redacted SOP UID; which one the instance keeps
+    depends on which task finishes last, which threads do not fix. That is
+    `redact()`'s behaviour on main, not this scenario's to pin. The image
+    is found by the serial ingest indexed, since its UIDs are replaced by
+    now."""
+    found = [(inst, series.equipment)
+             for patient in session.store.patients
+             for study in patient.studies
+             for series in study.series
+             if series.equipment is not None
+             and series.equipment.device_serial_number == SERIAL
+             for inst in series.instances]
+    assert len(found) == 1, found
+    instance, equipment = found[0]
+    regions = [TextRegion(text, box, 90.0) for text, box in STAR_REGIONS]
+    leaks = RedactionVerifier(session.configuration.rules)._findings_for(
+        instance, regions, equipment)
+    suggestions = ConfigAutomator.suggest_config_updates(PhiReport(leaks))
+    applied = ConfigAutomator.apply_suggestions(session, suggestions)
+    return {
+        "leaks": [[f.entity_uid, f.field_name, f.value, f.reason, _canon(f.metadata)]
+                  for f in leaks],
+        "suggestions": _canon(suggestions),
+        "applied": applied,
+        "rules": _canon(session.configuration.rules),
+    }
+
+
+def _scenario(root, name, configure, redact=False, inspect=None):
+    """Ingest the files into a fresh store and reopen it, apply
+    `configure`, audit and anonymize twice (and redact), run `inspect` (its
+    record kept under `"inspected"`), and return what was found and
+    written."""
     directory = os.path.join(root, name)
     _inputs(os.path.join(directory, "input"))
     db = os.path.join(directory, "s.db")
@@ -293,6 +365,8 @@ def _scenario(root, name, configure, redact=False):
                                 pixels.tobytes()).hexdigest()
             record["frames_after_redact"] = frames
             record["sop_after_redact"] = _graph(session)
+        if inspect:
+            record["inspected"] = inspect(session)
     return record
 
 
@@ -335,6 +409,10 @@ def behaviour(root):
             _load("privacy_profile: basic\nremove_private_tags: false\n")),
         "floor": _scenario(root, "floor", _floor, redact=True),
         "none-kitchen-sink": _scenario(root, "none", _none),
+        # Redacts with the rules the suggestions left: `"*"`'s zone and
+        # the rule added for `SERIAL`.
+        "star-zone": _scenario(root, "star", _load(STAR_CONFIG), redact=True,
+                               inspect=_leaks_on_the_synthetic_image),
     }
 
 

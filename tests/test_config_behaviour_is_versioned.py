@@ -54,15 +54,17 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: `support.behaviour_digest.behaviour_digest`. Recomputed on the B3 PR
 #: (#782) after #879, #883, #784, #731 and #741 landed in it, and again
 #: when the fixture was widened to see B1's #746 and #765 (review of #895), and
-#: again for a second pass, an ID-less subject and a legacy patient (#903).
+#: again for a second pass, an ID-less subject and a legacy patient (#903),
+#: and again on the B4 PR (#899) when the `"*"` zone scenario was added
+#: for #808, #814 and the PARTIAL_LEAK ruling.
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "91649e13f2b002fb7557d98b0e890df8e1520f7a138b0a112d2bf8d3ecf11686",
+    "2.0": "d7f8d150345915ac54286bb4b6df3a81b126c3be739e43b9d45394e0ba93fcdd",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "91649e13f2b002fb7557d98b0e890df8e1520f7a138b0a112d2bf8d3ecf11686",
+    "2.0": "d7f8d150345915ac54286bb4b6df3a81b126c3be739e43b9d45394e0ba93fcdd",
 }
 
 _WHAT_TO_DO = (
