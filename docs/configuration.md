@@ -132,14 +132,14 @@ is refused, whatever it contains, because this release cannot apply it
 the way it was written for: `ValueError: cfg.yaml: version '2.1' is newer
 than this isocenter's configuration version 2.0, which may apply it
 differently than it was written for; upgrade isocenter, or set version:
-'2.0' to apply it as 2.0 does (#784)` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
+'2.0' to apply it as 2.0 does` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
 An external profile file declaring a newer minor is refused the same way. So
 is a `save()` over one, by a session whose `config_path` was assigned
 rather than loaded, plainly or under `auto_save`, and a `create_config()`
 onto one: `ValueError: cfg.yaml:
 declares version '2.1', newer than this isocenter's configuration version
 2.0; saving would rewrite it as 2.0. Nothing was written: upgrade
-isocenter, or save to another path (#784)`. A target that is missing,
+isocenter, or save to another path`. A target that is missing,
 cannot be read, or declares no newer minor is written as before.
 
 When the way a file is applied changes, a store scanned under the older
@@ -349,7 +349,7 @@ decided by its **size**, not its VR:
 | Private tag | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
 | Text or numeric VR (`LO`, `SH`, `DS`, ...) | Removed | **Kept**, and written to the exported file |
-| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
+| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, `OV`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
 | Binary value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
 
 65534 bytes is the largest value an explicit-VR 16-bit length field can
@@ -419,13 +419,17 @@ private attribute and the entry reads `removed before export` (grading
     *descriptors* (`OverlayRows`, `OverlayColumns`, `OverlayBitPosition`
     and friends) are `US`, so they survive, and an export from which a
     large overlay plane was dropped declares a plane it does not carry.
-    The descriptors are not stripped by the size rule: an overlay may
-    legitimately live in the unused high bits of `PixelData` (addressed
-    by `OverlayBitPosition`), and since Isocenter preserves `PixelData`
-    intact, those overlays survive and their descriptors are the only
-    pointer to them. When the group rule removes the descriptors, such
-    high-bit overlay bits stay in `PixelData`, with
-    nothing left that points to them.
+    The descriptors are not stripped by the size rule. An overlay
+    declared in the unused high bits of `PixelData` (Overlay Bits
+    Allocated above 1, no Overlay Data, `OverlayBitPosition` at or above
+    BitsStored) does not survive ingest: the decode reads BitsStored bits
+    and clears the rest, so neither the store nor any export holds them,
+    whatever the policy. Ingest writes one `DATA_LOSS` row for such an
+    instance, scoped `STANDARD`, naming the group and its bit; under a
+    policy that keeps `60xx`, the exported descriptors point at bits that
+    are no longer there. A compressed stream wider than BitsStored is read
+    at its own width, so its high bits are kept as sample values, and its
+    own `WARNING` row says so.
 
     A dropped *standard* element is listed in the report's Data Loss
     section but does not change the grade.
@@ -547,7 +551,7 @@ machines:
 ```
 
 * **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
-* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. The export applies them whether or not `redact()` has run.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
   * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
@@ -653,7 +657,7 @@ A de-identification run depends on three things, and the configuration file is o
 | | What it decides | Where it is | If you lose it |
 | :--- | :--- | :--- | :--- |
 | **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads unchanged in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. A release that applies an unchanged file differently raises the schema minor (see [Schema (version 2)](#schema-version-2)). But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ), `remove_private_tags`, and the configuration schema version this isocenter applies the file under -- or an export from the reopened store writes a `WARNING` row. The row stays in the store's audit log, so every later report of the store grades `REVIEW_REQUIRED`; running `audit()` and `anonymize()` under the right configuration stops further warnings but does not remove it. The same happens after an upgrade that raises the minor. After reopening a store, load its configuration before anything else. |
-| **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
+| **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`), on a local disk ([why](quickstart.md#1-initialize-a-session)). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
 | **`isocenter.key`** (only with [reversible anonymization](quickstart.md#4-backup-identity-optional)) | Whether original identities written into exported files can be recovered. | The file `enable_reversible_anonymization()` names. | Recovery. Identities in files exported under that key cannot be recovered by anyone. |
 
 **The configuration does not reproduce pseudonyms or date shifts.** They belong to the store they were made in. A later batch for the same patients goes into the same store: `ingest()` adds to it, and a patient ingested under the same original Patient ID gets the same pseudonym and the same offset.
@@ -662,7 +666,7 @@ A de-identification run depends on three things, and the configuration file is o
 
 **A copy of the store is the same store, secret included.** The store is both files: copy `my_project.db` and `my_project_pixels.bin` together, and keep them under the same basename, because the session finds its sidecar by the `.db` file's name. A copy of the `.db` alone keeps the pseudonyms and offsets; for the instances ingested before the copy, their pixels are not in the copy, and export fails for them. Isocenter does not detect copies or refuse them. Treat every copy as the project itself: back it up as you back up `isocenter.key`, and never send it, or any copy of it, with an export. Whoever holds the store can recover every shifted date, and its audit log records each offset.
 
-**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and its zones, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`, because a new secret would not recognise them and would replace them a second time.
+**Replacement UIDs belong to the store as well.** A source UID gets the same replacement in every export from the store and from any copy of it, and a different one from any other store. A redacted instance's new SOP Instance UID is derived from the same secret, its source UID and the zones of every rule that matches it, so redacting it again with the same zones gives the same UID. A store that holds replaced UIDs but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`, because a new secret would not recognise them and would replace them a second time.
 
 ## Auto-Discovery of Redaction Zones
 

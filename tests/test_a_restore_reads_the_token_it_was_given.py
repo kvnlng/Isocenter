@@ -56,7 +56,7 @@ NO_TOKEN = ("no encrypted identity token on this patient's instances; was it "
 #: instance copy was blank, what the Study holds is the shifted date
 #: (review of #640, P-5).
 UNREADABLE = ("The restored Study Date could not be read as a date, so the "
-              "Study keeps its de-identified Study Date (#619).")
+              "Study keeps its de-identified Study Date.")
 
 
 @pytest.fixture(autouse=True)
@@ -258,13 +258,13 @@ def tokenless(count, total):
     return (f"{count} of {total} instances of this patient carry no identity "
             "token, so they took only the patient-level identifiers (group "
             "0010) of the token the patient's identity was restored from, and "
-            "their other locked identifiers keep what anonymize() left (#583).")
+            "their other locked identifiers keep what anonymize() left.")
 
 
 def _tokenless_warnings(caplog):
     return [r.getMessage() for r in caplog.records
             if r.name == "isocenter" and r.levelno == logging.WARNING
-            and "(#583)" in r.getMessage()]
+            and "of this patient" in r.getMessage()]
 
 
 def _restored_accessions(db, key, pseudonym, caplog):

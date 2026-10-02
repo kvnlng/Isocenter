@@ -48,7 +48,7 @@ import sys
 import hashlib
 import numbers
 import struct
-from math import ceil
+from math import ceil, isfinite
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
 from datetime import datetime, date
@@ -86,7 +86,7 @@ except ImportError:
 from pydicom.encaps import (generate_frames, parse_basic_offsets,
                             parse_fragments)
 from pydicom.multival import MultiValue
-from pydicom.valuerep import validate_value
+from pydicom.valuerep import format_number_as_ds, validate_value
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 from pydicom.charset import default_encoding
@@ -94,7 +94,10 @@ from pydicom.dataelem import DataElement
 from pydicom.filebase import DicomBytesIO
 from pydicom.filereader import read_sequence
 from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
-                                correct_ambiguous_vr_element)
+                                correct_ambiguous_vr_element,
+                                write_data_element)
+from pydicom.dataelem import RawDataElement, convert_raw_data_element
+from pydicom.valuerep import EXPLICIT_VR_LENGTH_16
 from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
@@ -728,7 +731,8 @@ def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
 
 
 def _photometric_warning(label, syntax_uid, *,
-                         has_pixels: bool) -> Optional[str]:
+                         has_pixels: bool,
+                         remedy: Optional[str] = None) -> Optional[str]:
     """One sentence for a label the written syntax does not admit.
 
     Args:
@@ -737,6 +741,9 @@ def _photometric_warning(label, syntax_uid, *,
         has_pixels (bool): Whether the file carries a pixel element.
             Keyword-only, no default. A pixel-less file gets the
             `_PHOTOMETRIC_NO_PIXELS` remedy instead of the table's.
+        remedy (Optional[str]): Replaces the table's remedy for a file
+            with pixels, where the door makes the table's false (the #771
+            fallback). None keeps the table's.
 
     Returns:
         Optional[str]: A sentence naming what was declared, what the file
@@ -751,7 +758,8 @@ def _photometric_warning(label, syntax_uid, *,
     found = _label_inadmissibility(label, syntax_uid)
     if found is None:
         return None
-    clause, remedy = found
+    clause, table_remedy = found
+    remedy = table_remedy if remedy is None else remedy
     if has_pixels:
         kept = ("The label was written as declared, over the samples the "
                 "instance held, and neither was changed.")
@@ -1036,11 +1044,13 @@ class NestedPixelRef:
 #: Reporting them would put two `DATA_LOSS` rows on every encapsulated
 #: instance carrying an Extended Offset Table.
 #:
-#: These three are the group's non-binary members (`OV`, `OV`, `UV`),
-#: and `import_files`' reason clause says "binary-VR elements are not
-#: held in the object graph", which exempting them keeps true. A future
-#: non-binary member of this group has to be added here *or* given a
-#: reason clause of its own -- do not let it inherit this one.
+#: These three (`OV`, `OV`, `UV`) are not the group's bulk bytes, and
+#: `import_files`' reason clause says "binary-VR elements are not held in
+#: the object graph", which exempting them keeps true. The group is skipped
+#: before `populate_attrs` weighs any VR, so `OV`'s membership of
+#: `BINARY_VRS` there (#735) does not reach them. A future member of this
+#: group has to be added here *or* given a reason clause of its own -- do
+#: not let it inherit this one.
 _DERIVED_PIXEL_INDEX_TAGS = frozenset({
     Tag(0x7fe0, 0x0001),   # Extended Offset Table
     Tag(0x7fe0, 0x0002),   # Extended Offset Table Lengths
@@ -1284,7 +1294,19 @@ def _value_fits_vr(value, vr: str) -> bool:
         # `DSfloat` is a `float` subclass, same reasoning as `IS`, and
         # pydicom renders it with `str()` -- `str(1 / 3)` is 18
         # characters, two past what `DS` may carry.
-        return vr == 'DS' and len(str(value)) <= _TEXT_VR_MAX['DS']
+        #
+        # A non-finite float a caller set has no `DS` spelling (PS3.5
+        # 6.2), and `_merge` drops it with a `DATA_LOSS` row under `DS`
+        # (#723), so it is declined here and takes the fallback, which
+        # writes its text under `LO`. A value read from a file carries its
+        # `original_string`, and `_ds_text_that_fits` leaves those alone:
+        # the same exemption here, so a source `inf` is written as it was
+        # read, under `DS`, live or after a reopen alike.
+        if vr != 'DS':
+            return False
+        if not getattr(value, "original_string", None) and not isfinite(value):
+            return False
+        return len(str(value)) <= _TEXT_VR_MAX['DS']
 
     if isinstance(value, str):
         if vr in _INTEGER_VRS or vr in _FLOAT_VRS:
@@ -1728,7 +1750,8 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                    is_root: bool = True, unscanned: list = None,
                    nested: list = None, path: tuple = (),
-                   unconverted: list = None, waveform_bits=None):
+                   unconverted: list = None, waveform_bits=None,
+                   ambiguous: list = None):
     """Populate a DicomItem's attributes and sequences from a pydicom Dataset.
 
     A module-level function so it pickles into workers. Handles sequences
@@ -1789,6 +1812,11 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             Minimum or Maximum Value inside its Channel Definition
             Sequence. Set here when `ds` is itself a Waveform Sequence
             item and forwarded below it.
+        ambiguous (list, optional): Collects `(path, tag, values)` for
+            every standard `US or SS` element read under Implicit VR, with
+            no Pixel Representation anywhere in its chain, holding a value
+            at or above 32768 -- held unsigned where a signed reading
+            differs (#700). None records nothing.
     """
     # `nested` rather than appending to both lists and reconciling by
     # count: reconciling works only while one icon's `(tag, vr)` entry is
@@ -1814,7 +1842,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # attempt first; its blob fallback takes the same size gate further
     # down. Do not assume `UN` values are small: under Implicit VR every
     # private element is `UN`, megabyte blobs included.
-    BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
+    #
+    # `OV` is a member (#735). Left out, an Explicit VR private `OV` over
+    # the threshold took the generic arm, which has no size gate, and was
+    # kept and exported while its Implicit VR twin (`UN`) and an `OD` of
+    # the same size were dropped: the transfer-syntax dependence #151
+    # removed for every other binary VR. One side effect, harmless: a
+    # zero-length `OV` is now held as `b""` rather than None, and
+    # `_merge` writes both as a zero-length element.
+    BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL', 'OV'}
 
     # Read once, not per element: the float pair's exemption depends on
     # whether this instance also carries Pixel Data, and `in` on a
@@ -1933,8 +1969,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 # A retained private value keeps the VR it was read with,
                 # so the export can write it under that VR. Only
                 # here, where the value is kept: a dropped one records
-                # nothing. `OV` is not in `BINARY_VRS` and records
-                # through the generic arm below.
+                # nothing.
                 _record_private_vr(item, b_tag, elem, implicit)
                 continue
             if dropped is not None:
@@ -2001,7 +2036,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     process_sequence(tag, parsed, item, dropped, unscanned,
                                      nested=nested, path=path,
                                      unconverted=unconverted,
-                                     waveform_bits=waveform_bits)
+                                     waveform_bits=waveform_bits,
+                                     ambiguous=ambiguous)
                     continue
                 if (unscanned is not None
                         and len(raw) <= BINARY_RETENTION_MAX_BYTES):
@@ -2014,6 +2050,24 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     unscanned.append((tag, len(raw)))
                 # Falls through: the bytes stay in `attributes` and are
                 # exported as they are.
+
+        # A standard element read as `UN` over 0xFFFF bytes, decoded under
+        # its dictionary VR (#692). An Explicit VR writer must spell a long
+        # US or FD list that way (PS3.5 6.2.2) -- this library's own
+        # compressed export does -- and pydicom decodes such a `UN` only up
+        # to 0xFFFF bytes, so without this the gate below dropped it, and
+        # this library could not re-ingest its own output. Decoded, it takes
+        # the generic arm, which has no size gate, exactly as the Implicit
+        # VR source of the same value did. Even group only: a private tag
+        # has no dictionary VR, and keeps the gate. Little-endian only: a
+        # `UN` value's bytes follow the file's byte order, and the decode
+        # reads them as Implicit VR Little Endian.
+        if (elem.VR == 'UN' and elem.tag.group % 2 == 0 and not big_endian
+                and isinstance(elem.value, (bytes, bytearray, memoryview))
+                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+            decoded = _standard_un_decoded(elem, encoding)
+            if decoded is not None:
+                elem = decoded
 
         # The `UN` half of the size rule. A proven sequence was
         # taken structurally above and is exempt -- structure is
@@ -2035,18 +2089,27 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             process_sequence(tag, elem, item, dropped, unscanned,
                              nested=nested, path=path,
                              unconverted=unconverted,
-                             waveform_bits=waveform_bits)
+                             waveform_bits=waveform_bits,
+                             ambiguous=ambiguous)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
             _record_private_vr(item, tag, elem)
         else:
-            # `OV` and `UN` land here, not in the `BINARY_VRS` arm.
+            # `UN` lands here, not in the `BINARY_VRS` arm.
             item.set_attr(tag, _stored_byte_order(
                 _process_safe(elem.value), elem.VR, tag, path, big_endian,
                 unconverted, waveform_bits,
                 _declared_width(ds, tag) if big_endian else None))
             _record_private_vr(item, tag, elem, implicit)
+            # `implicit` is this dataset's own: an item `_sequence_from_un_bytes`
+            # rebuilt is read by `read_sequence` as Implicit VR Little
+            # Endian and carries `original_encoding` (True, True) in
+            # pydicom 3.0.2, measured, so nothing is carried down for it.
+            if ambiguous is not None and implicit:
+                held = _held_unsigned_without_a_declarer(elem, ds)
+                if held:
+                    ambiguous.append((path, tag, held))
 
 
 def _read_element(ds, tag, little_endian=True):
@@ -2062,6 +2125,13 @@ def _read_element(ds, tag, little_endian=True):
     VR twin of the file would hold. No audit row is written here; the
     export resolves again and writes its `WARNING` row.
 
+    An IS element whose text pydicom reads as an infinite float (`inf`,
+    `-inf`, `1e400`) raises `OverflowError` inside pydicom's own read, even
+    in its default reading mode. Such an element is returned holding the
+    file's text as a `str`, as pydicom holds an IS it cannot convert
+    (`ab12cd`), so the file is ingested and the export drops that one
+    element with a `DATA_LOSS` row (#870).
+
     Args:
         ds: The pydicom `Dataset` holding the element.
         tag: The element's tag, as `Dataset.__getitem__` accepts it.
@@ -2074,6 +2144,7 @@ def _read_element(ds, tag, little_endian=True):
     Raises:
         AttributeError: Any `AttributeError` from `ds[tag]` other than an
             unresolved ambiguous VR, which refuses the file.
+        OverflowError: From an element whose VR is not IS.
     """
     # `__getitem__` stores the converted element *before* it resolves the
     # VR, so `get_item` returns the file's bytes under the ambiguous VR.
@@ -2087,6 +2158,32 @@ def _read_element(ds, tag, little_endian=True):
         elem = ds.get_item(tag)
         if str(elem.VR) not in AMBIGUOUS_VR:
             raise
+    except OverflowError:
+        # #870. pydicom's `IS()` falls through to `int(float(text))`, which
+        # raises for an infinite value; its validation mode does not catch
+        # it. Keyed on the VR, never on pydicom's message. Under Implicit
+        # VR the raw element carries no VR, so the dictionary's is read;
+        # a private tag has none and re-raises.
+        raw_elem = ds.get_item(tag)
+        vr = raw_elem.VR
+        if vr is None:
+            try:
+                vr = dictionary_VR(Tag(tag))
+            except KeyError:
+                vr = None
+        if vr != "IS" or not isinstance(raw_elem.value, (bytes, bytearray)):
+            raise
+        # The file's text, as a `str`, which is how pydicom already holds
+        # an IS it cannot convert. `validation_mode=IGNORE` rather than
+        # `catch_warnings`: on 3.12 that mutates the process-global
+        # filters, and ingest runs on threads under 3.14t. The export
+        # cannot write it as IS either (`add_new` raises the same
+        # `OverflowError` inside `_merge`'s per-element `try`), so it is
+        # dropped there with one `DATA_LOSS` row, exactly as an IS of
+        # `ab12cd` is.
+        text = bytes(raw_elem.value).decode("ascii", "replace").strip(" \x00")
+        return DataElement(Tag(tag), "IS", text, already_converted=True,
+                           validation_mode=pydicom.config.IGNORE)
     # Outside the `try`, so a failure here is not reported "during
     # handling of" pydicom's.
     #
@@ -2206,7 +2303,7 @@ def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
 def process_sequence(tag, elem, parent_item, dropped: list = None,
                      unscanned: list = None, nested: list = None,
                      path: tuple = (), unconverted: list = None,
-                     waveform_bits=None):
+                     waveform_bits=None, ambiguous: list = None):
     """Recursively parse a Sequence (SQ) element into `parent_item`.
 
     Adds the sequence to `parent_item` even when it has zero items (so an
@@ -2231,6 +2328,7 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
             collector.
         waveform_bits (int, optional): Waveform Bits Allocated of the
             nearest enclosing Waveform Sequence item, or None.
+        ambiguous (list, optional): `populate_attrs`'s #700 collector.
     """
     # Unconditional rather than guarded by `if not len(elem)`: the item
     # loop makes zero calls for "present, no items", and without this the
@@ -2247,7 +2345,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         populate_attrs(ds_item, seq_item, dropped, is_root=False,
                        unscanned=unscanned, nested=nested,
                        path=path + ((tag, index),),
-                       unconverted=unconverted, waveform_bits=waveform_bits)
+                       unconverted=unconverted, waveform_bits=waveform_bits,
+                       ambiguous=ambiguous)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -2882,6 +2981,64 @@ def _precision_mismatch(ds, arr) -> Optional[dict]:
         "pixel_representation": getattr(ds, "PixelRepresentation", None),
         "sample": sample,
     }
+
+
+def _in_pixel_overlays(ds) -> Optional[list]:
+    """The overlays a header declares in Pixel Data's bits at or above BitsStored.
+
+    An overlay group 60xx (even, `6000` to `601e`) whose Overlay Bits
+    Allocated `(60xx,0100)` is above 1 and which has no Overlay Data
+    `(60xx,3000)` keeps its plane in a bit of each Pixel Data sample, the
+    one Overlay Bit Position `(60xx,0102)` names. At or above BitsStored,
+    that bit is one the decode does not read (#755).
+
+    Args:
+        ds (pydicom.Dataset): The top-level dataset.
+
+    Returns:
+        Optional[list]: `(group, bit)` per such overlay, `group` as four
+        lowercase hex digits; None when there is none or BitsStored is
+        absent.
+    """
+    bits_stored = ds.get("BitsStored")
+    if bits_stored is None:
+        return None
+    found = []
+    for group in range(0x6000, 0x6020, 2):
+        allocated = ds.get((group, 0x0100))
+        position = ds.get((group, 0x0102))
+        if allocated is None or position is None or (group, 0x3000) in ds:
+            continue
+        try:
+            allocated, position = int(allocated.value), int(position.value)
+        except (TypeError, ValueError):
+            continue
+        if allocated > 1 and position >= int(bits_stored):
+            found.append((f"{group:04x}", position))
+    return found or None
+
+
+def _in_pixel_overlay_words(facts) -> str:
+    """The `DATA_LOSS` row for `_in_pixel_overlays`' facts.
+
+    Args:
+        facts (dict): `overlays` (the `(group, bit)` list) and
+            `bits_stored`.
+
+    Returns:
+        str: One sentence, naming no file.
+    """
+    overlays = facts["overlays"]
+    if len(overlays) == 1:
+        (group, bit), = overlays
+        named = f"group {group} is declared in Pixel Data at bit {bit}"
+    else:
+        named = ("groups " + " and ".join(f"{group} at bit {bit}"
+                                          for group, bit in overlays)
+                 + " are declared in Pixel Data")
+    return (f"Overlay {named}, at or above BitsStored "
+            f"{facts['bits_stored']}: the decode reads BitsStored bits, so "
+            f"the stored pixels and every export carry no overlay bits.")
 
 
 def _sample_beyond(arr, bits_stored, signed) -> Optional[int]:
@@ -3945,8 +4102,7 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
             store_backend.log_audit(
                 action_type="WARNING", entity_uid=uid,
                 details=(f"{element} absent from the source of instance "
-                         f"{uid}; the export writes a UID generated for it "
-                         "(#584)."))
+                         f"{uid}; the export writes a UID generated for it."))
     if linked_under_id_less:
         store_backend.log_audit(
             action_type="WARNING", entity_uid=uid,
@@ -3955,7 +4111,7 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
                      "whose key a date was already shifted or an identity "
                      "locked; it was linked under that patient, which exports "
                      "an empty Patient ID, because re-keying would contradict "
-                     "them (#584)."))
+                     "them."))
 
 
 def _held_under(held, uid, secret):
@@ -4105,10 +4261,11 @@ def _instance_number_of(ds) -> int:
     cannot convert, which it leaves as a `str` -- reads as 0, the value a
     file with no Instance Number gets, and so does an integer outside IS's
     range. An ill-formed Instance Number is not a reason to refuse the
-    file, with one exception that predates #810 and is not changed here:
-    an infinite value (`inf`, `-inf`, `1e400`) makes pydicom's own read
-    raise `OverflowError`, even in its default reading mode, and the file
-    is refused, as it was when only `populate_attrs` read the element.
+    file, and that includes an infinite value (`inf`, `-inf`, `1e400`),
+    whose read makes pydicom raise `OverflowError` even in its default
+    reading mode: it reads as 0 too (#870), and `_read_element` holds the
+    element as the file's text for the export to drop with its row. Until
+    #870 that `OverflowError` refused the file.
     What pydicom does read as one integer is taken as it reads it,
     including spellings a conformant IS string would not use: `1e3` and
     `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
@@ -4125,16 +4282,76 @@ def _instance_number_of(ds) -> int:
     # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
     # `str` pydicom leaves unconverted are not, and read as 0. No `str`
     # arm: pydicom leaves text unconverted only when `float()` refused it,
-    # and `int()` refuses everything `float()` does. No `try` around the
-    # read either: what it raises -- `OverflowError` for an infinite value
-    # in pydicom's default mode, any invalid value under its RAISE mode --
-    # `populate_attrs` raises on the same element, so the file is refused
-    # either way, as it was before #810. A `try` here would not keep it.
-    value = ds.get("InstanceNumber")
+    # and `int()` refuses everything `float()` does. `OverflowError` only:
+    # `populate_attrs` (through `_read_element`) takes the same element
+    # without raising, so catching it here is what lets the file in. Any
+    # other exception -- an invalid value under pydicom's RAISE mode --
+    # `populate_attrs` raises on the same element, and the file is refused
+    # either way; a wider `except` here would not keep it.
+    try:
+        value = ds.get("InstanceNumber")
+    except OverflowError:
+        return 0
     if not isinstance(value, int):
         return 0
     number = int(value)
     return number if _IS_MIN <= number <= _IS_MAX else 0
+
+
+def _series_number_of(ds):
+    """The file's Series Number (0020,0011) as pydicom reads it, or 0.
+
+    0 when the file has none, as before, and when pydicom's read raises
+    `OverflowError` for an infinite value (#870), which refused the file.
+    `populate_attrs` holds the element itself (`_read_element`), and the
+    export drops it with a `DATA_LOSS` row. Every other value is returned
+    as pydicom reads it, unchanged by #870.
+
+    Args:
+        ds: The pydicom Dataset read from the file.
+
+    Returns:
+        The value for `Series.series_number`.
+    """
+    try:
+        return ds.get("SeriesNumber", 0)
+    except OverflowError:
+        return 0
+
+
+#: The three Pixel Data elements a frame count divides (PS3.3 C.7.6.3).
+_FRAMED_PIXEL_TAGS = (0x7FE00008, 0x7FE00009, 0x7FE00010)
+
+
+def _refuse_an_infinite_frame_count(ds) -> None:
+    """Refuse an image whose NumberOfFrames reads as infinite, by name (#870).
+
+    Every other IS element that reads as infinite is held as its text and
+    dropped at export with a row (`_read_element`). NumberOfFrames over
+    Pixel Data cannot be: the count is what divides the pixels into
+    frames, and every decode -- pydicom's and ours -- converts it to an
+    integer first. So the file is refused, as before #870, but with a
+    reason that names the element; pydicom's own was `OverflowError:
+    cannot convert float infinity to integer`, naming nothing (review of
+    #900, F3). A file with no Pixel Data is not refused: the count lays
+    nothing out there.
+
+    Raises:
+        ValueError: The image's NumberOfFrames reads as infinite.
+    """
+    if not any(tag in ds for tag in _FRAMED_PIXEL_TAGS):
+        return
+    try:
+        ds.get("NumberOfFrames")
+    except OverflowError as exc:
+        text = ds.get_item(0x00280008).value
+        if isinstance(text, (bytes, bytearray)):
+            text = bytes(text).decode("ascii", "replace")
+        raise ValueError(
+            f"NumberOfFrames (0028,0008) reads as infinite "
+            f"({str(text).strip()!r}); the frame count divides Pixel Data "
+            f"into frames, so the image cannot be read without a finite "
+            f"one") from exc
 
 
 def ingest_worker(fp: str) -> Tuple:
@@ -4186,21 +4403,31 @@ def ingest_worker(fp: str) -> Tuple:
             'man': ds.get("Manufacturer", ""),
             'model': ds.get("ManufacturerModelName", ""),
             'dev_sn': ds.get("DeviceSerialNumber", ""),
-            'series_num': ds.get("SeriesNumber", 0)
+            'series_num': _series_number_of(ds),
         }
 
         if not meta['sop']:
             raise ValueError("Missing SOPInstanceUID. Likely not a valid DICOM file.")
+        _refuse_an_infinite_frame_count(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))
 
         # Construct Instance (Metadata Only)
         # The file's Instance Number, not 0 (#810). `__post_init__` sets
         # `0020,0013` from it, and `populate_attrs` below then writes the
-        # file's own element over that whenever the file has one, so the
-        # attribute is exactly what it was before #810 in every case.
+        # file's own element over that whenever the file has one.
         inst = Instance(meta['sop'], meta['sop_class'],
                         _instance_number_of(ds), file_path=fp)
+        # And when the file has none, the attribute goes: the 0 that
+        # `__post_init__` wrote is ours, not the file's, and was exported
+        # as `(0020,0013) '0'` (#870). The field keeps its 0, for the
+        # store column, the scan clone and the WFDB record name, which
+        # reads the attribute and spells an absent one "0" anyway. `in`
+        # does not convert the value, so it cannot raise for an infinite
+        # one; a zero-length element is present and is kept. Both
+        # hydration sites in `persistence.py` repeat this for a reopen.
+        if "InstanceNumber" not in ds:
+            del inst.attributes["0020,0013"]
         # Losses ride `meta` rather than a ninth tuple slot, as the
         # multiplex-group loss does. This worker may be in a subprocess
         # with no store handle, so the loss travels and the parent
@@ -4209,9 +4436,13 @@ def ingest_worker(fp: str) -> Tuple:
         unscanned = []
         nested = []
         unconverted = []
+        # #700's values ride `meta` like the other collectors: ints and
+        # tuples only, so they pickle from a spawned worker.
+        ambiguous = []
         populate_attrs(ds, inst, dropped, unscanned=unscanned, nested=nested,
-                       unconverted=unconverted)
+                       unconverted=unconverted, ambiguous=ambiguous)
         meta['big_endian_unconverted'] = unconverted
+        meta['ambiguous_unsigned'] = ambiguous
         # Between the walk and `meta['dropped_private_binary']`, so the
         # candidates that failed to decode land in `dropped` before it is
         # handed over. `_decode_nested_pixels` appends them itself: it is
@@ -4292,6 +4523,9 @@ def ingest_worker(fp: str) -> Tuple:
             # Top level only -- 0028,2110 is the General Image Module's,
             # and an icon is not the image.
             lossy = _lossy_compression_evidence(ds)
+            # An overlay kept in Pixel Data's unused high bits (#755), asked
+            # of the header before the decode like the two above.
+            in_pixel_overlays = _in_pixel_overlays(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -4335,6 +4569,22 @@ def ingest_worker(fp: str) -> Tuple:
                 beyond_precision = _samples_beyond_stream_precision(ds, arr)
                 if beyond_precision is not None:
                     meta['beyond_precision'] = beyond_precision
+                # The decode reads BitsStored bits: pydicom's
+                # `correct_unused_bits` clears every bit above them, so an
+                # overlay kept there reaches neither the store nor an
+                # export, and the loss gets a row. Only when every sample
+                # fits BitsStored, which is the "bits were cleared" case;
+                # a stream read wider than BitsStored keeps them as sample
+                # values and has its own precision row above. Plain types,
+                # so it rides `meta` out of a spawned worker.
+                if (in_pixel_overlays is not None
+                        and _sample_beyond(
+                            arr, int(ds.BitsStored),
+                            int(ds.get("PixelRepresentation", 0) or 0) == 1)
+                        is None):
+                    meta['in_pixel_overlay'] = {
+                        'overlays': in_pixel_overlays,
+                        'bits_stored': int(ds.BitsStored)}
                 if lossy is not None:
                     # In the worker, on an Instance nothing has linked yet,
                     # beside the relabel above; the row rides `meta`.
@@ -4529,7 +4779,7 @@ def ingest_worker(fp: str) -> Tuple:
 class IngestSummary:
     """What `ingest()` did with each file it found.
 
-    A file takes exactly one of four routes. A declined file is not
+    A file takes exactly one of five routes. A declined file is not
     recorded as imported, so offering it again declines it again.
 
     Attributes:
@@ -4543,6 +4793,10 @@ class IngestSummary:
             Patient ID (#745). Each has a `WARNING` audit row and is not
             read into the store.
         skipped (int): Files already in the store, not read again.
+        hidden (int): Files found walking the directory whose name starts
+            with `.` (`.DS_Store`, AppleDouble `._*`), which are not read
+            (#795). A directory whose name starts with `.` is walked, and
+            a file named directly is read whatever its name.
         failed (int): `len(failures)`.
     """
     ingested: int = 0
@@ -4551,6 +4805,8 @@ class IngestSummary:
     failures: List[Tuple[str, str]] = field(default_factory=list)
     declined: int = 0
     skipped: int = 0
+    # Last, so the four fields before it keep their positions (#795).
+    hidden: int = 0
 
     @property
     def failed(self) -> int:
@@ -4595,6 +4851,12 @@ class DicomImporter:
                 with an `ERROR` audit row when `store_backend` is given.
         """
         all_files = []
+        # Skipped, not read: a `.DS_Store` or an AppleDouble `._*` file read
+        # would be a rejected file with an `ERROR` row, which costs every
+        # folder a Mac has touched its PASS. Counted, so a DICOM file
+        # named `.foo.dcm` does not vanish without a trace (#795).
+        # Directories are not filtered: a hidden one is walked.
+        hidden = 0
         for path in file_paths:
             if os.path.isfile(path):
                 all_files.append(path)
@@ -4602,6 +4864,7 @@ class DicomImporter:
                 for root, _, filenames in os.walk(path):
                     for filename in filenames:
                         if filename.startswith('.'):
+                            hidden += 1
                             continue
                         all_files.append(os.path.join(root, filename))
         # `os.walk` order is the filesystem's -- APFS lists neither sorted
@@ -4624,7 +4887,7 @@ class DicomImporter:
             logger.info(f"Skipping {skipped_count} already imported files.")
 
         if not new_files:
-            return IngestSummary(skipped=skipped_count)
+            return IngestSummary(skipped=skipped_count, hidden=hidden)
 
         logger.info(f"Importing {len(new_files)} files (Parallel Eager Ingest)...")
 
@@ -4800,6 +5063,8 @@ class DicomImporter:
         precision_rows = 0
         beyond_precision_rows = 0
         byte_order_rows = 0
+        ambiguous_unsigned_rows = 0
+        in_pixel_overlay_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -4867,6 +5132,25 @@ class DicomImporter:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
 
+        def _record_in_pixel_overlay(uid, detail):
+            """One in-pixel overlay row (#755), on its own log cap."""
+            # `DATA_LOSS`, scoped STANDARD: an overlay dropped from an
+            # ordinary image is what the ungraded scope is for (owner
+            # ruling Q1-B), so the row is reported and the grade does not
+            # move. Its own counter, for `_record_lossy`'s reason.
+            nonlocal in_pixel_overlay_rows
+            in_pixel_overlay_rows += 1
+            if in_pixel_overlay_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif in_pixel_overlay_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "an overlay in Pixel Data's unused bits) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="DATA_LOSS", entity_uid=uid, details=detail,
+                    loss_scope=LOSS_SCOPE_STANDARD)
+
         def _record_byte_order(uid, detail):
             """One big-endian byte-order row, on its own log cap."""
             nonlocal byte_order_rows
@@ -4878,6 +5162,21 @@ class DicomImporter:
                     "... (suppressing further per-element messages for "
                     "big-endian values whose byte order could not be "
                     "converted) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_ambiguous_unsigned(uid, detail):
+            """One #700 row, on its own log cap; the row is per element."""
+            nonlocal ambiguous_unsigned_rows
+            ambiguous_unsigned_rows += 1
+            if ambiguous_unsigned_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif ambiguous_unsigned_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-element messages for "
+                    "Implicit VR values held unsigned with no Pixel "
+                    "Representation) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -5049,7 +5348,7 @@ class DicomImporter:
                             f"Instance UID is held by a patient with a "
                             f"different Patient ID, and one study belongs to "
                             f"one patient. Instance {inst.sop_instance_uid} "
-                            f"was not read into the store (#745).")
+                            f"was not read into the store.")
                         declined_shared_study += 1
                         if declined_shared_study <= 5:
                             logger.warning(detail)
@@ -5140,6 +5439,15 @@ class DicomImporter:
                     if lossy:
                         _record_lossy(inst.sop_instance_uid,
                                       _lossy_compression_words(lossy))
+
+                    # An overlay in Pixel Data's unused high bits, cleared
+                    # by the decode (#755). After both declined
+                    # `continue`s, like the rows above.
+                    overlay = meta.get('in_pixel_overlay')
+                    if overlay:
+                        _record_in_pixel_overlay(
+                            inst.sop_instance_uid,
+                            _in_pixel_overlay_words(overlay))
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames
@@ -5238,11 +5546,11 @@ class DicomImporter:
                                 f" that also name the kept group")
                         detail = (
                             f"{'; '.join(parts)}. Only Waveform Sequence "
-                            f"item 0 is kept (#36); a reference to a "
+                            f"item 0 is kept; a reference to a "
                             f"discarded item would name an item the "
                             f"exported file does not carry, and ordinals "
                             f"are positional so the survivors are never "
-                            f"renumbered (#177).")
+                            f"renumbered.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
@@ -5487,6 +5795,16 @@ class DicomImporter:
                         _record_byte_order(inst.sop_instance_uid,
                                            _byte_order_words(*entry))
 
+                    # A `US or SS` value an Implicit VR source left to the
+                    # unsigned default, where a signed reading differs
+                    # (#700, owner ruling Q6). WARNING: the bytes are
+                    # carried whole, and its Explicit VR twin draws the
+                    # export's row for the same value.
+                    for entry in meta.get('ambiguous_unsigned', ()):
+                        _record_ambiguous_unsigned(
+                            inst.sop_instance_uid,
+                            _ambiguous_unsigned_words(*entry))
+
                     # Persist Waveform Samples to Sidecar
                     #
                     # Site 3 of six: append and row commit under one
@@ -5613,7 +5931,7 @@ class DicomImporter:
             ingested=count, failures=failures,
             declined=(declined_superseded + declined_duplicate
                       + declined_shared_study),
-            skipped=skipped_count)
+            skipped=skipped_count, hidden=hidden)
 
 
 #: The refusal every door raises for a `compression` it cannot write.
@@ -5930,7 +6248,8 @@ class ExportError(RuntimeError):
 
 
 def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
-                          syntax_uid: str, warnings=None) -> None:
+                          syntax_uid: str, warnings=None,
+                          remedy: Optional[str] = None) -> None:
     """Write the descriptors that describe the pixel element just written.
 
     Writes `Rows`, `Columns`, `SamplesPerPixel`, `NumberOfFrames` (when
@@ -5957,6 +6276,10 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
         warnings (list): Where a sentence goes for a label the syntax
             does not admit, for the parent to log and audit. `None`
             means the caller does not collect them.
+        remedy (Optional[str]): A remedy that replaces the table's in that
+            sentence, for a door where the table's is false: the #771
+            fallback passes `_PHOTOMETRIC_J2K_FALLBACK`. None keeps the
+            table's.
 
     Raises:
         _PhotometricRefusal: if the *file* would carry more than one
@@ -6101,7 +6424,7 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if warnings is not None:
         warning = _photometric_warning(
             _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid, has_pixels=True)
+            syntax_uid, has_pixels=True, remedy=remedy)
         if warning is not None:
             warnings.append(warning)
 
@@ -6327,6 +6650,26 @@ def _readback_pixel_mismatch(decoded: np.ndarray, written: np.ndarray,
             f"{first} ({got!r} read back where {want!r} was written)")
 
 
+def _a_frame_compression_cannot_carry(readback, label) -> bool:
+    """Whether a delivered transform label sits on a frame #771 writes raw.
+
+    True for `YBR_ICT`/`YBR_RCT` on an integer `PixelData` whose
+    BitsAllocated and SamplesPerPixel `_j2k_encodable` refuses: compressing
+    would not apply the transform the label names, so the table's remedy
+    to compress is false for it.
+    """
+    if label not in ("YBR_ICT", "YBR_RCT") or "PixelData" not in readback:
+        return False
+    try:
+        bits = int(readback.BitsAllocated)
+        samples = int(readback.get("SamplesPerPixel", 1) or 1)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    if bits <= 0 or bits % 8:
+        return False
+    return not _j2k_encodable(bits // 8, samples > 1)
+
+
 def _readback_label_mismatch(readback) -> Optional[str]:
     """Why the delivered label is not one its syntax admits, or None.
 
@@ -6388,6 +6731,12 @@ def _readback_label_mismatch(readback) -> Optional[str]:
     # is offered only where the file has a pixel element.
     if not any(kw in readback for kw in _PIXEL_ELEMENTS):
         remedy = _PHOTOMETRIC_NO_PIXELS
+    elif _a_frame_compression_cannot_carry(readback, normalized):
+        # The table's ICT/RCT remedy says to compress, which is false for
+        # a frame the #771 fallback writes uncompressed under compression
+        # too; the warning's door passes the same remedy (review of #900,
+        # F4). Read off the file alone, as everything here is.
+        remedy = _PHOTOMETRIC_J2K_FALLBACK
     return (f"PhotometricInterpretation reads back as '{normalized}', "
             f"which the transfer syntax the file was written under does "
             f"not admit ({syntax}): {clause} {remedy}")
@@ -7184,9 +7533,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         revrs: List[_ReVr] = []
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
-                             revrs=revrs)
+                             revrs=revrs, corrections=corrections,
+                             warnings=warnings)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
-                                       revrs=revrs, corrections=corrections)
+                                       revrs=revrs, corrections=corrections,
+                                       warnings=warnings)
         re_vr = _re_vr_warning(revrs)
         if re_vr is not None:
             warnings.append(re_vr)
@@ -7359,6 +7710,37 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"Rows/Columns to resolve it. Writing it would guess "
                 f"the image's geometry, and a recipient cannot tell a "
                 f"guess apart from a correct answer.")
+
+        # A frame JPEG 2000 Lossless cannot carry exactly -- 32- and 64-bit
+        # integer samples -- is written uncompressed under
+        # `use_compression=True`, with an INFO note (#771, owner ruling
+        # Q1). It was refused by `_refuse_unencodable_j2k_frame`, which
+        # failed the instance, and an export of nothing but such images
+        # raised `ExportError`, while `use_compression=False` wrote the
+        # same pixels exactly. Decided here, per instance, once the frame
+        # and its geometry are known and before any reader of
+        # `compressed` or `written_syntax` below, so the label judgement,
+        # the raw write and `_finalize_dataset` all see the syntax the
+        # file is actually written under.
+        #
+        # Through `_j2k_encodable`, the guard's own predicate, never a set
+        # of widths of its own: the two cannot drift. `itemsize` is what
+        # the encoder sees (`bool` is 1, and the encoder views it as
+        # `uint8`).
+        #
+        # Integer frames only. The float arm below already writes native
+        # under compression and keeps the batch's `compressed`; folding it
+        # in here would change which syntax its label is judged against.
+        j2k_fallback = (compressed and arr is not None
+                        and arr.dtype.kind != 'f'
+                        and not _j2k_encodable(arr.dtype.itemsize,
+                                               geom.samples > 1))
+        if j2k_fallback:
+            compressed = False
+            written_syntax = str(ImplicitVRLittleEndian)
+            corrections.append(_J2K_FALLBACK_NOTE.format(
+                dtype=arr.dtype, bits=arr.dtype.itemsize * 8,
+                samples=geom.samples))
 
         if arr is not None and arr.dtype.kind == 'f':
             # A floating-point array is not Pixel Data, and writing it
@@ -7651,7 +8033,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             _write_pixel_geometry(ds, geom, attributes,
                                   float_element=False,
                                   syntax_uid=written_syntax,
-                                  warnings=warnings)
+                                  warnings=warnings,
+                                  remedy=(_PHOTOMETRIC_J2K_FALLBACK
+                                          if j2k_fallback else None))
 
             # Derived from the array, never read from `attributes`, as Rows
             # and SamplesPerPixel are: `ds.PixelData = arr.tobytes()` is
@@ -7797,7 +8181,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             written_pixels = arr
 
         # Validate & Save
-        ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
+        #
+        # The per-instance answer, not `ctx.compression`: after a #771
+        # fallback, handing the batch's `"j2k"` on would send the frame to
+        # the encoder, whose guard refuses it again. A float frame and a
+        # pixel-less file keep the batch value, as before.
+        ds = DicomExporter._finalize_dataset(
+            ds, None if j2k_fallback else ctx.compression, pixel_array=arr)
 
         # A limit of ours, not a defect in the data: a
         # 16-bit or signed 8-bit YBR_FULL file is conformant and is
@@ -7822,7 +8212,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"{_written_photometric(ds.PhotometricInterpretation)} at "
                 f"BitsAllocated {ds.BitsAllocated} and PixelRepresentation "
                 f"{ds.get('PixelRepresentation', 0)} is written as declared, "
-                f"and this library cannot read such a file back (#461): "
+                f"and this library cannot read such a file back: "
                 f"pydicom's colour conversion takes unsigned 8-bit samples "
                 f"only.")
 
@@ -7885,6 +8275,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # left to decide, so a file pydicom could already resolve is
         # written byte for byte as pydicom alone would write it.
         _resolve_ambiguous_vrs(ds, losses, warnings)
+
+        # A value too long for its VR's 2-byte Explicit VR length is
+        # written `UN`, and said (#692). After the ambiguous VRs are
+        # resolved, so every VR it weighs is concrete, and off the syntax
+        # in `ds.file_meta`, never `written_syntax`: a pixel-less file stays
+        # native under compression. Under Implicit VR every length is
+        # 4 bytes and nothing is relabelled.
+        if not ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+            _relabel_long_short_length_values(ds, corrections)
 
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
@@ -8014,7 +8413,7 @@ _PILLOW_J2K_NOTE = (
     "more than one sample (\"Pillow cannot decode 16-bit multi-sample data "
     "correctly\"); pydicom with pylibjpeg-openjpeg reads it exactly, and "
     "this library reads it back through imagecodecs. For a reader with "
-    "only Pillow, export with use_compression=False (#670).")
+    "only Pillow, export with use_compression=False.")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
 #: component transform. `RGB` is transformed and relabelled
@@ -8083,6 +8482,49 @@ def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
     return (expected, expected + expected % 2)
 
 
+def _j2k_encodable(itemsize, multi_sample) -> bool:
+    """Whether a frame of this width and sample count is in `_J2K_ENCODABLE_FRAMES`.
+
+    The one predicate: the export worker asks it to decide whether an
+    instance is compressed at all (#771), and `_refuse_unencodable_j2k_frame`
+    asks it as the backstop for a direct `_compress_j2k` caller, so the two
+    cannot answer differently. Read at call time, never copied.
+
+    Args:
+        itemsize (int): The bytes per sample the encoder will see -- 1 for
+            a `bool` mask, which it views as `uint8`.
+        multi_sample (bool): More than one sample per pixel.
+
+    Returns:
+        bool: True when the cell is encodable and reads back exactly.
+    """
+    return (itemsize, bool(multi_sample)) in _J2K_ENCODABLE_FRAMES
+
+
+#: The INFO note for a frame the default compression writes uncompressed
+#: (#771, owner ruling Q1). No path and no identifier: the parent prefixes
+#: the SOP Instance UID. A note and not a row: the file is exact, written in
+#: the syntax `use_compression=False` would have written, and a WARNING
+#: would grade a correct file REVIEW_REQUIRED.
+_J2K_FALLBACK_NOTE = (
+    "written uncompressed (Implicit VR Little Endian) under "
+    "use_compression=True: JPEG 2000 Lossless here is exact only to 25 "
+    "bits, so a {dtype} frame at BitsAllocated {bits} with {samples} "
+    "sample(s) per pixel cannot be compressed losslessly. The "
+    "samples are written exactly.")
+
+#: The remedy for an inadmissible label on a frame the fallback above
+#: wrote uncompressed. A property of the door, as `_PHOTOMETRIC_ICON` is
+#: of an icon: the table's ICT/RCT remedy says "export with
+#: use_compression=True", which is false for a frame compression cannot
+#: carry.
+_PHOTOMETRIC_J2K_FALLBACK = (
+    "This frame is written uncompressed under use_compression=True as "
+    "well, because JPEG 2000 Lossless cannot carry it exactly, so "
+    "compressing the export does not change this. Declare the label these "
+    "bytes have with set_attr(\"0028,0004\", ...).")
+
+
 def _refuse_unencodable_j2k_frame(arr, ds, samples):
     """Raise before the encode, naming what the codec will not say.
 
@@ -8100,7 +8542,7 @@ def _refuse_unencodable_j2k_frame(arr, ds, samples):
         _J2kFrameRefusal: The `(itemsize, multi-sample)` cell is not in
             `_J2K_ENCODABLE_FRAMES`.
     """
-    if (arr.dtype.itemsize, samples > 1) in _J2K_ENCODABLE_FRAMES:
+    if _j2k_encodable(arr.dtype.itemsize, samples > 1):
         return
 
     # Every 8- and 16-bit cell is encodable, so what reaches here is
@@ -9830,6 +10272,316 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
     rows.append(_ambiguous_veto_clause(tag, other, named))
 
 
+#: The largest value an Explicit VR element with a 2-byte length can hold.
+_SHORT_LENGTH_MAX = 0xFFFF
+
+#: Bytes per value of the numeric VRs with a 2-byte Explicit VR length, for
+#: `_relabel_long_short_length_values`' cheap pre-filter.
+_SHORT_LENGTH_WIDTHS = {"US": 2, "SS": 2, "UL": 4, "SL": 4, "FL": 4,
+                        "FD": 8, "AT": 4}
+
+
+def _could_exceed_short_length(vr, value) -> bool:
+    """Whether `value` under `vr` can encode to more than 0xFFFF bytes.
+
+    A pre-filter only, so the encode runs on candidates alone: a numeric VR
+    is weighed by its count, anything else by its characters at the widest
+    an encoding can make one (4 bytes). Never False for a value that does
+    exceed.
+    """
+    many = isinstance(value, (list, tuple, MultiValue))
+    width = _SHORT_LENGTH_WIDTHS.get(vr)
+    if width is not None:
+        return (len(value) if many else 1) * width > _SHORT_LENGTH_MAX
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return len(value) > _SHORT_LENGTH_MAX
+    chars = (sum(len(str(item)) + 1 for item in value) if many
+             else len(str(value)))
+    return chars * 4 > _SHORT_LENGTH_MAX
+
+
+def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
+                                      within="") -> None:
+    """Write every value too long for its VR's 2-byte length as `UN`, and say so (#692).
+
+    Under an Explicit VR syntax, an element whose VR has a 2-byte length
+    (pydicom's `EXPLICIT_VR_LENGTH_16`) holds at most 65535
+    bytes. pydicom relabels a longer one `UN` inside `dcmwrite`, as PS3.5
+    6.2.2 provides, but warns in the export worker, a spawned process, so
+    the caller never heard of it. This does the same relabel first --
+    `UN`, the value's own bytes in Implicit VR Little Endian encoding,
+    which is what pydicom writes -- and appends one INFO note per element.
+    Call it on a dataset written under an Explicit VR syntax only, after
+    every ambiguous VR is resolved.
+
+    Args:
+        ds (pydicom.Dataset): The dataset, edited in place; sequence items
+            are walked.
+        corrections (list): Where each note goes.
+        encodings: The character sets text is encoded with; the dataset's
+            own when None.
+        within (str): The enclosing sequence path, for the note.
+    """
+    # Keyed on the VR and the encoded length, never on pydicom's warning
+    # text (`_read_element`'s rule). The encode is pydicom's own writer
+    # into a scratch buffer, so the bytes are the ones `dcmwrite` would
+    # have written under the `UN` it chose;
+    # `test_our_relabel_writes_the_bytes_pydicom_would` compares them.
+    if encodings is None:
+        encodings = getattr(ds, "_character_set", None) or default_encoding
+    for elem in list(ds):
+        vr = str(elem.VR)
+        tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+        if vr == "SQ":
+            for index, item in enumerate(elem.value or []):
+                path = (f"{within} > ({tag}) item {index}" if within
+                        else f"({tag}) item {index}")
+                _relabel_long_short_length_values(
+                    item, corrections, encodings=encodings, within=path)
+            continue
+        # Membership in the 2-byte set, never absence from the 4-byte one:
+        # an ambiguous spelling is in neither, and Pixel Data reaches here
+        # as `OB or OW` under compression (`_compress_j2k` assigns it to a
+        # dataset with no element, and pydicom settles the VR only inside
+        # `dcmwrite`). Weighed as 2-byte, a stream over 65535 bytes was
+        # relabelled `UN` and written with an undefined length, a file
+        # pydicom cannot read back -- every compressed export over 64 KiB
+        # of stream, found by the fingerprint retake.
+        if (vr not in EXPLICIT_VR_LENGTH_16 or elem.is_empty
+                or not _could_exceed_short_length(vr, elem.value)):
+            continue
+        buffer = DicomBytesIO()
+        buffer.is_little_endian = True
+        buffer.is_implicit_VR = True
+        write_data_element(buffer, elem, encodings=encodings)
+        # Tag (4) and 4-byte length (4): the rest is the value.
+        value = buffer.getvalue()[8:]
+        if len(value) <= _SHORT_LENGTH_MAX:
+            continue
+        ds[elem.tag] = DataElement(elem.tag, "UN", value)
+        where = f"{within} > " if within else ""
+        corrections.append(
+            f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
+            f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
+            f"6.2.2). The bytes are the value's own, in Implicit VR Little "
+            f"Endian encoding, {_read_back_words(elem.tag, vr)}.")
+
+
+def _read_back_words(tag, vr) -> str:
+    """What the #692 note may say about re-ingesting a relabelled value.
+
+    Only what `populate_attrs` does with it. A standard tag whose
+    dictionary VR is the one written, and not binary, is decoded under it
+    (`_standard_un_decoded`) and kept: no size limit applies to a numeric
+    or text value. Anything else stays `UN` bytes and meets the binary
+    retention limit, which a value relabelled here always exceeds -- a
+    private tag (no dictionary VR, review of #900 F2, #901) and an
+    ambiguous one such as LUT Data (gated as its `OW` twin, F6, #902).
+    """
+    try:
+        named = None if tag.group % 2 else dictionary_VR(tag)
+    except KeyError:
+        named = None
+    if named == vr:
+        return f"and this library reads them back under {vr}"
+    return ("and this library holds them as UN bytes on re-ingest, which "
+            "drops a UN over 65534 bytes with a DATA_LOSS row")
+
+
+#: The lowest value whose signed and unsigned 16-bit readings differ.
+_US_SS_SIGN_BIT = 0x8000
+
+
+def _held_unsigned_without_a_declarer(elem, ds) -> List[int]:
+    """The values of a `US or SS` element read unsigned with nothing to say so (#700).
+
+    For an element read under Implicit VR -- the caller checks that -- whose
+    dictionary VR is `US or SS`, when neither `ds` nor any ancestor
+    (`_pixel_rep`, which pydicom and `populate_attrs` stamp into every
+    item) declares Pixel Representation: the values at or above 32768,
+    where the unsigned reading pydicom fell back to and a signed one
+    differ. Below that the two agree, and nothing was ambiguous.
+
+    Args:
+        elem: The element as read.
+        ds: The dataset holding it.
+
+    Returns:
+        List[int]: The values held unsigned that a signed reading takes
+        otherwise; empty when there is nothing to say.
+    """
+    if elem.tag.group % 2:
+        return []
+    try:
+        if dictionary_VR(elem.tag) != "US or SS":
+            return []
+    except KeyError:
+        return []
+    if ("PixelRepresentation" in ds
+            or getattr(ds, "_pixel_rep", None) is not None):
+        return []
+    values = (list(elem.value)
+              if isinstance(elem.value, (list, tuple, MultiValue))
+              else [elem.value])
+    return [int(v) for v in values
+            if isinstance(v, numbers.Integral) and int(v) >= _US_SS_SIGN_BIT]
+
+
+def _ambiguous_unsigned_words(path, tag, held) -> str:
+    """The ingest `WARNING` sentence for #700's values.
+
+    Opens as the export's ambiguous-VR row does, so the Explicit VR twin's
+    row and this one read alike in the report. No path to a file and no
+    identifier: the caller prefixes the SOP Instance UID.
+    """
+    where = f" in {_item_path_words(path)}" if path else ""
+    unsigned = ", ".join(str(v) for v in held)
+    signed = ", ".join(str(v - 0x10000) for v in held)
+    return (f"Ambiguous value representation ({tag}){where}: read from an "
+            f"Implicit VR source with no Pixel Representation declared "
+            f"anywhere above it, and held unsigned as {unsigned}, which a "
+            f"signed reading takes as {signed}. The bytes are exported "
+            f"unchanged.")
+
+
+def _standard_un_decoded(elem, encoding):
+    """A standard element read as `UN`, decoded under its dictionary VR, or None (#692).
+
+    pydicom decodes a `UN` of known VR only up to 0xFFFF bytes, so a longer
+    one -- which is how an Explicit VR writer, this library's compressed
+    export included, must spell a long US list or FD list (PS3.5 6.2.2) --
+    arrives as bytes. Decoded here as Implicit VR Little Endian, which is
+    what a `UN` value is, it takes the generic arm, as the Implicit VR
+    source of the same file did.
+
+    Args:
+        elem: The `UN` element, little-endian bytes.
+        encoding: The dataset's character set, for text.
+
+    Returns:
+        The decoded element, or None when the tag has no single dictionary
+        VR that is not binary or a sequence, or the bytes do not decode.
+    """
+    # Not for a private tag (no dictionary VR), an ambiguous VR (nothing
+    # here says which arm; see below for the `OW`-armed ones), a sequence (`_sequence_from_un_bytes` is the
+    # private-sequence route) or a binary VR (the binary gate weighs it).
+    try:
+        vr = dictionary_VR(elem.tag)
+    except KeyError:
+        return None
+    # An ambiguous VR with an `OW` arm -- LUT Data (0028,3006) `US or OW`,
+    # the retired Gray LUT Data (0028,1200) `US or SS or OW` -- is NOT
+    # decoded, by owner ruling (review of #900, F6): its `UN` spelling
+    # over the limit then meets the `UN` size gate below, and is dropped
+    # with the same `DATA_LOSS` row its `OW` spelling draws from the
+    # binary gate. Decoding it on the `US` arm kept 80,000 bytes spelled
+    # `UN` that the same bytes spelled `OW` lost. Whether LUT Data should
+    # be exempt from the limit at all is #902.
+    if (vr in AMBIGUOUS_VR or vr == "SQ"
+            or vr in ("OB", "OW", "OF", "OD", "OL", "OV", "UN")):
+        return None
+    raw = bytes(elem.value)
+    try:
+        return convert_raw_data_element(
+            RawDataElement(elem.tag, vr, len(raw), raw, 0, True, True),
+            encoding=encoding)
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Falls through to the `UN` size gate and its row, as before.
+        return None
+
+
+#: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
+_DS_MAX = 16
+
+
+def _ds_text_that_fits(value):
+    """`value` with every caller's float spelled in 16 characters or fewer (#723).
+
+    pydicom writes a Python `float` with `repr`, so `0.1 + 0.2` set into a
+    DS went out as `'0.30000000000000004'`, 19 characters. Each value -- the
+    atom, or each member of a list -- is rewritten only when it is a
+    `float`, carries no `original_string`, and its text is longer than 16
+    characters:
+
+    - a whole number whose integer spelling fits is written that way, which
+      is exact (`1234567890123456.0` -> `'1234567890123456'`);
+    - anything else is rounded by pydicom's `format_number_as_ds`
+      (`'0.30000000000000'`).
+
+    A non-finite float has no DS spelling and raises.
+
+    Args:
+        value: The value about to be written under DS.
+
+    Returns:
+        Tuple: `(value, changes)`; `changes` lists `(set, written, exact)`
+        per rewritten value, and is empty when nothing was rewritten, in
+        which case `value` is returned unchanged.
+
+    Raises:
+        ValueError: A non-finite float. Raised inside `_merge`'s
+            per-element `try`, so it becomes that element's `DATA_LOSS` row.
+    """
+    # `original_string` is the exemption that keeps every source value as
+    # the file wrote it: pydicom keeps it on a DS it reads, #662's tagged
+    # text keeps it across a reopen, and a source value over 16 characters
+    # is the file's own statement, not ours to round. The length test alone
+    # would rewrite it. Non-finite before the length test: `'nan'` and
+    # `'inf'` fit, and neither is a DS value.
+    changes = []
+
+    def one(item):
+        if not isinstance(item, float) or getattr(item, "original_string", None):
+            return item
+        if not isfinite(item):
+            raise ValueError(f"{item!r} has no Decimal String spelling")
+        if len(str(item)) <= _DS_MAX:
+            return item
+        whole = str(int(item)) if item.is_integer() else None
+        if whole is not None and len(whole) <= _DS_MAX:
+            changes.append((item, whole, True))
+            return whole
+        # `format_number_as_ds` alone would write 1234567890123456.0 as
+        # '1.2345678901e+15', which is why the integer spelling comes first.
+        text = format_number_as_ds(item)
+        changes.append((item, text, float(text) == item))
+        return text
+
+    if isinstance(value, (list, tuple, MultiValue)):
+        written = [one(item) for item in value]
+    else:
+        written = one(value)
+    return (written if changes else value), changes
+
+
+def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
+    """The note for `_ds_text_that_fits`' rewrite, and whether it was exact.
+
+    Args:
+        tag (str): The element's `gggg,eeee` tag.
+        within (str): The enclosing sequence path, or "" at the top level.
+        changes (list): `(set, written, exact)` per rewritten value.
+
+    Returns:
+        Tuple[bool, str]: True when every value is the same number it was,
+        and the sentence. No path and no identifier: the parent prefixes
+        the SOP Instance UID.
+    """
+    exact = all(ok for _set, _written, ok in changes)
+    where = f"{within} > " if within else ""
+    pairs = ", ".join(f"{set_!r} as '{written}'"
+                      for set_, written, _ok in changes)
+    if exact:
+        return True, (
+            f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+            f"characters was written in its integer spelling, the same "
+            f"number: {pairs}.")
+    return False, (
+        f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+        f"characters cannot be written exactly, and was rounded to fit: "
+        f"{pairs}.")
+
+
 def _numeric_arm(vr, value):
     """The arm an ambiguous VR's `value` fits, or a refusal.
 
@@ -9877,10 +10629,12 @@ def _numeric_arm(vr, value):
     # only bytes. No ingest reaches the refusal -- an explicit source's
     # `US` is in range by construction -- only a caller's `set_attr`.
     #
-    # `US` has a 2-byte explicit length, so 32767 entries at most. No
-    # ingest exceeds it (an Explicit VR source has the same cap, and an
-    # Implicit one hands back bytes); a longer caller list raises at
-    # `dcmwrite`.
+    # `US` has a 2-byte explicit length, so 32767 entries at most under an
+    # Explicit VR syntax. A longer list -- a caller's, or an Implicit VR
+    # source's, where every length is 4 bytes -- does not raise: Implicit
+    # VR writes it whole, and an Explicit VR export writes it `UN` with an
+    # INFO note (`_relabel_long_short_length_values`, #692), which ingest
+    # decodes back under its dictionary VR.
     arms = vr.split(" or ")
     if vr not in AMBIGUOUS_VR:
         return vr
@@ -10492,7 +11246,8 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within=""):
+    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",
+               corrections=None, warnings=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         Keys that are not `gggg,eeee` (the `_`-prefixed bookkeeping keys)
@@ -10516,6 +11271,13 @@ class DicomExporter:
                 collapse is logged here instead.
             within (str): The sequence an item's element sits in, for the
                 re-VR sentence.
+            corrections (list, optional): Collects the INFO note for a
+                float set into a DS that was written in its integer
+                spelling (#723). With None, it is logged here instead.
+            warnings (list, optional): Collects the WARNING sentence for a
+                float set into a DS that was rounded to fit (#723). With
+                None, it is logged here instead. The three owner-stamp
+                merges pass neither.
         """
         # `losses` and `revrs` are accumulators rather than return values
         # because `_merge` is called five times per instance and once per
@@ -10641,6 +11403,18 @@ class DicomExporter:
                 # re-encoded silently instead of reported.
                 if vr is not None:
                     vr = _numeric_arm(vr, v)
+                # A caller's float in a standard DS, spelled to fit its 16
+                # characters (#723). Here, inside the loss arm's `try`, so
+                # a non-finite float is this element's DATA_LOSS row; and
+                # on the standard arm only (`encoded` is None): a private
+                # tag's float goes through the fallback encoder's own VR
+                # choice. The note is gathered rather than written now,
+                # because `add_new` can still refuse the element.
+                ds_note = None
+                if vr == "DS" and encoded is None:
+                    v, changes = _ds_text_that_fits(v)
+                    if changes:
+                        ds_note = _ds_fit_sentence(t, within, changes)
                 if vr is None:
                     if encoded is None:
                         raise ValueError(
@@ -10680,6 +11454,17 @@ class DicomExporter:
                 ds.add_new(Tag(g, e), vr, v)
                 if re_vr is not None and revrs is not None:
                     revrs.append(re_vr)
+                if ds_note is not None:
+                    # Exact: an INFO note, no row. Rounded: a WARNING row
+                    # naming both spellings (owner ruling Q3).
+                    exact, sentence = ds_note
+                    sink = corrections if exact else warnings
+                    if sink is not None:
+                        sink.append(sentence)
+                    elif exact:
+                        get_logger().info(sentence)
+                    else:
+                        get_logger().warning(sentence)
             except Exception as exc:
                 # Say "not exported": this is an element the caller asked
                 # for that will not be in the output, not an internal
@@ -10888,7 +11673,8 @@ class DicomExporter:
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
-                         revrs=None, within="", corrections=None):
+                         revrs=None, within="", corrections=None,
+                         warnings=None):
         """Write the graph's sequences into `ds`, recursing into each item.
 
         Args:
@@ -10901,7 +11687,10 @@ class DicomExporter:
             within (str): The enclosing sequence path, for that sentence.
             corrections (list, optional): Appended to with
                 `_label_as_written`'s note for every item whose
-                (0028,0004) was respelled, prefixed with the item.
+                (0028,0004) was respelled, prefixed with the item, and
+                handed to every item's `_merge` for its #723 notes.
+            warnings (list, optional): Handed to every item's `_merge`
+                for its #723 WARNING sentences.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
@@ -10924,10 +11713,13 @@ class DicomExporter:
                     corrections.append(f"{path} item {index}: {respelled}")
                 DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
-                                     revrs=revrs, within=path)
+                                     revrs=revrs, within=path,
+                                     corrections=corrections,
+                                     warnings=warnings)
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses,
                                                revrs=revrs, within=path,
-                                               corrections=corrections)
+                                               corrections=corrections,
+                                               warnings=warnings)
 
                 pydicom_seq.append(ds_item)
 

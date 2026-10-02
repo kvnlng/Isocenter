@@ -6,7 +6,7 @@ Isocenter is an indexing layer over your DICOM files. It never modifies them. It
 
 The `Session` object is your single entry point. It manages:
 
-- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and a DICOM `export()` saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
+- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and `export()` (either built-in format) saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
 - **Inventory**: the patients, studies, series and instances the store holds.
 - **Workers**: a process pool and two background threads. Use `with Session(...) as session:` or call `close()`, or the worker processes outlive your script.
 
@@ -45,6 +45,8 @@ Ten steps, in the order the code expects them. Your source files are never writt
 ## 4. Storage
 
 The store is a SQLite index plus an append-only sidecar file. Keep `<name>.db` and `<name>_pixels.bin` together: a copy of both, under the same base name, is the same project, and either alone is incomplete.
+
+The index runs in SQLite's WAL mode and the sidecar's locks are `flock`, so the store belongs on a local disk, opened from one host at a time. `Session()` logs a `WARNING` when it recognises the store's filesystem as a network type, and opens it anyway ([Keep the store on local disk](quickstart.md#1-initialize-a-session)).
 
 - **Standard tags** (even groups), and every binary value small enough to keep, are stored as one JSON document per instance and read back whole. Reopening a session loads the cohort's metadata in one pass, not one file at a time.
 - **Private tags** (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.

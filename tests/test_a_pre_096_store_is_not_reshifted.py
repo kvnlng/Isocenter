@@ -426,7 +426,7 @@ def test_the_load_says_so_once_naming_the_guarantee_that_does_not_apply(tmp_path
     assert len(rows) == 1, rows
     (row,) = rows
     assert "3 instances" in row, row
-    assert "0.9.6" in row and "#510" in row
+    assert "0.9.6" in row and "never shifted" in row
     assert "never shifted twice" in row
     assert "Re-ingesting" in row
 

@@ -23,9 +23,9 @@ than `session.export()`, so it can construct neither half. These tests
 build their own sources for that reason.
 """
 import glob
+import logging
 import os
 import re
-import sqlite3
 
 import numpy as np
 import pydicom
@@ -33,7 +33,7 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from isocenter.io_handlers import ExportError, SidecarPixelLoader
+from isocenter.io_handlers import SidecarPixelLoader
 from isocenter.session import DicomSession
 
 
@@ -266,13 +266,16 @@ def test_a_float_instance_whose_pixels_become_integers_exports_as_integers(tmp_p
     assert np.array_equal(written.pixel_array.reshape(want.shape), want)
 
 
-def test_the_same_export_compressed_refuses_instead_of_writing_a_float_file(tmp_path):
-    """The breaking half: `use_compression=True` now raises.
+def test_the_same_export_compressed_writes_integers_instead_of_a_float_file(
+        tmp_path, caplog):
+    """`use_compression=True` writes the int32 frame, uncompressed.
 
-    It previously "succeeded", writing a `FloatPixelData` file with float
+    It once "succeeded", writing a `FloatPixelData` file with float
     values beside one `EXPORT` audit row reading `wrote 1 of 1`. With the
     frame correctly seen as 32-bit integer, `_J2K_ENCODABLE_FRAMES`
-    refuses it -- the same refusal any other 32-bit integer frame gets.
+    refused it, and the export raised; since #771 such a frame is written
+    uncompressed with an INFO note naming its dtype -- the same as any
+    other 32-bit integer frame.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -294,38 +297,28 @@ def test_the_same_export_compressed_refuses_instead_of_writing_a_float_file(tmp_
         assert os.path.getsize(_sidecar(db)) == before_size, (
             "the dedup arm was not entered")
 
-        with pytest.raises(ExportError) as raised:
-            session.export(out, format="dicom", show_progress=False)
-        message = str(raised.value)
-
-        session.store_backend.flush_audit_queue()
-        with sqlite3.connect(db) as conn:
-            errors = [d for (d,) in conn.execute(
-                "SELECT details FROM audit_log WHERE action_type = 'ERROR'")]
+        with caplog.at_level(logging.INFO, logger="isocenter"):
+            summary = session.export(out, format="dicom", show_progress=False)
     finally:
         session.close()
 
-    assert errors, "the refusal was not recorded in the audit log"
-    # Both doors, because they are separately reachable: the exception the
-    # caller sees and the row a maintainer reads afterwards.
-    assert "wrote 0 of 1 planned instances" in message, message
-    refusal = "\n".join([message] + errors)
+    assert summary.failures == []
+    (written,) = glob.glob(os.path.join(out, "**", "*.dcm"), recursive=True)
+    ds = pydicom.dcmread(written)
+    assert "FloatPixelData" not in ds
+    assert ds.pixel_array.dtype == np.dtype("int32")
+    assert np.array_equal(ds.pixel_array.reshape(want.shape), want)
+    notes = [r.getMessage() for r in caplog.records
+             if "written uncompressed" in r.getMessage()]
+    assert len(notes) == 1, [r.getMessage() for r in caplog.records]
     # `\b` on purpose, and this one assertion is the whole kill for a
     # `pixel_dtype`-only fix: `"int32" in "uint32"` is True, so a bare
     # substring check passes on that mutant and it survives.
     #
-    # What moves to `uint32` is the `{arr.dtype}` token of
-    # `_refuse_unencodable_j2k_frame`'s message -- `arr` is the frame the
-    # loader rebuilt, and its dtype comes from `_integer_dtype(self.bits,
+    # What moves to `uint32` is the `{dtype}` token of the #771 note
+    # (`_J2K_FALLBACK_NOTE`) -- `arr` is the frame the loader rebuilt, and
+    # its dtype comes from `_integer_dtype(self.bits,
     # self.pixel_representation)`, the loader's own stale snapshot. The
-    # message's *PixelRepresentation* token does NOT move: it is read
-    # with `getattr(ds, 'PixelRepresentation', ...)` off the live export
-    # dataset, which the export built from `attributes`, and it reads `1`
-    # on every tree here. So do not add an assertion on it -- there is
-    # nothing for one to catch, and a reader who added one would be
-    # pinning the wrong variable. The loader's state itself is pinned
-    # independently, and directly, by tests 2 and 3.
-    assert re.search(r"\bint32\b", refusal), refusal
-
-    assert not glob.glob(os.path.join(out, "**", "*.dcm"), recursive=True), (
-        "a file was written despite the refusal")
+    # loader's state itself is pinned independently, and directly, by
+    # tests 2 and 3.
+    assert re.search(r"\bint32\b", notes[0]), notes[0]

@@ -438,7 +438,7 @@ def test_a_value_on_an_owned_uid_leaves_the_owner_as_0_9_8_did(tmp_path):
     src.mkdir()
     shutil.copy(get_testdata_file("CT_small.dcm"), src / "CT_small.dcm")
     for tag in ("0020,000d", "0020,000e"):
-        with pytest.raises(ValueError, match=r"\(#877\)"):
+        with pytest.raises(ValueError, match=r"would carry the source UID$"):
             _pipeline(tmp_path, src, name=f"refused-{tag[-1]}", config=(
                 "privacy_profile: basic\nphi_tags:\n"
                 f"  '{tag}': {{action: REPLACE, value: '1.2.3.5'}}\n"))

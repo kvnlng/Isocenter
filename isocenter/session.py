@@ -15,10 +15,12 @@ import datetime
 import multiprocessing
 import concurrent.futures
 import functools
+import numbers
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
+import numpy as np
 import yaml
 from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
@@ -44,7 +46,7 @@ from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_RE
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
-from .persistence import SqliteStore
+from .persistence import SqliteStore, _network_filesystem_type
 from .crypto import KeyManager
 from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
                             _TokenOfALaterScheme, _TokenOfAnEarlierLayout)
@@ -101,7 +103,7 @@ def scan_worker(args):
     # way.
     if not isinstance(config_source, dict):
         raise TypeError(f"scan_worker expects the PHI policy as a mapping of tag "
-                        f"to rule; got a {type(config_source).__name__} (#729)")
+                        f"to rule; got a {type(config_source).__name__}")
     inspector = PhiInspector(config_tags=config_source,
                              remove_private_tags=remove_private,
                              project_secret=project_secret)
@@ -1020,6 +1022,14 @@ _DEFAULT_TAGS_TO_LOCK = (
 )
 
 
+# `redact()`'s two fixed sentences for a pass with nothing to do (#807);
+# the third, the zoneless count, is built in `_why_no_redaction_task`.
+_NO_REDACTION_RULES = (
+    "No redaction rules: the configuration names no machines. Load one "
+    "with load_config(), or add machines to its rules.")
+_NO_IMAGE_MATCHED = "No image matched any loaded rule's serial_number."
+
+
 def _redaction_worker_count() -> int:
     """How many workers to redact pixels with.
 
@@ -1170,6 +1180,177 @@ def _unheld_spelling(value):
 
 
 
+# The cells a Parquet column may hold as a list: Python sequences and
+# pydicom's `MultiValue` (a `MutableSequence`, not a `list`, which is why
+# pyarrow refuses it, #816). `str` and `bytes` are sequences to Python but
+# scalars here, so they are never in this tuple.
+_PARQUET_SEQUENCES = (list, tuple, MultiValue, np.ndarray)
+
+# The int64 range: an Arrow integer column holds nothing wider, and
+# pyarrow raises on a wider Python int rather than widening.
+_INT64_MIN, _INT64_MAX = -2 ** 63, 2 ** 63 - 1
+
+
+def _parquet_null(value, isna) -> bool:
+    """Whether a frame cell (or a sequence element) is a missing value.
+
+    Args:
+        value (Any): One cell or element.
+        isna (Callable): `pandas.isna`, passed in by the caller that
+            imported pandas, so a call per cell does not re-import it.
+
+    Returns:
+        bool: True for `None`, NaN, `pd.NA` and `NaT`. False for every
+            sequence, `str` and `bytes`, whatever they hold.
+    """
+    # Sequences first: `pd.isna` of a list is element-wise, and the
+    # truth of an array is an error.
+    if value is None:
+        return True
+    if isinstance(value, _PARQUET_SEQUENCES + (str, bytes)):
+        return False
+    try:
+        return bool(isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parquet_family(value) -> Optional[str]:
+    """The scalar family of a non-null value, or None when it is not a scalar.
+
+    Judged by `isinstance`, never by type name, so pydicom's `DSfloat`
+    and `IS` (float and int subclasses) and numpy's numbers fall in
+    `number`. `bool` is tested before `int`, of which it is a subclass,
+    and `datetime` before `date`, likewise.
+
+    Args:
+        value (Any): A non-null cell or element.
+
+    Returns:
+        Optional[str]: `bool`, `number` (an int in the int64 range, or a
+            float), `str`, `bytes`, `datetime` (naive), `datetime-tz`
+            (aware), `date` or `time`; None for anything else -- a sequence, a pydicom `PersonName`
+            (not a `str`), a `Decimal`, an int wider than int64.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "bool"
+    if isinstance(value, numbers.Integral):
+        return "number" if _INT64_MIN <= int(value) <= _INT64_MAX else None
+    if isinstance(value, numbers.Real):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, bytes):
+        return "bytes"
+    if isinstance(value, datetime.datetime):
+        # Aware and naive are two families: pyarrow writes them as one
+        # timestamp column and drops the offset (review of #899).
+        return "datetime" if value.tzinfo is None else "datetime-tz"
+    if isinstance(value, datetime.date):
+        return "date"
+    if isinstance(value, datetime.time):
+        return "time"
+    return None
+
+
+def _parquet_column_shape(values, isna) -> str:
+    """How `export_dataframe` writes one object column to Parquet (#816).
+
+    Nulls (`_parquet_null`) are skipped throughout; they stay null in
+    every arm. Of the rest:
+
+    - `"keep"`: every cell is a scalar (`_parquet_family` is not None)
+      and all of one family. Written as it is, so the Arrow type is the
+      engine's (`date` stays a date, `int` an integer). A column of
+      nulls alone is kept.
+    - `"list"` (the column is *uniform*): every cell is a sequence (a
+      `list`, `tuple`, pydicom `MultiValue` or numpy array), and every
+      non-null element of every cell is a scalar, all of one family. An
+      empty sequence has no elements and does not break uniformity.
+      Written as an Arrow list column of that family.
+    - `"text"`: anything else. A column mixing scalars and sequences,
+      or two families (`str` beside `int`; `date` beside `datetime`,
+      which pyarrow would truncate to the day; `str` beside `bytes`,
+      which pyarrow would encode; an aware `datetime` beside a naive
+      one, whose offset pyarrow would drop), or holding one value that
+      is not a scalar (a `PersonName`, a nested sequence, an int wider
+      than int64, a 0-d numpy array). Each non-null cell becomes `str(cell)`, the text the CSV
+      arm writes for it.
+
+    Args:
+        values (Iterable[Any]): The column's cells.
+        isna (Callable): `pandas.isna`, as `_parquet_null` takes it.
+
+    Returns:
+        str: `"keep"`, `"list"` or `"text"`.
+    """
+    scalar_families = set()
+    element_families = set()
+    sequences = scalars = 0
+    for value in values:
+        if _parquet_null(value, isna):
+            continue
+        if isinstance(value, np.ndarray) and value.ndim == 0:
+            # Neither a sequence (it cannot be iterated) nor a Python
+            # scalar: written as its text.
+            return "text"
+        if isinstance(value, _PARQUET_SEQUENCES):
+            sequences += 1
+            for element in value:
+                if _parquet_null(element, isna):
+                    continue
+                family = _parquet_family(element)
+                if family is None:
+                    return "text"
+                element_families.add(family)
+        else:
+            scalars += 1
+            family = _parquet_family(value)
+            if family is None:
+                return "text"
+            scalar_families.add(family)
+    if sequences and scalars:
+        return "text"
+    if sequences:
+        return "list" if len(element_families) <= 1 else "text"
+    return "keep" if len(scalar_families) <= 1 else "text"
+
+
+def _parquet_safe(df):
+    """A copy of `df` that a Parquet engine can write, by `_parquet_column_shape`.
+
+    Only columns of dtype `object` are read; every other column, and
+    every object column the rule keeps, is passed through unchanged, so
+    a frame that was already writable keeps its schema.
+
+    Args:
+        df (pd.DataFrame): The cohort frame.
+
+    Returns:
+        pd.DataFrame: A copy; `df` is not changed.
+    """
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+    out = df.copy()
+    for column in out.columns:
+        series = out[column]
+        if series.dtype != object:
+            continue
+        shape = _parquet_column_shape(series, pd.isna)
+        if shape == "list":
+            converted = [None if _parquet_null(v, pd.isna)
+                         else [None if _parquet_null(e, pd.isna) else e
+                               for e in v]
+                         for v in series]
+        elif shape == "text":
+            converted = [None if _parquet_null(v, pd.isna) else str(v)
+                         for v in series]
+        else:
+            continue
+        out[column] = pd.Series(converted, index=series.index, dtype=object)
+    return out
+
+
+
 def _edited_since_its_status(entity) -> bool:
     """Whether a status recorded on `entity` is stale (grade condition 8).
 
@@ -1227,8 +1408,13 @@ class DicomSession:
         The store is the SQLite file and a pixel file beside it
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
         original identifiers and pixels** of everything ingested; keep it where
-        you keep the source data. Until `export()`, the session writes only the
-        store, `isocenter.log` and files you ask for (a configuration, a key).
+        you keep the source data, on a local filesystem: the store uses
+        SQLite's WAL mode and `flock` locks, which a network filesystem does
+        not dependably support. When the store's filesystem is a known
+        network type (NFS, SMB, Lustre, GPFS and others), one `WARNING` log
+        line says so and the store opens anyway. Until `export()`, the
+        session writes only the store, `isocenter.log` and files you ask
+        for (a configuration, a key).
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`
@@ -1249,8 +1435,11 @@ class DicomSession:
                 Environment Variables page.
 
         Raises:
-            ValueError: `isocenter.key` in the working directory is empty or
-                is not a Fernet key.
+            ValueError: `isocenter.key` in the working directory is empty,
+                is not a Fernet key, or is not a regular file (a directory,
+                a FIFO). The message names its absolute path, and the
+                threads the session had started are released before it
+                raises, as they are for any exception from construction.
         """
         configure_logger()
         self.persistence_file = persistence_file or os.getenv("ISOCENTER_DB_PATH", "isocenter.db")
@@ -1258,8 +1447,78 @@ class DicomSession:
         # Check existence before SqliteStore potentially creates it
         db_exists = os.path.exists(self.persistence_file)
 
+        # `SqliteStore` starts its audit thread as its last statement, so a
+        # raise inside it leaves nothing running. Everything after it can
+        # raise with threads (and the store's sqlite handles) live -- a bad
+        # `./isocenter.key`, a `KeyboardInterrupt` during `load_all()` --
+        # and those threads hold the session by weakref, so they lived for
+        # as long as anything referenced the failed session: its
+        # traceback, or `sys.last_exc` in a REPL, indefinitely (#791).
+        # `BaseException`, so an interrupt releases them too.
         self.store_backend = SqliteStore(self.persistence_file)
+        try:
+            self._open_after_the_store(db_exists)
+        except BaseException:
+            self._close_half_built()
+            raise
+
+    def _close_half_built(self):
+        """Close what a failed `__init__` started; never raises.
+
+        `close()` guards each step by `hasattr`, so a session that failed
+        before its executor or its manager existed closes cleanly. A
+        failure of `close()` itself is logged and swallowed: the exception
+        that stopped construction is the one the caller needs (#791).
+        """
+        try:
+            self.close()
+        except Exception as exc:  # pylint: disable=broad-except
+            get_logger().error(
+                "Closing a session whose construction failed raised "
+                f"{describe_exception(exc)}; the construction error follows")
+
+    def _warn_on_a_network_filesystem(self):
+        """Log one WARNING when the store sits on a known network
+        filesystem; never refuses the open, and never raises (#839).
+
+        The directories asked about are the database file's and the pixel
+        sidecar's, each with symlinks resolved first: a `.db` that is a
+        link onto NFS is opened there by SQLite, while its sidecar, named
+        after the link, sits beside the link. A `:memory:` store has only
+        its sidecar, in the temporary directory. A type the detector
+        cannot read, or does not know as a network type, draws nothing.
+        """
+        paths = [self.store_backend.sidecar_path]
+        if self.persistence_file != ":memory:":
+            paths.insert(0, self.persistence_file)
+        fstype = None
+        for path in paths:
+            # `realpath` of the file, not of its directory: the link is the
+            # file, and its directory is where the link sits.
+            where = os.path.dirname(os.path.realpath(path))
+            fstype = _network_filesystem_type(where)
+            if fstype is not None:
+                break
+        if fstype is None:
+            return
+        what = ("the session store's pixel file"
+                if self.persistence_file == ":memory:" else "the session store")
+        get_logger().warning(
+            f"{where} holds {what} and is on a {fstype} filesystem, a "
+            "network filesystem. The store uses SQLite's WAL mode, which "
+            "does not work over a network filesystem, and flock locks, "
+            "whose behaviour there depends on the mount; keep the store on "
+            "a local disk (see the quickstart). The session is opened "
+            "anyway.")
+
+    def _open_after_the_store(self, db_exists):
+        """The rest of `__init__`, after the store is open.
+
+        Split out so `__init__` can close what this starts when it
+        raises (#791).
+        """
         self.persistence_manager = PersistenceManager(self.store_backend)
+        self._warn_on_a_network_filesystem()
 
         # Hydrate memory from DB
         self.store = DicomStore()
@@ -1350,7 +1609,18 @@ class DicomSession:
         self._pixel_scans: List[PixelScanSummary] = []
 
         if os.path.exists("isocenter.key"):
-            self.enable_reversible_anonymization("isocenter.key")
+            # Only this call is wrapped: wider, a `ValueError` from
+            # `load_all()` would carry a false sentence about a key. The
+            # caller did not name this file, so the message says where it
+            # came from; the type stays the frozen `ValueError` (#791).
+            try:
+                self.enable_reversible_anonymization("isocenter.key")
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc}. Session() found it in the working directory "
+                    "and enables reversible anonymization with any "
+                    "isocenter.key there; fix it, or move it out of the "
+                    "directory") from None
 
         # Shared Global Executor for Process Consistency.
         #
@@ -1938,7 +2208,7 @@ class DicomSession:
                         "state while the sidecar is rewritten leaves "
                         "loaders on offsets that no longer exist. Flush "
                         "the persistence manager and stop other writers "
-                        "first (#295).")
+                        "first.")
 
                 # The gate, taken AFTER the leading save above --
                 # that save runs site 6 on this thread and would deadlock
@@ -2136,7 +2406,7 @@ class DicomSession:
                     f"absent from the instance's core attributes, so a "
                     f"pre-0.9.1 session never saw or exported them. "
                     f"Explicitly requested via "
-                    f"reconcile_private_tags() (#172)."))
+                    f"reconcile_private_tags()."))
 
         get_logger().warning(
             f"reconcile_private_tags: dropped {rows_deleted} stored "
@@ -2198,6 +2468,13 @@ class DicomSession:
         returned summary and gets an `ERROR` audit row naming the path and
         the reason, which bars a `PASS` grade. Check the return value: a
         run that rejected files completes normally.
+
+        **Hidden files.** A file found walking `directory` whose name
+        starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
+        counted in `IngestSummary.hidden`, and the console summary prints
+        the count, with no audit row. A directory whose name starts with
+        `.` is walked, and a file named directly as `directory` is read
+        whatever its name.
 
         **A file that ends the worker process reading it** (the
         out-of-memory killer, a decoder crash, `SIGKILL`) is read again
@@ -2352,6 +2629,11 @@ class DicomSession:
             print(f"  - {summary.declined} file(s) DECLINED -- see the "
                   f"returned IngestSummary.declined and the WARNING audit "
                   f"rows.")
+        if summary.hidden:
+            # A print line only: no log line, and no audit row, which
+            # would cost every folder a Mac has touched its PASS (#795).
+            print(f"  - {summary.hidden} file(s) whose name starts with '.' "
+                  f"were not read; see IngestSummary.hidden.")
 
         return summary
 
@@ -2825,7 +3107,7 @@ class DicomSession:
         detail = (f"{count} patient{' was' if count == 1 else 's were'} "
                   "grouped by a release before 1.0 from files with no Patient "
                   "ID and may be more than one subject; re-ingest their source "
-                  "files into a new store to separate them (#584).")
+                  "files into a new store to separate them.")
         get_logger().warning(detail)
         self.store_backend.log_audit(action_type="WARNING",
                                      entity_uid=self.persistence_file,
@@ -2919,9 +3201,15 @@ class DicomSession:
         Scan instances for burned-in text with OCR, and report the text no
         configured redaction zone covers.
 
-        Only instances of machines (by Device Serial Number) the current
-        configuration has a rule for are scanned; other machines are
-        skipped.
+        Only instances of machines a rule covers, by exact Device Serial
+        Number or `"*"` (as `redact()` reads it), and whose covering rules
+        hold at least one valid zone, are scanned. Each instance is
+        checked against the zones of every rule that covers it, `[y1, y2,
+        x1, x2]` and `{"roi": [...]}` alike, the zones `redact()` and
+        `export()` apply. A series with no Device Serial Number is never
+        scanned. When nothing is scanned, the printed line counts the
+        instances of machines no rule names apart from those whose rules
+        hold no zone.
 
         Args:
             serial_number (str, optional): Scan only the machine with this
@@ -2966,49 +3254,55 @@ class DicomSession:
         current_rules = self.configuration.rules
 
         worker_items = []
-        skipped_count = 0
+        # Counted apart (#808, owner ruling Q3-A): a machine no rule names,
+        # and one whose covering rules hold no zone (a `create_config()`
+        # scaffold), call for different fixes. `skipped_count` stays their
+        # sum, which `PixelScanSummary.skipped` reports.
+        unconfigured = 0
+        zoneless = 0
 
         for p in self.store.patients:
             for st in p.studies:
                 for se in st.series:
                     equip = se.equipment
-                    if not equip or not equip.device_serial_number:
-                        skipped_count += len(se.instances)
-                        continue
+                    sn = equip.device_serial_number if equip else None
 
-                    sn = equip.device_serial_number
-
-                    # Filter 1: Must be in Config
-                    # We check if we have a rule for this serial
-                    matched_rule = None
-                    for r in current_rules:
-                        if r.get("serial_number") == sn:
-                            matched_rule = r
-                            break
-
-                    if not matched_rule:
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Rule Refinement: Skip if NO ZONES defined (Scaffolded state)
-                    # Unless user explicitly wants to scan? No, user req says skip.
-                    if not matched_rule.get("redaction_zones"):
-                        # Log once per serial?
-                        # For now just skip
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Filter 2: Explicit User Filter
+                    # The explicit filter first: it is the caller's machine
+                    # selector, compared exactly, not a rule.
                     if serial_number and sn != serial_number:
+                        continue
+
+                    # The rules `redact()` and the export's zones read for
+                    # this series (`rules_matching`: exact or "*", and none
+                    # for a series with no serial), never a reading of its
+                    # own. Taking the first exact match missed "*" and
+                    # every rule after the first (#808).
+                    matched = rules_matching(current_rules, sn)
+                    if not matched:
+                        unconfigured += len(se.instances)
+                        continue
+                    # `zone_rois`, the one reader of a zone: `{"roi": [...]}`
+                    # is a zone, `[1, 2, 3]` is not (#814).
+                    if not any(zone_rois(r.get("redaction_zones"))
+                               for r in matched):
+                        zoneless += len(se.instances)
                         continue
 
                     for inst in se.instances:
                         worker_items.append((inst, equip, current_rules, tesseract_cmd))
 
+        skipped_count = unconfigured + zoneless
         if not worker_items:
             msg = "No matching configured instances found to scan."
-            if skipped_count > 0:
-                msg += f" (Skipped {skipped_count} unconfigured instances)"
+            parts = []
+            if unconfigured:
+                parts.append(f"{unconfigured} instance(s) of machines no "
+                             f"rule names")
+            if zoneless:
+                parts.append(f"{zoneless} instance(s) whose rules have no "
+                             f"redaction zones")
+            if parts:
+                msg += " (Skipped " + "; ".join(parts) + ")"
             print(msg)
             # Recorded: a call that found nothing configured to read still
             # ran, and "no scan ran" would be the wrong thing for section 5
@@ -3604,13 +3898,6 @@ class DicomSession:
                 "(`phi_status_policy`), not the configuration above")
             deid_method = deid_method.replace("|", "\\|")
 
-        try:
-            from importlib.metadata import version, PackageNotFoundError
-            ver = version("isocenter")
-        except PackageNotFoundError:
-            # Running from a source tree that was never installed.
-            ver = "0.0.0"
-
         # 4. Grade the run
         #
         # A dropped *private* element fails the grade; a dropped
@@ -3724,7 +4011,11 @@ class DicomSession:
 
         # 5. Build Report DTO
         report = ComplianceReport(
-            isocenter_version=ver,
+            # The running code's version, the name the (0012,0063) stamp
+            # reads. Not importlib.metadata: that answers "what is
+            # installed under this name", which in an editable or
+            # PYTHONPATH install can be another tree's (#806).
+            isocenter_version=__version__,
             project_name=os.path.basename(self.persistence_file),
             privacy_profile=privacy_profile,
             deid_method=deid_method,
@@ -3821,14 +4112,19 @@ class DicomSession:
                     model = se.equipment.model_name if se.equipment else ""
 
                     for inst in se.instances:
-                        fpath = getattr(inst, 'file_path', "N/A")
+                        # `source_path` first: it is the file `ingest()`
+                        # read, which is what the key documents, and
+                        # `redact()` leaves it in place while detaching
+                        # `file_path` (#794). `None` stays `None` (JSON
+                        # `null`), never the string `"None"`.
+                        fpath = inst.source_path or inst.file_path
 
                         item = ManifestItem(
                             patient_id=p.patient_id,
                             study_instance_uid=st.study_instance_uid,
                             series_instance_uid=se.series_instance_uid,
                             sop_instance_uid=inst.sop_instance_uid,
-                            file_path=str(fpath),
+                            file_path=None if fpath is None else str(fpath),
                             modality=modality,
                             manufacturer=manufacturer,
                             model_name=model,
@@ -5281,13 +5577,13 @@ class DicomSession:
                         "token, so they took only the patient-level identifiers "
                         "(group 0010) of the token the patient's identity was "
                         "restored from, and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         tokenless, count)
                 if kept_ids:
                     get_logger().warning(
                         "%d of them kept their own Patient ID: the token holds "
                         "the blank one a subject with no Patient ID exports, "
-                        "and a restore does not write it over a real one (#584).",
+                        "and a restore does not write it over a real one.",
                         kept_ids)
                 if elsewhere:
                     get_logger().warning(
@@ -5296,7 +5592,7 @@ class DicomSession:
                         "stamp, which may hold one study's values, so outside "
                         "the first study carrying it they took only its "
                         "patient-level identifiers (group 0010), and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         elsewhere, count)
                 # **Tokens that disagree on the name or ID.**
                 # Each instance keeps its own token's, so a re-lock after
@@ -5339,7 +5635,7 @@ class DicomSession:
                         "the patient's identity was restored from (the first "
                         "found, or the first holding a Patient ID); the patient "
                         "takes that token's, which export() stamps on every "
-                        "study (#583).",
+                        "study.",
                         disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed
@@ -5386,8 +5682,7 @@ class DicomSession:
                         get_logger().warning(
                             "The restored Study Date could not be read as "
                             "a date, so the Study keeps its de-identified "
-                            "Study Date "
-                            "(#619).")
+                            "Study Date.")
                     # A restore onto a date that never moved records
                     # no change.
                     elif study.study_date != restored_date:
@@ -5420,8 +5715,10 @@ class DicomSession:
 
         Raises:
             ValueError: The file at `key_path` is not a Fernet key, or is
-                empty (the message names the path). Nothing is cached by a
-                failed enable: fix the file and enable again.
+                empty, or the path is not a regular file (a directory, a
+                FIFO); the message names the path. Nothing is cached by a
+                failed enable, and the session stays open and usable: fix
+                the file and enable again.
         """
         key_manager = KeyManager(key_path)
         service = ReversibilityService(key_manager)
@@ -5443,9 +5740,11 @@ class DicomSession:
         Uses `session.configuration.rules`: every image of a series whose
         Device Serial Number a rule matches has each of the rule's zones
         set to zero. This changes pixel data in memory (and the sidecar,
-        for persistence); call `save()` afterwards to persist it. A
-        redacted instance takes a new SOP Instance UID, derived from its
-        source SOP Instance UID and the rule's zones.
+        for persistence); call `save()` afterwards to persist it. An image
+        several rules match (an exact rule and `"*"`) is redacted once, with
+        every matching rule's zones. A redacted instance takes a new SOP
+        Instance UID, derived from its source SOP Instance UID and the zones
+        of every rule that matches it, whatever order the work runs in.
 
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this
@@ -5459,7 +5758,7 @@ class DicomSession:
                 this configuration, instead of skipping them. Every
                 instance the rules match is redacted again, and its SOP
                 Instance UID is derived again from its source SOP Instance
-                UID and the rule's zones: unchanged zones give the UID and
+                UID and its matching rules' zones: unchanged zones give the UID and
                 exported filename it already has, and other zones give
                 another. `file_path` becomes None either way. To repair a
                 store redacted by 0.9.0 or earlier, see Upgrading from
@@ -5508,8 +5807,13 @@ class DicomSession:
                 `WARNING` names the variable instead.
         """
         if not self.configuration.rules:
-            get_logger().warning("No configuration loaded. Use .load_config() first.")
-            print("No configuration loaded. Use .load_config() first.")
+            # True whether or not a file was loaded (#807): a scaffold over
+            # a cohort with no Device Serial Number loads with no machines.
+            # Not branched on `configuration.config_path`, which only
+            # `load_config()` sets, so rules assigned in code and then
+            # emptied would take the wrong branch.
+            get_logger().warning(_NO_REDACTION_RULES)
+            print(_NO_REDACTION_RULES)
             return 0
 
         # A redaction pass must not run concurrently with a background
@@ -5595,6 +5899,39 @@ class DicomSession:
                 "in memory; the rest are untouched.")
             raise
 
+    def _why_no_redaction_task(self, service) -> str:
+        """The sentence for a pass whose rules prepared no task (#807).
+
+        Asks the predicates task preparation asks, never a second reading:
+        `RedactionService._targets_for` for which instances a rule covers,
+        and `zone_rois` for whether it holds a zone. `prepare_redaction_tasks`
+        returns a task for every target of a rule with a valid ROI, so a
+        pass with no task has either no covered instance or only covered
+        instances whose every rule is zoneless. Reads only the index the
+        service built: no pixel I/O, no sqlite, no lock.
+
+        Args:
+            service (RedactionService): The pass's service.
+
+        Returns:
+            str: The no-match sentence, or the count of covered instances
+                with no zone.
+        """
+        # Keyed by `id()`: two rules can cover one instance (an exact rule
+        # and `"*"`), and it is one instance. True once any covering rule
+        # holds a valid zone.
+        zoned = {}
+        for rule in self.configuration.rules:
+            has_zone = bool(zone_rois(rule.get("redaction_zones")))
+            for inst in service._targets_for(rule.get("serial_number")):
+                zoned[id(inst)] = zoned.get(id(inst), False) or has_zone
+        if not zoned:
+            return _NO_IMAGE_MATCHED
+        count = sum(1 for has_zone in zoned.values() if not has_zone)
+        noun = "instance" if count == 1 else "instances"
+        return (f"{count} {noun} matched rules with no redaction zones; "
+                f"nothing to redact.")
+
     def _apply_redaction_rules(self, service, strategy, force=False,
                                project_secret=None):
         """Run every loaded rule and apply the results to the store.
@@ -5633,12 +5970,34 @@ class DicomSession:
             # -- keyed on the serial they collapse into one row carrying
             # the first rule's zone count.
             for task in rule_tasks:
-                task['pass_key'] = pass_key
+                task['pass_keys'] = [pass_key]
             tasks.extend(rule_tasks)
 
+        # Audit accounting per rule-pass, counted over the rules' own tasks
+        # before they are folded below, so each pass's row still names its
+        # rule's zone count and the images it targeted. `applied` is
+        # tallied by `_apply_redaction_outcomes` from each mutation's own
+        # `pass_keys`.
+        passes = {}
+        for t in tasks:
+            acct = passes.setdefault(
+                t['pass_keys'][0], {'machine_sn': t['machine_sn'],
+                                    'zones': len(t['rois']),
+                                    'targeted': 0, 'applied': 0})
+            acct['targeted'] += 1
+
+        # One task per instance (#908): an image two rules cover is redacted
+        # with both rules' zones in one task, attested and given its UID
+        # over the whole set. Two tasks made its UID the last one's, and its
+        # frame one rule's: every time under processes, by a race under
+        # threads.
+        tasks = service._one_task_per_instance(  # pylint: disable=protected-access
+            tasks, project_secret=project_secret)
+
         if not tasks:
-            get_logger().warning("No matching images found for any loaded rules.")
-            print("No matching images found for any loaded rules.")
+            message = self._why_no_redaction_task(service)
+            get_logger().warning(message)
+            print(message)
             return 0
 
         print(f"Queued {len(tasks)} redaction tasks across "
@@ -5670,22 +6029,8 @@ class DicomSession:
         # pre-dispatch UID on its task, the worker keys its mutation on
         # that same value, and one authority for "what was this
         # instance called before redaction" is what keeps the two sides
-        # of the round-trip agreeing. Two rules on one instance put the
-        # same key here twice; the map deduplicates to the one object.
+        # of the round-trip agreeing. One task per instance, so one key.
         instances = {t['original_sop_uid']: t['instance'] for t in tasks}
-
-        # Audit accounting per rule-pass. `targeted` is countable
-        # here; `applied` is tallied by `_apply_redaction_outcomes` from
-        # each mutation's own `pass_key`, because outcomes carry no
-        # order and a UID join back to tasks has the two-rules-one-
-        # instance ambiguity `execute_redaction_task` documents.
-        passes = {}
-        for t in tasks:
-            acct = passes.setdefault(
-                t['pass_key'], {'machine_sn': t['machine_sn'],
-                                'zones': len(t['rois']),
-                                'targeted': 0, 'applied': 0})
-            acct['targeted'] += 1
 
         # Pixel I/O and NumPy ops release the GIL. The generator is consumed
         # incrementally so each worker's image is applied and released rather
@@ -6016,14 +6361,15 @@ class DicomSession:
 
             instance.mark_modified()
             applied += 1
-            # Attributed by the mutation's own `pass_key` rather than
-            # by joining the UID back to a task: two rules matching one
-            # instance produce two mutations under one pre-redaction UID,
-            # and each belongs to its own pass's row.
+            # Attributed by the mutation's own `pass_keys` rather than by
+            # joining the UID back to a task: an instance two rules cover
+            # is one mutation carrying both rules' zones, and it counts in
+            # each of their passes' rows (#908).
             if passes is not None:
-                acct = passes.get(mutation.get('pass_key'))
-                if acct is not None:
-                    acct['applied'] += 1
+                for key in mutation.get('pass_keys') or ():
+                    acct = passes.get(key)
+                    if acct is not None:
+                        acct['applied'] += 1
 
         return applied, _report_redaction_failures(failures, store_backend)
 
@@ -6262,6 +6608,10 @@ class DicomSession:
     def export(self, folder: str, format: str = "dicom", **options):
         """Export the session to a directory in the requested format.
 
+        Both built-in formats save the session (`save(sync=True)`) before
+        they write, after any refusal listed under `Raises:`; a refused
+        call saves nothing.
+
         Either format writes one `WARNING` audit row, and changes nothing it
         writes, when the instances it writes carry PHI statuses recorded
         under a policy that is neither the one in force nor one this
@@ -6376,8 +6726,7 @@ class DicomSession:
                 "which holds the source SOP Instance UID, the "
                 "recoverable-identity disclosure, the de-identification "
                 "markers, the owner stamps, the EXPORT and DATA_LOSS "
-                "rows), so this report does not know what it wrote "
-                "(#527).")
+                "rows), so this report does not know what it wrote.")
             get_logger().warning(detail)
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
@@ -6396,7 +6745,9 @@ class DicomSession:
                 JPEG 2000 (lossless). A 16-bit image with more than one
                 sample is written this way too, and pydicom with only its
                 Pillow plugin cannot decode it; the export names each such
-                instance at INFO.
+                instance at INFO. An image of 32- or 64-bit integer
+                samples, which JPEG 2000 here cannot carry exactly, is
+                written uncompressed instead, also named at INFO (#771).
             check_burned_in (bool): If True, scans for PHI before exporting and
                 withholds every instance that still carries an identifier,
                 at any level of its hierarchy. Each withheld instance
@@ -7188,7 +7539,7 @@ class DicomSession:
                   f"{'; '.join(named)}. A status says what the scan it came "
                   f"from concluded; export() writes the graph as it holds "
                   f"it. To apply the policy in force, run audit() and then "
-                  f"anonymize() (#555).")
+                  f"anonymize().")
         detail = " ".join(detail.split()).replace("|", "\\|")
         get_logger().warning(detail)
         if self.store_backend is not None:
@@ -7406,6 +7757,15 @@ class DicomSession:
         It reports the session's in-memory graph and does not `save()`
         first: pending edits are not committed as a side effect.
 
+        Parquet holds a column of sequences (a multi-valued tag such as
+        Image Type) as a list column when its values are uniform: every
+        non-null cell a sequence whose non-null elements are all of one
+        scalar family. A column that is neither that nor scalars of one
+        family (a tag single-valued in one file and multi-valued in
+        another, or a `str` beside an `int`) is written as text, each
+        value as the CSV writes it. Missing values stay null in both.
+        Other columns are written as they are.
+
         Args:
             output_path (str): The output file path (ends with .csv or
                 .parquet). Required; its directory is created if missing.
@@ -7417,7 +7777,8 @@ class DicomSession:
                 line.
 
         Returns:
-            pd.DataFrame: The frame that was written.
+            pd.DataFrame: The frame as built, before any Parquet
+                conversion; the same frame for either format.
 
         Raises:
             ImportError: If pandas (or, for Parquet, a Parquet engine) is
@@ -7457,8 +7818,12 @@ class DicomSession:
 
         if output_path.endswith(".parquet"):
             try:
-                # Requires pandas plus pyarrow or fastparquet
-                df.to_parquet(output_path, index=False)
+                # Requires pandas plus pyarrow or fastparquet. Through
+                # `_parquet_safe`: a multi-valued tag is a pydicom
+                # `MultiValue`, which pyarrow refuses, and a column can mix
+                # types a CSV writes as text (#816). The copy is what is
+                # written; the frame returned is the one built.
+                _parquet_safe(df).to_parquet(output_path, index=False)
             except ImportError as e:
                 get_logger().error(
                     "Parquet engine (pyarrow or fastparquet) missing.")

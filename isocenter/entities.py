@@ -1090,7 +1090,8 @@ class Instance(DicomItem):
             and `redact()` can replace it.
         sop_class_uid (str): SOP Class UID (0008,0016).
         instance_number (int): Instance Number (0020,0013). Not unique
-            within a series.
+            within a series. 0 for an ingested file that has none, and
+            `0020,0013` is then absent from `attributes` (#870).
         file_path (Optional[str]): A file whose pixels match this instance
             now, read when the store holds no frame for it. None after
             redaction.
@@ -2767,7 +2768,7 @@ class Study(TrackedEntity):
                 ".date() on it, and put the time of day in Study Time "
                 "(0008,0030) -- Study.study_time -- instead. A datetime "
                 "here comes back from the store as an ISO string and "
-                "exports as an illegal DA value (#188).")
+                "exports as an illegal DA value.")
         # ...and the DA-string boundary, for the same reason. Hydration
         # turns a DA value into a `date`, so a DA-spelled string left as a
         # string here would make `export_folder_names` -- which builds the

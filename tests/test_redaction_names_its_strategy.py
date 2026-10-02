@@ -310,7 +310,9 @@ def test_a_malformed_tuning_value_is_reported_by_a_pass_with_no_work(
     Resolving the strategy before task preparation -- which the banner
     requires, since it has to name the strategy the pool was built from
     rather than guess at it -- moved three environment reads ahead of
-    `No matching images found for any loaded rules.` At `f544989` none
+    the no-match sentence (`No matching images found for any loaded
+    rules.` then; `No image matched any loaded rule's serial_number.`
+    since #807). At `f544989` none
     of the five variables below said anything on such a call; three of
     them now warn once each.
 

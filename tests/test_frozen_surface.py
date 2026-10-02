@@ -170,7 +170,7 @@ TIER_ONE_NAMES = {
                    "tag", "patient_id", "entity", "remediation_proposal",
                    "metadata", "entity_path"},
     "ExportSummary": {"written_uids", "failures", "written", "failed"},
-    "IngestSummary": {"ingested", "failures", "declined", "skipped", "failed"},
+    "IngestSummary": {"ingested", "failures", "declined", "skipped", "hidden", "failed"},
     "DiscoveryResult": {"filter", "to_zones", "to_dataframe"},
     "DicomBuilder": {"start_patient"},
     "DicomStore": {"patients"},
@@ -948,7 +948,7 @@ def test_the_frozen_shapes_have_these_fields(tmp_path):
         # every other shape the frozen methods return, and not this one.
         written = session.export(str(tmp_path / "wfdb"), format="wfdb")
     assert type(written) is list and written == [], written
-    assert _public_fields(type(summary)) == ["ingested", "failures", "declined", "skipped"]
+    assert _public_fields(type(summary)) == ["ingested", "failures", "declined", "skipped", "hidden"]
     assert hasattr(summary, "failed")
 
     assert _public_fields(session_module.ExportSummary) == ["written_uids", "failures"]
@@ -1644,6 +1644,12 @@ def test_the_stability_page_says_what_the_freeze_covers():
     # `test_a_malformed_key_in_the_working_directory_makes_session_raise`.
     assert ("A malformed one makes `Session()` raise its `ValueError`."
             ) in frozen
+    # #791, owner ruling Q1 A: a path that is not a regular file is the
+    # same refusal, and the half-built session is closed before it.
+    # Pinned in behaviour by `test_a_bad_key_in_the_working_directory.py`.
+    assert ("So does anything at that path that is not a regular file, such "
+            "as a directory. The message names the path, and the threads the "
+            "session had started are released first.") in frozen
     # D2 and E1: the report arm locks the patients with a finding, not
     # every patient scanned. After `anonymize()` it names no patient whose
     # ID was replaced; an ID-less subject (#584) or a KEEP on `0010,0020`

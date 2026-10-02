@@ -1936,14 +1936,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -1985,7 +1985,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2029,7 +2028,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI '2.25.291335229807378616725209041676934935357'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -2073,7 +2071,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2150,14 +2147,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.32503923131738778902515719140406645893; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -2192,7 +2189,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI/implicit '2.25.291335229807378616725209041676934935357'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2236,7 +2232,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.248810711538203109090146145334470144227'",
           "0020,000e": "UI '2.25.291335229807378616725209041676934935357'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -2334,14 +2329,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -2383,7 +2378,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2428,7 +2422,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI '2.25.248960922551121475208531727793057208230'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -2473,7 +2466,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2558,14 +2550,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.42100818553109929247133932621265238857; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -2600,7 +2592,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI/implicit '2.25.248960922551121475208531727793057208230'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -2645,7 +2636,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.241562789756228738447671560248571998636'",
           "0020,000e": "UI '2.25.248960922551121475208531727793057208230'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -2737,14 +2727,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -2786,7 +2776,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -2829,7 +2818,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI '2.25.179993520496940927358596955971438368858'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [128]",
@@ -2872,7 +2860,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -2948,14 +2935,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.3209389531017675549415813877624368448; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -2990,7 +2977,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI/implicit '2.25.179993520496940927358596955971438368858'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -3033,7 +3019,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.232493156614777367039225110471151081235'",
           "0020,000e": "UI '2.25.179993520496940927358596955971438368858'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [128]",
@@ -3123,14 +3108,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -3172,7 +3157,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -3215,7 +3199,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI '2.25.162641998833467617755830957270735679433'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [128]",
@@ -3258,7 +3241,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -3334,14 +3316,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.29103878517107328248228050231695478959; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -3376,7 +3358,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI/implicit '2.25.162641998833467617755830957270735679433'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [128]",
@@ -3419,7 +3400,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.179156730963171913409272256935869151694'",
           "0020,000e": "UI '2.25.162641998833467617755830957270735679433'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [128]",
@@ -20883,16 +20863,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -20983,8 +20956,66 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -21079,16 +21110,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -21165,8 +21189,66 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -21199,16 +21281,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -21300,8 +21375,67 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -21397,16 +21531,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -21484,8 +21611,67 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -26168,16 +26354,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -26268,8 +26447,66 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -26364,16 +26601,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -26450,8 +26680,66 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -26484,16 +26772,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -26585,8 +26866,67 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -26682,16 +27022,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -26769,8 +27102,67 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -46932,7 +47324,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -46978,7 +47369,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI '2.25.310508164927388238977918745982593899273'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -47024,7 +47414,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -47131,7 +47520,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI/implicit '2.25.310508164927388238977918745982593899273'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -47177,7 +47565,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.27571396632059582514985840407152828728'",
           "0020,000e": "UI '2.25.310508164927388238977918745982593899273'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -49636,14 +50023,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -49685,7 +50072,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [45]",
@@ -49729,7 +50115,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI '2.25.317059928404542492382929200468973645508'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [45]",
@@ -49773,7 +50158,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [45]",
@@ -49857,14 +50241,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.86164008115771185238417434208295286685; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -49899,7 +50283,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI/implicit '2.25.317059928404542492382929200468973645508'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [45]",
@@ -49943,7 +50326,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.237661239041429930621515013203418771237'",
           "0020,000e": "UI '2.25.317059928404542492382929200468973645508'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [45]",
@@ -50041,14 +50423,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -50090,7 +50472,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [50]",
@@ -50134,7 +50515,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI '2.25.227182294489441497089851006594117732077'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [50]",
@@ -50178,7 +50558,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [50]",
@@ -50262,14 +50641,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.83170309094709282338053441269889264103; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -50304,7 +50683,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI/implicit '2.25.227182294489441497089851006594117732077'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [1]",
           "0028,0004": "CS/implicit 'MONOCHROME2'",
           "0028,0010": "US/implicit [50]",
@@ -50348,7 +50726,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.201943059832127029704218153835918429519'",
           "0020,000e": "UI '2.25.227182294489441497089851006594117732077'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [1]",
           "0028,0004": "CS 'MONOCHROME2'",
           "0028,0010": "US [50]",
@@ -60240,14 +60617,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -60289,7 +60666,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60334,7 +60710,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI '2.25.127328168497235663585352668020579007762'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -60379,7 +60754,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60464,14 +60838,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.38415045543282514992782840218948293430; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -60506,7 +60880,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI/implicit '2.25.127328168497235663585352668020579007762'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60551,7 +60924,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.187382813516254971360498371410574365600'",
           "0020,000e": "UI '2.25.127328168497235663585352668020579007762'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -60650,14 +61022,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -60699,7 +61071,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60744,7 +61115,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI '2.25.314220933897190562966998231169467117031'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -60789,7 +61159,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60874,14 +61243,14 @@
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427",
-        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
+        "Series Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it.",
         null,
         null
        ],
        [
         "WARNING",
         "1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427",
-        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it (#584).",
+        "Study Instance UID absent from the source of instance 1.2.826.0.1.3680043.8.498.35129940130895238772240045385911100427; the export writes a UID generated for it.",
         null,
         null
        ],
@@ -60916,7 +61285,6 @@
           "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI/implicit '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI/implicit '2.25.314220933897190562966998231169467117031'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0002": "US/implicit [3]",
           "0028,0004": "CS/implicit 'RGB'",
           "0028,0006": "US/implicit [0]",
@@ -60961,7 +61329,6 @@
           "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
           "0020,000d": "UI '2.25.249196614928311317444056394417584619731'",
           "0020,000e": "UI '2.25.314220933897190562966998231169467117031'",
-          "0020,0013": "IS '0'",
           "0028,0002": "US [3]",
           "0028,0004": "CS 'YBR_RCT'",
           "0028,0006": "US [0]",
@@ -65368,16 +65735,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -65468,8 +65828,66 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -65564,16 +65982,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -65650,8 +66061,66 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [100, 100, 3] sha256:1a243c9351e3a9ae"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -65684,16 +66153,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -65785,8 +66247,67 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -65882,16 +66403,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.222497678311849900570271307043549855727",
-        "Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -65969,8 +66483,67 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.222497678311849900570271307043549855727: Export failed for instance 2.25.222497678311849900570271307043549855727: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 3 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_968f7c20dcee23fad1b3a338/Study_2016-11-21_Study_78542/Series_1_OT_Series_02072/2.25.222497678311849900570271307043549855727.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 192'",
+          "0008,0008": "CS/implicit 'DERIVED\\\\SECONDARY\\\\OTHER'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.7'",
+          "0008,0018": "UI/implicit '2.25.222497678311849900570271307043549855727'",
+          "0008,0020": "DA/implicit '20161121'",
+          "0008,0023": "DA/implicit ''",
+          "0008,002a": "DT/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'OT'",
+          "0008,0064": "CS/implicit 'SYN'",
+          "0008,0090": "PN/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_968f7c20dcee23fad1b3a338'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '024Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,5100": "CS/implicit ''",
+          "0020,000d": "UI/implicit '2.25.269814021165076455830223932665496578542'",
+          "0020,000e": "UI/implicit '2.25.171992634815046722570182185585179402072'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0020": "CS/implicit ''",
+          "0020,0060": "CS/implicit ''",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0008": "IS/implicit '2'",
+          "0028,0010": "US/implicit [100]",
+          "0028,0011": "US/implicit [100]",
+          "0028,0030": "DS/implicit '1.0\\\\1.0'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.7'",
+          "0002,0003": "UI '2.25.222497678311849900570271307043549855727'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [2, 100, 100, 3] sha256:3caa80cc3032f745"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -105428,16 +106001,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -105542,8 +106108,80 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -105652,16 +106290,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -105752,8 +106383,80 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -105786,16 +106489,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -105899,8 +106595,79 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -106008,16 +106775,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106107,8 +106867,79 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -106141,16 +106972,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106255,8 +107079,80 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -106365,16 +107261,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106465,8 +107354,80 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -106499,16 +107460,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106612,8 +107566,79 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -106721,16 +107746,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106820,8 +107838,79 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -106854,16 +107943,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -106968,8 +108050,80 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -107078,16 +108232,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -107178,8 +108325,80 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0008": "IS/implicit '15'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [15, 10, 10] sha256:e30a4288ac229022"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -107212,16 +108431,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -107325,8 +108537,79 @@
        }
       },
       "A.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:A.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       },
       "A.reopened.dicom": {
        "files": {
@@ -107434,16 +108717,9 @@
       ],
       "rows": [
        [
-        "ERROR",
-        "2.25.167304134895732710111873019996256991552",
-        "Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.",
-        null,
-        null
-       ],
-       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 0 of 1 planned instances from 1 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -107533,8 +108809,79 @@
        }
       },
       "B.dicom-j2k": {
-       "files": {},
-       "result": "raised ExportError: Export to <out:B.dicom-j2k> wrote 0 of 1 planned instances; 1 failed and nothing reached disk. First: 2.25.167304134895732710111873019996256991552: Export failed for instance 2.25.167304134895732710111873019996256991552: _J2kFrameRefusal: Compression failed: JPEG 2000 lossless cannot carry uint32 pixel data at 1 sample(s) per pixel (BitsAllocated 32, PixelRepresentation 0). Here the encoder (imagecodecs 2026.8.16) is exact only to 25 bits, so a 32-bit frame would be written wrong and read back wrong, and a 64-bit frame is refused by the codec outright. Export this study with use_compression=False, which writes the same pixels uncompressed and bit-exact.. See the audit log for the rest."
+       "files": {
+        "Subject_ANON_d2d198b5b05871d9b0f32eff/Study_2003-07-07_Study_96519/Series_1_RTDOSE_Series_86004/2.25.167304134895732710111873019996256991552.dcm": {
+         "elements": {
+          "0008,0012": "DA/implicit '19000101'",
+          "0008,0013": "TM/implicit '000000'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0008,0018": "UI/implicit '2.25.167304134895732710111873019996256991552'",
+          "0008,0020": "DA/implicit '20030707'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'RTDOSE'",
+          "0008,0070": "LO/implicit 'Manufacturer name here'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'Treatment Planning System name here'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_d2d198b5b05871d9b0f32eff'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'O'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit ''",
+          "0018,1020": "LO/implicit 'version 1'",
+          "0020,000d": "UI/implicit '2.25.306365164333985991463027396078882596519'",
+          "0020,000e": "UI/implicit '2.25.339271100276343577031694361964424086004'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit ''",
+          "0020,0032": "DS/implicit '189.431250000000\\\\199.431250000000\\\\-761.87000000000'",
+          "0020,0037": "DS/implicit '1.00000000000000\\\\0.0\\\\0.0\\\\0.0\\\\1.00000000000000\\\\0.0'",
+          "0020,0052": "UI/implicit '2.25.136993208052529252259834948747513939503'",
+          "0020,1040": "LO/implicit ''",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0009": "AT/implicit ['3004000c']",
+          "0028,0010": "US/implicit [10]",
+          "0028,0011": "US/implicit [10]",
+          "0028,0030": "DS/implicit '10.0000000000000\\\\10.0000000000000'",
+          "0028,0100": "US/implicit [32]",
+          "0028,0101": "US/implicit [32]",
+          "0028,0102": "US/implicit [31]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "3004,0002": "CS/implicit 'RELATIVE'",
+          "3004,0004": "CS/implicit 'PHYSICAL'",
+          "3004,000a": "CS/implicit 'BEAM'",
+          "3004,000c": "DS/implicit sha256:bc4c8cebe56647d1 len=241",
+          "3004,000e": "DS/implicit '1.0000000e-6'",
+          "300c,0002": "SQ/implicit items=1",
+          "300c,0002[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.481.5'",
+          "300c,0002[0]>0008,1155": "UI/implicit '2.25.209861960920122530500414320575363761102'",
+          "300c,0002[0]>300c,0020": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004": "SQ/implicit items=1",
+          "300c,0002[0]>300c,0020[0]>300c,0004[0]>300c,0006": "IS/implicit '1'",
+          "300c,0002[0]>300c,0020[0]>300c,0022": "IS/implicit '1'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.481.2'",
+          "0002,0003": "UI '2.25.167304134895732710111873019996256991552'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u4 [10, 10] sha256:67f96b3373d7acf1"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
       }
      },
      "steps": {
@@ -107626,7 +108973,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -107771,7 +109117,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -107916,7 +109261,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108108,7 +109452,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108253,7 +109596,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108459,7 +109801,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108578,7 +109919,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108697,7 +110037,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108863,7 +110202,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -108982,7 +110320,6 @@
           "0020,000e": "UI/implicit '2.25.38567738190377862841716885884244658011'",
           "0020,0010": "SH/implicit ''",
           "0020,0011": "IS/implicit '2'",
-          "0020,0013": "IS/implicit '0'",
           "0028,0303": "CS/implicit 'MODIFIED'",
           "300a,0002": "SH/implicit 'ANONYMIZED'",
           "300a,0006": "DA/implicit '19000101'",
@@ -124793,12 +126130,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "e238b31ffdf833a867fe416a392b18ebb5bd1f64",
-  "isocenter_version": "1.0.0rc8",
+  "git_sha": "2d904e6c66463f48637c206ef40d9c5b5687ade3",
+  "isocenter_version": "1.0.0rc9",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 759
+  "seconds": 1032
  },
  "schema": 1,
  "toolchain": {

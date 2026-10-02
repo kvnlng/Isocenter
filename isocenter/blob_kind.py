@@ -70,7 +70,7 @@ _BLOB_KIND_GRAMMAR = (
     "a blob kind is 'pixels' or 'waveform', optionally followed by ':' and "
     "the path to the element the bytes came from -- 'gggg,eeee/index' steps "
     "separated by '/', then the element's own 'gggg,eeee' tag, all "
-    "lowercase hex (e.g. 'pixels:0088,0200/0/7fe0,0010'). #183's "
+    "lowercase hex (e.g. 'pixels:0088,0200/0/7fe0,0010'). An earlier "
     "'pixels:seq:...' sketch is not the grammar: there is no 'seq' marker.")
 
 

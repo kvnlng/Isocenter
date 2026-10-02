@@ -54,7 +54,7 @@ summary = session.ingest("input")
 
 ```python
 >>> summary
-IngestSummary(ingested=1, failures=[], declined=0, skipped=0)
+IngestSummary(ingested=1, failures=[], declined=0, skipped=0, hidden=0)
 >>> [(p.patient_id, p.patient_name) for p in session.store.patients]
 [('1CT1', 'CompressedSamples^CT1')]
 ```

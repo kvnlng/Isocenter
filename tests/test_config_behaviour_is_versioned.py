@@ -47,21 +47,25 @@ import pytest
 
 import isocenter
 from isocenter import config_manager
-from support.behaviour_digest import behaviour_digest
+from support.behaviour_digest import LEGACY_ID, behaviour, digest_of
 from test_config_schema_version import SCHEMA_BY_VERSION
 
 #: The digest of what each configuration version does, computed by
 #: `support.behaviour_digest.behaviour_digest`. Recomputed on the B3 PR
 #: (#782) after #879, #883, #784, #731 and #741 landed in it, and again
-#: when the fixture was widened to see B1's #746 and #765 (review of #895).
+#: when the fixture was widened to see B1's #746 and #765 (review of #895), and
+#: again for a second pass, an ID-less subject and a legacy patient (#903),
+#: and again on the B4 PR (#899) when the `"*"` zone scenario was added
+#: for #808, #814 and the PARTIAL_LEAK ruling, and again when that scenario
+#: redacted under the rules its suggestions leave, two on one image (#908).
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "6eeeb91d8923e1132394c47bc5129d86e8e08bbba3513023f6d4cdde3738ee90",
+    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "6eeeb91d8923e1132394c47bc5129d86e8e08bbba3513023f6d4cdde3738ee90",
+    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
 }
 
 _WHAT_TO_DO = (
@@ -72,10 +76,15 @@ _WHAT_TO_DO = (
 
 
 @pytest.fixture(scope="module")
-def digest(tmp_path_factory):
+def record(tmp_path_factory):
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("ISOCENTER_FORCE_THREADS", "1")
-        return behaviour_digest(str(tmp_path_factory.mktemp("behaviour")))
+        return behaviour(str(tmp_path_factory.mktemp("behaviour")))
+
+
+@pytest.fixture(scope="module")
+def digest(record):
+    return digest_of(record)
 
 
 def test_behaviour_matches_this_versions_row(digest):
@@ -307,6 +316,25 @@ def test_no_row_the_previous_final_release_shipped_has_moved():
         f"a row {tag} released has moved: {'; '.join(result)}. A shipped "
         f"version's behaviour never changes: bump CONFIG_VERSION's minor and "
         f"add a row (#782)")
+
+
+def test_the_fixture_reaches_a_second_pass_an_id_less_subject_and_a_legacy_patient(record):
+    """The digest sees only what its fixture reaches (#903). In every
+    scenario: a second `audit()` finds nothing and its pass changes
+    nothing, so a UID the first pass minted is not replaced again; the
+    subject with no Patient ID keeps #584's synthetic key; and the patient
+    the store classes legacy carries its unkeyed pseudonym. A fixture
+    change that stopped reaching one of them would leave the digest blind
+    to it again while still pinning a number."""
+    from isocenter.entities import is_synthetic_patient_id
+    from isocenter.privacy import _unkeyed_replacement_id_for
+    legacy = _unkeyed_replacement_id_for(LEGACY_ID)
+    for name, scenario in record.items():
+        assert scenario["second_findings"] == [], name
+        assert scenario["graph_after_second"] == scenario["graph"], name
+        ids = [patient["id"] for patient in scenario["graph"]]
+        assert sum(is_synthetic_patient_id(pid) for pid in ids) == 1, (name, ids)
+        assert legacy in ids, (name, legacy, ids)
 
 
 def test_one_behaviour_row_per_schema_row():

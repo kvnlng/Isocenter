@@ -90,7 +90,8 @@ def test_remove_or_empty_on_an_owned_uid_is_refused(tmp_path, door, action, tag)
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is {action.upper()};" in message, message
     assert UIDS[tag] in message, message
-    assert "(REPLACE with no `value:` key, #544)" in message and "(#877)" in message, message
+    assert "(REPLACE with no `value:` key)" in message, message
+    assert message.endswith("the export would carry the source UID"), message
 
 
 @pytest.mark.parametrize("door", DOORS)
@@ -117,17 +118,18 @@ def test_replace_with_a_value_on_an_owned_uid_is_refused(tmp_path, door, value, 
     message = str(caught.value)
     assert f"phi_tags['{tag}'] is REPLACE with value {value!r};" in message, message
     assert UIDS[tag] in message, message
-    assert "(REPLACE with no `value:` key, #544)" in message and "(#877)" in message, message
+    assert "(REPLACE with no `value:` key)" in message, message
+    assert message.endswith("the export would carry the source UID"), message
 
 
 @pytest.mark.parametrize("tag", ["0020,000D", "0020,000E"])
 def test_an_upper_case_key_is_refused_too(tmp_path, tag):
     """The loader and `validate_phi_policy` lowercase the key before the
     arm reads it; an arm comparing the key as spelled would miss this."""
-    with pytest.raises(ValueError, match=r"\(#877\)"):
+    with pytest.raises(ValueError, match=r"would carry the source UID$"):
         PhiInspector(config_tags={tag: {"action": "REMOVE"}})
     with DicomSession(str(tmp_path / "s.db")) as session:
-        with pytest.raises(ValueError, match=r"\(#877\)"):
+        with pytest.raises(ValueError, match=r"would carry the source UID$"):
             session.load_config(_yaml(tmp_path, {tag: {"action": "EMPTY"}}))
 
 
@@ -138,26 +140,26 @@ def test_the_message():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000d'] is REMOVE; Study Instance UID can "
         "only be kept (KEEP) or replaced by this project's keyed replacement "
-        "UID (REPLACE with no `value:` key, #544), because the study writes its UID "
+        "UID (REPLACE with no `value:` key), because the study writes its UID "
         "on every exported file, so under REMOVE the export would carry the "
-        "source UID (#877)")
+        "source UID")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0020,000e": {"action": "EMPTY"}}, "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000e'] is EMPTY; Series Instance UID can "
         "only be kept (KEEP) or replaced by this project's keyed replacement "
-        "UID (REPLACE with no `value:` key, #544), because the series writes its "
+        "UID (REPLACE with no `value:` key), because the series writes its "
         "UID on every exported file, so under EMPTY the export would carry "
-        "the source UID (#877)")
+        "the source UID")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0020,000d": {"action": "REPLACE", "value": "1.2.3"}},
                             "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0020,000d'] is REPLACE with value '1.2.3'; Study "
         "Instance UID can only be kept (KEEP) or replaced by this project's "
-        "keyed replacement UID (REPLACE with no `value:` key, #544), because "
+        "keyed replacement UID (REPLACE with no `value:` key), because "
         "the study writes its UID on every exported file, so under REPLACE "
-        "with a value the export would carry the source UID (#877)")
+        "with a value the export would carry the source UID")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0020,000e": {"action": "REPLACE", "value": ""}},
                             "cfg.yaml")
@@ -196,7 +198,7 @@ def test_other_uids_are_not_swept_in(tag, rule):
 @pytest.mark.parametrize("action", ["SHIFT", "JITTER"])
 def test_shift_on_an_owned_uid_was_and_is_refused_by_its_own_arm(tag, action):
     """SHIFT/JITTER on a UI is #559's refusal, not this one."""
-    with pytest.raises(ValueError, match=r"apply only to DA and DT \(#559\)"):
+    with pytest.raises(ValueError, match=r"apply only to DA and DT$"):
         validate_phi_policy({tag: {"action": action}}, "cfg.yaml")
 
 
@@ -206,7 +208,7 @@ def test_a_refused_audit_mints_no_secret(tmp_path):
     db = tmp_path / "s.db"
     with DicomSession(str(db)) as session:
         session.configuration.phi_tags = {"0020,000e": {"action": "REMOVE"}}
-        with pytest.raises(ValueError, match=r"\(#877\)"):
+        with pytest.raises(ValueError, match=r"would carry the source UID$"):
             session.audit()
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
@@ -223,7 +225,7 @@ def test_set_phi_tag_leaves_the_policy_and_file_unchanged(tmp_path, tag):
         before = {t: dict(r) if isinstance(r, dict) else r
                   for t, r in config.phi_tags.items()}
         saved = (tmp_path / "saved.yaml").read_bytes()
-        with pytest.raises(ValueError, match=r"\(#877\)"):
+        with pytest.raises(ValueError, match=r"would carry the source UID$"):
             config.set_phi_tag(tag, "REMOVE")
         assert config.phi_tags == before
         assert (tmp_path / "saved.yaml").read_bytes() == saved
@@ -236,7 +238,7 @@ def test_an_external_profiles_row_is_refused_unless_the_file_overrides_it(tmp_pa
     profile.write_text(yaml.safe_dump(
         {"phi_tags": {tag: {"action": "REMOVE"}}}), encoding="utf-8")
     with DicomSession(str(tmp_path / "s.db")) as session:
-        with pytest.raises(ValueError, match=r"\(#877\)"):
+        with pytest.raises(ValueError, match=r"would carry the source UID$"):
             session.load_config(_yaml(tmp_path, {}, profile=str(profile)))
         session.load_config(_yaml(
             tmp_path, {tag: {"action": "REPLACE"}}, profile=str(profile)))

@@ -22,7 +22,7 @@ from .profiles import FLOOR_POLICY
 #: nowhere to write. Raised, never a silent return: a method must not
 #: report success after doing nothing.
 _NO_FILE = ("configuration.save() has no file to write: load_config(path) "
-            "sets one, or set session.configuration.config_path (#715)")
+            "sets one, or set session.configuration.config_path")
 
 
 class FlowList(list):
@@ -472,7 +472,7 @@ class IsocenterConfiguration:
         if self.privacy_profile and pinned not in profiles.PRIVACY_PROFILES:
             message += ("; if the profile file has changed since load_config(), "
                         "load it again")
-        return message + " (#715)"
+        return message
 
     def _refuse_auto_save_without_a_file(self) -> None:
         """Refuse an opted-in configuration with nowhere to write.
@@ -529,7 +529,7 @@ class IsocenterConfiguration:
             self._file_in_sync = False
             print(f"Configuration changed in memory only; {self.config_path} is "
                   f"unchanged. Call session.configuration.save() to write it, or "
-                  f"set session.configuration.auto_save = True (#715).")
+                  f"set session.configuration.auto_save = True.")
         return result
 
     @staticmethod

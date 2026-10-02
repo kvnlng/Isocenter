@@ -414,7 +414,8 @@ def test_export_says_when_it_writes_statuses_recorded_under_another_policy(
                                  "1 instance(s) whose PHI status was "), notice
         assert f"({FLOOR}, {floor.fingerprint[:15]})" in notice
         assert f"none ({narrow_policy.fingerprint[:15]})" in notice
-        assert "(#555)" in notice
+        assert notice.endswith("To apply the policy in force, run audit() "
+                               "and then anonymize()."), notice
         assert _warnings(session) == [notice], "the notice is the only row"
         # The export is unchanged: it writes the graph as it holds it.
         assert (_exported(tmp_path / "out").InstitutionName

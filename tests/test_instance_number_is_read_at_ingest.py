@@ -11,11 +11,12 @@ The owner's ruling: read InstanceNumber at ingest, 0 when the file has
 none. A value pydicom does not read as one integer -- empty,
 multi-valued, a fraction, not a number -- or one outside IS's range is
 read as none, and ingest goes on:
-an ill-formed Instance Number is not a reason to refuse the file. The one
-exception predates #810 and is only pinned here: an infinite value
-(`inf`, `-inf`, `1e400`) raises `OverflowError` inside pydicom and the file
-is refused, as it was before. The
-attribute is the file's element either way and is not touched by this.
+an ill-formed Instance Number is not a reason to refuse the file. An
+infinite value (`inf`, `-inf`, `1e400`), which raises `OverflowError`
+inside pydicom, refused the file until #870 and now reads as 0 too. The
+attribute is the file's element either way and is not touched by this;
+`tests/test_an_absent_instance_number_is_not_invented.py` covers what the
+export does with it, and with a file that has none.
 """
 import os
 import sqlite3
@@ -132,14 +133,15 @@ def test_the_is_range_bounds_what_is_read(tmp_path, text, expected):
 
 
 @pytest.mark.parametrize("text", ["inf", "-inf", "1e400"])
-def test_an_infinite_instance_number_still_refuses_the_file(tmp_path, text):
-    """The limit of "an ill-formed value does not refuse the file", pinned
-    so the prose that states it stays true.
+def test_an_infinite_instance_number_reads_as_zero(tmp_path, text):
+    """An ill-formed value does not refuse the file, an infinite one
+    included (#870).
 
     pydicom reads these as a float it then cannot make an int of, and its
-    `OverflowError` escapes `ds.get()` under its default reading mode. The
-    file is refused, exactly as it was before #810 (`populate_attrs` fails
-    on the same element); filed as #870, not changed here.
+    `OverflowError` escapes `ds.get()` under its default reading mode.
+    Until #870 the file was refused (`populate_attrs` failed on the same
+    element); the field now reads 0 and the element is held as the file's
+    text.
     """
     marker = "000000097531"
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
@@ -152,8 +154,9 @@ def test_an_infinite_instance_number_still_refuses_the_file(tmp_path, text):
     with open(path, "wb") as f:
         f.write(data.replace(marker.encode(), text.ljust(len(marker)).encode()))
     _meta, inst, *_rest, error = ingest_worker(str(path))
-    assert inst is None
-    assert error is not None and "OverflowError" in error, error
+    assert error is None, error
+    assert inst.instance_number == 0
+    assert inst.attributes["0020,0013"] == text
 
 
 def test_the_store_column_holds_the_files_instance_number(tmp_path):

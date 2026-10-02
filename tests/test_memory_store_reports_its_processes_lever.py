@@ -51,7 +51,7 @@ from isocenter import session as session_module
 from isocenter.entities import Equipment, Instance, Patient, Series, Study
 from isocenter.parallel import _Strategy
 from isocenter.services import RedactionError
-from isocenter.session import DicomSession
+from isocenter.session import DicomSession, _NO_IMAGE_MATCHED
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
 SERIAL = "SN_PROBE"
@@ -566,8 +566,12 @@ def test_the_refusal_fires_even_when_no_image_matches(monkeypatch, capsys):
     """A configuration that cannot run is refused whether or not it had work.
 
     The rule names a serial nothing carries, so without the refusal this
-    call returns `0` after printing `No matching images found for any
-    loaded rules.` One behaviour rather than two.
+    call returns `0` after printing the no-match sentence,
+    `session._NO_IMAGE_MATCHED`. One behaviour rather than two.
+
+    The sentence is read from the module, not spelled here: until #807 it
+    was spelled here, and #807's reword would have left this assertion
+    true of every output, the refusal's placement included.
 
     Killing edit: the refusal placed after task preparation.
     """
@@ -578,7 +582,7 @@ def test_the_refusal_fires_even_when_no_image_matches(monkeypatch, capsys):
             session.redact()
 
     assert MAX_TASKS in str(excinfo.value)
-    assert "No matching images found" not in capsys.readouterr().out, (
+    assert _NO_IMAGE_MATCHED not in capsys.readouterr().out, (
         "the refusal ran after task preparation; it must precede it")
 
 
