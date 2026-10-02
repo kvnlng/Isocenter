@@ -336,7 +336,47 @@ def dispatched_workers(repo):
     return set(dispatchers(repo)) - {None}
 
 
-def _tests_naming(repo, path):
+class SuiteIndex:
+    """Every tests/test_*.py, read once for one selection (#914).
+
+    The detectors below each read the whole suite, and `select` asks them
+    once per changed path: release/1.0 against its cut is 213 paths, so
+    405 files were read and searched 213 times over -- 86k searches, 40 of
+    `select`'s 45 s, and past the 120 s its subprocess test allows under a
+    four-shard release run. One index per call.
+
+    The trap: never keep this beyond one selection (a module-level or
+    lru cache). It would go stale the moment a test file is written, and
+    "the next such test is found the day it is written" (`glob_readers`)
+    would stop being true for the process that cached it.
+    """
+
+    def __init__(self, repo):
+        self.repo = Path(repo)
+        self._texts = None
+        self._walkers = None
+
+    def texts(self):
+        """{test file: its text}."""
+        if self._texts is None:
+            self._texts = {
+                test.relative_to(self.repo).as_posix():
+                    test.read_text(encoding="utf-8")
+                for test in sorted((self.repo / "tests").glob("test_*.py"))}
+        return self._texts
+
+    def walkers(self):
+        """{test file that lists a tree: (glob basenames, suffix literals)}."""
+        if self._walkers is None:
+            self._walkers = {
+                rel: ({Path(p).name for p in _GLOB_PATTERN.findall(source)},
+                      set(_SUFFIX_LITERAL.findall(source)))
+                for rel, source in self.texts().items()
+                if _TREE_CALL.search(source)}
+        return self._walkers
+
+
+def _tests_naming(repo, path, files=None):
     # The basename, and the stem only for Python: `import test_map` names
     # scripts/test_map.py without its suffix, but the stem of
     # docs/session.md is a word half the suite contains. RELEASING.md
@@ -344,9 +384,9 @@ def _tests_naming(repo, path):
     needles = {Path(path).name}
     if path.endswith(".py"):
         needles.add(Path(path).stem)
-    return {test.relative_to(repo).as_posix()
-            for test in (Path(repo) / "tests").glob("test_*.py")
-            if any(n in test.read_text(encoding="utf-8") for n in needles)}
+    files = files or SuiteIndex(repo)
+    return {rel for rel, source in files.texts().items()
+            if any(n in source for n in needles)}
 
 
 # Exact spellings, never a bare `.walk(`: dozens of test files call
@@ -365,7 +405,7 @@ _GLOB_PATTERN = re.compile(r"""["']([^"'\s]*\*[^"'\s]*\.\w+)["']""")
 _SUFFIX_LITERAL = re.compile(r"""["'](\.\w+)["']""")
 
 
-def glob_readers(repo, path):
+def glob_readers(repo, path, files=None):
     """Test files that read every file of `path`'s kind by glob or walk.
 
     A test that walks `docs/**/*.md`, or every `isocenter/**/*.py`, reads
@@ -385,24 +425,23 @@ def glob_readers(repo, path):
     so this over-selects: an `out.rglob("*.dcm")` over an export matches
     any `.dcm`, and a file that globs `*.py` and builds a `".md"` path
     elsewhere reads every `*.md` by this test. It only ever adds.
+
+    `files`: the selection's `SuiteIndex`, so the suite is read once per
+    selection rather than once per changed path (#914).
     """
     import fnmatch
-    name, suffix, found = Path(path).name, Path(path).suffix, set()
-    for test in sorted((Path(repo) / "tests").glob("test_*.py")):
-        source = test.read_text(encoding="utf-8")
-        if _TREE_CALL.search(source) and (
-                any(fnmatch.fnmatchcase(name, Path(pattern).name)
-                    for pattern in _GLOB_PATTERN.findall(source))
-                or suffix in _SUFFIX_LITERAL.findall(source)):
-            found.add(test.relative_to(repo).as_posix())
-    return found
+    name, suffix = Path(path).name, Path(path).suffix
+    files = files or SuiteIndex(repo)
+    return {rel for rel, (patterns, suffixes) in files.walkers().items()
+            if suffix in suffixes
+            or any(fnmatch.fnmatchcase(name, p) for p in patterns)}
 
 
 _WIDE_SCOPE = re.compile(
     r"""scope\s*=\s*["'](?:module|class|package|session)["']""")
 
 
-def has_wide_fixture(repo, test_file):
+def has_wide_fixture(repo, test_file, files=None):
     """Does the file hold a fixture set up once for several tests?
 
     Such a fixture's work is recorded on whichever test consumed it first;
@@ -410,9 +449,12 @@ def has_wide_fixture(repo, test_file):
     code that made it (#734 review, finding 6). So a selection that picks
     one test of the file takes the file.
     """
-    path = Path(repo) / test_file
-    return path.exists() and bool(
-        _WIDE_SCOPE.search(path.read_text(encoding="utf-8")))
+    source = files.texts().get(test_file) if files else None
+    if source is None:
+        # No index, or not a tests/test_*.py it holds: read the one file.
+        path = Path(repo) / test_file
+        source = path.read_text(encoding="utf-8") if path.is_file() else ""
+    return bool(_WIDE_SCOPE.search(source))
 
 
 def select(mapping, changes, other, targets, repo, dispatching=None,
@@ -433,12 +475,15 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
     workers = (mapping or {}).get("workers", {})
     if dispatching is None:
         dispatching = dispatchers(repo)
+    # One read of the suite for the whole selection, shared by every
+    # detector below; built per path it was #914.
+    suite = SuiteIndex(repo)
     if readers is None:
         def readers(path):
-            return glob_readers(repo, path)
+            return glob_readers(repo, path, suite)
     if wide is None:
         def wide(test_file):
-            return has_wide_fixture(repo, test_file)
+            return has_wide_fixture(repo, test_file, suite)
 
     def row(path, why):
         if path in targets:
@@ -520,7 +565,7 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             # Test files import helpers from test files
             # (`test_export_failure_audit`'s `_session`, three importers):
             # rule 7's needle finds them (#734 review, finding 3).
-            importers = _tests_naming(repo, path) - {path}
+            importers = _tests_naming(repo, path, suite) - {path}
             sel.files |= {path} | importers
             sel.reasons.append(
                 f"{path}: a changed test file -> itself"
@@ -534,7 +579,7 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             sel.reasons.append(
                 f"{path}: package data every session loads -> the full suite")
         else:
-            named = _tests_naming(repo, path)
+            named = _tests_naming(repo, path, suite)
             if named:
                 sel.files |= named
                 sel.reasons.append(f"{path}: {len(named)} test files name it")
