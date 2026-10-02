@@ -10654,6 +10654,9 @@ def _is_value_that_fits(value):
     # range check on one would change what a loaded file exports, a
     # `CONFIG_VERSION` minor (#762). `original_string` is #723's exemption:
     # a source IS is the file's statement, live and across a reopen.
+    # `bool` is excluded to say that `True` is not a number set here; it is
+    # equivalent today, since `True == 1` passes through unchanged, and no
+    # test is written around it.
     changes = []
 
     def one(item):
@@ -10662,8 +10665,11 @@ def _is_value_that_fits(value):
             return item
         if not isfinite(item):
             raise ValueError(f"{item!r} has no Integer String spelling")
-        # `int(...)` around `round` is load-bearing: `round()` of a numpy
-        # float is a numpy float, whose text is `'2.0'`.
+        # `int(...)` around `round` is for numpy 1.x, which `setup.py`
+        # admits (`numpy>=1.26.0`): there `round()` of a numpy float is a
+        # numpy float, whose text is `'2.0'`, a decimal in an IS. numpy 2
+        # returns an `int`, so under it deleting `int(...)` changes nothing
+        # and no test here can see it (an equivalent mutant on this venv).
         number = int(item) if item == int(item) else int(round(item))
         if not _IS_MIN <= number <= _IS_MAX:
             raise ValueError(

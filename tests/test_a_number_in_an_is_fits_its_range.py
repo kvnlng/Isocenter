@@ -132,11 +132,12 @@ def test_rounding_is_half_to_even(tmp_path, caplog, value, written):
     (np.int32(7), "7"),
 ], ids=["float32-1.5", "float64-2.5", "int32-7"])
 def test_a_numpy_number_is_written_as_an_integer(value, text):
-    """The `int(...)` around `round` is load-bearing: `round()` of a numpy
-    float is a numpy float, whose text is `'2.0'`, a decimal in an IS --
-    the defect itself. Driven through `_merge` directly, because the store
-    does not save a numpy scalar (`json` refuses it), so no session export
-    can carry one."""
+    """A numpy number is written as an integer. Under numpy 1.x, which
+    `setup.py` admits, `round()` of a numpy float is a numpy float whose
+    text is `'2.0'`; that case is the reason for `int(round(...))`, and is
+    seen only on a numpy 1.x install. Driven through `_merge` directly,
+    because the store does not save a numpy scalar (`json` refuses it), so
+    no session export can carry one."""
     from isocenter.io_handlers import DicomExporter
 
     ds, losses, warnings = pydicom.Dataset(), [], []
