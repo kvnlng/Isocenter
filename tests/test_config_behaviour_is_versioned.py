@@ -56,15 +56,16 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: when the fixture was widened to see B1's #746 and #765 (review of #895), and
 #: again for a second pass, an ID-less subject and a legacy patient (#903),
 #: and again on the B4 PR (#899) when the `"*"` zone scenario was added
-#: for #808, #814 and the PARTIAL_LEAK ruling.
+#: for #808, #814 and the PARTIAL_LEAK ruling, and again when that scenario
+#: redacted under the rules its suggestions leave, two on one image (#908).
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "d7f8d150345915ac54286bb4b6df3a81b126c3be739e43b9d45394e0ba93fcdd",
+    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "d7f8d150345915ac54286bb4b6df3a81b126c3be739e43b9d45394e0ba93fcdd",
+    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
 }
 
 _WHAT_TO_DO = (

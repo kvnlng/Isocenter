@@ -113,6 +113,10 @@ def test_two_rules_interleaved_on_one_instance_both_land(
     ordinary config); both must apply, and each pass's audit row must
     account for its own application. Pre-fix, every run of this test:
     `applied == 1` and the second row read `Applied 0 of 1`.
+
+    Since #908 `redact()` folds the two rules into one task for the image,
+    so `applied == 1` is the right count now and the rows are the pin:
+    both passes must say `Applied 1 of 1`.
     """
     session, _inst = reloaded_redaction_session(
         [IN_IMAGE_ZONE], name="capture_interleaved")
@@ -126,10 +130,13 @@ def test_two_rules_interleaved_on_one_instance_both_land(
                         lambda fn, items, **_kw: [fn(i) for i in items])
 
     applied = session.redact(show_progress=False)
-    assert applied == 2, (
-        "two rules matched one instance and only one application came "
-        "home; the other was keyed on a post-redaction UID and "
-        "discarded (#257)")
+    # One task for the image since #908, so this no longer reaches the
+    # interleaving; `test_the_worker_trusts_the_task_over_the_shared_object`
+    # still pins the capture for a direct caller of the worker. Kept for
+    # the rows below, which must say both passes applied.
+    assert applied == 1, (
+        "one image with both rules' zones applied; redact() counts "
+        "instances, not rule applications (#908)")
     session.close()
 
     assert _redaction_rows(db_path) == [

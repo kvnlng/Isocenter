@@ -5641,9 +5641,11 @@ class DicomSession:
         Uses `session.configuration.rules`: every image of a series whose
         Device Serial Number a rule matches has each of the rule's zones
         set to zero. This changes pixel data in memory (and the sidecar,
-        for persistence); call `save()` afterwards to persist it. A
-        redacted instance takes a new SOP Instance UID, derived from its
-        source SOP Instance UID and the rule's zones.
+        for persistence); call `save()` afterwards to persist it. An image
+        several rules match (an exact rule and `"*"`) is redacted once, with
+        every matching rule's zones. A redacted instance takes a new SOP
+        Instance UID, derived from its source SOP Instance UID and the zones
+        of every rule that matches it, whatever order the work runs in.
 
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this
@@ -5657,7 +5659,7 @@ class DicomSession:
                 this configuration, instead of skipping them. Every
                 instance the rules match is redacted again, and its SOP
                 Instance UID is derived again from its source SOP Instance
-                UID and the rule's zones: unchanged zones give the UID and
+                UID and its matching rules' zones: unchanged zones give the UID and
                 exported filename it already has, and other zones give
                 another. `file_path` becomes None either way. To repair a
                 store redacted by 0.9.0 or earlier, see Upgrading from
@@ -5869,8 +5871,28 @@ class DicomSession:
             # -- keyed on the serial they collapse into one row carrying
             # the first rule's zone count.
             for task in rule_tasks:
-                task['pass_key'] = pass_key
+                task['pass_keys'] = [pass_key]
             tasks.extend(rule_tasks)
+
+        # Audit accounting per rule-pass, counted over the rules' own tasks
+        # before they are folded below, so each pass's row still names its
+        # rule's zone count and the images it targeted. `applied` is
+        # tallied by `_apply_redaction_outcomes` from each mutation's own
+        # `pass_keys`.
+        passes = {}
+        for t in tasks:
+            acct = passes.setdefault(
+                t['pass_keys'][0], {'machine_sn': t['machine_sn'],
+                                    'zones': len(t['rois']),
+                                    'targeted': 0, 'applied': 0})
+            acct['targeted'] += 1
+
+        # One task per instance (#908): an image two rules cover is redacted
+        # with both rules' zones in one task, attested and given its UID
+        # over the whole set. Two tasks made its UID the last one's, and,
+        # under processes, its frame one rule's.
+        tasks = service._one_task_per_instance(  # pylint: disable=protected-access
+            tasks, project_secret=project_secret)
 
         if not tasks:
             message = self._why_no_redaction_task(service)
@@ -5907,22 +5929,8 @@ class DicomSession:
         # pre-dispatch UID on its task, the worker keys its mutation on
         # that same value, and one authority for "what was this
         # instance called before redaction" is what keeps the two sides
-        # of the round-trip agreeing. Two rules on one instance put the
-        # same key here twice; the map deduplicates to the one object.
+        # of the round-trip agreeing. One task per instance, so one key.
         instances = {t['original_sop_uid']: t['instance'] for t in tasks}
-
-        # Audit accounting per rule-pass. `targeted` is countable
-        # here; `applied` is tallied by `_apply_redaction_outcomes` from
-        # each mutation's own `pass_key`, because outcomes carry no
-        # order and a UID join back to tasks has the two-rules-one-
-        # instance ambiguity `execute_redaction_task` documents.
-        passes = {}
-        for t in tasks:
-            acct = passes.setdefault(
-                t['pass_key'], {'machine_sn': t['machine_sn'],
-                                'zones': len(t['rois']),
-                                'targeted': 0, 'applied': 0})
-            acct['targeted'] += 1
 
         # Pixel I/O and NumPy ops release the GIL. The generator is consumed
         # incrementally so each worker's image is applied and released rather
@@ -6253,14 +6261,15 @@ class DicomSession:
 
             instance.mark_modified()
             applied += 1
-            # Attributed by the mutation's own `pass_key` rather than
-            # by joining the UID back to a task: two rules matching one
-            # instance produce two mutations under one pre-redaction UID,
-            # and each belongs to its own pass's row.
+            # Attributed by the mutation's own `pass_keys` rather than by
+            # joining the UID back to a task: an instance two rules cover
+            # is one mutation carrying both rules' zones, and it counts in
+            # each of their passes' rows (#908).
             if passes is not None:
-                acct = passes.get(mutation.get('pass_key'))
-                if acct is not None:
-                    acct['applied'] += 1
+                for key in mutation.get('pass_keys') or ():
+                    acct = passes.get(key)
+                    if acct is not None:
+                        acct['applied'] += 1
 
         return applied, _report_redaction_failures(failures, store_backend)
 
