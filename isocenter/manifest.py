@@ -1,6 +1,6 @@
 """The export manifest: one entry per instance, rendered as JSON or HTML."""
 from dataclasses import dataclass, asdict
-from typing import List, Protocol
+from typing import List, Optional, Protocol
 import json
 
 
@@ -14,13 +14,13 @@ class ManifestItem:
         study_instance_uid (str): The Study Instance UID.
         series_instance_uid (str): The Series Instance UID.
         sop_instance_uid (str): The SOP Instance UID.
-        file_path (str): The path of the file the instance was ingested
-            from, as `ingest()` walked it (relative when the directory
-            given was relative), not a path in any export.
-            `Session.generate_manifest` writes `str(instance.file_path)`,
-            so it is `"None"` for an instance `redact()` detached from its
-            source file; `Instance.regenerate_uid()` does the same.
-        file_size_bytes (int): Size of the file in bytes.
+        file_path (Optional[str]): The path of the file the instance was
+            ingested from, as `ingest()` walked it (relative when the
+            directory given was relative), not a path in any export.
+            `Session.generate_manifest` reads `instance.source_path`, so
+            the path survives `redact()` detaching the instance from its
+            file (#794). `None` (JSON `null`, an empty HTML cell) for an
+            instance that has no source file.
         modality (str): Modality code (e.g. CT, MR).
         manufacturer (str): Manufacturer name.
         model_name (str): Model name.
@@ -41,9 +41,9 @@ class ManifestItem:
     series_instance_uid: str
     sop_instance_uid: str
 
-    # File details
-    file_path: str = ""
-    file_size_bytes: int = 0
+    # File details. There is deliberately no size: nothing measured a file
+    # for the manifest, and the keys that said `0` were deleted (#794).
+    file_path: Optional[str] = ""
 
     # Optional metadata
     modality: str = ""
@@ -68,29 +68,26 @@ class Manifest:
         items (List[ManifestItem]): The list of file entries.
         project_name (str): Name of the project/session.
         total_files (int): Total count of files.
-        total_size_bytes (int): Total size in bytes.
     """
     generated_at: str
     items: List[ManifestItem]
     project_name: str = "Isocenter Session"
     total_files: int = 0
-    total_size_bytes: int = 0
 
     def to_dict(self):
         """
         Converts the manifest to a dictionary for JSON serialization.
 
         Returns:
-            dict: `generated_at`, `project_name`, `total_files`,
-                `total_size_bytes` and `items` (each a dict of its
-                `ManifestItem` fields). The two totals are computed from
-                `items`, not read from the fields of the same name.
+            dict: `generated_at`, `project_name`, `total_files` and
+                `items` (each a dict of its `ManifestItem` fields).
+                `total_files` is computed from `items`, not read from the
+                field of the same name.
         """
         return {
             "generated_at": self.generated_at,
             "project_name": self.project_name,
             "total_files": len(self.items),
-            "total_size_bytes": sum(i.file_size_bytes for i in self.items),
             "items": [asdict(i) for i in self.items]
         }
 
@@ -187,7 +184,7 @@ class HTMLManifestRenderer:
                 <td>{item.manufacturer}</td>
                 <td>{item.model_name}</td>
                 <td>{item.sop_instance_uid}</td>
-                <td><code>{item.file_path}</code></td>
+                <td><code>{"" if item.file_path is None else item.file_path}</code></td>
             </tr>
 """
         html += """

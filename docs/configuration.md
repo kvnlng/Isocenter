@@ -419,13 +419,17 @@ private attribute and the entry reads `removed before export` (grading
     *descriptors* (`OverlayRows`, `OverlayColumns`, `OverlayBitPosition`
     and friends) are `US`, so they survive, and an export from which a
     large overlay plane was dropped declares a plane it does not carry.
-    The descriptors are not stripped by the size rule: an overlay may
-    legitimately live in the unused high bits of `PixelData` (addressed
-    by `OverlayBitPosition`), and since Isocenter preserves `PixelData`
-    intact, those overlays survive and their descriptors are the only
-    pointer to them. When the group rule removes the descriptors, such
-    high-bit overlay bits stay in `PixelData`, with
-    nothing left that points to them.
+    The descriptors are not stripped by the size rule. An overlay
+    declared in the unused high bits of `PixelData` (Overlay Bits
+    Allocated above 1, no Overlay Data, `OverlayBitPosition` at or above
+    BitsStored) does not survive ingest: the decode reads BitsStored bits
+    and clears the rest, so neither the store nor any export holds them,
+    whatever the policy. Ingest writes one `DATA_LOSS` row for such an
+    instance, scoped `STANDARD`, naming the group and its bit; under a
+    policy that keeps `60xx`, the exported descriptors point at bits that
+    are no longer there. A compressed stream wider than BitsStored is read
+    at its own width, so its high bits are kept as sample values, and its
+    own `WARNING` row says so.
 
     A dropped *standard* element is listed in the report's Data Loss
     section but does not change the grade.

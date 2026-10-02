@@ -2983,6 +2983,64 @@ def _precision_mismatch(ds, arr) -> Optional[dict]:
     }
 
 
+def _in_pixel_overlays(ds) -> Optional[list]:
+    """The overlays a header declares in Pixel Data's bits at or above BitsStored.
+
+    An overlay group 60xx (even, `6000` to `601e`) whose Overlay Bits
+    Allocated `(60xx,0100)` is above 1 and which has no Overlay Data
+    `(60xx,3000)` keeps its plane in a bit of each Pixel Data sample, the
+    one Overlay Bit Position `(60xx,0102)` names. At or above BitsStored,
+    that bit is one the decode does not read (#755).
+
+    Args:
+        ds (pydicom.Dataset): The top-level dataset.
+
+    Returns:
+        Optional[list]: `(group, bit)` per such overlay, `group` as four
+        lowercase hex digits; None when there is none or BitsStored is
+        absent.
+    """
+    bits_stored = ds.get("BitsStored")
+    if bits_stored is None:
+        return None
+    found = []
+    for group in range(0x6000, 0x6020, 2):
+        allocated = ds.get((group, 0x0100))
+        position = ds.get((group, 0x0102))
+        if allocated is None or position is None or (group, 0x3000) in ds:
+            continue
+        try:
+            allocated, position = int(allocated.value), int(position.value)
+        except (TypeError, ValueError):
+            continue
+        if allocated > 1 and position >= int(bits_stored):
+            found.append((f"{group:04x}", position))
+    return found or None
+
+
+def _in_pixel_overlay_words(facts) -> str:
+    """The `DATA_LOSS` row for `_in_pixel_overlays`' facts.
+
+    Args:
+        facts (dict): `overlays` (the `(group, bit)` list) and
+            `bits_stored`.
+
+    Returns:
+        str: One sentence, naming no file.
+    """
+    overlays = facts["overlays"]
+    if len(overlays) == 1:
+        (group, bit), = overlays
+        named = f"group {group} is declared in Pixel Data at bit {bit}"
+    else:
+        named = ("groups " + " and ".join(f"{group} at bit {bit}"
+                                          for group, bit in overlays)
+                 + " are declared in Pixel Data")
+    return (f"Overlay {named}, at or above BitsStored "
+            f"{facts['bits_stored']}: the decode reads BitsStored bits, so "
+            f"the stored pixels and every export carry no overlay bits.")
+
+
 def _sample_beyond(arr, bits_stored, signed) -> Optional[int]:
     """The sample farthest outside what BitsStored holds, or None when all fit.
 
@@ -4466,6 +4524,9 @@ def ingest_worker(fp: str) -> Tuple:
             # Top level only -- 0028,2110 is the General Image Module's,
             # and an icon is not the image.
             lossy = _lossy_compression_evidence(ds)
+            # An overlay kept in Pixel Data's unused high bits (#755), asked
+            # of the header before the decode like the two above.
+            in_pixel_overlays = _in_pixel_overlays(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -4509,6 +4570,22 @@ def ingest_worker(fp: str) -> Tuple:
                 beyond_precision = _samples_beyond_stream_precision(ds, arr)
                 if beyond_precision is not None:
                     meta['beyond_precision'] = beyond_precision
+                # The decode reads BitsStored bits: pydicom's
+                # `correct_unused_bits` clears every bit above them, so an
+                # overlay kept there reaches neither the store nor an
+                # export, and the loss gets a row. Only when every sample
+                # fits BitsStored, which is the "bits were cleared" case;
+                # a stream read wider than BitsStored keeps them as sample
+                # values and has its own precision row above. Plain types,
+                # so it rides `meta` out of a spawned worker.
+                if (in_pixel_overlays is not None
+                        and _sample_beyond(
+                            arr, int(ds.BitsStored),
+                            int(ds.get("PixelRepresentation", 0) or 0) == 1)
+                        is None):
+                    meta['in_pixel_overlay'] = {
+                        'overlays': in_pixel_overlays,
+                        'bits_stored': int(ds.BitsStored)}
                 if lossy is not None:
                     # In the worker, on an Instance nothing has linked yet,
                     # beside the relabel above; the row rides `meta`.
@@ -4975,6 +5052,7 @@ class DicomImporter:
         beyond_precision_rows = 0
         byte_order_rows = 0
         ambiguous_unsigned_rows = 0
+        in_pixel_overlay_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -5041,6 +5119,25 @@ class DicomImporter:
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_in_pixel_overlay(uid, detail):
+            """One in-pixel overlay row (#755), on its own log cap."""
+            # `DATA_LOSS`, scoped STANDARD: an overlay dropped from an
+            # ordinary image is what the ungraded scope is for (owner
+            # ruling Q1-B), so the row is reported and the grade does not
+            # move. Its own counter, for `_record_lossy`'s reason.
+            nonlocal in_pixel_overlay_rows
+            in_pixel_overlay_rows += 1
+            if in_pixel_overlay_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif in_pixel_overlay_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "an overlay in Pixel Data's unused bits) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="DATA_LOSS", entity_uid=uid, details=detail,
+                    loss_scope=LOSS_SCOPE_STANDARD)
 
         def _record_byte_order(uid, detail):
             """One big-endian byte-order row, on its own log cap."""
@@ -5330,6 +5427,15 @@ class DicomImporter:
                     if lossy:
                         _record_lossy(inst.sop_instance_uid,
                                       _lossy_compression_words(lossy))
+
+                    # An overlay in Pixel Data's unused high bits, cleared
+                    # by the decode (#755). After both declined
+                    # `continue`s, like the rows above.
+                    overlay = meta.get('in_pixel_overlay')
+                    if overlay:
+                        _record_in_pixel_overlay(
+                            inst.sop_instance_uid,
+                            _in_pixel_overlay_words(overlay))
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames

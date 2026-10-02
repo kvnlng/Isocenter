@@ -189,7 +189,7 @@ note.
 
 ## 5. Save before you close
 
-The DICOM format saves the session before it writes. A plugin's
+Both built-in formats save the session before they write. A plugin's
 export does not, so `anonymize()`'s changes are still only in memory.
 Save them, then close:
 

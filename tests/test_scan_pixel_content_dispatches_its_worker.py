@@ -303,4 +303,7 @@ def test_a_session_with_no_configured_equipment_scans_nothing_and_says_so(
     skipped = [line for line in capsys.readouterr().out.splitlines()
                if "Skipped" in line]
     assert len(skipped) == 1, skipped
-    assert "Skipped 3 unconfigured instances" in skipped[0]
+    # Since #808 the line counts machines no rule names apart from
+    # instances whose rules hold no zone; these three are the first kind.
+    assert ("(Skipped 3 instance(s) of machines no rule names)"
+            in skipped[0]), skipped[0]

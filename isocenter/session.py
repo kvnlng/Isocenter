@@ -15,10 +15,12 @@ import datetime
 import multiprocessing
 import concurrent.futures
 import functools
+import numbers
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
+import numpy as np
 import yaml
 from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
@@ -1020,6 +1022,14 @@ _DEFAULT_TAGS_TO_LOCK = (
 )
 
 
+# `redact()`'s two fixed sentences for a pass with nothing to do (#807);
+# the third, the zoneless count, is built in `_why_no_redaction_task`.
+_NO_REDACTION_RULES = (
+    "No redaction rules: the configuration names no machines. Load one "
+    "with load_config(), or add machines to its rules.")
+_NO_IMAGE_MATCHED = "No image matched any loaded rule's serial_number."
+
+
 def _redaction_worker_count() -> int:
     """How many workers to redact pixels with.
 
@@ -1167,6 +1177,177 @@ def _unheld_spelling(value):
         list: A marker, the value's type name and its repr.
     """
     return ["\x00unheld", type(value).__name__, repr(value)]
+
+
+
+# The cells a Parquet column may hold as a list: Python sequences and
+# pydicom's `MultiValue` (a `MutableSequence`, not a `list`, which is why
+# pyarrow refuses it, #816). `str` and `bytes` are sequences to Python but
+# scalars here, so they are never in this tuple.
+_PARQUET_SEQUENCES = (list, tuple, MultiValue, np.ndarray)
+
+# The int64 range: an Arrow integer column holds nothing wider, and
+# pyarrow raises on a wider Python int rather than widening.
+_INT64_MIN, _INT64_MAX = -2 ** 63, 2 ** 63 - 1
+
+
+def _parquet_null(value, isna) -> bool:
+    """Whether a frame cell (or a sequence element) is a missing value.
+
+    Args:
+        value (Any): One cell or element.
+        isna (Callable): `pandas.isna`, passed in by the caller that
+            imported pandas, so a call per cell does not re-import it.
+
+    Returns:
+        bool: True for `None`, NaN, `pd.NA` and `NaT`. False for every
+            sequence, `str` and `bytes`, whatever they hold.
+    """
+    # Sequences first: `pd.isna` of a list is element-wise, and the
+    # truth of an array is an error.
+    if value is None:
+        return True
+    if isinstance(value, _PARQUET_SEQUENCES + (str, bytes)):
+        return False
+    try:
+        return bool(isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parquet_family(value) -> Optional[str]:
+    """The scalar family of a non-null value, or None when it is not a scalar.
+
+    Judged by `isinstance`, never by type name, so pydicom's `DSfloat`
+    and `IS` (float and int subclasses) and numpy's numbers fall in
+    `number`. `bool` is tested before `int`, of which it is a subclass,
+    and `datetime` before `date`, likewise.
+
+    Args:
+        value (Any): A non-null cell or element.
+
+    Returns:
+        Optional[str]: `bool`, `number` (an int in the int64 range, or a
+            float), `str`, `bytes`, `datetime` (naive), `datetime-tz`
+            (aware), `date` or `time`; None for anything else -- a sequence, a pydicom `PersonName`
+            (not a `str`), a `Decimal`, an int wider than int64.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "bool"
+    if isinstance(value, numbers.Integral):
+        return "number" if _INT64_MIN <= int(value) <= _INT64_MAX else None
+    if isinstance(value, numbers.Real):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, bytes):
+        return "bytes"
+    if isinstance(value, datetime.datetime):
+        # Aware and naive are two families: pyarrow writes them as one
+        # timestamp column and drops the offset (review of #899).
+        return "datetime" if value.tzinfo is None else "datetime-tz"
+    if isinstance(value, datetime.date):
+        return "date"
+    if isinstance(value, datetime.time):
+        return "time"
+    return None
+
+
+def _parquet_column_shape(values, isna) -> str:
+    """How `export_dataframe` writes one object column to Parquet (#816).
+
+    Nulls (`_parquet_null`) are skipped throughout; they stay null in
+    every arm. Of the rest:
+
+    - `"keep"`: every cell is a scalar (`_parquet_family` is not None)
+      and all of one family. Written as it is, so the Arrow type is the
+      engine's (`date` stays a date, `int` an integer). A column of
+      nulls alone is kept.
+    - `"list"` (the column is *uniform*): every cell is a sequence (a
+      `list`, `tuple`, pydicom `MultiValue` or numpy array), and every
+      non-null element of every cell is a scalar, all of one family. An
+      empty sequence has no elements and does not break uniformity.
+      Written as an Arrow list column of that family.
+    - `"text"`: anything else. A column mixing scalars and sequences,
+      or two families (`str` beside `int`; `date` beside `datetime`,
+      which pyarrow would truncate to the day; `str` beside `bytes`,
+      which pyarrow would encode; an aware `datetime` beside a naive
+      one, whose offset pyarrow would drop), or holding one value that
+      is not a scalar (a `PersonName`, a nested sequence, an int wider
+      than int64, a 0-d numpy array). Each non-null cell becomes `str(cell)`, the text the CSV
+      arm writes for it.
+
+    Args:
+        values (Iterable[Any]): The column's cells.
+        isna (Callable): `pandas.isna`, as `_parquet_null` takes it.
+
+    Returns:
+        str: `"keep"`, `"list"` or `"text"`.
+    """
+    scalar_families = set()
+    element_families = set()
+    sequences = scalars = 0
+    for value in values:
+        if _parquet_null(value, isna):
+            continue
+        if isinstance(value, np.ndarray) and value.ndim == 0:
+            # Neither a sequence (it cannot be iterated) nor a Python
+            # scalar: written as its text.
+            return "text"
+        if isinstance(value, _PARQUET_SEQUENCES):
+            sequences += 1
+            for element in value:
+                if _parquet_null(element, isna):
+                    continue
+                family = _parquet_family(element)
+                if family is None:
+                    return "text"
+                element_families.add(family)
+        else:
+            scalars += 1
+            family = _parquet_family(value)
+            if family is None:
+                return "text"
+            scalar_families.add(family)
+    if sequences and scalars:
+        return "text"
+    if sequences:
+        return "list" if len(element_families) <= 1 else "text"
+    return "keep" if len(scalar_families) <= 1 else "text"
+
+
+def _parquet_safe(df):
+    """A copy of `df` that a Parquet engine can write, by `_parquet_column_shape`.
+
+    Only columns of dtype `object` are read; every other column, and
+    every object column the rule keeps, is passed through unchanged, so
+    a frame that was already writable keeps its schema.
+
+    Args:
+        df (pd.DataFrame): The cohort frame.
+
+    Returns:
+        pd.DataFrame: A copy; `df` is not changed.
+    """
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+    out = df.copy()
+    for column in out.columns:
+        series = out[column]
+        if series.dtype != object:
+            continue
+        shape = _parquet_column_shape(series, pd.isna)
+        if shape == "list":
+            converted = [None if _parquet_null(v, pd.isna)
+                         else [None if _parquet_null(e, pd.isna) else e
+                               for e in v]
+                         for v in series]
+        elif shape == "text":
+            converted = [None if _parquet_null(v, pd.isna) else str(v)
+                         for v in series]
+        else:
+            continue
+        out[column] = pd.Series(converted, index=series.index, dtype=object)
+    return out
 
 
 
@@ -2919,9 +3100,15 @@ class DicomSession:
         Scan instances for burned-in text with OCR, and report the text no
         configured redaction zone covers.
 
-        Only instances of machines (by Device Serial Number) the current
-        configuration has a rule for are scanned; other machines are
-        skipped.
+        Only instances of machines a rule covers, by exact Device Serial
+        Number or `"*"` (as `redact()` reads it), and whose covering rules
+        hold at least one valid zone, are scanned. Each instance is
+        checked against the zones of every rule that covers it, `[y1, y2,
+        x1, x2]` and `{"roi": [...]}` alike, the zones `redact()` and
+        `export()` apply. A series with no Device Serial Number is never
+        scanned. When nothing is scanned, the printed line counts the
+        instances of machines no rule names apart from those whose rules
+        hold no zone.
 
         Args:
             serial_number (str, optional): Scan only the machine with this
@@ -2966,49 +3153,55 @@ class DicomSession:
         current_rules = self.configuration.rules
 
         worker_items = []
-        skipped_count = 0
+        # Counted apart (#808, owner ruling Q3-A): a machine no rule names,
+        # and one whose covering rules hold no zone (a `create_config()`
+        # scaffold), call for different fixes. `skipped_count` stays their
+        # sum, which `PixelScanSummary.skipped` reports.
+        unconfigured = 0
+        zoneless = 0
 
         for p in self.store.patients:
             for st in p.studies:
                 for se in st.series:
                     equip = se.equipment
-                    if not equip or not equip.device_serial_number:
-                        skipped_count += len(se.instances)
-                        continue
+                    sn = equip.device_serial_number if equip else None
 
-                    sn = equip.device_serial_number
-
-                    # Filter 1: Must be in Config
-                    # We check if we have a rule for this serial
-                    matched_rule = None
-                    for r in current_rules:
-                        if r.get("serial_number") == sn:
-                            matched_rule = r
-                            break
-
-                    if not matched_rule:
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Rule Refinement: Skip if NO ZONES defined (Scaffolded state)
-                    # Unless user explicitly wants to scan? No, user req says skip.
-                    if not matched_rule.get("redaction_zones"):
-                        # Log once per serial?
-                        # For now just skip
-                        skipped_count += len(se.instances)
-                        continue
-
-                    # Filter 2: Explicit User Filter
+                    # The explicit filter first: it is the caller's machine
+                    # selector, compared exactly, not a rule.
                     if serial_number and sn != serial_number:
+                        continue
+
+                    # The rules `redact()` and the export's zones read for
+                    # this series (`rules_matching`: exact or "*", and none
+                    # for a series with no serial), never a reading of its
+                    # own. Taking the first exact match missed "*" and
+                    # every rule after the first (#808).
+                    matched = rules_matching(current_rules, sn)
+                    if not matched:
+                        unconfigured += len(se.instances)
+                        continue
+                    # `zone_rois`, the one reader of a zone: `{"roi": [...]}`
+                    # is a zone, `[1, 2, 3]` is not (#814).
+                    if not any(zone_rois(r.get("redaction_zones"))
+                               for r in matched):
+                        zoneless += len(se.instances)
                         continue
 
                     for inst in se.instances:
                         worker_items.append((inst, equip, current_rules, tesseract_cmd))
 
+        skipped_count = unconfigured + zoneless
         if not worker_items:
             msg = "No matching configured instances found to scan."
-            if skipped_count > 0:
-                msg += f" (Skipped {skipped_count} unconfigured instances)"
+            parts = []
+            if unconfigured:
+                parts.append(f"{unconfigured} instance(s) of machines no "
+                             f"rule names")
+            if zoneless:
+                parts.append(f"{zoneless} instance(s) whose rules have no "
+                             f"redaction zones")
+            if parts:
+                msg += " (Skipped " + "; ".join(parts) + ")"
             print(msg)
             # Recorded: a call that found nothing configured to read still
             # ran, and "no scan ran" would be the wrong thing for section 5
@@ -3821,14 +4014,19 @@ class DicomSession:
                     model = se.equipment.model_name if se.equipment else ""
 
                     for inst in se.instances:
-                        fpath = getattr(inst, 'file_path', "N/A")
+                        # `source_path` first: it is the file `ingest()`
+                        # read, which is what the key documents, and
+                        # `redact()` leaves it in place while detaching
+                        # `file_path` (#794). `None` stays `None` (JSON
+                        # `null`), never the string `"None"`.
+                        fpath = inst.source_path or inst.file_path
 
                         item = ManifestItem(
                             patient_id=p.patient_id,
                             study_instance_uid=st.study_instance_uid,
                             series_instance_uid=se.series_instance_uid,
                             sop_instance_uid=inst.sop_instance_uid,
-                            file_path=str(fpath),
+                            file_path=None if fpath is None else str(fpath),
                             modality=modality,
                             manufacturer=manufacturer,
                             model_name=model,
@@ -5508,8 +5706,13 @@ class DicomSession:
                 `WARNING` names the variable instead.
         """
         if not self.configuration.rules:
-            get_logger().warning("No configuration loaded. Use .load_config() first.")
-            print("No configuration loaded. Use .load_config() first.")
+            # True whether or not a file was loaded (#807): a scaffold over
+            # a cohort with no Device Serial Number loads with no machines.
+            # Not branched on `configuration.config_path`, which only
+            # `load_config()` sets, so rules assigned in code and then
+            # emptied would take the wrong branch.
+            get_logger().warning(_NO_REDACTION_RULES)
+            print(_NO_REDACTION_RULES)
             return 0
 
         # A redaction pass must not run concurrently with a background
@@ -5595,6 +5798,39 @@ class DicomSession:
                 "in memory; the rest are untouched.")
             raise
 
+    def _why_no_redaction_task(self, service) -> str:
+        """The sentence for a pass whose rules prepared no task (#807).
+
+        Asks the predicates task preparation asks, never a second reading:
+        `RedactionService._targets_for` for which instances a rule covers,
+        and `zone_rois` for whether it holds a zone. `prepare_redaction_tasks`
+        returns a task for every target of a rule with a valid ROI, so a
+        pass with no task has either no covered instance or only covered
+        instances whose every rule is zoneless. Reads only the index the
+        service built: no pixel I/O, no sqlite, no lock.
+
+        Args:
+            service (RedactionService): The pass's service.
+
+        Returns:
+            str: The no-match sentence, or the count of covered instances
+                with no zone.
+        """
+        # Keyed by `id()`: two rules can cover one instance (an exact rule
+        # and `"*"`), and it is one instance. True once any covering rule
+        # holds a valid zone.
+        zoned = {}
+        for rule in self.configuration.rules:
+            has_zone = bool(zone_rois(rule.get("redaction_zones")))
+            for inst in service._targets_for(rule.get("serial_number")):
+                zoned[id(inst)] = zoned.get(id(inst), False) or has_zone
+        if not zoned:
+            return _NO_IMAGE_MATCHED
+        count = sum(1 for has_zone in zoned.values() if not has_zone)
+        noun = "instance" if count == 1 else "instances"
+        return (f"{count} {noun} matched rules with no redaction zones; "
+                f"nothing to redact.")
+
     def _apply_redaction_rules(self, service, strategy, force=False,
                                project_secret=None):
         """Run every loaded rule and apply the results to the store.
@@ -5637,8 +5873,9 @@ class DicomSession:
             tasks.extend(rule_tasks)
 
         if not tasks:
-            get_logger().warning("No matching images found for any loaded rules.")
-            print("No matching images found for any loaded rules.")
+            message = self._why_no_redaction_task(service)
+            get_logger().warning(message)
+            print(message)
             return 0
 
         print(f"Queued {len(tasks)} redaction tasks across "
@@ -6261,6 +6498,10 @@ class DicomSession:
 
     def export(self, folder: str, format: str = "dicom", **options):
         """Export the session to a directory in the requested format.
+
+        Both built-in formats save the session (`save(sync=True)`) before
+        they write, after any refusal listed under `Raises:`; a refused
+        call saves nothing.
 
         Either format writes one `WARNING` audit row, and changes nothing it
         writes, when the instances it writes carry PHI statuses recorded
@@ -7408,6 +7649,15 @@ class DicomSession:
         It reports the session's in-memory graph and does not `save()`
         first: pending edits are not committed as a side effect.
 
+        Parquet holds a column of sequences (a multi-valued tag such as
+        Image Type) as a list column when its values are uniform: every
+        non-null cell a sequence whose non-null elements are all of one
+        scalar family. A column that is neither that nor scalars of one
+        family (a tag single-valued in one file and multi-valued in
+        another, or a `str` beside an `int`) is written as text, each
+        value as the CSV writes it. Missing values stay null in both.
+        Other columns are written as they are.
+
         Args:
             output_path (str): The output file path (ends with .csv or
                 .parquet). Required; its directory is created if missing.
@@ -7419,7 +7669,8 @@ class DicomSession:
                 line.
 
         Returns:
-            pd.DataFrame: The frame that was written.
+            pd.DataFrame: The frame as built, before any Parquet
+                conversion; the same frame for either format.
 
         Raises:
             ImportError: If pandas (or, for Parquet, a Parquet engine) is
@@ -7459,8 +7710,12 @@ class DicomSession:
 
         if output_path.endswith(".parquet"):
             try:
-                # Requires pandas plus pyarrow or fastparquet
-                df.to_parquet(output_path, index=False)
+                # Requires pandas plus pyarrow or fastparquet. Through
+                # `_parquet_safe`: a multi-valued tag is a pydicom
+                # `MultiValue`, which pyarrow refuses, and a column can mix
+                # types a CSV writes as text (#816). The copy is what is
+                # written; the frame returned is the one built.
+                _parquet_safe(df).to_parquet(output_path, index=False)
             except ImportError as e:
                 get_logger().error(
                     "Parquet engine (pyarrow or fastparquet) missing.")

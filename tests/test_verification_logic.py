@@ -27,6 +27,30 @@ class TestRedactionVerifier(unittest.TestCase):
         inst.equipment = Equipment(manufacturer="Man", model_name="C", device_serial_number="789")
         self.assertIsNone(verifier.get_matching_rule(inst.equipment))
 
+    def test_get_matching_rule_reads_the_wildcard_as_redact_does(self):
+        """`"*"` covers every serial, first in rule order wins (#808).
+
+        The case above has no `"*"` rule, so it passes under the old
+        exact-only predicate and the new one alike; these do not.
+        """
+        exact = {"serial_number": "789"}
+        wildcard = {"serial_number": "*"}
+        machine = Equipment(manufacturer="Man", model_name="C",
+                            device_serial_number="789")
+        self.assertIs(RedactionVerifier([wildcard]).get_matching_rule(machine),
+                      wildcard)
+        self.assertIs(
+            RedactionVerifier([wildcard, exact]).get_matching_rule(machine),
+            wildcard)
+        self.assertIs(
+            RedactionVerifier([exact, wildcard]).get_matching_rule(machine),
+            exact)
+        # No serial: nothing covers it, "*" included, as `redact()` reads it.
+        no_serial = Equipment(manufacturer="Man", model_name="C",
+                              device_serial_number="")
+        self.assertIsNone(
+            RedactionVerifier([wildcard]).get_matching_rule(no_serial))
+
     def test_is_covered(self):
         # Zones are zone space (y1, y2, x1, x2), the order every consumer
         # of redaction_zones reads; text boxes stay OCR (x, y, w, h). The
