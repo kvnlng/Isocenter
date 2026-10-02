@@ -2040,7 +2040,7 @@
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_WORKER_FAULTHANDLER</code></strong></td>
 <td style="text-align: left;"><code>0</code></td>
-<td style="text-align: left;">Diagnostic: <code>1</code> makes a worker process that is still alive after 240 s dump its stacks.</td>
+<td style="text-align: left;">Diagnostic: <code>1</code> makes a worker process that is still alive after 240 s dump its stacks, and ends a worker whose exit has not finished 15 s after it began.</td>
 </tr>
 </tbody>
 </table>
@@ -2120,7 +2120,7 @@
 <p>It can only switch a bar off: an explicit <code>show_progress=False</code>, where a call takes one, is honoured whatever this says, and <code>export(show_progress=False)</code> silences the memory-release bar too.</p>
 <h2 id="isocenter_worker_faulthandler"><code>ISOCENTER_WORKER_FAULTHANDLER</code></h2>
 <p><strong>Default:</strong> <code>0</code>.</p>
-<p>Diagnostic. Set to <code>1</code> to have every worker <em>process</em> arm <code>faulthandler.dump_traceback_later(240, exit=False)</code> at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall <em>inside</em> a pool child becomes a stack trace instead of a silent hang, because the parent's faulthandler cannot see into children. Leave it off in production runs.</p>
+<p>Diagnostic. Set to <code>1</code> to have every worker <em>process</em> arm <code>faulthandler.dump_traceback_later(240, exit=False)</code> at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall <em>inside</em> a pool child becomes a stack trace instead of a silent hang, because the parent's faulthandler cannot see into children. With it set, a worker's exit is also bounded: a worker whose exit has not finished 15 seconds after it began is ended by SIGALRM, so a dump that never finishes cannot hold its pool's shutdown (#844). Leave it off in production runs.</p>
 
 
 
