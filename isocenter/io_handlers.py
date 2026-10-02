@@ -3820,9 +3820,8 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 # `run_parallel(executor=None)`: that path is threads on
                 # 3.14t, where a file that ends its process ends the
                 # parent with it, and `multiprocessing.Pool` under
-                # `ISOCENTER_MAX_TASKS_PER_CHILD`, which waited forever on
-                # a killed worker until #887 and now fails the whole
-                # stream with `BrokenProcessPool`. The spawn pin is the shared pool's,
+                # `ISOCENTER_MAX_TASKS_PER_CHILD`, which fails the whole
+                # stream on a killed worker (#887). The spawn pin is the shared pool's,
                 # and so is the initializer -- resolved
                 # through this module's binding, deliberately, and not
                 # `strategy.worker_initializer`, which is the same
