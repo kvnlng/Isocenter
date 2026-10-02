@@ -2964,6 +2964,71 @@ def test_a_ctrl_c_while_the_sentinels_are_asked_still_kills_them_all(
     assert [p.killed for p in processes] == [True, True]
 
 
+# U8g and U8h drive each caller of `_kill_still_running` rather than pin the
+# call by AST: an AST pin would hold for any spelling that calls the helper
+# and would go red on an equivalent rewrite, while these go red on exactly
+# the regression that matters -- an interrupt in the readiness check that
+# leaves a worker unkilled. Every `connection.wait` raises: in U8g the first
+# interrupt lands in the grace wait and the second in the readiness check
+# inside the `finally`; U8h's grace is an `Event.wait`, so its one interrupt
+# is the readiness check's. That check is what a reverted site gets wrong.
+
+
+def _every_wait_interrupted(monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(multiprocessing.connection, "wait", interrupted)
+
+
+def test_a_broken_pools_kill_survives_a_ctrl_c_in_its_readiness_check(
+        monkeypatch):
+    """U8g: `_end_broken_pool_stragglers` kills every worker when a Ctrl-C
+    lands in the readiness check, then raises it (review of #913).
+
+    Killing mutation: the site reverted to asking `_still_running_or_all`
+    and killing inline, which raises before any `kill()`.
+    """
+    processes = [_KillRecorded(1), _KillRecorded(2)]
+
+    class _BrokenExecutor:
+        _broken = True
+        _processes = {p.pid: p for p in processes}
+
+    _every_wait_interrupted(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        parallel._end_broken_pool_stragglers(_BrokenExecutor())
+    assert [p.killed for p in processes] == [True, True]
+
+
+def test_a_recycling_pools_exit_kill_survives_a_ctrl_c_in_its_readiness_check(
+        monkeypatch):
+    """U8h: `_end_recycling_pool` kills every worker when a Ctrl-C lands in
+    the readiness check after the grace, then raises it (review of #913).
+
+    The pool's stdlib exit is held on its helper thread so the grace runs
+    out. Killing mutation: the site reverted to asking
+    `_still_running_or_all` and killing inline.
+    """
+    processes = [_KillRecorded(1), _KillRecorded(2)]
+    release = threading.Event()
+
+    class _StuckPool:
+        _pool = processes
+
+        def terminate(self):
+            release.wait(30)
+
+    monkeypatch.setattr(parallel, "_BROKEN_POOL_GRACE_S", 0.05)
+    _every_wait_interrupted(monkeypatch)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            parallel._end_recycling_pool(_StuckPool(), finished=False)
+    finally:
+        release.set()
+    assert [p.killed for p in processes] == [True, True]
+
+
 def test_a_worker_that_cannot_leave_at_its_quota_ends_itself(
         tmp_path, monkeypatch, caplog, recorded_pools):
     """R1: workers that cannot finish exiting after their quota are ended by
