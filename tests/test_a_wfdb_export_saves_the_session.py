@@ -24,13 +24,18 @@ the second; a deleted save fails the first.
 import pytest
 
 from isocenter.session import DicomSession
-from scripts.generate_waveform_test_data import write_fixture
 
 SOURCE_ID = "WFSAVE-809"
 CLOSE_WARNING = "holding unsaved changes"
 
 
 def _ingested_and_anonymized(tmp_path):
+    # Imported here, not at module level: CI runs bare `pytest`, and this
+    # module sorts before every module that puts the repository root on
+    # sys.path, so a module-level `scripts.` import failed its collection
+    # in all 16 jobs of the v1.0.0rc10 rehearsal. A local PYTHONPATH hides
+    # it; tests/test_the_suite_collects_with_no_root_on_sys_path.py does not.
+    from scripts.generate_waveform_test_data import write_fixture
     src = tmp_path / "src"
     src.mkdir()
     write_fixture(str(src / "ecg.dcm"), num_samples=64,
