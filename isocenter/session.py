@@ -3797,13 +3797,6 @@ class DicomSession:
                 "(`phi_status_policy`), not the configuration above")
             deid_method = deid_method.replace("|", "\\|")
 
-        try:
-            from importlib.metadata import version, PackageNotFoundError
-            ver = version("isocenter")
-        except PackageNotFoundError:
-            # Running from a source tree that was never installed.
-            ver = "0.0.0"
-
         # 4. Grade the run
         #
         # A dropped *private* element fails the grade; a dropped
@@ -3917,7 +3910,11 @@ class DicomSession:
 
         # 5. Build Report DTO
         report = ComplianceReport(
-            isocenter_version=ver,
+            # The running code's version, the name the (0012,0063) stamp
+            # reads. Not importlib.metadata: that answers "what is
+            # installed under this name", which in an editable or
+            # PYTHONPATH install can be another tree's (#806).
+            isocenter_version=__version__,
             project_name=os.path.basename(self.persistence_file),
             privacy_profile=privacy_profile,
             deid_method=deid_method,
