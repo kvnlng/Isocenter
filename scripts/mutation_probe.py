@@ -172,7 +172,7 @@ TARGETS = {
     # with the mutant it kills (#441, the rule in the comment above).
     #
     # 17 sites, exhaustive: all 17 killed. One file, 1.4s per pass.
-    "isocenter/automation.py": (["tests/test_automation.py", "tests/test_the_ocr_check_reads_rules_as_redaction_does.py"], 30),
+    "isocenter/automation.py": (["tests/test_automation.py", "tests/test_the_ocr_check_reads_rules_as_redaction_does.py", "tests/test_config_behaviour_is_versioned.py"], 30),
     "isocenter/uids.py": (["tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py"], 30),
     # 5 sites, exhaustive: all 5 killed. Thirteen files; 20.3s/pass at seven.
     "isocenter/exporters/__init__.py": (["tests/test_a_third_party_export_is_not_attested.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
@@ -241,7 +241,7 @@ TARGETS = {
     #     <= x_left`, so the guard above has already returned, and `th <= 0`
     #     is the same on the other axis; the second guard only ever sees a
     #     positive area. Nothing is filed: the guard costs nothing.
-    "isocenter/verification.py": (["tests/test_ocr_formal.py",
+    "isocenter/verification.py": (["tests/test_config_behaviour_is_versioned.py", "tests/test_ocr_formal.py",
                                    "tests/test_the_ocr_check_reads_rules_as_redaction_does.py",
                                    "tests/test_scan_reports_what_it_could_not_read.py",
                                    "tests/test_verification_logic.py"], 30),
