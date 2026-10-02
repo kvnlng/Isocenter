@@ -18,7 +18,7 @@ Each variable's name, default and documented behaviour are part of the 1.0 freez
 | **`ISOCENTER_FORCE_THREADS`** | `0` | `1` runs `audit()`, `scan_pixel_content()` and `redact()` in threads. |
 | **`ISOCENTER_FORCE_PROCESSES`** | `0` | `1` runs in processes on a free-threaded build too. |
 | **`ISOCENTER_SHOW_PROGRESS`** | `1` | `0` turns every progress bar off. |
-| **`ISOCENTER_WORKER_FAULTHANDLER`** | `0` | Diagnostic: `1` makes a worker process that is still alive after 240 s dump its stacks. |
+| **`ISOCENTER_WORKER_FAULTHANDLER`** | `0` | Diagnostic: `1` makes a worker process that is still alive after 240 s dump its stacks, and ends a worker whose exit has not finished 15 s after it began. |
 
 ## `ISOCENTER_LOG_LEVEL`
 
@@ -134,4 +134,4 @@ It can only switch a bar off: an explicit `show_progress=False`, where a call ta
 
 **Default:** `0`.
 
-Diagnostic. Set to `1` to have every worker *process* arm `faulthandler.dump_traceback_later(240, exit=False)` at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall *inside* a pool child becomes a stack trace instead of a silent hang, because the parent's faulthandler cannot see into children. Leave it off in production runs.
+Diagnostic. Set to `1` to have every worker *process* arm `faulthandler.dump_traceback_later(240, exit=False)` at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall *inside* a pool child becomes a stack trace instead of a silent hang, because the parent's faulthandler cannot see into children. With it set, a worker's exit is also bounded: a worker whose exit has not finished 15 seconds after it began is ended by SIGALRM, so a dump that never finishes cannot hold its pool's shutdown (#844). Leave it off in production runs.
