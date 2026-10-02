@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc11] - 2026-10-02
+
 ### Changed
 
 - **The packaging test builds the wheel and sdist from a copy of the git-tracked tree, not in the repository root (#859, owner ruling Q5 A).** `tests/test_packaging_contract.py`'s `built` fixture ran `setup.py sdist bdist_wheel` with the root as its working directory, so the sdist made and deleted a release tree, `isocenter-<version>/`, there. A second test run in the same checkout whose closing root-guard snapshot fell inside that window exited 1 though every test passed (#849). The build also depended on the checkout's leftovers: setuptools reads an existing `isocenter.egg-info/SOURCES.txt`, and `graft tests` swept untracked test files into the sdist under test.
