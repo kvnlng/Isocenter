@@ -2627,6 +2627,13 @@ the path string as walked (<code>os.path.join</code> of the directory and the
 name), the one the <code>WARNING</code> row prints. A declined file is not
 recorded as imported, so ingesting the same folder again declines
 it again.</p>
+<p><strong>A study another patient holds.</strong> A file carrying a Patient ID,
+whose Study Instance UID a patient with a different Patient ID
+already holds, is declined the same way, and in the same order
+(#745). Its <code>WARNING</code> row names the file and the instance, never a
+Patient ID. A file carrying the original ID of the patient whose
+study <code>anonymize()</code> renamed is that patient's, and is linked; so
+is a file with no Patient ID.</p>
 <p><strong>Byte order.</strong> A big-endian source's values in words wider than a
 byte (<code>OW</code>, <code>OL</code>, <code>OF</code>, <code>OD</code>, <code>OV</code> and the waveform samples) are
 stored little-endian, as its pixels are. What cannot be converted
@@ -2846,6 +2853,52 @@ tag policy, and writes the result as commented YAML.</p>
             </td>
             <td>
                 <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+        <p>The <code>phi_tags</code> section names the session's own base, as <code>save()</code>
+does, and holds every rule that differs from that base's, compared
+whole (#741): <code>privacy_profile: none</code> for a session under <code>none</code>,
+the external file's path for an external profile, and the pinned
+name for a built-in. The floor is the one exception, spelled
+<code>privacy_profile: basic@2026c</code> with the research defaults as
+editable lines, which loads to the same rules. The file loads to
+the session's <code>phi_tags</code>.</p>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>configuration.date_jitter</code> is a range the
+loader would refuse in the file (#731), and <code>save()</code>'s
+refusal when <code>phi_tags</code> lacks a rule its base supplies
+(#741), or when <code>output_path</code> is a file declaring a newer
+<code>version</code> minor than this library's (#784). Nothing is
+written.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="OSError">OSError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The write's own error, after it is logged (#741).</p>
+              </div>
             </td>
           </tr>
       </tbody>
@@ -3070,7 +3123,10 @@ with <code>to_dataframe()</code>.</p>
                 <p>When the file at <code>config_path</code> fails any check
 <code>load_config()</code> makes, or the policy (that file's, or
 <code>configuration.phi_tags</code>) holds a rule the pipeline cannot
-honour. Raised before a project secret is created.</p>
+honour, or, with no <code>config_path</code>, when
+<code>configuration.date_jitter</code> is a range the loader would
+refuse in a file (#731). Raised before a project secret
+is created.</p>
               </div>
             </td>
           </tr>
@@ -3205,6 +3261,10 @@ only with a value that belongs to the live patient holding it (this
 store's pseudonym, and an offset seeded on that patient under its
 own scheme), and declines otherwise. The findings passed are not
 modified.</p>
+<p>A patient, study or instance edited after its last scan and before
+this pass is not stamped by it: it keeps the status that scan left
+and still reads <code>UNSCANNED</code> afterwards, so it grades under
+condition 8 until <code>audit()</code> reads the edit (#752).</p>
 <p>Two patients left holding one Patient ID (a study ingested under a
 patient's original ID after that patient was anonymized) are merged
 into whichever was in the session first, and the other is removed
@@ -3283,6 +3343,18 @@ one.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When <code>configuration.date_jitter</code> is a range the
+loader would refuse in a file (#731); raised first, before
+anything is scanned or shifted.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
                   <code><span title="RuntimeError">RuntimeError</span></code>
             </td>
             <td>
@@ -3317,7 +3389,7 @@ one built in user code.</p>
         <p>Turn on reversible anonymization with the key file at <code>key_path</code>.</p>
 <p>Loads the key when a file is there. This call never creates the
 key file, and neither does recovery: the first <code>lock_identities()</code>
-creates it when none exists. So a mistyped path before
+that writes a token creates it when none exists. So a mistyped path before
 <code>recover_patient_identity()</code> fails there with <code>FileNotFoundError</code>
 rather than minting a key the data was never locked under.</p>
 
@@ -3428,10 +3500,14 @@ when the patient cannot be locked as asked:</p>
 <li>a value it would capture is one no token can hold (<code>bytes</code>),
   naming the tag;</li>
 <li>Patient's Name is blank under a rule of EMPTY or REMOVE on it;</li>
+<li>the patient holds a Patient ID (or a Patient's Name) and every
+  instance's copy of <code>0010,0020</code> (or <code>0010,0010</code>) is present and
+  blank, naming the tag: the token would restore the patient
+  without it (#761);</li>
 <li>the patient has instances and any of them holds no value in any
   tag <code>tags_to_lock</code> names (or it names none), counted. A tag held
-  blank is a value, and a patient with no instances locks as 0
-  instances.</li>
+  blank is a value, except as the refusal above says, and a
+  patient with no instances locks as 0 instances.</li>
 </ul>
 <p>Each of these is judged on every instance's own values: a value a
 pass wrote on any study refuses the lock. An existing token is
@@ -3443,9 +3519,11 @@ patient is checked first and, if any is refused, one error lists
 each and no patient is locked.</p>
 <p>No message carries a Patient ID: a message says "this patient", its
 advice spells the ID <code>&lt;its Patient ID&gt;</code>, and a replaced Patient ID
-is described, not quoted. When the lock creates the key file (the
-first lock under a path with none), the file is created already
-written, with mode 0600.</p>
+is described, not quoted. The key file is created only by a lock
+that writes a token (the first under a path with none), after every
+patient is planned, already written and with mode 0600; a lock that
+writes no token (refused, no patient found, or none with an
+instance) creates no key file (#813).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5215,8 +5293,8 @@ counts as UNSCANNED.</p>
 <p>Series are not counted: the scan records a status on patients,
 studies and instances only.</p>
 <p><code>redact()</code> is the one edit that keeps an instance's status: an
-instance REMEDIATED or CLEARED before the pass reads the same after
-it, provided nothing but redaction's own writes changed it. See
+instance REMEDIATED, CLEARED or IDENTIFIED before the pass reads the
+same after it, provided nothing but redaction's own writes changed it. See
 <code>PhiStatus</code>.</p>
 <p>A status is counted whatever policy it was recorded under;
 <code>phi_status_policy</code> names that policy, and an <code>export()</code> of

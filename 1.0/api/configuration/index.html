@@ -2075,9 +2075,12 @@ new file.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>With no <code>config_path</code>; and when <code>phi_tags</code> has no
+                <p>With no <code>config_path</code>; when <code>phi_tags</code> has no
 rule for a tag its base supplies, because a file naming
-that base would bring the rule back on reload. Nothing is
+that base would bring the rule back on reload; and when
+<code>date_jitter</code> is a range the loader would refuse (#731);
+and when <code>config_path</code> is a file declaring a newer
+<code>version</code> minor than this library's (#784). Nothing is
 written.</p>
               </div>
             </td>
@@ -2527,7 +2530,10 @@ lowercase.</p>
             <td>
               <div class="doc-md-description">
                 <p>The value <code>REPLACE</code> writes, stored as
-the rule's <code>value</code>, the key a file spells it with.</p>
+the rule's <code>value</code>, the key a file spells it with. An empty
+value is no value, on every tag: <code>value=""</code> stores no
+<code>value</code> key, so on a UI tag it is the keyed replacement UID,
+although a file's <code>value: ''</code> on a UI tag is refused (#883).</p>
               </div>
             </td>
             <td>

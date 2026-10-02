@@ -1945,8 +1945,8 @@ there is no original value left to copy.</p>
 <li><strong><code>lock_identities(report)</code></strong> writes an identity token into every
   instance of those patients: Patient's Name, Patient ID, Birth Date, Sex
   and Accession Number, encrypted, in the Encrypted Attributes Sequence
-  <code>(0400,0500)</code>. The first lock creates the key file, readable only by
-  you (mode 0600).</li>
+  <code>(0400,0500)</code>. The first lock that writes a token creates the key
+  file, readable only by you (mode 0600).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">locked</span><span class="p">)</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="mi">1</span>
@@ -1960,10 +1960,10 @@ there is no original value left to copy.</p>
 Called after <code>anonymize()</code>, <code>lock_identities(report)</code> does not
 raise. It looks for the report's patients by their original Patient
 IDs, and after <code>anonymize()</code> no patient holds them, so it logs one
-<code>ERROR</code> line saying the IDs matched no patient, returns an empty
-result, and still creates the key file. The count is 0, and the key
-opens nothing. (Passing one patient's new <code>ANON_</code> ID instead raises
-<code>RuntimeError</code>.)</p>
+<code>ERROR</code> line saying the IDs matched no patient, and returns an empty
+result. The count is 0, and no key file is created: only a lock that
+writes a token creates one. (Passing one patient's new <code>ANON_</code> ID
+instead raises <code>RuntimeError</code>, and creates no key file either.)</p>
 </div>
 <p>The key is a file of its own. Here it sits next to the store; step 6
 moves it where it belongs. Keep its contents to yourself: anyone who

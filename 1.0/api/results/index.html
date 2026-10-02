@@ -2318,8 +2318,10 @@ file, the same pair its <code>ERROR</code> audit row carries.</p>
               <div class="doc-md-description">
                 <p>Files refused because the session already holds
 their SOP Instance UID (as another instance's UID, or as a
-redacted instance's UID before redaction). Each has a
-<code>WARNING</code> audit row and is not read into the store.</p>
+redacted instance's UID before redaction), or because their
+Study Instance UID is held by a patient with a different
+Patient ID (#745). Each has a <code>WARNING</code> audit row and is not
+read into the store.</p>
               </div>
             </td>
           </tr>
