@@ -2429,6 +2429,13 @@ class DicomSession:
         the reason, which bars a `PASS` grade. Check the return value: a
         run that rejected files completes normally.
 
+        **Hidden files.** A file found walking `directory` whose name
+        starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
+        counted in `IngestSummary.hidden`, and the console summary prints
+        the count, with no audit row. A directory whose name starts with
+        `.` is walked, and a file named directly as `directory` is read
+        whatever its name.
+
         **A file that ends the worker process reading it** (the
         out-of-memory killer, a decoder crash, `SIGKILL`) is read again
         alone on a fresh worker, and rejected only if it ends that worker
@@ -2582,6 +2589,11 @@ class DicomSession:
             print(f"  - {summary.declined} file(s) DECLINED -- see the "
                   f"returned IngestSummary.declined and the WARNING audit "
                   f"rows.")
+        if summary.hidden:
+            # A print line only: no log line, and no audit row, which
+            # would cost every folder a Mac has touched its PASS (#795).
+            print(f"  - {summary.hidden} file(s) whose name starts with '.' "
+                  f"were not read; see IngestSummary.hidden.")
 
         return summary
 

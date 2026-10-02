@@ -209,7 +209,7 @@ other from `store.patients`; `audit()` runs inside
 **Shapes the frozen methods return** (attribute names; each is
 rendered on [Results and errors](results.md), except `DiscoveryResult`,
 on [OCR API](ocr.md)).
-`IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
+`IngestSummary(ingested, failures, declined, skipped, hidden)` plus `failed`;
 `ExportSummary(written_uids, failures)` plus `written`, `failed`;
 `written_uids` holds the SOP Instance UID of each written instance and
 nothing else: an instance with no UID is not written and is in

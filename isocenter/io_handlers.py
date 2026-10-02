@@ -4780,7 +4780,7 @@ def ingest_worker(fp: str) -> Tuple:
 class IngestSummary:
     """What `ingest()` did with each file it found.
 
-    A file takes exactly one of four routes. A declined file is not
+    A file takes exactly one of five routes. A declined file is not
     recorded as imported, so offering it again declines it again.
 
     Attributes:
@@ -4794,6 +4794,10 @@ class IngestSummary:
             Patient ID (#745). Each has a `WARNING` audit row and is not
             read into the store.
         skipped (int): Files already in the store, not read again.
+        hidden (int): Files found walking the directory whose name starts
+            with `.` (`.DS_Store`, AppleDouble `._*`), which are not read
+            (#795). A directory whose name starts with `.` is walked, and
+            a file named directly is read whatever its name.
         failed (int): `len(failures)`.
     """
     ingested: int = 0
@@ -4802,6 +4806,8 @@ class IngestSummary:
     failures: List[Tuple[str, str]] = field(default_factory=list)
     declined: int = 0
     skipped: int = 0
+    # Last, so the four fields before it keep their positions (#795).
+    hidden: int = 0
 
     @property
     def failed(self) -> int:
@@ -4846,6 +4852,12 @@ class DicomImporter:
                 with an `ERROR` audit row when `store_backend` is given.
         """
         all_files = []
+        # Skipped, not read: a `.DS_Store` or an AppleDouble `._*` file read
+        # would be a rejected file with an `ERROR` row, which costs every
+        # folder a Mac has touched its PASS. Counted, so a DICOM file
+        # named `.foo.dcm` does not vanish without a trace (#795).
+        # Directories are not filtered: a hidden one is walked.
+        hidden = 0
         for path in file_paths:
             if os.path.isfile(path):
                 all_files.append(path)
@@ -4853,6 +4865,7 @@ class DicomImporter:
                 for root, _, filenames in os.walk(path):
                     for filename in filenames:
                         if filename.startswith('.'):
+                            hidden += 1
                             continue
                         all_files.append(os.path.join(root, filename))
         # `os.walk` order is the filesystem's -- APFS lists neither sorted
@@ -4875,7 +4888,7 @@ class DicomImporter:
             logger.info(f"Skipping {skipped_count} already imported files.")
 
         if not new_files:
-            return IngestSummary(skipped=skipped_count)
+            return IngestSummary(skipped=skipped_count, hidden=hidden)
 
         logger.info(f"Importing {len(new_files)} files (Parallel Eager Ingest)...")
 
@@ -5919,7 +5932,7 @@ class DicomImporter:
             ingested=count, failures=failures,
             declined=(declined_superseded + declined_duplicate
                       + declined_shared_study),
-            skipped=skipped_count)
+            skipped=skipped_count, hidden=hidden)
 
 
 #: The refusal every door raises for a `compression` it cannot write.

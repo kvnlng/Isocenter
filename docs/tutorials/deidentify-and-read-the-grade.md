@@ -58,7 +58,7 @@ summary = session.ingest("input")
 
 ```python
 >>> summary
-IngestSummary(ingested=3, failures=[], declined=0, skipped=0)
+IngestSummary(ingested=3, failures=[], declined=0, skipped=0, hidden=0)
 ```
 
 ## 2. Write a configuration
@@ -399,7 +399,7 @@ offset, so the 42 days between the two scans survive:
 
 ```python
 >>> batch
-IngestSummary(ingested=1, failures=[], declined=0, skipped=0)
+IngestSummary(ingested=1, failures=[], declined=0, skipped=0, hidden=0)
 >>> second_visit.PatientID == ct.PatientID
 True
 >>> study_date(later) - study_date(second_visit) == shift

@@ -170,7 +170,7 @@ TIER_ONE_NAMES = {
                    "tag", "patient_id", "entity", "remediation_proposal",
                    "metadata", "entity_path"},
     "ExportSummary": {"written_uids", "failures", "written", "failed"},
-    "IngestSummary": {"ingested", "failures", "declined", "skipped", "failed"},
+    "IngestSummary": {"ingested", "failures", "declined", "skipped", "hidden", "failed"},
     "DiscoveryResult": {"filter", "to_zones", "to_dataframe"},
     "DicomBuilder": {"start_patient"},
     "DicomStore": {"patients"},
@@ -948,7 +948,7 @@ def test_the_frozen_shapes_have_these_fields(tmp_path):
         # every other shape the frozen methods return, and not this one.
         written = session.export(str(tmp_path / "wfdb"), format="wfdb")
     assert type(written) is list and written == [], written
-    assert _public_fields(type(summary)) == ["ingested", "failures", "declined", "skipped"]
+    assert _public_fields(type(summary)) == ["ingested", "failures", "declined", "skipped", "hidden"]
     assert hasattr(summary, "failed")
 
     assert _public_fields(session_module.ExportSummary) == ["written_uids", "failures"]
