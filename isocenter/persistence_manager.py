@@ -76,7 +76,7 @@ def _report_abandoned_saves(work_queue, held=None):
             f"save{'' if pending == 1 else 's'} that never reached the "
             f"store; they are lost. Call close() -- or use the session "
             f"as a context manager -- rather than dropping a session "
-            f"mid-flight (#318).")
+            f"mid-flight.")
 
 
 # Module-level, taking a **weak** reference: a running `Thread` holds its
@@ -203,7 +203,7 @@ def _persistence_worker_loop(manager_ref, work_queue):
                 except Exception as exc:  # pylint: disable=broad-except
                     get_logger().error(
                         "PersistenceManager worker could not write the "
-                        f"saves queued behind its sentinel: {describe_exception(exc)} (#319).")
+                        f"saves queued behind its sentinel: {describe_exception(exc)}.")
                 break
 
             # Everything from unpacking onwards runs under the same
@@ -432,7 +432,7 @@ class PersistenceManager:
                 "PersistenceManager.flush() has waited "
                 f"{_FLUSH_REPORT_INTERVAL_S:g}s: "
                 f"unfinished_tasks={self.queue.unfinished_tasks}, "
-                f"worker_alive={alive}, in_flight_items={inflight} (#309)")
+                f"worker_alive={alive}, in_flight_items={inflight}")
             self._recover_orphaned_item()
 
     def _reap_orphans(self):
@@ -467,7 +467,7 @@ class PersistenceManager:
         for payload in orphaned:
             get_logger().warning(
                 "PersistenceManager worker stopped holding a save it "
-                "never finished; re-queueing it (#309).")
+                "never finished; re-queueing it.")
             # `put()` then `task_done()`. Reversed, `unfinished_tasks` reaches
             # zero between the two calls, a waiting `queue.join` wakes, and
             # `flush()` can return before the payload is back in the queue.
@@ -621,8 +621,7 @@ class PersistenceManager:
                     f"and race it. in_flight_items={outstanding} (recorded "
                     f"under any owner), queue_depth={self.queue.qsize()} "
                     "(includes the shutdown sentinel; that worker writes "
-                    "what is behind its own sentinel before it stops, "
-                    "#319) (#314).")
+                    "what is behind its own sentinel before it stops).")
             return
 
         self._drain_queued_saves(self._reap_orphans())
@@ -681,13 +680,13 @@ class PersistenceManager:
                 # must not name the wrong thread.
                 get_logger().warning(
                     "PersistenceManager is writing a save its worker "
-                    "never finished (#314, #319).")
+                    "never finished.")
                 self.store_backend.save_all(
                     patients, prune_absent_patients=prune_absent_patients)
             except Exception as exc:  # pylint: disable=broad-except
                 self._report_unreconciled(
                     "PersistenceManager could not write a save its worker "
-                    f"left behind: {exc} (#314, #319).")
+                    f"left behind: {exc}.")
             finally:
                 # `task_done()` gets its own guard, and that is not
                 # belt-and-braces. It is the one statement here whose
@@ -706,7 +705,7 @@ class PersistenceManager:
                 except ValueError as exc:
                     get_logger().error(
                         "PersistenceManager counted off more tasks than the "
-                        f"queue is holding: {describe_exception(exc)} (#314).")
+                        f"queue is holding: {describe_exception(exc)}.")
 
     def _report_unreconciled(self, message):
         """Report, as an ERROR log line and an audit row, that a save did not reach the store.

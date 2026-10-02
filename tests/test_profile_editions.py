@@ -495,7 +495,7 @@ def test_the_two_refusals_say_what_the_changelog_quotes(tmp_path):
     assert str(caught.value) == (
         f"{unshipped}: privacy_profile 'basic@2027a' is not a profile this "
         "isocenter ships; it ships basic@2026c ('basic' means basic@2026c). "
-        "A later PS3.15 edition arrives as a new name in a newer isocenter (#714)")
+        "A later PS3.15 edition arrives as a new name in a newer isocenter")
 
     unknown = _config(tmp_path, "privacy_profile: Basic\n", "k.yaml")
     with pytest.raises(ValueError) as caught:

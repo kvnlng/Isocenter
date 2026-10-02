@@ -175,14 +175,14 @@ def test_saves_queued_at_collection_are_reported(tmp_path, caplog):
         del manager
         gc.collect()
 
-        assert _poll(lambda: any("#318" in r.message
+        assert _poll(lambda: any("A PersistenceManager was collected with" in r.message
                                  for r in caplog.records)), (
             "the manager was collected with saves still queued and "
             "nothing said so: close() is the call that promises the "
             "work is on disk, and a session dropped without it now "
             "loses these silently (#318)")
 
-    reported = [r.message for r in caplog.records if "#318" in r.message]
+    reported = [r.message for r in caplog.records if "A PersistenceManager was collected with" in r.message]
     # Matched against the phrase, not the bare digit. `"1" in m` is
     # satisfied by the `#318` the message ends with, so it would hold for
     # a report of seven saves just as happily as for one -- an assertion
@@ -230,7 +230,7 @@ def test_an_abandoned_manager_with_nothing_queued_reports_nothing(caplog):
     """
     with caplog.at_level(logging.WARNING):
         _report_abandoned_saves(queue.Queue())
-    assert [r.message for r in caplog.records if "#318" in r.message] == [], (
+    assert [r.message for r in caplog.records if "A PersistenceManager was collected with" in r.message] == [], (
         "a manager abandoned with nothing queued reported a loss anyway; "
         "the warning is a constant rather than a report of something "
         "that happened, and it claims data loss on every session dropped "
@@ -241,7 +241,7 @@ def test_an_abandoned_manager_with_nothing_queued_reports_nothing(caplog):
     caplog.clear()
     with caplog.at_level(logging.WARNING):
         _report_abandoned_saves(empty_then_sentinel)
-    assert [r.message for r in caplog.records if "#318" in r.message] == [], (
+    assert [r.message for r in caplog.records if "A PersistenceManager was collected with" in r.message] == [], (
         "a shutdown sentinel was counted as a lost save: a `None` is the "
         "stop signal, and reporting it is a false claim of data loss "
         "(#318)")
@@ -253,7 +253,7 @@ def test_an_abandoned_manager_with_nothing_queued_reports_nothing(caplog):
     caplog.clear()
     with caplog.at_level(logging.WARNING):
         _report_abandoned_saves(two)
-    reported = [r.message for r in caplog.records if "#318" in r.message]
+    reported = [r.message for r in caplog.records if "A PersistenceManager was collected with" in r.message]
     assert any("2 queued saves that never reached" in m for m in reported), (
         "the report does not count two saves in the plural, so the "
         f"ternary's else-arm is executed by nothing: {reported}")

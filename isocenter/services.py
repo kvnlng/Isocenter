@@ -1480,7 +1480,7 @@ class RedactionService:
                         "zones are (y1, y2, x1, x2) and this one has "
                         "y2 <= y1 or x2 <= x1, so it cannot redact "
                         "anything on any image -- it used to earn a full "
-                        "attestation anyway (#244)")
+                        "attestation anyway")
 
                 # A zone starting past the edge describes nothing to redact.
                 if r1 >= rows or c1 >= cols:

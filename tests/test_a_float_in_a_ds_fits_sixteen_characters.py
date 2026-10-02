@@ -70,8 +70,8 @@ def _export(tmp_path, mutate=None, *, reopen=False, caplog=None):
                 rows = s.store_backend.get_audit_errors()
                 losses = s.store_backend.get_audit_losses()
     notes = [r.getMessage() for r in caplog.records
-             if "#723" in r.getMessage() and r.levelno == logging.INFO]
-    warnings = [r for r in rows if r[1] == "WARNING" and "#723" in r[2]]
+             if "a float longer than DS" in r.getMessage() and r.levelno == logging.INFO]
+    warnings = [r for r in rows if r[1] == "WARNING" and "a float longer than DS" in r[2]]
     (written,) = list(out.rglob("*.dcm"))
     return pydicom.dcmread(str(written)), notes, warnings, losses
 

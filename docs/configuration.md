@@ -132,14 +132,14 @@ is refused, whatever it contains, because this release cannot apply it
 the way it was written for: `ValueError: cfg.yaml: version '2.1' is newer
 than this isocenter's configuration version 2.0, which may apply it
 differently than it was written for; upgrade isocenter, or set version:
-'2.0' to apply it as 2.0 does (#784)` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
+'2.0' to apply it as 2.0 does` ([#784](https://github.com/kvnlng/Isocenter/issues/784)).
 An external profile file declaring a newer minor is refused the same way. So
 is a `save()` over one, by a session whose `config_path` was assigned
 rather than loaded, plainly or under `auto_save`, and a `create_config()`
 onto one: `ValueError: cfg.yaml:
 declares version '2.1', newer than this isocenter's configuration version
 2.0; saving would rewrite it as 2.0. Nothing was written: upgrade
-isocenter, or save to another path (#784)`. A target that is missing,
+isocenter, or save to another path`. A target that is missing,
 cannot be read, or declares no newer minor is written as before.
 
 When the way a file is applied changes, a store scanned under the older
@@ -657,7 +657,7 @@ A de-identification run depends on three things, and the configuration file is o
 | | What it decides | Where it is | If you lose it |
 | :--- | :--- | :--- | :--- |
 | **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads unchanged in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. A release that applies an unchanged file differently raises the schema minor (see [Schema (version 2)](#schema-version-2)). But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ), `remove_private_tags`, and the configuration schema version this isocenter applies the file under -- or an export from the reopened store writes a `WARNING` row. The row stays in the store's audit log, so every later report of the store grades `REVIEW_REQUIRED`; running `audit()` and `anonymize()` under the right configuration stops further warnings but does not remove it. The same happens after an upgrade that raises the minor. After reopening a store, load its configuration before anything else. |
-| **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
+| **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`), on a local disk ([why](quickstart.md#1-initialize-a-session)). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
 | **`isocenter.key`** (only with [reversible anonymization](quickstart.md#4-backup-identity-optional)) | Whether original identities written into exported files can be recovered. | The file `enable_reversible_anonymization()` names. | Recovery. Identities in files exported under that key cannot be recovered by anyone. |
 
 **The configuration does not reproduce pseudonyms or date shifts.** They belong to the store they were made in. A later batch for the same patients goes into the same store: `ingest()` adds to it, and a patient ingested under the same original Patient ID gets the same pseudonym and the same offset.

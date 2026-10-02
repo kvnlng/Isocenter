@@ -46,7 +46,7 @@ from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_RE
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
-from .persistence import SqliteStore
+from .persistence import SqliteStore, _network_filesystem_type
 from .crypto import KeyManager
 from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
                             _TokenOfALaterScheme, _TokenOfAnEarlierLayout)
@@ -103,7 +103,7 @@ def scan_worker(args):
     # way.
     if not isinstance(config_source, dict):
         raise TypeError(f"scan_worker expects the PHI policy as a mapping of tag "
-                        f"to rule; got a {type(config_source).__name__} (#729)")
+                        f"to rule; got a {type(config_source).__name__}")
     inspector = PhiInspector(config_tags=config_source,
                              remove_private_tags=remove_private,
                              project_secret=project_secret)
@@ -1408,8 +1408,13 @@ class DicomSession:
         The store is the SQLite file and a pixel file beside it
         (by default `isocenter.db` and `isocenter_pixels.bin`). **It holds the
         original identifiers and pixels** of everything ingested; keep it where
-        you keep the source data. Until `export()`, the session writes only the
-        store, `isocenter.log` and files you ask for (a configuration, a key).
+        you keep the source data, on a local filesystem: the store uses
+        SQLite's WAL mode and `flock` locks, which a network filesystem does
+        not dependably support. When the store's filesystem is a known
+        network type (NFS, SMB, Lustre, GPFS and others), one `WARNING` log
+        line says so and the store opens anyway. Until `export()`, the
+        session writes only the store, `isocenter.log` and files you ask
+        for (a configuration, a key).
 
         When a file named `isocenter.key` exists in the current working
         directory, the session calls `enable_reversible_anonymization()`
@@ -1430,8 +1435,11 @@ class DicomSession:
                 Environment Variables page.
 
         Raises:
-            ValueError: `isocenter.key` in the working directory is empty or
-                is not a Fernet key.
+            ValueError: `isocenter.key` in the working directory is empty,
+                is not a Fernet key, or is not a regular file (a directory,
+                a FIFO). The message names its absolute path, and the
+                threads the session had started are released before it
+                raises, as they are for any exception from construction.
         """
         configure_logger()
         self.persistence_file = persistence_file or os.getenv("ISOCENTER_DB_PATH", "isocenter.db")
@@ -1439,8 +1447,78 @@ class DicomSession:
         # Check existence before SqliteStore potentially creates it
         db_exists = os.path.exists(self.persistence_file)
 
+        # `SqliteStore` starts its audit thread as its last statement, so a
+        # raise inside it leaves nothing running. Everything after it can
+        # raise with threads (and the store's sqlite handles) live -- a bad
+        # `./isocenter.key`, a `KeyboardInterrupt` during `load_all()` --
+        # and those threads hold the session by weakref, so they lived for
+        # as long as anything referenced the failed session: its
+        # traceback, or `sys.last_exc` in a REPL, indefinitely (#791).
+        # `BaseException`, so an interrupt releases them too.
         self.store_backend = SqliteStore(self.persistence_file)
+        try:
+            self._open_after_the_store(db_exists)
+        except BaseException:
+            self._close_half_built()
+            raise
+
+    def _close_half_built(self):
+        """Close what a failed `__init__` started; never raises.
+
+        `close()` guards each step by `hasattr`, so a session that failed
+        before its executor or its manager existed closes cleanly. A
+        failure of `close()` itself is logged and swallowed: the exception
+        that stopped construction is the one the caller needs (#791).
+        """
+        try:
+            self.close()
+        except Exception as exc:  # pylint: disable=broad-except
+            get_logger().error(
+                "Closing a session whose construction failed raised "
+                f"{describe_exception(exc)}; the construction error follows")
+
+    def _warn_on_a_network_filesystem(self):
+        """Log one WARNING when the store sits on a known network
+        filesystem; never refuses the open, and never raises (#839).
+
+        The directories asked about are the database file's and the pixel
+        sidecar's, each with symlinks resolved first: a `.db` that is a
+        link onto NFS is opened there by SQLite, while its sidecar, named
+        after the link, sits beside the link. A `:memory:` store has only
+        its sidecar, in the temporary directory. A type the detector
+        cannot read, or does not know as a network type, draws nothing.
+        """
+        paths = [self.store_backend.sidecar_path]
+        if self.persistence_file != ":memory:":
+            paths.insert(0, self.persistence_file)
+        fstype = None
+        for path in paths:
+            # `realpath` of the file, not of its directory: the link is the
+            # file, and its directory is where the link sits.
+            where = os.path.dirname(os.path.realpath(path))
+            fstype = _network_filesystem_type(where)
+            if fstype is not None:
+                break
+        if fstype is None:
+            return
+        what = ("the session store's pixel file"
+                if self.persistence_file == ":memory:" else "the session store")
+        get_logger().warning(
+            f"{where} holds {what} and is on a {fstype} filesystem, a "
+            "network filesystem. The store uses SQLite's WAL mode, which "
+            "does not work over a network filesystem, and flock locks, "
+            "whose behaviour there depends on the mount; keep the store on "
+            "a local disk (see the quickstart). The session is opened "
+            "anyway.")
+
+    def _open_after_the_store(self, db_exists):
+        """The rest of `__init__`, after the store is open.
+
+        Split out so `__init__` can close what this starts when it
+        raises (#791).
+        """
         self.persistence_manager = PersistenceManager(self.store_backend)
+        self._warn_on_a_network_filesystem()
 
         # Hydrate memory from DB
         self.store = DicomStore()
@@ -1531,7 +1609,18 @@ class DicomSession:
         self._pixel_scans: List[PixelScanSummary] = []
 
         if os.path.exists("isocenter.key"):
-            self.enable_reversible_anonymization("isocenter.key")
+            # Only this call is wrapped: wider, a `ValueError` from
+            # `load_all()` would carry a false sentence about a key. The
+            # caller did not name this file, so the message says where it
+            # came from; the type stays the frozen `ValueError` (#791).
+            try:
+                self.enable_reversible_anonymization("isocenter.key")
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc}. Session() found it in the working directory "
+                    "and enables reversible anonymization with any "
+                    "isocenter.key there; fix it, or move it out of the "
+                    "directory") from None
 
         # Shared Global Executor for Process Consistency.
         #
@@ -2119,7 +2208,7 @@ class DicomSession:
                         "state while the sidecar is rewritten leaves "
                         "loaders on offsets that no longer exist. Flush "
                         "the persistence manager and stop other writers "
-                        "first (#295).")
+                        "first.")
 
                 # The gate, taken AFTER the leading save above --
                 # that save runs site 6 on this thread and would deadlock
@@ -2317,7 +2406,7 @@ class DicomSession:
                     f"absent from the instance's core attributes, so a "
                     f"pre-0.9.1 session never saw or exported them. "
                     f"Explicitly requested via "
-                    f"reconcile_private_tags() (#172)."))
+                    f"reconcile_private_tags()."))
 
         get_logger().warning(
             f"reconcile_private_tags: dropped {rows_deleted} stored "
@@ -2379,6 +2468,13 @@ class DicomSession:
         returned summary and gets an `ERROR` audit row naming the path and
         the reason, which bars a `PASS` grade. Check the return value: a
         run that rejected files completes normally.
+
+        **Hidden files.** A file found walking `directory` whose name
+        starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
+        counted in `IngestSummary.hidden`, and the console summary prints
+        the count, with no audit row. A directory whose name starts with
+        `.` is walked, and a file named directly as `directory` is read
+        whatever its name.
 
         **A file that ends the worker process reading it** (the
         out-of-memory killer, a decoder crash, `SIGKILL`) is read again
@@ -2533,6 +2629,11 @@ class DicomSession:
             print(f"  - {summary.declined} file(s) DECLINED -- see the "
                   f"returned IngestSummary.declined and the WARNING audit "
                   f"rows.")
+        if summary.hidden:
+            # A print line only: no log line, and no audit row, which
+            # would cost every folder a Mac has touched its PASS (#795).
+            print(f"  - {summary.hidden} file(s) whose name starts with '.' "
+                  f"were not read; see IngestSummary.hidden.")
 
         return summary
 
@@ -3006,7 +3107,7 @@ class DicomSession:
         detail = (f"{count} patient{' was' if count == 1 else 's were'} "
                   "grouped by a release before 1.0 from files with no Patient "
                   "ID and may be more than one subject; re-ingest their source "
-                  "files into a new store to separate them (#584).")
+                  "files into a new store to separate them.")
         get_logger().warning(detail)
         self.store_backend.log_audit(action_type="WARNING",
                                      entity_uid=self.persistence_file,
@@ -3797,13 +3898,6 @@ class DicomSession:
                 "(`phi_status_policy`), not the configuration above")
             deid_method = deid_method.replace("|", "\\|")
 
-        try:
-            from importlib.metadata import version, PackageNotFoundError
-            ver = version("isocenter")
-        except PackageNotFoundError:
-            # Running from a source tree that was never installed.
-            ver = "0.0.0"
-
         # 4. Grade the run
         #
         # A dropped *private* element fails the grade; a dropped
@@ -3917,7 +4011,11 @@ class DicomSession:
 
         # 5. Build Report DTO
         report = ComplianceReport(
-            isocenter_version=ver,
+            # The running code's version, the name the (0012,0063) stamp
+            # reads. Not importlib.metadata: that answers "what is
+            # installed under this name", which in an editable or
+            # PYTHONPATH install can be another tree's (#806).
+            isocenter_version=__version__,
             project_name=os.path.basename(self.persistence_file),
             privacy_profile=privacy_profile,
             deid_method=deid_method,
@@ -5479,13 +5577,13 @@ class DicomSession:
                         "token, so they took only the patient-level identifiers "
                         "(group 0010) of the token the patient's identity was "
                         "restored from, and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         tokenless, count)
                 if kept_ids:
                     get_logger().warning(
                         "%d of them kept their own Patient ID: the token holds "
                         "the blank one a subject with no Patient ID exports, "
-                        "and a restore does not write it over a real one (#584).",
+                        "and a restore does not write it over a real one.",
                         kept_ids)
                 if elsewhere:
                     get_logger().warning(
@@ -5494,7 +5592,7 @@ class DicomSession:
                         "stamp, which may hold one study's values, so outside "
                         "the first study carrying it they took only its "
                         "patient-level identifiers (group 0010), and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         elsewhere, count)
                 # **Tokens that disagree on the name or ID.**
                 # Each instance keeps its own token's, so a re-lock after
@@ -5537,7 +5635,7 @@ class DicomSession:
                         "the patient's identity was restored from (the first "
                         "found, or the first holding a Patient ID); the patient "
                         "takes that token's, which export() stamps on every "
-                        "study (#583).",
+                        "study.",
                         disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed
@@ -5584,8 +5682,7 @@ class DicomSession:
                         get_logger().warning(
                             "The restored Study Date could not be read as "
                             "a date, so the Study keeps its de-identified "
-                            "Study Date "
-                            "(#619).")
+                            "Study Date.")
                     # A restore onto a date that never moved records
                     # no change.
                     elif study.study_date != restored_date:
@@ -5618,8 +5715,10 @@ class DicomSession:
 
         Raises:
             ValueError: The file at `key_path` is not a Fernet key, or is
-                empty (the message names the path). Nothing is cached by a
-                failed enable: fix the file and enable again.
+                empty, or the path is not a regular file (a directory, a
+                FIFO); the message names the path. Nothing is cached by a
+                failed enable, and the session stays open and usable: fix
+                the file and enable again.
         """
         key_manager = KeyManager(key_path)
         service = ReversibilityService(key_manager)
@@ -6627,8 +6726,7 @@ class DicomSession:
                 "which holds the source SOP Instance UID, the "
                 "recoverable-identity disclosure, the de-identification "
                 "markers, the owner stamps, the EXPORT and DATA_LOSS "
-                "rows), so this report does not know what it wrote "
-                "(#527).")
+                "rows), so this report does not know what it wrote.")
             get_logger().warning(detail)
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
@@ -7441,7 +7539,7 @@ class DicomSession:
                   f"{'; '.join(named)}. A status says what the scan it came "
                   f"from concluded; export() writes the graph as it holds "
                   f"it. To apply the policy in force, run audit() and then "
-                  f"anonymize() (#555).")
+                  f"anonymize().")
         detail = " ".join(detail.split()).replace("|", "\\|")
         get_logger().warning(detail)
         if self.store_backend is not None:

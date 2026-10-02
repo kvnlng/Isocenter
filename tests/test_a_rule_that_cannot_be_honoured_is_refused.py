@@ -135,7 +135,7 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
         "cfg.yaml: phi_tags['0010,0020'] is REMOVE; Patient ID can only be "
         "kept (KEEP) or replaced by its keyed pseudonym (REPLACE with no "
         "value), because the ID is what keeps two patients apart and "
-        "anonymize() merges patients that share one (#537)")
+        "anonymize() merges patients that share one")
     # 0.9.8 quoted the DA and OB refusals; #557 gave both VRs a dummy, and
     # these two are what a value-less REPLACE is still refused on.
     with pytest.raises(ValueError) as caught:
@@ -143,7 +143,7 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0010,1030'] is REPLACE, which writes "
         "'ANONYMIZED', and 0010,1030 is DS, which cannot hold it; use EMPTY "
-        "or REMOVE, or give a value: that is a valid DS (#560)")
+        "or REMOVE, or give a value: that is a valid DS")
     # A value-less REPLACE on a UI is the keyed UID since #544; a value
     # the UI cannot hold is refused, and the message names the spelling
     # that replaces it.
@@ -153,8 +153,8 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0008,0018'] is REPLACE, which writes "
         "'x.y', and 0008,0018 is UI, which cannot hold it; use EMPTY "
-        "or REMOVE, or give a value: that is a valid UI (#560); REPLACE "
-        "with no value gives it this project's replacement UID (#544)")
+        "or REMOVE, or give a value: that is a valid UI; REPLACE "
+        "with no value gives it this project's replacement UID")
     # A `value:` that fails still gets the JITTER advice on a date.
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0008,0012": {"action": "REPLACE", "value": "X"}},
@@ -162,7 +162,7 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0008,0012'] is REPLACE, which writes 'X', and "
         "0008,0012 is DA, which cannot hold it; use EMPTY or REMOVE, or "
-        "JITTER to shift it, or give a value: that is a valid DA (#560)")
+        "JITTER to shift it, or give a value: that is a valid DA")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0010,0020": {"action": "REPLACE", "value": "S1"}},
                             "cfg.yaml")
@@ -181,7 +181,7 @@ def test_a_compound_dictionary_vr_is_refused_when_no_arm_holds_the_value(tag):
     # Every arm is numeric or binary, so no text value fits and the advice
     # stops at EMPTY or REMOVE, as it does for US and OB alone (review of
     # #574, F-3: it offered "give a value: that is a valid US or SS").
-    assert str(caught.value).endswith("which cannot hold it; use EMPTY or REMOVE (#560)"), \
+    assert str(caught.value).endswith("which cannot hold it; use EMPTY or REMOVE"), \
         str(caught.value)
 
 
@@ -193,13 +193,13 @@ def test_the_range_and_multi_value_messages():
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0008,0020'] is REPLACE, which writes "
         "'19000101-19010101', and a '-' in a DA is a range, which 0008,0020 "
-        "cannot hold; give one DA value (#560)")
+        "cannot hold; give one DA value")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0010,0010": {"action": "REPLACE", "value": "A\\B"}}, "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0010,0010'] is REPLACE, which writes 'A\\\\B', "
         "and 0010,0010 holds one value, which a '\\' would make two; give a "
-        "value without one (#560)")
+        "value without one")
 
 
 @pytest.mark.parametrize("tag,value", [
@@ -240,7 +240,7 @@ def test_a_dt_range_is_refused(value):
     assert str(caught.value) == (
         f"cfg.yaml: phi_tags['0008,002a'] is REPLACE, which writes {value!r}, "
         "and a '-' in a DT anywhere but its UTC offset (&ZZXX at the end) is a "
-        "range, which 0008,002a cannot hold; give one DT value (#560)")
+        "range, which 0008,002a cannot hold; give one DT value")
 
 
 def test_a_vm_spelling_the_counter_does_not_read_allows_any_count():
@@ -280,7 +280,7 @@ def test_a_value_count_the_tags_multiplicity_does_not_allow_is_refused(tag, valu
     assert str(caught.value) == (
         f"cfg.yaml: phi_tags['{tag}'] is REPLACE, which writes {value!r}, and "
         f"{tag} holds {vm} values (its dictionary VM), which {count} "
-        f"'\\'-separated values are not; give a value of that multiplicity (#560)")
+        f"'\\'-separated values are not; give a value of that multiplicity")
 
 
 @pytest.mark.parametrize("key", ["10000,0010", "ffff,ffff0"])

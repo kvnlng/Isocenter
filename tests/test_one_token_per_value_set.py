@@ -67,7 +67,7 @@ def tokenless(count, total):
     return (f"{count} of {total} instances of this patient carry no identity "
             "token, so they took only the patient-level identifiers (group "
             "0010) of the token the patient's identity was restored from, and "
-            "their other locked identifiers keep what anonymize() left (#583).")
+            "their other locked identifiers keep what anonymize() left.")
 
 
 def old_shared(count, total):
@@ -81,7 +81,7 @@ def old_shared(count, total):
             "token shared across studies that this store did not stamp, which "
             "may hold one study's values, so outside the first study carrying "
             "it they took only its patient-level identifiers (group 0010), and "
-            "their other locked identifiers keep what anonymize() left (#583).")
+            "their other locked identifiers keep what anonymize() left.")
 
 
 def disagree(count, total):
@@ -90,7 +90,7 @@ def disagree(count, total):
             "Patient's Name or Patient ID different from the token the "
             "patient's identity was restored from (the first found, or the "
             "first holding a Patient ID); the patient takes that token's, which "
-            "export() stamps on every study (#583).")
+            "export() stamps on every study.")
 
 
 def empty_records(count, total, tags):
@@ -181,7 +181,7 @@ def _anonymize_by_hand(patient, instances, pseudonym="ANON_583", **tags):
 def _warnings(caplog):
     return [r.getMessage() for r in caplog.records
             if r.name == "isocenter" and r.levelno == logging.WARNING
-            and "(#583)" in r.getMessage()]
+            and "of this patient" in r.getMessage()]
 
 
 def _restore(session, caplog, pseudonym="ANON_583"):
@@ -265,7 +265,7 @@ def test_two_studies_get_their_own_tokens_and_their_own_accessions_back(tmp_path
             session.recover_patient_identity(pseudonym, restore=True)
         finally:
             logging.getLogger("isocenter").removeHandler(handler)
-        assert not [r for r in caplog_records if "(#583)" in r.getMessage()]
+        assert not [r for r in caplog_records if "of this patient" in r.getMessage()]
         [patient] = session.store.patients
         assert {st.study_instance_uid: st.series[0].instances[0].attributes[ACC]
                 for st in patient.studies} == {one: ACC_ONE, two: ACC_TWO}

@@ -104,8 +104,7 @@ def test_a_newer_minor_is_refused(tmp_path):
         f"{tmp_path / 'cfg.yaml'}: version '{newer}' is newer than this "
         f"isocenter's configuration version {CONFIG_VERSION}, which may apply "
         f"it differently than it was written for; upgrade isocenter, or set "
-        f"version: '{CONFIG_VERSION}' to apply it as {CONFIG_VERSION} does "
-        f"(#784)")
+        f"version: '{CONFIG_VERSION}' to apply it as {CONFIG_VERSION} does")
 
 
 def test_a_newer_minor_is_refused_by_the_loader_and_audit(tmp_path):
@@ -114,11 +113,11 @@ def test_a_newer_minor_is_refused_by_the_loader_and_audit(tmp_path):
     newer = _newer_minor()
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(f'version: "{newer}"\nprivacy_profile: basic\n', encoding="utf-8")
-    with pytest.raises(ValueError, match=r"is newer than this isocenter's .*\(#784\)"):
+    with pytest.raises(ValueError, match=r"is newer than this isocenter's .* does$"):
         ConfigLoader.load_unified_config(str(cfg))
     db = tmp_path / "s.db"
     with DicomSession(str(db)) as session:
-        with pytest.raises(ValueError, match=r"\(#784\)"):
+        with pytest.raises(ValueError, match=r"newer than this isocenter's configuration version"):
             session.audit(config_path=str(cfg))
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
@@ -133,7 +132,7 @@ def test_a_refused_newer_file_is_not_the_one_save_writes(tmp_path):
     text = f'version: "{newer}"\nprivacy_profile: basic\n'
     cfg.write_text(text, encoding="utf-8")
     with DicomSession(str(tmp_path / "s.db")) as session:
-        with pytest.raises(ValueError, match=r"\(#784\)"):
+        with pytest.raises(ValueError, match=r"newer than this isocenter's configuration version"):
             session.load_config(str(cfg))
         assert session.configuration.config_path != str(cfg)
     assert cfg.read_text(encoding="utf-8") == text
@@ -150,7 +149,8 @@ def test_minors_compare_as_numbers(tmp_path, monkeypatch, ours, theirs, loads):
     if loads:
         _loaded(tmp_path, text)
     else:
-        assert "(#784)" in _refused(tmp_path, text)
+        assert "is newer than this isocenter's configuration version" in \
+            _refused(tmp_path, text)
 
 
 def test_the_newer_minor_is_named_before_the_keys(tmp_path):
@@ -158,7 +158,7 @@ def test_the_newer_minor_is_named_before_the_keys(tmp_path):
     reason, as for another major. Kills the check placed after the key
     check."""
     message = _refused(tmp_path, f'version: "{_newer_minor()}"\na_new_key: 1\n')
-    assert "(#784)" in message, message
+    assert "is newer than this isocenter's configuration version" in message, message
     assert "a_new_key" not in message, message
 
 
@@ -189,7 +189,7 @@ def test_a_version_that_is_not_a_quoted_string_is_refused(tmp_path, line):
     in `test_a_config_value_means_one_thing.py`."""
     message = _refused(tmp_path, f"{line}\nprivacy_profile: basic\n")
     assert "version" in message, message
-    assert "(#711)" in message, message
+    assert "such as '2.0'" in message, message
 
 
 def test_an_unquoted_float_version_says_to_quote_it(tmp_path):
@@ -284,8 +284,8 @@ def test_a_newer_external_profile_is_refused_naming_the_profile(tmp_path):
     tests (#784): the refusal names the file whose version it is."""
     newer = _newer_minor()
     profile, message = _with_profile(tmp_path, None, newer, "{action: KEEP}")
-    assert message.startswith(f"{profile}: version '{newer}'"), message
-    assert "(#784)" in message, message
+    assert message.startswith(f"{profile}: version '{newer}' is newer than "
+                              "this isocenter's configuration version"), message
 
 
 def test_a_newer_configuration_is_refused_before_its_profile_is_read(tmp_path):
@@ -365,7 +365,7 @@ def _expected_refusal(target):
     return (f"{target}: declares version '{_newer_minor()}', newer than this "
             f"isocenter's configuration version {CONFIG_VERSION}; saving "
             f"would rewrite it as {CONFIG_VERSION}. Nothing was written: "
-            f"upgrade isocenter, or save to another path (#784)")
+            f"upgrade isocenter, or save to another path")
 
 
 def test_save_refuses_to_overwrite_a_file_declaring_a_newer_minor(tmp_path):

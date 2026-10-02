@@ -107,11 +107,11 @@ class DicomStore:
             logger.warning(
                 f"{renamed} merged patient(s) carried a Patient Name different "
                 "from the patient they were merged into; the surviving "
-                "patient's name is kept and stamped on every study (#548)")
+                "patient's name is kept and stamped on every study")
         logger.info(
             f"Merged {merged} {'patient' if merged == 1 else 'patients'} into "
             "the patient already holding the same Patient ID; "
-            f"{moved} {'study' if moved == 1 else 'studies'} moved (#548)")
+            f"{moved} {'study' if moved == 1 else 'studies'} moved")
         return merged, moved
 
     def _patients_sharing_an_id(

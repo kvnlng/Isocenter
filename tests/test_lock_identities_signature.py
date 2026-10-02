@@ -294,14 +294,16 @@ def test_a_malformed_key_in_the_working_directory_makes_session_raise(tmp_path):
     """The third arm (review of #787, D1): a malformed `isocenter.key` in
     the working directory makes `Session()` raise `ValueError`, rather
     than leaving reversible anonymization off without a word. Only the
-    class is frozen: the message, and what the half-built session leaves
-    running, are #791's, so this asserts neither and closes nothing.
+    class is frozen here; the message naming the path, the threads the
+    half-built session releases, and the not-a-file arm are pinned in
+    `test_a_bad_key_in_the_working_directory.py` (#791).
 
     Killing mutation: the auto-enable wrapped in `except ValueError: pass`
     (the reviewer's n6), which left 153 tests green."""
     (tmp_path / "isocenter.key").write_bytes(b"not a key")
     # Written as a `with` for #371's construction-site check; the
-    # constructor raises, so the block never runs and nothing is closed.
+    # constructor raises, so the block never runs, and the constructor
+    # closes what it had started (#791).
     with pytest.raises(ValueError):
         with DicomSession(str(tmp_path / "auto.db")):
             pass

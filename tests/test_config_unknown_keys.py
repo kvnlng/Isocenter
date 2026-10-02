@@ -209,7 +209,7 @@ def test_replacement_keeps_its_rename_message(tmp_path):
     pre-empt it, alongside another unknown key.)"""
     message = _refused(tmp_path,
                        "phi_tags:\n  '0008,0080': {action: REPLACE, replacement: X}\n")
-    assert "the key is 'value' (0.9.8, #538), so rename it" in message, message
+    assert "the key is 'value' (renamed in 0.9.8), so rename it" in message, message
     assert "unknown key" not in message, message
 
 

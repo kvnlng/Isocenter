@@ -36,11 +36,11 @@ The path the file handler writes to. The file handler takes `DEBUG` and above; t
 
 **Default:** `isocenter.db`.
 
-The path to the SQLite session database, read when `Session()` is given no `persistence_file`.
+The path to the SQLite session database, read when `Session()` is given no `persistence_file`. Name a path on a local disk: the store uses SQLite's WAL mode and `flock` locks, neither of which is dependable over a network filesystem (see [Keep the store on local disk](quickstart.md#1-initialize-a-session)).
 
 `:memory:` is accepted, here or as `Session(":memory:")`:
 
-- the index lives in memory, and the pixel sidecar in a temporary file the store removes on `close()`;
+- the index lives in memory, and the pixel sidecar in a temporary file the store removes on `close()`, under `$TMPDIR`, which should be local too;
 - `redact()` runs in threads on every interpreter, or refuses if worker recycling is asked for (see [`ISOCENTER_FORCE_PROCESSES`](#isocenter_force_processes) and [`ISOCENTER_MAX_TASKS_PER_CHILD`](#isocenter_max_tasks_per_child)).
 
 ## `ISOCENTER_MAX_WORKERS`
