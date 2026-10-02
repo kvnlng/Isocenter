@@ -1053,7 +1053,7 @@ def test_16_bit_ybr_full_default_export_notes_the_limit(tmp_path,
 
     assert outcome.ok, outcome.error
     assert outcome.warnings == [], outcome.warnings
-    notes = [c for c in outcome.corrections if "#461" in c]
+    notes = [c for c in outcome.corrections if "this library cannot read such a file back" in c]
     assert len(notes) == 1, outcome.corrections
     bits = np.dtype(dtype).itemsize * 8
     representation = 1 if np.dtype(dtype).kind == "i" else 0

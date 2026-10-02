@@ -124,13 +124,13 @@ def test_rows_queued_at_collection_are_reported(tmp_path, caplog):
         del store
         gc.collect()
 
-        assert _poll(lambda: any("#316" in r.message
+        assert _poll(lambda: any("An SqliteStore was collected with" in r.message
                                  for r in caplog.records)), (
             "the store was collected with audit rows still queued and "
             "nothing said so: a silent loss is exactly what the audit "
             "log exists to prevent (#316)")
 
-    reported = [r.message for r in caplog.records if "#316" in r.message]
+    reported = [r.message for r in caplog.records if "An SqliteStore was collected with" in r.message]
     # Matched against the phrase, not against the bare digit. `"1" in m`
     # was satisfied by the `#316` the message ends with, so it held for
     # a report of seven rows just as happily as for one -- an assertion

@@ -77,7 +77,7 @@ def _export(tmp_path, inst, compression="j2k"):
 
 
 def _notes(corrections):
-    return [c for c in corrections if "#771" in c]
+    return [c for c in corrections if "written uncompressed" in c]
 
 
 @pytest.mark.parametrize("dtype,samples", [
@@ -166,7 +166,7 @@ def test_a_wide_ybr_rct_label_is_not_told_to_compress(tmp_path):
     label = [w for w in outcome.warnings if "YBR_RCT" in w]
     assert len(label) == 1, outcome.warnings
     assert "Export with use_compression=True" not in label[0], label[0]
-    assert "#771" in label[0], label[0]
+    assert "written uncompressed" in label[0], label[0]
 
 
 def test_a_16_bit_ybr_rct_label_under_readback_is_still_told_to_compress(tmp_path):
@@ -205,7 +205,7 @@ def test_a_wide_ybr_rct_label_under_readback_is_not_told_to_compress(tmp_path):
     error = str(outcome.error)
     assert "YBR_RCT" in error, error
     assert "Export with use_compression=True" not in error, error
-    assert "#771" in error, error
+    assert "written uncompressed" in error, error
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ def test_one_export_writes_each_instance_in_its_own_syntax(tmp_path, caplog):
         want = wide if int(ds.BitsAllocated) == 32 else narrow
         assert ds.pixel_array.tolist() == want.tolist()
     assert syntaxes == {32: IMPLICIT, 16: J2K_LOSSLESS}
-    lines = [r for r in caplog.records if "#771" in r.getMessage()]
+    lines = [r for r in caplog.records if "written uncompressed" in r.getMessage()]
     assert len(lines) == 1, [r.getMessage() for r in caplog.records]
     assert lines[0].levelno == logging.INFO
 
@@ -277,4 +277,4 @@ def test_an_export_of_only_wide_frames_writes_with_no_row(tmp_path):
     assert summary.failures == []
     assert len(list((tmp_path / "out").rglob("*.dcm"))) == 1
     assert not [r for r in rows if r[1] == "ERROR"], rows
-    assert not [r for r in rows if "#771" in r[2]], rows
+    assert not [r for r in rows if "written uncompressed" in r[2]], rows

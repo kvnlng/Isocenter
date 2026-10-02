@@ -83,7 +83,7 @@ def _export(src, db, out, *, compress, mutate=None):
 
 
 def _notes(caplog):
-    return [r.getMessage() for r in caplog.records if "#692" in r.getMessage()]
+    return [r.getMessage() for r in caplog.records if "is written as UN" in r.getMessage()]
 
 
 def test_an_implicit_source_fd_list_round_trips_through_our_own_compressed_export(tmp_path):
@@ -111,7 +111,7 @@ def test_the_relabel_to_un_is_said(tmp_path, caplog):
     notes = _notes(caplog)
     assert len(notes) == 1, notes
     assert RWV_TEXT in notes[0] and "UN" in notes[0] and "72000" in notes[0]
-    assert not [r for r in rows if "#692" in r[2]], rows
+    assert not [r for r in rows if "is written as UN" in r[2]], rows
 
 
 def test_an_implicit_export_writes_it_under_its_own_vr(tmp_path, caplog):
