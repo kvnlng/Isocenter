@@ -38073,20 +38073,6 @@
       ],
       "rows": [
        [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
         "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
@@ -38211,6 +38197,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38325,6 +38313,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -38439,6 +38429,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38489,20 +38481,6 @@
        "element_tag"
       ],
       "rows": [
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
        [
         "EXPORT",
         "<out:B.dicom-j2k>",
@@ -38614,6 +38592,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38728,6 +38708,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -38779,20 +38761,6 @@
       ],
       "rows": [
        [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
         "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
@@ -38917,6 +38885,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39031,6 +39001,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -39145,6 +39117,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39195,20 +39169,6 @@
        "element_tag"
       ],
       "rows": [
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
        [
         "EXPORT",
         "<out:B.dicom-j2k>",
@@ -39320,6 +39280,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39434,6 +39396,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -126130,12 +126094,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "2d904e6c66463f48637c206ef40d9c5b5687ade3",
+  "git_sha": "7e6516b9802a93e10f7e10ef49fdbcb3d65019f1",
   "isocenter_version": "1.0.0rc9",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 1032
+  "seconds": 1349
  },
  "schema": 1,
  "toolchain": {
