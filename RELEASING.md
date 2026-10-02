@@ -456,7 +456,8 @@ fixes, never features.
      contains from `[Unreleased]`. A branch that takes this by merge can
      find its own new entries under the released heading with no
      conflict; `tests/test_released_changelog_sections_stay_as_released.py`
-     fails a released section that has a line its newest tag lacks;
+     fails a released section whose lines are not those of the newest
+     tag that holds it, other than a line rewritten in place;
    - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that

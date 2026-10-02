@@ -8,32 +8,35 @@ puts the branch's new entries under the released heading, where they read as
 part of a release that never contained them. It happened twice, at rc10 and
 rc11, and only the reviews caught it.
 
-The rule this pins, for each `## [X]` heading other than `[Unreleased]` whose
-tag `vX` is present:
+The rule this pins, for each `## [X]` heading other than `[Unreleased]`:
 
 * **The base** is the section as the newest present tag's CHANGELOG.md holds
   it: the first heading, reading this file top-down (newest first), whose tag
   is present and whose CHANGELOG.md has a `## [X]` heading. Not always `vX`
   itself, because a released section is amended on purpose, and an amendment
-  that has shipped is the published record. Measured on `main` at c0552934:
-  13 of 31 tagged sections differ from their own tag, and every one equals its
-  text in v1.0.0rc11. Two were amended on `main` since 0.9.0 (fd77f8f0 struck
-  #765's limit inside `[1.0.0rc1]`; b223f6ab corrected a PS3.5 citation inside
-  `[0.9.0]`), each picked into the next cut. Everything at 0.7.0 and before
-  was reformatted after its tag (Gantry to Isocenter, blank lines), and
-  v0.7.0's own CHANGELOG.md has no `[0.7.0]` heading. No record-back commit has
-  edited a section that was already there. The newest tag is read from this
-  file's heading order rather than `sort -V` (which puts `v1.0.0` before
-  `v1.0.0rc1`) or tag dates (which misorder a patch to an older line).
+  that has shipped is the published record. Measured on `main` at c0552934,
+  with every tag present: 32 sections are tagged; 9 differ from their own tag
+  (1.0.0rc1, 0.9.0, 0.6.0, 0.5.0, 0.4.1, 0.3.0, 0.2.0, 0.1.0) and v0.7.0's
+  own CHANGELOG.md has no `[0.7.0]` heading, 10 in all, and every one equals
+  its text in v1.0.0rc11. Two were amended on `main` since 0.9.0 (fd77f8f0
+  struck #765's limit inside `[1.0.0rc1]`; b223f6ab corrected a PS3.5
+  citation inside `[0.9.0]`), each picked into the next cut; the older ones
+  were reformatted after their tags (Gantry to Isocenter, blank lines), though
+  not `[0.5.3]` or `[0.5.2]`. No record-back commit has edited a section that
+  was already there. The newest tag is read from this file's heading order
+  rather than `sort -V` (which puts `v1.0.0` before `v1.0.0rc1`) or tag dates
+  (which misorder a patch to an older line). A version never tagged (0.6.1,
+  0.5.4, 0.5.1, 0.4.0) has a base all the same, in any later tag.
 * **Byte-identical passes.** So does an *in-place rewrite*: the same number of
   lines and the same heading line, some lines changed. That is the shape of
   both amendments above, made before the next cut carries them, and never the
   shape of the defect, which inserts lines. Any added or removed line is red,
   with the diff against the base tag.
-* **Skipped**, naming why: the tag `vX` is not present (a fresh clone without
-  tags, CI's shallow checkout, or a version never tagged: 0.6.1, 0.5.4, 0.5.1,
-  0.4.0), `git` cannot read this tree, or no present tag's CHANGELOG.md holds
-  the heading.
+* **Skipped**, naming why: no present tag's CHANGELOG.md holds the heading (a
+  fresh clone without tags, CI's shallow checkout), or `git` cannot read this
+  tree. So `test_the_live_check_reads_a_tag` pins, where the tags are present,
+  that the check reads one and acts on what it finds: without it, a check that
+  skipped everywhere or compared the tree with itself would stay green.
 
 What this does not see: a misplaced entry that rewrites an existing line
 instead of adding one, and any change to `[Unreleased]`.
@@ -114,35 +117,79 @@ def git_reads_this_tree():
         pytest.skip(f"git cannot read {ROOT}, so no tag can be compared")
 
 
-@pytest.mark.parametrize("version", _released_versions())
-def test_a_released_section_is_the_text_its_release_published(
-        version, git_reads_this_tree):
-    if not _tag_present(version):
-        pytest.skip(f"tag v{version} is not present here, so [{version}] "
-                    "has no released text to compare with")
-    current = _working_sections()[version]
+def problem_for(version, working):
+    """(base tag, None or the failure message) for `[version]` of `working`.
+
+    `working` is {version: section} for the CHANGELOG under test. The base
+    tag is None when no present tag's CHANGELOG.md holds the heading.
+    """
     base_tag = next(
-        (v for v in _working_sections()
+        (v for v in working
          if v != "Unreleased" and _tag_present(v)
          and version in (_sections_at_tag(v) or {})),
         None)
     if base_tag is None:
-        pytest.skip(f"no present tag's {CHANGELOG} has a [{version}] heading")
-    base = _sections_at_tag(base_tag)[version]
+        return None, None
+    current, base = working[version], _sections_at_tag(base_tag)[version]
     assert current.startswith(f"## [{version}]") and base.startswith(
         f"## [{version}]"), "the section parser lost its heading"
-
     problem = released_section_problem(current, base)
-    if problem:
-        diff = "".join(difflib.unified_diff(
-            base.splitlines(keepends=True), current.splitlines(keepends=True),
-            f"v{base_tag}:{CHANGELOG} [{version}]",
-            f"working tree {CHANGELOG} [{version}]"))
-        pytest.fail(
-            f"[{version}] in {CHANGELOG} is not the text v{base_tag} released: "
-            f"{problem}. A new entry belongs under [Unreleased]; a branch that "
-            "took main's release record-back by merge can have put its own "
-            "entries under the released heading.\n" + diff)
+    if problem is None:
+        return base_tag, None
+    diff = "".join(difflib.unified_diff(
+        base.splitlines(keepends=True), current.splitlines(keepends=True),
+        f"v{base_tag}:{CHANGELOG} [{version}]",
+        f"working tree {CHANGELOG} [{version}]"))
+    return base_tag, (
+        f"[{version}] in {CHANGELOG} is not the text v{base_tag} released: "
+        f"{problem}. A new entry belongs under [Unreleased]; a branch that "
+        "took main's release record-back by merge can have put its own "
+        "entries under the released heading.\n" + diff)
+
+
+@pytest.mark.parametrize("version", _released_versions())
+def test_a_released_section_is_the_text_its_release_published(
+        version, git_reads_this_tree):
+    base_tag, failure = problem_for(version, _working_sections())
+    if base_tag is None:
+        pytest.skip(f"no present tag's {CHANGELOG} has a [{version}] heading, "
+                    "so it has no released text to compare with")
+    if failure:
+        pytest.fail(failure)
+
+
+def test_the_live_check_reads_a_tag(git_reads_this_tree):
+    """The check above reads a tag, compares with it and acts on the answer.
+
+    Each half goes red on a mutant that left every parametrized case green
+    (review of #927): `_tag_present` never true (all skip), the base read
+    from HEAD (tree compared with itself), the problem dropped.
+    """
+    # Listed, not asked of `_tag_present`, which is under test here.
+    tags = _git("tag", "-l", "v*").stdout.split()
+    if "v1.0.0rc10" not in tags:
+        pytest.skip("tag v1.0.0rc10 is not present here")
+    assert _tag_present("1.0.0rc10") and _tag_present("1.0.0rc1")
+    assert not _tag_present("0.6.1"), "0.6.1 was never tagged"
+
+    working = _working_sections()
+    # [0.5.0] gained blank lines after v0.5.0 was cut: its own tag's text
+    # is not the tree's, so a base read from the tree would pass for it.
+    assert _sections_at_tag("0.5.0")["0.5.0"] != working["0.5.0"]
+    base_tag, failure = problem_for("0.5.0", working)
+    assert base_tag is not None and base_tag != "0.5.0" and failure is None
+
+    misfiled = dict(working)
+    misfiled["1.0.0rc10"] = working["1.0.0rc10"].replace(
+        "\n### ", "\n- **A later bunch's entry.** Never released.\n\n### ", 1)
+    assert misfiled["1.0.0rc10"] != working["1.0.0rc10"]
+    base_tag, failure = problem_for("1.0.0rc10", misfiled)
+    assert base_tag is not None
+    assert failure is not None and "A later bunch's entry" in failure
+
+    # A never-tagged version is checked against a later tag, not skipped.
+    base_tag, failure = problem_for("0.6.1", working)
+    assert base_tag is not None and failure is None
 
 
 def test_the_parser_finds_the_headings_the_file_has():
