@@ -9,7 +9,7 @@ the behaviour half: `test_config_behaviour_is_versioned.py` pins it per
 version, and a change that moves it must either bump the minor or, before
 the version ships, say in the CHANGELOG why it is not a behaviour change.
 
-**What it runs.** Four policies, each over the same three files:
+**What it runs.** Four policies, each over the same seven files:
 
 - `basic@2026c`, the floor, and `basic@2026c` with `remove_private_tags:
   false`;
@@ -17,13 +17,20 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
   `VR_DUMMY` string VR, and a repeating-group mask key.
 
-The files are CT_small and MR_small (bundled with pydicom) and three
+The files are CT_small and MR_small (bundled with pydicom) and five
 synthetic images built from CT_small. One holds an element of every
 `VR_DUMMY` string VR, a nested sequence holding a UID copy and a date, a
 private element, private copies of its own SOP Instance and Study UIDs
 (#765), a 60xx overlay element, and a Device Serial Number one pixel zone
-matches. The other two are patients of their own: one named `Unknown`, one
-with no Patient's Name (#746).
+matches. The other four are patients of their own: one named `Unknown`
+and one with no Patient's Name (#746); one with no Patient ID, keyed by its
+study (#584); and one the store classes legacy, so its pseudonym and offset
+are the unkeyed pre-0.9.7 derivations (`patients.jitter_scheme`, #903).
+
+**How it runs** (#903): each scenario ingests in one session, classes the
+legacy patient in the closed store, then reopens and runs `audit()` and
+`anonymize()` twice. The second pass must find nothing and change nothing:
+every UID the first pass minted verifies under this store's secret.
 
 **What it cannot see** (a change to any of these moves no digest, so its
 PR must say whether it is a behaviour change): pixel-zone matching beyond
@@ -32,15 +39,18 @@ match, no zone overlapping the frame edge, no multi-frame image); external
 profile files; `SHIFT` and `JITTER` on TM; date ranges other than the one
 `JITTER` fixes; `remove_private_tags: false` under the floor or `none`;
 nested sequences deeper than one item; private sequences; UIDs only another
-instance carries; the reversible lock; WFDB and waveform scenarios; burned-in
+instance carries; a re-key of an ID-less subject by a later file
+carrying its Patient ID (#584's `_its_key_is_in_use`); a patient merge
+(#548); a pass after a reopen with statuses the store holds; the
+reversible lock; WFDB and waveform scenarios; burned-in
 text detection (OCR); and every behaviour at export (markers, the Type 1
 gates, owner stamps), which `fingerprint/output.json` measures instead.
 
 **What it records,** per policy: each finding as `(entity_type, path, tag,
 action, new value)`; after `anonymize()`, every patient, study, series and
 instance as the graph holds it (attributes and sequences, the tags reached
-and the values written, the shifted dates); and, for the floor, the
-redacted frame's sha256.
+and the values written, the shifted dates); the second pass's findings and
+graph; and, for the floor, the redacted frame's sha256.
 
 **Fixed state:** the secret is `FIXED_A` (`load_fixed_secret`), the range
 is a fixed `date_jitter`, and the caller sets `ISOCENTER_FORCE_THREADS=1`.
@@ -54,6 +64,7 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 from datetime import date, datetime
 
 import numpy as np
@@ -62,12 +73,16 @@ from pydicom.data import get_testdata_file
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 
+from isocenter.entities import JITTER_SCHEME_UNKEYED
 from isocenter.session import DicomSession
 from support.project_secret import load_fixed_secret
 
 SERIAL = "B3-DIGEST-SN"
 JITTER = {"min_days": -40, "max_days": -3}
 ZONE = [10, 30, 12, 40]
+#: The patient the store classes legacy (#903): its pseudonym and date
+#: offset are the unkeyed pre-0.9.7 derivations (`patients.jitter_scheme`).
+LEGACY_ID = "DIGEST-782-7"
 
 #: `none`'s whole policy. One rule per line of the action x VR grid the
 #: scan and the remediation distinguish.
@@ -142,17 +157,22 @@ def _synthetic(path):
     ds.save_as(str(path))
 
 
-def _named(path, suffix, name):
+def _named(path, suffix, name, patient_id=True):
     """CT_small as a patient of its own (`suffix` keys its IDs and UIDs)
     whose Patient's Name is `name`, or absent when `name` is None (#746):
     a name literally `Unknown` is replaced like any other, and an absent
-    one is held as `''`, never a placeholder."""
+    one is held as `''`, never a placeholder. With `patient_id=False`
+    the file has no Patient ID, and ingest keys its subject by its study
+    (#584, #903)."""
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
     ds.SOPInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}1"
     ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
     ds.SeriesInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}2"
     ds.StudyInstanceUID = f"1.2.826.0.1.3680043.8.498.782.{suffix}3"
-    ds.PatientID = f"DIGEST-782-{suffix}"
+    if patient_id:
+        ds.PatientID = f"DIGEST-782-{suffix}"
+    else:
+        del ds.PatientID
     if name is None:
         del ds.PatientName
     else:
@@ -167,6 +187,8 @@ def _inputs(directory):
     _synthetic(os.path.join(directory, "synthetic.dcm"))
     _named(os.path.join(directory, "named-unknown.dcm"), "5", "Unknown")
     _named(os.path.join(directory, "no-name.dcm"), "6", None)
+    _named(os.path.join(directory, "legacy.dcm"), "7", "Legacy^Pat")
+    _named(os.path.join(directory, "no-id.dcm"), "8", "NoId^Pat", patient_id=False)
 
 
 def _canon(value):
@@ -237,15 +259,25 @@ def _scenario(root, name, configure, redact=False):
     anonymize (and redact), and return what was found and written."""
     directory = os.path.join(root, name)
     _inputs(os.path.join(directory, "input"))
-    with DicomSession(os.path.join(directory, "s.db")) as session:
+    db = os.path.join(directory, "s.db")
+    with DicomSession(db) as session:
         load_fixed_secret(session)
         session.ingest(os.path.join(directory, "input"))
+    _class_legacy(db, LEGACY_ID)
+    with DicomSession(db) as session:
         configure(session, directory)
         session.configuration.date_jitter = dict(JITTER)
         report = session.audit()
         found = _findings(report)
         session.anonymize(report)
         record = {"findings": found, "graph": _graph(session)}
+        # A second pass (#903): every UID the first minted verifies under
+        # this store's secret and is left alone, so what it finds and
+        # writes is pinned too.
+        again = session.audit()
+        record["second_findings"] = _findings(again)
+        session.anonymize(again)
+        record["graph_after_second"] = _graph(session)
         if redact:
             session.redact(show_progress=False)
             # Every frame, not only the zone's: the zone matches by the
@@ -262,6 +294,17 @@ def _scenario(root, name, configure, redact=False):
             record["frames_after_redact"] = frames
             record["sop_after_redact"] = _graph(session)
     return record
+
+
+def _class_legacy(db, patient_id):
+    """Class `patient_id` legacy in the closed store at `db`, as a store
+    opened from before 0.9.7 classes its patients (#903): the next open
+    reads the scheme from `patients.jitter_scheme`."""
+    with sqlite3.connect(db) as conn:
+        changed = conn.execute(
+            "UPDATE patients SET jitter_scheme = ? WHERE patient_id = ?",
+            (JITTER_SCHEME_UNKEYED, patient_id)).rowcount
+    assert changed == 1, f"{patient_id} not in the store"
 
 
 def _load(text):
@@ -304,5 +347,10 @@ def behaviour_digest(root):
     Returns:
         str: 64 hex digits.
     """
-    text = json.dumps(behaviour(root), sort_keys=True, separators=(",", ":"))
+    return digest_of(behaviour(root))
+
+
+def digest_of(record):
+    """The sha256 of a `behaviour()` record as canonical JSON."""
+    text = json.dumps(record, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
