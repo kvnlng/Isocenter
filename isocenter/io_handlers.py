@@ -4102,8 +4102,7 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
             store_backend.log_audit(
                 action_type="WARNING", entity_uid=uid,
                 details=(f"{element} absent from the source of instance "
-                         f"{uid}; the export writes a UID generated for it "
-                         "(#584)."))
+                         f"{uid}; the export writes a UID generated for it."))
     if linked_under_id_less:
         store_backend.log_audit(
             action_type="WARNING", entity_uid=uid,
@@ -4112,7 +4111,7 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
                      "whose key a date was already shifted or an identity "
                      "locked; it was linked under that patient, which exports "
                      "an empty Patient ID, because re-keying would contradict "
-                     "them (#584)."))
+                     "them."))
 
 
 def _held_under(held, uid, secret):
@@ -4352,7 +4351,7 @@ def _refuse_an_infinite_frame_count(ds) -> None:
             f"NumberOfFrames (0028,0008) reads as infinite "
             f"({str(text).strip()!r}); the frame count divides Pixel Data "
             f"into frames, so the image cannot be read without a finite "
-            f"one (#870)") from exc
+            f"one") from exc
 
 
 def ingest_worker(fp: str) -> Tuple:
@@ -5349,7 +5348,7 @@ class DicomImporter:
                             f"Instance UID is held by a patient with a "
                             f"different Patient ID, and one study belongs to "
                             f"one patient. Instance {inst.sop_instance_uid} "
-                            f"was not read into the store (#745).")
+                            f"was not read into the store.")
                         declined_shared_study += 1
                         if declined_shared_study <= 5:
                             logger.warning(detail)
@@ -5547,11 +5546,11 @@ class DicomImporter:
                                 f" that also name the kept group")
                         detail = (
                             f"{'; '.join(parts)}. Only Waveform Sequence "
-                            f"item 0 is kept (#36); a reference to a "
+                            f"item 0 is kept; a reference to a "
                             f"discarded item would name an item the "
                             f"exported file does not carry, and ordinals "
                             f"are positional so the survivors are never "
-                            f"renumbered (#177).")
+                            f"renumbered.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
@@ -8213,7 +8212,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"{_written_photometric(ds.PhotometricInterpretation)} at "
                 f"BitsAllocated {ds.BitsAllocated} and PixelRepresentation "
                 f"{ds.get('PixelRepresentation', 0)} is written as declared, "
-                f"and this library cannot read such a file back (#461): "
+                f"and this library cannot read such a file back: "
                 f"pydicom's colour conversion takes unsigned 8-bit samples "
                 f"only.")
 
@@ -8414,7 +8413,7 @@ _PILLOW_J2K_NOTE = (
     "more than one sample (\"Pillow cannot decode 16-bit multi-sample data "
     "correctly\"); pydicom with pylibjpeg-openjpeg reads it exactly, and "
     "this library reads it back through imagecodecs. For a reader with "
-    "only Pillow, export with use_compression=False (#670).")
+    "only Pillow, export with use_compression=False.")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
 #: component transform. `RGB` is transformed and relabelled
@@ -8511,7 +8510,7 @@ _J2K_FALLBACK_NOTE = (
     "written uncompressed (Implicit VR Little Endian) under "
     "use_compression=True: JPEG 2000 Lossless here is exact only to 25 "
     "bits, so a {dtype} frame at BitsAllocated {bits} with {samples} "
-    "sample(s) per pixel cannot be compressed losslessly (#771). The "
+    "sample(s) per pixel cannot be compressed losslessly. The "
     "samples are written exactly.")
 
 #: The remedy for an inadmissible label on a frame the fallback above
@@ -8521,7 +8520,7 @@ _J2K_FALLBACK_NOTE = (
 #: carry.
 _PHOTOMETRIC_J2K_FALLBACK = (
     "This frame is written uncompressed under use_compression=True as "
-    "well, because JPEG 2000 Lossless cannot carry it exactly (#771), so "
+    "well, because JPEG 2000 Lossless cannot carry it exactly, so "
     "compressing the export does not change this. Declare the label these "
     "bytes have with set_attr(\"0028,0004\", ...).")
 
@@ -10365,7 +10364,7 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
-            f"Endian encoding, {_read_back_words(elem.tag, vr)} (#692).")
+            f"Endian encoding, {_read_back_words(elem.tag, vr)}.")
 
 
 def _read_back_words(tag, vr) -> str:
@@ -10442,7 +10441,7 @@ def _ambiguous_unsigned_words(path, tag, held) -> str:
             f"Implicit VR source with no Pixel Representation declared "
             f"anywhere above it, and held unsigned as {unsigned}, which a "
             f"signed reading takes as {signed}. The bytes are exported "
-            f"unchanged (#700).")
+            f"unchanged.")
 
 
 def _standard_un_decoded(elem, encoding):
@@ -10576,11 +10575,11 @@ def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
         return True, (
             f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
             f"characters was written in its integer spelling, the same "
-            f"number: {pairs} (#723).")
+            f"number: {pairs}.")
     return False, (
         f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
         f"characters cannot be written exactly, and was rounded to fit: "
-        f"{pairs} (#723).")
+        f"{pairs}.")
 
 
 def _numeric_arm(vr, value):

@@ -856,7 +856,7 @@ class WfdbExporter(Exporter):
                 f"annotations.json: referenced multiplex "
                 f"{'group' if len(ordinals) == 1 else 'groups'} "
                 f"{', '.join(str(g) for g in ordinals)}, not ingested. Only "
-                f"Waveform Sequence item 0 is kept (#36); resolving these "
+                f"Waveform Sequence item 0 is kept; resolving these "
                 f"against the surviving group would have placed each mark at "
                 f"a position and lead belonging to a different signal.")
             logger.warning(f"{instance.sop_instance_uid}: {detail}")

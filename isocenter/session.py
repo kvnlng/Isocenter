@@ -103,7 +103,7 @@ def scan_worker(args):
     # way.
     if not isinstance(config_source, dict):
         raise TypeError(f"scan_worker expects the PHI policy as a mapping of tag "
-                        f"to rule; got a {type(config_source).__name__} (#729)")
+                        f"to rule; got a {type(config_source).__name__}")
     inspector = PhiInspector(config_tags=config_source,
                              remove_private_tags=remove_private,
                              project_secret=project_secret)
@@ -2197,7 +2197,7 @@ class DicomSession:
                         "state while the sidecar is rewritten leaves "
                         "loaders on offsets that no longer exist. Flush "
                         "the persistence manager and stop other writers "
-                        "first (#295).")
+                        "first.")
 
                 # The gate, taken AFTER the leading save above --
                 # that save runs site 6 on this thread and would deadlock
@@ -2395,7 +2395,7 @@ class DicomSession:
                     f"absent from the instance's core attributes, so a "
                     f"pre-0.9.1 session never saw or exported them. "
                     f"Explicitly requested via "
-                    f"reconcile_private_tags() (#172)."))
+                    f"reconcile_private_tags()."))
 
         get_logger().warning(
             f"reconcile_private_tags: dropped {rows_deleted} stored "
@@ -3096,7 +3096,7 @@ class DicomSession:
         detail = (f"{count} patient{' was' if count == 1 else 's were'} "
                   "grouped by a release before 1.0 from files with no Patient "
                   "ID and may be more than one subject; re-ingest their source "
-                  "files into a new store to separate them (#584).")
+                  "files into a new store to separate them.")
         get_logger().warning(detail)
         self.store_backend.log_audit(action_type="WARNING",
                                      entity_uid=self.persistence_file,
@@ -5566,13 +5566,13 @@ class DicomSession:
                         "token, so they took only the patient-level identifiers "
                         "(group 0010) of the token the patient's identity was "
                         "restored from, and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         tokenless, count)
                 if kept_ids:
                     get_logger().warning(
                         "%d of them kept their own Patient ID: the token holds "
                         "the blank one a subject with no Patient ID exports, "
-                        "and a restore does not write it over a real one (#584).",
+                        "and a restore does not write it over a real one.",
                         kept_ids)
                 if elsewhere:
                     get_logger().warning(
@@ -5581,7 +5581,7 @@ class DicomSession:
                         "stamp, which may hold one study's values, so outside "
                         "the first study carrying it they took only its "
                         "patient-level identifiers (group 0010), and their other "
-                        "locked identifiers keep what anonymize() left (#583).",
+                        "locked identifiers keep what anonymize() left.",
                         elsewhere, count)
                 # **Tokens that disagree on the name or ID.**
                 # Each instance keeps its own token's, so a re-lock after
@@ -5624,7 +5624,7 @@ class DicomSession:
                         "the patient's identity was restored from (the first "
                         "found, or the first holding a Patient ID); the patient "
                         "takes that token's, which export() stamps on every "
-                        "study (#583).",
+                        "study.",
                         disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed
@@ -5671,8 +5671,7 @@ class DicomSession:
                         get_logger().warning(
                             "The restored Study Date could not be read as "
                             "a date, so the Study keeps its de-identified "
-                            "Study Date "
-                            "(#619).")
+                            "Study Date.")
                     # A restore onto a date that never moved records
                     # no change.
                     elif study.study_date != restored_date:
@@ -6716,8 +6715,7 @@ class DicomSession:
                 "which holds the source SOP Instance UID, the "
                 "recoverable-identity disclosure, the de-identification "
                 "markers, the owner stamps, the EXPORT and DATA_LOSS "
-                "rows), so this report does not know what it wrote "
-                "(#527).")
+                "rows), so this report does not know what it wrote.")
             get_logger().warning(detail)
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
@@ -7530,7 +7528,7 @@ class DicomSession:
                   f"{'; '.join(named)}. A status says what the scan it came "
                   f"from concluded; export() writes the graph as it holds "
                   f"it. To apply the policy in force, run audit() and then "
-                  f"anonymize() (#555).")
+                  f"anonymize().")
         detail = " ".join(detail.split()).replace("|", "\\|")
         get_logger().warning(detail)
         if self.store_backend is not None:

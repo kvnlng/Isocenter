@@ -206,7 +206,7 @@ class RemediationService:
             self.logger.info(
                 f"{_count(len(folded_keys), 'instance-level finding')} folded "
                 "into a patient's or study's remediation: the owner's value "
-                "is already on the copies it reached (#496).")
+                "is already on the copies it reached.")
 
         # An entity that declined during this pass does not leave it
         # REMEDIATED, or the manifest would read `"anonymized": true` over
@@ -687,7 +687,7 @@ class RemediationService:
             refused_vr = _dictionary_vr_refuses(tag, value)
             if refused_vr is not None:
                 reason = (f"{tag} is {refused_vr}, which cannot hold "
-                          f"{value!r}; the value is left unchanged (#560)")
+                          f"{value!r}; the value is left unchanged")
                 self.logger.warning(
                     f"Remediation declined for {self._log_subject(finding)}: "
                     f"{reason}")
@@ -726,7 +726,7 @@ class RemediationService:
                 return None, None
             reason = (f"the SOP Instance UID is {entity.sop_instance_uid!r}, "
                       f"not {proposal.original_value!r} as scanned; the "
-                      "identity is left as it is (#544)")
+                      "identity is left as it is")
             self.logger.warning(
                 f"Remediation declined for {self._log_subject(finding)}: "
                 f"{reason}")

@@ -760,7 +760,7 @@ def _report_abandoned_audit_rows(audit_queue):
             f"An SqliteStore was collected with {pending} audit row(s) "
             f"still queued; those rows are lost. Call stop() -- or close "
             f"the session -- to settle the audit log before dropping a "
-            f"store (#316).")
+            f"store.")
 
 
 def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
@@ -1758,12 +1758,12 @@ class SqliteStore:
             ann_note = (
                 f" {ann_dropped} waveform annotation(s) referencing the "
                 f"pruned groups were dropped and {ann_rewritten} trimmed "
-                f"to their surviving references (#177).")
+                f"to their surviving references.")
         self.logger.warning(
             f"{instance.sop_instance_uid}: Waveform Sequence held "
             f"{pruned + 1} multiplex groups but this store carries "
-            f"samples for group 0 only -- it was indexed before the "
-            f"#160 fix, which discarded the samples and kept the "
+            f"samples for group 0 only -- it was indexed by a release "
+            f"that discarded the samples and kept the "
             f"metadata. Pruned {pruned} sample-less item(s) so the "
             f"export does not declare Waveform Data it cannot carry "
             f"(Type 1, PS3.3 C.10.9).{ann_note} The discarded samples "
@@ -2138,11 +2138,11 @@ class SqliteStore:
                     f"SamplesPerPixel={samples} NumberOfFrames={frames} "
                     f"BitsAllocated={bits} implies {expected} bytes, "
                     f"but the sidecar frame holds {r['pixel_length']}. "
-                    f"The descriptors were likely rewritten by a "
-                    f"pre-fix release (#186); an export of this "
+                    f"The descriptors were likely rewritten by an "
+                    f"earlier release; an export of this "
                     f"instance is not trustworthy. Re-ingest the "
                     f"source file, or run export(verify_readback=True) "
-                    f"to fail it at delivery (#209)."))
+                    f"to fail it at delivery."))
         return flagged
 
     def log_audit_batch(self, entries: List[tuple]):
@@ -2637,7 +2637,7 @@ class SqliteStore:
         "their SHIFT/JITTER values are not re-examined. The guarantee "
         "that does not apply to them is the new one -- \"a date under a "
         "SHIFT rule that this pipeline never shifted is raised and "
-        "shifted\" (#510). They are never shifted twice (#513). "
+        "shifted\". They are never shifted twice. "
         "Re-ingesting those files from source gives them the full "
         "guarantee."
     )
@@ -2706,7 +2706,7 @@ class SqliteStore:
         "not a whole audit() report. Which configuration the scan ran "
         "under is not known. They are restored as recorded, and an export that writes "
         "them says so. To record a policy, run audit() under the "
-        "configuration you mean, then save() (#555).")
+        "configuration you mean, then save().")
 
     def _report_statuses_without_a_policy(self, count: int):
         """Log one WARNING with how many statuses carry no policy.
@@ -2854,7 +2854,7 @@ class SqliteStore:
         "longer has ({n}). A new secret would give {those} a second date "
         "offset, so audit() and anonymize() refuse. The secret cannot be "
         "restored from outside the store: re-ingest the source files into "
-        "a new store (#716).")
+        "a new store.")
 
     _FOREIGN_PSEUDONYM_NOTICE = (
         "{n} in this store carr{ies} {a}`ANON_` pseudonym{s} minted under a "
@@ -3015,7 +3015,7 @@ class SqliteStore:
         "would replace them a second time, a second UID for each of those "
         "instances, so audit(), anonymize() and redact() refuse. The secret "
         "cannot be restored from outside the store: re-ingest the source "
-        "files into a new store (#716, #544).")
+        "files into a new store.")
 
     def _replaced_uid_evidence(self) -> int:
         """How many instances carry a SOP Instance UID of the shape this
@@ -3097,7 +3097,7 @@ class SqliteStore:
         "different offset from the dates of the same patients shifted "
         "before it, and the store cannot tell which. The secret cannot be "
         "checked or replaced from outside the store: where those offsets "
-        "matter, re-ingest the source files into a new store (#716).")
+        "matter, re-ingest the source files into a new store.")
 
     def _serialize_item(self, item: Instance) -> Dict[str, Any]:
         """Serializes an Instance to the dictionary stored as `attributes_json`.

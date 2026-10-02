@@ -49,21 +49,21 @@ def _tokenless(count, total):
     return (f"{count} of {total} instances of this patient carry no identity "
             "token, so they took only the patient-level identifiers (group "
             f"0010) of {SPEAKER}, and their other locked identifiers keep what "
-            "anonymize() left (#583).")
+            "anonymize() left.")
 
 
 def _disagree(count, total):
     return (f"{count} of {total} identity tokens of this patient hold a "
             f"Patient's Name or Patient ID different from {SPEAKER} (the first "
             "found, or the first holding a Patient ID); the patient takes that "
-            "token's, which export() stamps on every study (#583).")
+            "token's, which export() stamps on every study.")
 
 
 def _restore_warnings(session, caplog, patient_id):
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="isocenter"):
         session.recover_patient_identity(patient_id, restore=True)
-    return [r.getMessage() for r in caplog.records if "(#583)" in r.getMessage()]
+    return [r.getMessage() for r in caplog.records if "of this patient" in r.getMessage()]
 
 
 @pytest.fixture(autouse=True)

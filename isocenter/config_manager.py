@@ -150,15 +150,15 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
         raise ValueError(
             f"{source}: version must be a quoted string such as '2.0', got "
             f"{version!r} ({type(version).__name__}); unquoted, YAML reads "
-            f"a version as a number, and 2.10 as the number 2.1 (#711)")
+            f"a version as a number, and 2.10 as the number 2.1")
     if _VERSION_DIGITS.fullmatch(version) and not _VERSION_SHAPE.fullmatch(version):
         raise ValueError(
             f"{source}: version {version!r} is not canonical: write "
-            f"'MAJOR.MINOR' with no leading zero, such as '2.0' (#730)")
+            f"'MAJOR.MINOR' with no leading zero, such as '2.0'")
     if not _VERSION_SHAPE.fullmatch(version):
         raise ValueError(
             f"{source}: version {version!r} is not a 'MAJOR.MINOR' string "
-            f"such as '2.0' (#711)")
+            f"such as '2.0'")
     # `CONFIG_VERSION` is read at call time, not import time, so the
     # constant has one home.
     ours = CONFIG_VERSION
@@ -166,7 +166,7 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
         raise ValueError(
             f"{source}: version {version!r} is a configuration schema this "
             f"isocenter does not read; it reads version {_READABLE_MAJOR} "
-            f"({_READABLE_MAJOR}.0 through {ours}) (#711)")
+            f"({_READABLE_MAJOR}.0 through {ours})")
     # Refused, not loaded with a note (owner ruling Q1 A on #784): a minor
     # bump means the same file is applied differently (#762), so a newer
     # file loaded here would be applied this library's way under its own
@@ -179,7 +179,7 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
             f"{source}: version {version!r} is newer than this isocenter's "
             f"configuration version {ours}, which may apply it differently "
             f"than it was written for; upgrade isocenter, or set version: "
-            f"{ours!r} to apply it as {ours} does (#784)")
+            f"{ours!r} to apply it as {ours} does")
     return version
 
 
@@ -218,7 +218,7 @@ def _refuse_overwriting_a_newer_minor(path: str) -> None:
             f"{path}: declares version {version!r}, newer than this "
             f"isocenter's configuration version {ours}; saving would "
             f"rewrite it as {ours}. Nothing was written: upgrade isocenter, "
-            f"or save to another path (#784)")
+            f"or save to another path")
 
 
 def _unknown_keys(keys, known, where: str, whose: str,
@@ -254,7 +254,7 @@ def _unknown_keys(keys, known, where: str, whose: str,
             match = difflib.get_close_matches(key, sorted(known), n=1)
             if match:
                 guesses.append((key, match[0]))
-    listed = f"{whose} keys are {', '.join(sorted(known))} (#712)"
+    listed = f"{whose} keys are {', '.join(sorted(known))}"
     if len(unknown) == 1 and guesses:
         return f"{message}; did you mean {guesses[0][1]!r}? {listed}"
     if guesses:
@@ -285,7 +285,7 @@ def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
     if "machine_rules" in data:
         raise ValueError(
             f"{source}: 'machine_rules' is an old spelling of 'machines'; "
-            f"rename it (#712)")
+            f"rename it")
     reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
                            "A version 2 configuration's")
     if reason is not None:
@@ -489,7 +489,7 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
         raise ValueError(
             f"{path}: an external privacy profile contributes only its "
             f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
-            f"would be ignored (#712)")
+            f"would be ignored")
     return _validated_phi_tags(data["phi_tags"], path)
 
 
@@ -516,7 +516,7 @@ def _refused_date_jitter(dj: Any) -> Optional[str]:
     if isinstance(dj, int) and not isinstance(dj, bool):
         return (f"'date_jitter' must be {{min_days: int, max_days: int}}; the "
                 f"single-int form was removed in 1.0 -- write {{min_days: "
-                f"{dj}, max_days: {dj}}} for the same fixed shift (#713)")
+                f"{dj}, max_days: {dj}}} for the same fixed shift")
     if not (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
             and all(isinstance(v, int) and not isinstance(v, bool)
                     for v in dj.values())):
@@ -527,7 +527,7 @@ def _refused_date_jitter(dj: Any) -> Optional[str]:
     if dj["min_days"] > dj["max_days"]:
         return (f"'date_jitter' min_days {dj['min_days']} is greater than "
                 f"max_days {dj['max_days']}; one of them is wrong, and which "
-                f"cannot be told from the range alone (#713)")
+                f"cannot be told from the range alone")
     return None
 
 
@@ -571,7 +571,7 @@ def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
         return f"phi_tags[{tag!r}] has {reason}"
     if rule.get("name") is not None and not isinstance(rule["name"], str):
         return (f"phi_tags[{tag!r}] name must be a string, got "
-                f"{type(rule['name']).__name__} (#713)")
+                f"{type(rule['name']).__name__}")
     return None
 
 
@@ -964,7 +964,7 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         value = rule.get("value")
         if "replacement" in rule:
             return (f"phi_tags[{tag!r}] has a 'replacement' key; the key is "
-                    f"'value' (0.9.8, #538), so rename it")
+                    f"'value' (renamed in 0.9.8), so rename it")
         if value is not None and action != "REPLACE":
             return (f"phi_tags[{tag!r}] has a value under {action}; only "
                     f"REPLACE writes a value")
@@ -989,7 +989,7 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
             return None
         return (f"phi_tags[{tag!r}] is {action}; a repeating-group key (50xx "
                 f"or 60xx) takes REMOVE or KEEP, because it names elements "
-                f"of many VRs (#556)")
+                f"of many VRs")
     # The ID is what keeps two patients apart, and `anonymize()` merges
     # patients that share one, so an emptied or literal ID would merge
     # every patient.
@@ -999,7 +999,7 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         return (f"phi_tags['{tag}'] is {action}{said}; Patient ID can only be "
                 f"kept (KEEP) or replaced by its keyed pseudonym (REPLACE with "
                 f"no value), because the ID is what keeps two patients apart "
-                f"and anonymize() merges patients that share one (#537)")
+                f"and anonymize() merges patients that share one")
     # Refused rather than honoured or read as REPLACE (owner rulings on
     # #877): neither element can be absent from a valid file, and the
     # owner's stamp is what the export writes, so no REMOVE, EMPTY or
@@ -1018,10 +1018,9 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         under = f"{action} with a value" if valued else action
         return (f"phi_tags['{tag}'] is {action}{said}; {name} can only be "
                 f"kept (KEEP) or replaced by this project's keyed "
-                f"replacement UID (REPLACE with no `value:` key, #544), "
+                f"replacement UID (REPLACE with no `value:` key), "
                 f"because the {owner} writes its UID on every exported file, "
-                f"so under {under} the export would carry the source UID "
-                f"(#877)")
+                f"so under {under} the export would carry the source UID")
     # Its own arm, before the UI exemption below, which reads `not value`
     # and so would let `''` through as the keyed rule; and not reached by
     # making that exemption `value is None`, which would fall through to
@@ -1036,8 +1035,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"empty value: is still a value, and no UID is empty, so the "
                 f"scan would propose nothing a UI can hold and the export "
                 f"would carry the source UID. Omit the value: key (or write "
-                f"value: null) for this project's keyed replacement UID "
-                f"(#544), or use EMPTY or REMOVE (#883)")
+                f"value: null) for this project's keyed replacement UID, "
+                f"or use EMPTY or REMOVE")
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
@@ -1046,7 +1045,7 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         if vr is not None and not {"DA", "DT", "SQ"} & set(vr.split(" or ")):
             return (f"phi_tags['{tag}'] is {action}, and {tag} is {vr}; "
                     f"SHIFT and JITTER move a date by the patient's offset "
-                    f"and apply only to DA and DT (#559)")
+                    f"and apply only to DA and DT")
         return None
     if action == "REPLACE" and not value and _standard_dictionary_vr(tag) == "UI":
         # The keyed UID replacement, which a UI holds by construction.
@@ -1067,10 +1066,10 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
             if not set(vr.split(" or ")) <= _NON_STRING_VRS:
                 advice += f", or give a value: that is a valid {vr}"
             uid = ("; REPLACE with no value gives it this project's "
-                   "replacement UID (#544)") if vr == "UI" else ""
+                   "replacement UID") if vr == "UI" else ""
             return (f"phi_tags['{tag}'] is REPLACE, which writes {written!r}, "
-                    f"and {tag} is {vr}, which cannot hold it; use {advice} "
-                    f"(#560){uid}")
+                    f"and {tag} is {vr}, which cannot hold it; use {advice}"
+                    f"{uid}")
         # Ranges and multiplicity pydicom's `validate_value` passes. Only a
         # `value:` is counted: REPLACE with no value writes one value.
         if value:
@@ -1078,23 +1077,23 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
             if vr in ("DA", "TM") and "-" in value:
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and a '-' in a {vr} is a range, which "
-                        f"{tag} cannot hold; give one {vr} value (#560)")
+                        f"{tag} cannot hold; give one {vr} value")
             if vr == "DT" and _dt_is_a_range(value):
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and a '-' in a DT anywhere but its UTC "
                         f"offset (&ZZXX at the end) is a range, which {tag} "
-                        f"cannot hold; give one DT value (#560)")
+                        f"cannot hold; give one DT value")
             vm = _dictionary_vm(tag)
             if "\\" in value and vm == "1":
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and {tag} holds one value, which a '\\' "
-                        f"would make two; give a value without one (#560)")
+                        f"would make two; give a value without one")
             count = value.count("\\") + 1
             if vm is not None and not _vm_allows(vm, count):
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and {tag} holds {vm} values (its "
                         f"dictionary VM), which {count} '\\'-separated values "
-                        f"are not; give a value of that multiplicity (#560)")
+                        f"are not; give a value of that multiplicity")
     return None
 
 
@@ -1204,7 +1203,7 @@ def _unshipped_profile_refusal(profile_name: str, path: str) -> ValueError:
         f"{path}: privacy_profile {profile_name!r} is not a profile this "
         f"isocenter ships; it ships {', '.join(sorted(PRIVACY_PROFILES))} "
         f"({aliases}). A later PS3.15 edition arrives as a new name in a "
-        f"newer isocenter (#714)")
+        f"newer isocenter")
 
 
 def _resolved_policy(config: Dict[str, Any], path: str):
@@ -1376,7 +1375,7 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
         f"configuration.save(): privacy_profile {privacy_profile!r} is neither "
         f"a built-in profile ({known}), 'none', nor an existing file, so a "
         f"file naming it would not load{where}. If the profile file has "
-        f"moved, set privacy_profile to its path (#715)")
+        f"moved, set privacy_profile to its path")
 
 
 class ConfigLoader:
@@ -1502,7 +1501,7 @@ class ConfigLoader:
             raise ValueError(
                 f"{filepath}: 'remove_private_tags' must be true or false, got "
                 f"{remove_private_tags!r} ({type(remove_private_tags).__name__}); "
-                f"{why} (#713)")
+                f"{why}")
 
         # Validate machines
         for i, rule in enumerate(machine_rules):
@@ -1583,20 +1582,20 @@ class ConfigLoader:
                 f"({type(sn).__name__}); quote it as it is written on the "
                 f"machine (serial_number: \"0123\", not serial_number: 0123), "
                 f"because YAML reads unquoted digits as a number, and a "
-                f"leading 0 as octal: 0123 loads as 83 (#713)")
+                f"leading 0 as octal: 0123 loads as 83")
         if not sn.strip():
             # As an empty serial is: no Device Serial Number is blank, so
             # the rule would match no machine and redact nothing.
             raise ValueError(
                 f"Rule #{index}: 'serial_number' {sn!r} is blank; give the "
-                f"serial as it is written on the machine (#730)")
+                f"serial as it is written on the machine")
 
         for key in ("manufacturer", "model_name", "comment"):
             # Null is absent (the comment above `_VERSION_SHAPE`).
             if rule.get(key) is not None and not isinstance(rule[key], str):
                 raise ValueError(
                     f"{label}: '{key}' must be a string, got {rule[key]!r} "
-                    f"({type(rule[key]).__name__}) (#713)")
+                    f"({type(rule[key]).__name__})")
 
         zones = rule.get("redaction_zones", [])
         if not isinstance(zones, list):
@@ -1613,7 +1612,7 @@ class ConfigLoader:
                 if zone.get("note") is not None and not isinstance(zone["note"], str):
                     raise ValueError(
                         f"{label}, Zone #{z_idx}: 'note' must be a string, got "
-                        f"{zone['note']!r} ({type(zone['note']).__name__}) (#713)")
+                        f"{zone['note']!r} ({type(zone['note']).__name__})")
                 roi = zone.get("roi")
             else:
                 raise ValueError(
