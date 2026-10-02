@@ -10359,8 +10359,26 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
         value = buffer.getvalue()[8:]
         if len(value) <= _SHORT_LENGTH_MAX:
             continue
-        ds[elem.tag] = DataElement(elem.tag, "UN", value)
         where = f"{within} > " if within else ""
+        # A private `LO` -- the multi-valued text `_fallback_multivalue`
+        # writes for a caller's list, or a recorded private `LO` -- is
+        # written `UC` instead (#901): Unlimited Characters is a text VR of
+        # VM 1-n with a 4-byte Explicit VR length, so it holds the same
+        # values whole, and this library reads it back as text with no size
+        # gate. As `UN` it had no dictionary VR to decode under on
+        # re-ingest and was dropped. Private only: a standard `LO` keeps
+        # `UN`, which re-ingest decodes under the dictionary's `LO`, where
+        # `UC` would be a VR its dictionary does not give. `LO` only: any
+        # other recorded private VR is the source's, and stays.
+        if vr == "LO" and elem.tag.group % 2:
+            ds[elem.tag] = DataElement(elem.tag, "UC", elem.value)
+            corrections.append(
+                f"{where}{tag} (LO, {len(value)} bytes) is written as UC: an "
+                f"Explicit VR LO element can hold at most 65535 bytes (PS3.5 "
+                f"6.2.2), and UC holds the same values with a 4-byte length; "
+                f"this library reads them back as UC.")
+            continue
+        ds[elem.tag] = DataElement(elem.tag, "UN", value)
         corrections.append(
             f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
@@ -10376,8 +10394,9 @@ def _read_back_words(tag, vr) -> str:
     (`_standard_un_decoded`) and kept: no size limit applies to a numeric
     or text value. Anything else stays `UN` bytes and meets the binary
     retention limit, which a value relabelled here always exceeds -- a
-    private tag (no dictionary VR, review of #900 F2, #901) and an
-    ambiguous one such as LUT Data (gated as its `OW` twin, F6, #902).
+    private tag other than `LO` (no dictionary VR, review of #900 F2; a
+    private `LO` is written `UC` instead, #901, and has its own note) and
+    an ambiguous one such as LUT Data (gated as its `OW` twin, F6, #902).
     """
     try:
         named = None if tag.group % 2 else dictionary_VR(tag)
