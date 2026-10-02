@@ -58,7 +58,10 @@ current working directory at construction, `Session()` calls
 path then, so a later change of directory does not move it; a key
 beside the store in another directory is not looked for. With no such
 file, reversible anonymization stays off and no key is created. A
-malformed one makes `Session()` raise its `ValueError`. Keeping the key
+malformed one makes `Session()` raise its `ValueError`. So does anything
+at that path that is not a regular file, such as a directory. The
+message names the path, and the threads the session had started are
+released first. Keeping the key
 in the directory you run from, beside the store and the exported data,
 is not advised: whoever holds the key and an export can read the
 identities it carries.
@@ -391,7 +394,8 @@ otherwise.
   prints nothing, and no message names a Patient ID.
   It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
-  file, creating none. The first `lock_identities()` that writes a token
+  file, or a path that is not a regular file, creating none; the session
+  stays open (#791). The first `lock_identities()` that writes a token
   creates the key, exclusively and with mode 0600; a lock that writes
   none (a refusal, or no patient found, or none with an instance) creates
   no key file (#813). When no key file exists and the session holds an

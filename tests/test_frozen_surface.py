@@ -1644,6 +1644,12 @@ def test_the_stability_page_says_what_the_freeze_covers():
     # `test_a_malformed_key_in_the_working_directory_makes_session_raise`.
     assert ("A malformed one makes `Session()` raise its `ValueError`."
             ) in frozen
+    # #791, owner ruling Q1 A: a path that is not a regular file is the
+    # same refusal, and the half-built session is closed before it.
+    # Pinned in behaviour by `test_a_bad_key_in_the_working_directory.py`.
+    assert ("So does anything at that path that is not a regular file, such "
+            "as a directory. The message names the path, and the threads the "
+            "session had started are released first.") in frozen
     # D2 and E1: the report arm locks the patients with a finding, not
     # every patient scanned. After `anonymize()` it names no patient whose
     # ID was replaced; an ID-less subject (#584) or a KEEP on `0010,0020`

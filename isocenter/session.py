@@ -1430,8 +1430,11 @@ class DicomSession:
                 Environment Variables page.
 
         Raises:
-            ValueError: `isocenter.key` in the working directory is empty or
-                is not a Fernet key.
+            ValueError: `isocenter.key` in the working directory is empty,
+                is not a Fernet key, or is not a regular file (a directory,
+                a FIFO). The message names its absolute path, and the
+                threads the session had started are released before it
+                raises, as they are for any exception from construction.
         """
         configure_logger()
         self.persistence_file = persistence_file or os.getenv("ISOCENTER_DB_PATH", "isocenter.db")
@@ -1439,7 +1442,42 @@ class DicomSession:
         # Check existence before SqliteStore potentially creates it
         db_exists = os.path.exists(self.persistence_file)
 
+        # `SqliteStore` starts its audit thread as its last statement, so a
+        # raise inside it leaves nothing running. Everything after it can
+        # raise with threads (and the store's sqlite handles) live -- a bad
+        # `./isocenter.key`, a `KeyboardInterrupt` during `load_all()` --
+        # and those threads hold the session by weakref, so they lived for
+        # as long as anything referenced the failed session: its
+        # traceback, or `sys.last_exc` in a REPL, indefinitely (#791).
+        # `BaseException`, so an interrupt releases them too.
         self.store_backend = SqliteStore(self.persistence_file)
+        try:
+            self._open_after_the_store(db_exists)
+        except BaseException:
+            self._close_half_built()
+            raise
+
+    def _close_half_built(self):
+        """Close what a failed `__init__` started; never raises.
+
+        `close()` guards each step by `hasattr`, so a session that failed
+        before its executor or its manager existed closes cleanly. A
+        failure of `close()` itself is logged and swallowed: the exception
+        that stopped construction is the one the caller needs (#791).
+        """
+        try:
+            self.close()
+        except Exception as exc:  # pylint: disable=broad-except
+            get_logger().error(
+                "Closing a session whose construction failed raised "
+                f"{describe_exception(exc)}; the construction error follows")
+
+    def _open_after_the_store(self, db_exists):
+        """The rest of `__init__`, after the store is open.
+
+        Split out so `__init__` can close what this starts when it
+        raises (#791).
+        """
         self.persistence_manager = PersistenceManager(self.store_backend)
 
         # Hydrate memory from DB
@@ -1531,7 +1569,18 @@ class DicomSession:
         self._pixel_scans: List[PixelScanSummary] = []
 
         if os.path.exists("isocenter.key"):
-            self.enable_reversible_anonymization("isocenter.key")
+            # Only this call is wrapped: wider, a `ValueError` from
+            # `load_all()` would carry a false sentence about a key. The
+            # caller did not name this file, so the message says where it
+            # came from; the type stays the frozen `ValueError` (#791).
+            try:
+                self.enable_reversible_anonymization("isocenter.key")
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc}. Session() found it in the working directory "
+                    "and enables reversible anonymization with any "
+                    "isocenter.key there; fix it, or move it out of the "
+                    "directory") from None
 
         # Shared Global Executor for Process Consistency.
         #
@@ -5615,8 +5664,10 @@ class DicomSession:
 
         Raises:
             ValueError: The file at `key_path` is not a Fernet key, or is
-                empty (the message names the path). Nothing is cached by a
-                failed enable: fix the file and enable again.
+                empty, or the path is not a regular file (a directory, a
+                FIFO); the message names the path. Nothing is cached by a
+                failed enable, and the session stays open and usable: fix
+                the file and enable again.
         """
         key_manager = KeyManager(key_path)
         service = ReversibilityService(key_manager)

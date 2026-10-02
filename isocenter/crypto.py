@@ -45,11 +45,23 @@ class KeyManager:
         Raises:
             FileNotFoundError: No file at `key_path`. The message names the
                 path, which is the caller's own argument.
-            ValueError: The file is empty (the message names the path and
-                says so), or its content is not a Fernet key (`Fernet`'s
-                own message). Neither is cached.
+            ValueError: The file is empty, its content is not a Fernet
+                key, or the path is not a regular file (a directory, a
+                FIFO, a device), which is refused before it is opened. The
+                message names the path in every case. Nothing is cached.
         """
         if self.key is None:
+            # Before `open`, not after it: `open` on a FIFO blocks until a
+            # writer appears, which hung `Session()` for good (#791), so an
+            # `fstat` of the opened file is too late. `isfile` follows
+            # links, so a symlink to a key file still loads; a dangling one
+            # does not exist and takes the `FileNotFoundError` arm.
+            if (os.path.exists(self.key_path)
+                    and not os.path.isfile(self.key_path)):
+                raise ValueError(
+                    f"{self.key_path} is not a regular file (a directory, "
+                    "a pipe or a device), so it holds no key; a key file is "
+                    "a file")
             try:
                 with open(self.key_path, "rb") as f:
                     mode = stat.S_IMODE(os.fstat(f.fileno()).st_mode)
@@ -64,9 +76,16 @@ class KeyManager:
                     f"the key file at {self.key_path} is empty, so it holds no "
                     "key; a lock interrupted while creating it leaves the file "
                     "behind -- remove it and lock again")
-            # Raises `ValueError` for a malformed key. The content is not
-            # quoted: whatever the file holds, it was meant to be a secret.
-            Fernet(key)
+            # The content is not quoted: whatever the file holds, it was
+            # meant to be a secret. Fernet's own message names no file
+            # (#791).
+            try:
+                Fernet(key)
+            except ValueError:
+                raise ValueError(
+                    f"the key file at {self.key_path} does not hold a Fernet "
+                    "key (32 url-safe base64-encoded bytes); it is not the "
+                    "file a lock writes") from None
             self.key = key
             # Never chmod a file this code did not create: its mode may be
             # deliberate (a group sharing the key). The warning names the
@@ -116,7 +135,8 @@ class KeyManager:
             bytes: The key.
 
         Raises:
-            ValueError: An existing file at the path is empty or malformed.
+            ValueError: An existing file at the path is empty or malformed,
+                or the path is not a regular file.
         """
         # Split from the write so a lock that writes no token -- refused,
         # or matching no patient, or none with an instance -- leaves no
