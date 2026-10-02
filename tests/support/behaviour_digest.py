@@ -17,10 +17,11 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
   `VR_DUMMY` string VR, and a repeating-group mask key;
 - `basic@2026c` with a dict zone on a `"*"` rule beside an exact rule for
-  another machine (`STAR_CONFIG`). Fixed text regions on the synthetic
+  another machine (`STAR_CONFIG`). The store is audited, anonymized and
+  redacted under the file's rules. Then fixed text regions on the synthetic
   image are classified against the rules covering it, and the suggestions
-  `ConfigAutomator` makes are applied (#808, #814, #899). Then the store is
-  audited, anonymized and redacted under the rules the suggestions left.
+  `ConfigAutomator` makes are applied (#808, #814, #899). Redaction under
+  the rules the suggestions leave is not seen until #908.
 
 The files are CT_small and MR_small (bundled with pydicom) and five
 synthetic images built from CT_small. One holds an element of every
@@ -409,8 +410,8 @@ def behaviour(root):
             _load("privacy_profile: basic\nremove_private_tags: false\n")),
         "floor": _scenario(root, "floor", _floor, redact=True),
         "none-kitchen-sink": _scenario(root, "none", _none),
-        # Redacts with the rules the suggestions left: `"*"`'s zone and
-        # the rule added for `SERIAL`.
+        # Redacts under the file's rules, before the suggestions are
+        # applied; `_leaks_on_the_synthetic_image` says why (#908).
         "star-zone": _scenario(root, "star", _load(STAR_CONFIG), redact=True,
                                inspect=_leaks_on_the_synthetic_image),
     }
