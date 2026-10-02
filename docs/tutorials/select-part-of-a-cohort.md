@@ -103,10 +103,11 @@ session.anonymize()
 ```
 
 Now pass the rows you chose as `subset=`. `rtdose.dcm` stores 32-bit
-dose values, which Isocenter's JPEG 2000 encoder cannot write exactly,
-so every export on this page uses `use_compression=False`
-([#771](https://github.com/kvnlng/Isocenter/issues/771) tracks writing
-such an instance uncompressed on its own).
+dose values, which Isocenter's JPEG 2000 encoder cannot write exactly, so
+with compression on that one instance would be written uncompressed, with
+an INFO note ([#771](https://github.com/kvnlng/Isocenter/issues/771)).
+Every export on this page uses `use_compression=False`, so every file it
+writes is in the same transfer syntax.
 
 ```python
 session.export("export-images", subset=images, use_compression=False)

@@ -349,7 +349,7 @@ decided by its **size**, not its VR:
 | Private tag | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
 | Text or numeric VR (`LO`, `SH`, `DS`, ...) | Removed | **Kept**, and written to the exported file |
-| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
+| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, `OV`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
 | Binary value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
 
 65534 bytes is the largest value an explicit-VR 16-bit length field can

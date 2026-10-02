@@ -40,7 +40,10 @@ merely unreadable here, it is **written wrong and read back wrong**.
 
 - **32- and 64-bit.** The codec does not reject 32-bit: it encodes,
   exactly to 25 bits and wrong above that, and the DICOM file built from
-  a 32-bit codestream cannot be decoded by any pydicom plugin.
+  a 32-bit codestream cannot be decoded by any pydicom plugin. Since
+  #771 the export does not fail such an instance: it writes it
+  uncompressed, with an INFO note, and the encoder's refusal is the
+  backstop for a direct `_compress_j2k` caller.
 - **16-bit multi-sample**, which this guard refused until #416 and now
   writes. The codestream was always *exact*; what this project lacked
   was a decoder at the door. Pillow is the only JPEG 2000 plugin pydicom
@@ -73,6 +76,7 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, JPEG2000Lossless, generate_uid
 
+from isocenter.io_handlers import _compress_j2k, _J2kFrameRefusal
 from isocenter.session import DicomSession
 
 #: A 4x4 corner of Hounsfield-shaped values, as a literal. Negative on
@@ -328,8 +332,31 @@ def test_the_bool_arm_writes_the_bytes_the_uncompressed_path_writes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# P4/P5 -- the widths that stay unsupported, refused by name
+# P4/P5 -- the widths the encoder refuses by name. Since #771 the export
+# writes them uncompressed instead; the guard is the backstop for a direct
+# `_compress_j2k` call, pinned here.
 # ---------------------------------------------------------------------------
+
+def _direct_refusal(arr, pixel_representation):
+    """`_compress_j2k` on a dataset declaring `arr`; the refusal's text.
+
+    The dataset is left untouched by a refusal, which is asserted.
+    """
+    ds = pydicom.Dataset()
+    ds.Rows, ds.Columns = arr.shape[0], arr.shape[1]
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = ds.BitsStored = arr.dtype.itemsize * 8
+    ds.HighBit = ds.BitsStored - 1
+    ds.PixelRepresentation = pixel_representation
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+    with pytest.raises(_J2kFrameRefusal) as raised:
+        _compress_j2k(ds, pixel_array=arr)
+    assert "PixelData" not in ds
+    assert ds.file_meta.TransferSyntaxUID == pydicom.uid.ImplicitVRLittleEndian
+    return str(raised.value)
+
 
 @pytest.mark.parametrize("dtype_name,pixel_representation", [
     ("uint32", 0),
@@ -351,24 +378,18 @@ def test_a_32_bit_frame_is_refused_by_name_rather_than_written_wrong(
     2147483647 and read back 67108863; `int32` full-range read back -1.
     That is worse than unreadable, not a milder form of it.
 
-    *Red when:* the frame guard is removed. Measured, it is red on
-    `assert error is not None` -- the export **succeeds** -- so the
-    no-file-on-disk assertion below is never reached under that mutation.
-    It is here anyway and it is independently sufficient: it is what
-    distinguishes "the export refused" from "the export raised after
-    leaving a file behind", and a future change that turns the refusal
-    into a partial write would be red on it alone.
+    Since #771 the export never hands such a frame to the encoder: it
+    writes it uncompressed under the default, with an INFO note
+    (`tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py`).
+    The guard stays as the backstop for a direct `_compress_j2k` caller,
+    and this is where its sentence is pinned.
+
+    *Red when:* the frame guard is removed: the encode then succeeds, and
+    returns, rather than raising.
     """
     arr = np.array(_rows_for(dtype_name), dtype=dtype_name)
-    _summary, error, files, rows, _out = _export(
-        tmp_path, arr, pixel_representation, f"p4_{dtype_name}")
+    message = _direct_refusal(arr, pixel_representation)
 
-    assert error is not None, (
-        "a 32-bit frame was accepted by the compressed path; the codec "
-        "encodes it silently wrong above 25 bits")
-    assert files == [], "a file reached disk for a refused width"
-
-    message = " ".join(d for _a, _u, d in rows if d)
     assert dtype_name in message, f"the refusal does not name the dtype: {message}"
     assert "BitsAllocated 32" in message, message
     assert f"PixelRepresentation {pixel_representation}" in message, message
@@ -392,16 +413,13 @@ def test_a_64_bit_frame_is_refused_by_name(
     different releases -- `ValueError: item size not supported by codec` on
     2026.8.16, `Jpeg2kError: opj_encode or opj_write_tile failed` on
     2024.6.1 -- so a message the user can act on cannot come from the
-    codec. *Red when:* the guard is narrowed to 32-bit only.
+    codec. *Red when:* the guard is narrowed to 32-bit only. A direct
+    `_compress_j2k` call, as above: the export writes such a frame
+    uncompressed since #771.
     """
     arr = np.array(_rows_for(dtype_name), dtype=dtype_name)
-    _summary, error, files, rows, _out = _export(
-        tmp_path, arr, pixel_representation, f"p5_{dtype_name}")
+    message = _direct_refusal(arr, pixel_representation)
 
-    assert error is not None
-    assert files == []
-
-    message = " ".join(d for _a, _u, d in rows if d)
     assert dtype_name in message, message
     assert "BitsAllocated 64" in message, message
     assert "use_compression=False" in message, message
@@ -635,7 +653,7 @@ def test_compress_j2k_without_an_array_writes_nothing_and_raises_nothing():
     whose only caller is the export worker, which always passes
     `pixel_array=arr`; and when compression is on the worker never assigns
     `ds.PixelData` at all, which the worker's own comment already says:
-    `# Only set PixelData if NOT compressing.` at io_handlers.py line 7595.
+    `# Only set PixelData if NOT compressing.` at io_handlers.py line 7859.
     `pixel_array is None` therefore means "nothing to
     compress" and nothing else.
 

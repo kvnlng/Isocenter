@@ -1090,7 +1090,8 @@ class Instance(DicomItem):
             and `redact()` can replace it.
         sop_class_uid (str): SOP Class UID (0008,0016).
         instance_number (int): Instance Number (0020,0013). Not unique
-            within a series.
+            within a series. 0 for an ingested file that has none, and
+            `0020,0013` is then absent from `attributes` (#870).
         file_path (Optional[str]): A file whose pixels match this instance
             now, read when the store holds no frame for it. None after
             redaction.

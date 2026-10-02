@@ -2230,6 +2230,17 @@ class SqliteStore:
                         try:
                             attrs = json.loads(
                                 r['attributes_json'], object_hook=isocenter_json_object_hook)
+                            # Read before `_deserialize_into` consumes
+                            # `attrs`. `__post_init__` wrote `0020,0013`
+                            # from the column, and `update` keeps that 0
+                            # when the stored JSON lacks the key: a file
+                            # with no Instance Number would export `'0'`
+                            # after every reopen (#870). Only with a JSON
+                            # to speak for the attributes; a store saved
+                            # before #870 holds the 0 it saved and keeps
+                            # it.
+                            if "0020,0013" not in attrs:
+                                inst.attributes.pop("0020,0013", None)
                             self._deserialize_into(inst, attrs)
                         except (json.JSONDecodeError, TypeError) as exc:
                             self.logger.error(
@@ -2413,6 +2424,10 @@ class SqliteStore:
                                 try:
                                     attrs = json.loads(
                                         r['attributes_json'], object_hook=isocenter_json_object_hook)
+                                    # As load_all: an absent Instance
+                                    # Number stays absent (#870).
+                                    if "0020,0013" not in attrs:
+                                        inst.attributes.pop("0020,0013", None)
                                     self._deserialize_into(inst, attrs)
                                 except (json.JSONDecodeError, TypeError) as exc:
                                     # Logged, never silent: the instance
