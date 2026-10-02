@@ -18,12 +18,12 @@ Each file is written under a temporary name and renamed when complete, so a cras
 
 ## Compression
 
-The export writes two transfer syntaxes and no others: JPEG 2000 Lossless (`1.2.840.10008.1.2.4.90`) with `use_compression=True`, the default, and Implicit VR Little Endian with `use_compression=False`. A file with no pixel data is always Implicit VR Little Endian. A source in any other syntax is decoded at ingest and re-encoded into one of those two, and nothing records the source syntax. [Codec support](codecs.md) lists which decoder reads each source syntax.
+The export writes two transfer syntaxes and no others: JPEG 2000 Lossless (`1.2.840.10008.1.2.4.90`) with `use_compression=True`, the default, and Implicit VR Little Endian with `use_compression=False`. A file with no pixel data, a file of floating-point pixels, and an image of 32- or 64-bit integer samples are always Implicit VR Little Endian. A source in any other syntax is decoded at ingest and re-encoded into one of those two, and nothing records the source syntax. [Codec support](codecs.md) lists which decoder reads each source syntax.
 
 Compression is lossless, but it changes how colour images are labelled:
 
 - An `RGB` image is encoded with JPEG 2000's reversible colour transform and declared `YBR_RCT`, as the standard requires. A YBR source that decodes to RGB is already stored as `RGB`.
-- 32- and 64-bit images cannot be compressed. Their export fails with a message naming `use_compression=False`.
+- 32- and 64-bit integer images cannot be compressed exactly: JPEG 2000 Lossless here is exact only to 25 bits. Under `use_compression=True` each such instance is written uncompressed, Implicit VR Little Endian, and the export names it at INFO, with no audit row; the samples are written exactly. Other instances of the same export are still compressed ([#771](https://github.com/kvnlng/Isocenter/issues/771)).
 - A 16-bit colour image is compressed too, and pydicom cannot read it with Pillow alone; with `pylibjpeg-openjpeg` installed, pydicom reads it exactly. The export names each such instance at INFO.
 
 If a recipient's reader cannot handle JPEG 2000, export with `use_compression=False`.
