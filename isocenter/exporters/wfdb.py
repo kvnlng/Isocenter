@@ -377,6 +377,10 @@ class WfdbExporter(Exporter):
     def export(self, session, folder: str, **options) -> List[str]:
         """Write WFDB records into `folder`.
 
+        Saves the session (`save(sync=True)`) before the first record is
+        written and after both refusals under `Raises:`, as the `dicom`
+        format does; a refused call saves nothing.
+
         Args:
             session (DicomSession): Active session.
             folder (str): Output root.
@@ -477,6 +481,23 @@ class WfdbExporter(Exporter):
         # This is the auditor's override, not a debug switch -- it says the
         # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
+
+        # Save before the walk, as `_export_dicom` does (#809):
+        # `export()` is documented to save the session before it writes,
+        # and a WFDB export that did not left `anonymize()`'s edits only
+        # in memory, so the store reopened on the source values. After
+        # both refusals above and never before them: a refused export
+        # must not have moved the store. `sync=True` for the reason the
+        # comment above `_export_dicom`'s own `save(sync=True)` gives (a
+        # plain `save()` returns before the flush and races the walk).
+        # `getattr`, because a caller may hand in a session-like object
+        # with no `save`, as `report_policies` below allows; and only with
+        # a store behind the session, because `save()` writes to
+        # `store_backend` and `None` is a legitimate value here (see the
+        # comment on `store_backend` above).
+        save = getattr(session, "save", None)
+        if save is not None and store_backend is not None:
+            save(sync=True)
 
         # The notice for statuses recorded under another policy, over the
         # instances this export will attempt: the ones in the selected
