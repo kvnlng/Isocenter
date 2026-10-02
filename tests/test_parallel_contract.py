@@ -2968,9 +2968,10 @@ def test_a_ctrl_c_while_the_sentinels_are_asked_still_kills_them_all(
 # call by AST: an AST pin would hold for any spelling that calls the helper
 # and would go red on an equivalent rewrite, while these go red on exactly
 # the regression that matters -- an interrupt in the readiness check that
-# leaves a worker unkilled. Every `connection.wait` raises, so the first
+# leaves a worker unkilled. Every `connection.wait` raises: in U8g the first
 # interrupt lands in the grace wait and the second in the readiness check
-# inside the `finally`, which is the path a reverted site gets wrong.
+# inside the `finally`; U8h's grace is an `Event.wait`, so its one interrupt
+# is the readiness check's. That check is what a reverted site gets wrong.
 
 
 def _every_wait_interrupted(monkeypatch):
