@@ -1886,7 +1886,7 @@
 <li><strong>Private tags</strong> (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.</li>
 <li><strong>Pixel and waveform data</strong> go in the sidecar, referenced by offset and length, so the index stays small. <code>compact()</code> rewrites the sidecar to reclaim the space of frames no instance references any more.</li>
 </ul>
-<p>Binary values other than pixel and waveform data are kept only up to 65534 bytes; larger ones are dropped at ingest with a <code>DATA_LOSS</code> row. <a href="../configuration/#private-tags">Private Tags</a> explains the limit and what it means for <code>remove_private_tags: false</code>.</p>
+<p>Binary values other than pixel and waveform data are kept only up to 65534 bytes, or 393216 bytes for the pixel lookup tables (LUT Data and the palette data); larger ones are dropped at ingest with a <code>DATA_LOSS</code> row. <a href="../configuration/#private-tags">Private Tags</a> explains the limit and what it means for <code>remove_private_tags: false</code>.</p>
 <p>The table layout is described for contributors in <a href="../developer_guide/#storage-schema">Contributing</a>. It is not part of the frozen API.</p>
 <h2 id="5-when-a-worker-process-dies">5. When a worker process dies</h2>
 <p><code>ingest()</code> reads files in worker processes. A file that ends the worker reading it (the out-of-memory killer, a decoder crash, <code>SIGKILL</code>) does not end the call, and a crashing file is retried alone and rejected only if it also crashes a fresh worker:</p>
