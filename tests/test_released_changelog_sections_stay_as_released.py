@@ -192,15 +192,37 @@ def test_the_live_check_reads_a_tag(git_reads_this_tree):
     assert base_tag is not None and failure is None
 
 
-def test_the_parser_finds_the_headings_the_file_has():
-    """An empty parse would parametrize nothing and pass silently."""
-    text = (ROOT / CHANGELOG).read_text(encoding="utf-8")
+def _parser_problem(text):
+    """Assert `sections` parses `text` whole: every heading, every byte."""
     found = list(sections(text))
-    assert found[0] == "Unreleased"
     assert found == [line[4:line.index("]")]
                      for line in text.splitlines() if line.startswith("## [")]
     assert "1.0.0rc1" in found and "0.1.0" in found
     assert "".join(sections(text).values()) == text[text.index("## ["):]
+
+
+def test_the_parser_finds_the_headings_the_file_has():
+    """An empty parse would parametrize nothing and pass silently."""
+    _parser_problem((ROOT / CHANGELOG).read_text(encoding="utf-8"))
+
+
+def test_the_parser_reads_a_release_commits_file():
+    """A release commit renames `[Unreleased]`, and the file still parses.
+
+    The parser test asserted `[Unreleased]` was the first heading, so it
+    failed at the 1.0.0rc12 release commit (#929), where the rename is the
+    point: every release commit would have been red. Which first heading is
+    right, `[Unreleased]` on `main` or the declared version on a release
+    branch, is `test_version_contract.top_heading_problem`'s question, not
+    the parser's.
+    """
+    text = (ROOT / CHANGELOG).read_text(encoding="utf-8")
+    if "## [Unreleased]\n" in text:
+        text = text.replace("## [Unreleased]\n", "## [9.9.9] - 2099-01-01\n", 1)
+    # A heading whose bytes drift (a trailing space, CRLF) would make the
+    # replace a no-op and this test a copy of the one above.
+    assert "Unreleased" not in sections(text)
+    _parser_problem(text)
 
 
 BASE = ("## [1.0.0rc9] - 2026-10-01\n"
