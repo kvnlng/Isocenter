@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc12] - 2026-10-03
+
+**Exported output changes in this release**, each named by its entry's `**Output:**` line, where the details are. `compare --base v1.0.0rc11` reports the first in the reference cohort and nothing else; the rest change no cohort file:
+- **#902 (#924):** a pixel-interpretation lookup table (LUT Data, Gray LUT Data, and the three palette and three segmented palette data elements) of up to 393216 bytes is kept and exported, where above 65534 bytes it was dropped at ingest with an ungraded `DATA_LOSS` row. The cohort members `gdcm-US-ALOKA-16.dcm` and `gdcm-US-ALOKA-16_big.dcm` now export their Segmented Red and Green Palette Color LUT Data in every arm that writes a file (20 elements) and drop the 8 `DATA_LOSS` rows that reported them; a new member, `synthetic:big_lut`, carries a full 16-bit VOI LUT.
+- **#897 (#924):** a Python number set into a standard IS element is written as an integer in IS's range: a non-integer is rounded half-to-even with a `WARNING` row, and one out of range or non-finite is dropped with a `DATA_LOSS` row. Values read from a file keep their text.
+- **#898 (#924):** a `str` set into a standard DS element whose stripped text exceeds 16 characters is written by #723's rule, with an INFO note when exact and a `WARNING` row otherwise; one naming no finite number is dropped with a `DATA_LOSS` row.
+- **#901 (#924):** under an Explicit VR export, a private value written as multi-valued `LO` over 65535 bytes is written `UC` rather than `UN`, with the same value bytes, and this library's re-ingest keeps it.
+- **#682 (#924):** no exported byte changes. A signed JPEG Lossless stream with a sample beyond its own declared precision, under a BitsStored no wider than that precision, read from its low bits by the imagecodecs fallback, now draws a `WARNING` row naming that sample.
+
 ### Added
 
 - **A test fails a branch whose CHANGELOG.md has added a line to a released section.** At rc10 and rc11 a bunch PR took `main`'s release record-back by a merge that raised no conflict, and its new entries landed under the released `## [1.0.0rcN]` heading instead of `[Unreleased]`. Only the reviews caught it. `tests/test_released_changelog_sections_stay_as_released.py` compares each released section with the same section in the newest present tag whose CHANGELOG.md has that heading. A section may be byte-identical, or rewritten in place (the same number of lines, the same heading); any added or removed line is red, with the diff. Reproduced red by merging the rc10 record-back (beab1a99) into a branch at 6d5eafd1 that had added an entry at the end of `[Unreleased]`: git merged it cleanly and the entry landed in `[1.0.0rc10]`.
