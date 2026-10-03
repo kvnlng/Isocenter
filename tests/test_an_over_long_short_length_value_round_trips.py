@@ -205,15 +205,13 @@ def test_a_caller_us_list_is_said_and_round_trips(tmp_path, caplog):
     assert list(pydicom.dcmread(str(second))[0x00181310].value) == values
 
 
-def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_path, caplog):
+def test_a_caller_lut_data_list_is_said_and_kept_on_re_ingest(tmp_path, caplog):
     """LUT Data (0028,3006) is `US or OW` in the dictionary.
 
     A caller's 80,000-byte `US` list is written `UN` (#692). Re-ingest
-    weighs that `UN` against the binary retention limit, exactly as it
-    weighs the same bytes spelled `OW`, and drops it with a `DATA_LOSS`
-    row (owner ruling on the review of #900, F6); the note says so rather
-    than promising a read-back. Whether LUT Data should be exempt from the
-    limit is #902.
+    weighs that `UN` as it weighs the same bytes spelled `OW` (owner ruling
+    on the review of #900, F6), against LUT Data's own ceiling of 393216
+    bytes (#902), so it is kept, and the note says so.
     """
     values = [(i * 7) % 65536 for i in range(40000)]
     with caplog.at_level(logging.INFO, logger="isocenter"):
@@ -225,8 +223,32 @@ def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_pa
                               i.set_attr("0028,3006", values)))
     notes = _notes(caplog)
     assert len(notes) == 1 and "0028,3006" in notes[0], notes
-    assert "reads them back" not in notes[0], notes[0]
-    assert "65534" in notes[0], notes[0]
+    assert notes[0].endswith(
+        "and this library keeps them on re-ingest as bytes, up to 393216 "
+        "bytes for this tag."), notes[0]
+
+    (tmp_path / "again").mkdir()
+    shutil.copy(first, tmp_path / "again" / "a.dcm")
+    _second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
+                                     tmp_path / "out2", compress=False)
+    assert not [r for r in losses if "0028,3006" in r[2]], losses
+
+
+def test_a_caller_lut_data_list_over_its_ceiling_is_said_to_drop(tmp_path, caplog):
+    """200000 entries, 400000 bytes: over LUT Data's 393216, so the note
+    names that limit and re-ingest drops it with its row."""
+    values = [i % 65536 for i in range(200000)]
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True,
+            mutate=lambda i: (i.set_attr("0028,3002", [0, 0, 16]),
+                              i.set_attr("0028,3006", values)))
+    notes = _notes(caplog)
+    assert len(notes) == 1, notes
+    assert notes[0].endswith("which drops a UN over 393216 bytes with a "
+                             "DATA_LOSS row."), notes[0]
 
     (tmp_path / "again").mkdir()
     shutil.copy(first, tmp_path / "again" / "a.dcm")
@@ -234,6 +256,7 @@ def test_a_caller_lut_data_list_is_said_and_dropped_on_re_ingest_as_ow_is(tmp_pa
                                      tmp_path / "out2", compress=False)
     rows = [r for r in losses if "Standard tag 0028,3006 (UN)" in r[2]]
     assert len(rows) == 1, losses
+    assert "exceeds the 393216-byte retention threshold" in rows[0][2]
 
 
 def _lut_source(folder, vr, nbytes):
@@ -247,16 +270,19 @@ def _lut_source(folder, vr, nbytes):
     _source(folder, syntax=ExplicitVRLittleEndian, extra=lut)
 
 
-@pytest.mark.parametrize("nbytes,kept", [(65532, True), (65534, True), (65536, False)],
-                         ids=["under", "at", "over"])
+@pytest.mark.parametrize("nbytes,kept", [(65534, True), (65536, True),
+                                         (131074, True), (393216, True),
+                                         (393218, False)],
+                         ids=["vendor-limit", "past-vendor-limit", "past-a-full-table",
+                              "at", "over"])
 @pytest.mark.parametrize("vr", ["OW", "UN"])
 def test_lut_data_meets_the_retention_limit_whichever_way_it_is_spelled(tmp_path, vr, nbytes, kept):
     """The owner's ruling on F6: a `UN` LUT Data is gated as its `OW` twin.
 
-    At or below 65534 bytes both are kept, byte for byte; above it both
-    are dropped with one `DATA_LOSS` row naming the tag and the limit.
-    Before, the `UN` spelling of 65536 bytes was decoded on its `US` arm
-    and kept while the `OW` one was dropped.
+    At or below LUT Data's ceiling, 393216 bytes (#902; 65534 before), both
+    are kept, byte for byte; above it both are dropped with one `DATA_LOSS`
+    row naming the tag and that ceiling. The ceiling is read at both gates,
+    so neither spelling can be kept while the other is dropped.
     """
     _lut_source(tmp_path / "src", vr, nbytes)
     with DicomSession(str(tmp_path / "s.db")) as s:
@@ -274,36 +300,140 @@ def test_lut_data_meets_the_retention_limit_whichever_way_it_is_spelled(tmp_path
     else:
         assert "0028,3006" not in attrs
         assert len(rows) == 1, losses
-        assert "65534-byte retention threshold" in rows[0][2]
+        assert "393216-byte retention threshold" in rows[0][2]
 
 
-def test_a_caller_private_list_note_says_it_is_dropped_on_re_ingest(tmp_path, caplog):
-    """A private tag has no dictionary VR: the narrowed promise, pinned.
+def _uc_notes(caplog):
+    return [r.getMessage() for r in caplog.records if "is written as UC" in r.getMessage()]
 
-    The note says what happens -- a private `UN` over 65534 bytes is
-    dropped at ingest with a `DATA_LOSS` row -- and it is.
+
+def _private_list(i):
+    i.set_attr("0009,0010", "ACME")
+    # No recorded VR: the fallback writes the list as multi-valued `LO`
+    # text, about 230 KB of it.
+    i.set_attr("0009,1001", list(range(40000)))
+
+
+def test_a_caller_private_list_round_trips_as_uc(tmp_path, caplog):
+    """A private `LO` over 65535 bytes is written `UC` under Explicit VR (#901, Q3 A).
+
+    #692 wrote it `UN`, and a private `UN` has no dictionary VR to decode
+    under, so this library's re-ingest dropped it with a PRIVATE
+    `DATA_LOSS` row, grading the run `REVIEW_REQUIRED`. `UC` holds the
+    same values with a 4-byte length, and reads back as text.
     """
-    def private(i):
-        i.set_attr("0009,0010", "ACME")
-        # No recorded VR: the fallback writes the list as `LO` text,
-        # about 230 KB of it.
-        i.set_attr("0009,1001", list(range(40000)))
-
     with caplog.at_level(logging.INFO, logger="isocenter"):
         _source(tmp_path / "src")
         first, _losses, _rows = _export(
             tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
-            compress=True, mutate=private)
+            compress=True, mutate=_private_list)
+    elem = pydicom.dcmread(str(first))[0x00091001]
+    assert elem.VR == "UC"
+    assert elem.VM == 40000
+    notes = _uc_notes(caplog)
+    assert len(notes) == 1, notes
+    assert notes[0].endswith(
+        "0009,1001 (LO, 228890 bytes) is written as UC: an Explicit VR LO "
+        "element can hold at most 65535 bytes (PS3.5 6.2.2), and UC holds "
+        "the same values with a 4-byte length; this library reads them "
+        "back as UC."), notes
+    assert _notes(caplog) == []
+
+    (tmp_path / "again").mkdir()
+    shutil.copy(first, tmp_path / "again" / "a.dcm")
+    with DicomSession(str(tmp_path / "b.db")) as s:
+        s.ingest(str(tmp_path / "again"))
+        (p,) = s.store.patients
+        held = p.studies[0].series[0].instances[0].attributes["0009,1001"]
+        assert [str(v) for v in held] == [str(i) for i in range(40000)]
+        s.export(str(tmp_path / "out2"), show_progress=False)
+        losses = s.store_backend.get_audit_losses()
+        rows = s.store_backend.get_audit_errors()
+    assert not [r for r in losses if "0009,1001" in r[2]], losses
+    assert not [r for r in rows if "0009,1001" in r[2]], rows
+    (second,) = list((tmp_path / "out2").rglob("*.dcm"))
+    again = pydicom.dcmread(str(second))[0x00091001]
+    assert again.VR == "UC" and again.VM == 40000
+
+
+def test_a_recorded_private_us_list_is_still_un_and_said(tmp_path, caplog):
+    """A recorded private numeric VR keeps #692's `UN` (Q3 A): writing it
+    as text would change the source's own VR. The note says re-ingest
+    drops it, and it does."""
+    def extra(ds):
+        ds.add_new(0x00090010, "LO", "ACME")
+        ds.add_new(0x00091002, "US", [1, 2])
+
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src", syntax=ExplicitVRLittleEndian, extra=extra)
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True,
+            mutate=lambda i: i.set_attr("0009,1002", list(range(40000))))
+    assert pydicom.dcmread(str(first))[0x00091002].VR == "UN"
     notes = _notes(caplog)
-    assert len(notes) == 1 and "0009,1001" in notes[0], notes
-    assert "reads them back" not in notes[0]
+    assert len(notes) == 1 and "0009,1002 (US, 80000 bytes)" in notes[0], notes
     assert "drops a UN over 65534 bytes with a DATA_LOSS row" in notes[0]
+    assert _uc_notes(caplog) == []
 
     (tmp_path / "again").mkdir()
     shutil.copy(first, tmp_path / "again" / "a.dcm")
     _second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
                                      tmp_path / "out2", compress=False)
-    assert [r for r in losses if "0009,1001" in r[2]], losses
+    assert [r for r in losses if "Private tag 0009,1002 (UN)" in r[2]], losses
+
+
+def test_a_recorded_private_sh_list_is_still_un(tmp_path, caplog):
+    """The `UC` arm is for `LO` alone, the one multi-valued text VR the
+    fallback writes. A recorded private `SH` whose values still fit it, over
+    65535 bytes in all, keeps #692's `UN`: it is the source's VR, and
+    writing it `UC` would change it."""
+    def extra(ds):
+        ds.add_new(0x00090010, "LO", "ACME")
+        ds.add_new(0x00091003, "SH", ["A", "B"])
+
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src", syntax=ExplicitVRLittleEndian, extra=extra)
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True,
+            mutate=lambda i: i.set_attr("0009,1003", ["abcdefghijklmn"] * 5000))
+    assert pydicom.dcmread(str(first))[0x00091003].VR == "UN"
+    assert _uc_notes(caplog) == []
+    assert len([n for n in _notes(caplog) if "0009,1003 (SH" in n]) == 1
+
+
+def test_a_standard_lo_over_the_limit_is_still_un(tmp_path, caplog):
+    """Software Versions (0018,1020), LO 1-n: a standard tag keeps #692's
+    `UN`, which re-ingest decodes under the dictionary's `LO`. Writing it
+    `UC` would put a standard tag under a VR its dictionary does not
+    give."""
+    values = ["v" * 60] * 1200
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        first, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=True, mutate=lambda i: i.set_attr("0018,1020", values))
+    assert pydicom.dcmread(str(first)).get_item(0x00181020).VR == "UN"
+    assert _uc_notes(caplog) == []
+    assert len([n for n in _notes(caplog) if "0018,1020" in n]) == 1
+
+
+def test_an_implicit_export_of_a_long_private_list_is_unchanged(tmp_path, caplog):
+    """Implicit VR names no VR on the wire, so there is nothing to relabel:
+    the value is the backslash-joined text, as before, and nothing is
+    said. Re-ingest of it still drops it (a follow-up)."""
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _source(tmp_path / "src")
+        written, _losses, _rows = _export(
+            tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
+            compress=False, mutate=_private_list)
+    ds = pydicom.dcmread(str(written))
+    assert str(ds.file_meta.TransferSyntaxUID) == ImplicitVRLittleEndian
+    raw = ds.get_item(0x00091001).value
+    joined = "\\".join(str(i) for i in range(40000)).encode()
+    assert raw == joined + b" " * (len(joined) % 2)
+    assert _uc_notes(caplog) == [] and _notes(caplog) == []
 
 
 def _explicit_bytes(ds):

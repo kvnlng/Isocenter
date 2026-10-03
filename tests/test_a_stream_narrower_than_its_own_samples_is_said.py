@@ -40,7 +40,7 @@ signedness three different ways -- the answers come from
   *wider* than BitsStored (#622), so the width is
   `max(precision, BitsStored)` and masking into the precision happens
   only where BitsStored <= precision. One precision-12 stream reads
-  `[-1996, 1470]` at BitsStored 12 (masked, no row), and
+  `[-1996, 1470]` at BitsStored 12 (masked; #682's row, not this one), and
   `[-3992, 3570]` at 13 and `[0, 4970]` at 16 against `[0, 4095]` on the
   plugin route, 16 of 64 cells apart -- the reported half
   (`test_a_signed_t81_stream_above_its_precision_writes_the_row`,
@@ -68,8 +68,10 @@ Two candidate bounds were refused on measurement and both are pinned by
 a test rather than by prose: `[-2^(P-1), 2^(P-1) - 1]` fires on a
 conformant signed T.81 stream both routes read identically, and the
 unsigned bound applied across the whole gate fires on `693_J2KR.dcm`
-from pydicom's own test data. #682 keeps the masked T.81 half, which
-needs a hook inside the decoder rather than a bound outside it.
+from pydicom's own test data. The masked T.81 half, which no bound
+outside the decoder can see, is said from a hook inside it (#682,
+`imagecodecs_handler._masked_beyond_precision`), in its own words
+(`MASKED_ROW`), and only where this row is not written.
 
 *It is not visible on pydicom's plugin route*, which has already clamped
 the samples, so a clamped array always fits. **That half needs pylibjpeg
@@ -424,25 +426,102 @@ def test_a_signed_t81_stream_above_its_precision_writes_the_row(
     assert (int(decoded.min()), int(decoded.max())) == bounds
 
 
-def test_a_signed_t81_stream_at_its_precision_writes_no_row(tmp_path,
-                                                            pydicom_cannot):
-    """The masked half, which stays #682's and stays silent.
+#: #682's row for FILED under BitsStored 12, PixelRepresentation 1.
+MASKED_ROW = (
+    "The JPEG Lossless stream declares a sample precision of 12, and "
+    "encodes a sample of 4970, which 12 bits cannot hold. Under Pixel "
+    "Representation 1 every sample is read from its low 12 bits and "
+    "sign-extended, so it reads 874 here; a decoder that clamps to the "
+    "declared precision reads another value, so another reader may see "
+    "different values.")
 
-    At BitsStored 12 the extension width is 12, so the samples really are
-    pushed back inside `[-2048, 2047]` and read `[-1996, 1470]` on both
-    routes. Nothing after the decode can see the divergence, so there is
-    nothing honest to say about it -- this is the half of #682 that needs
-    a hook inside the decoder rather than a bound outside it.
+
+@pytest.mark.parametrize("ts", [LJPEG, LJPEG_SV1], ids=[".57", ".70"])
+def test_a_signed_t81_stream_at_its_precision_writes_the_masked_row(
+        tmp_path, pydicom_cannot, ts):
+    """The masked half (#682): said, from a hook inside the decoder.
+
+    At BitsStored 12 the extension width is 12, so each over-precision
+    sample is read from its low 12 bits and sign-extended -- 4970 reads
+    874 -- and the stored range, `[-1996, 1470]`, is the same as a
+    conformant stream's. Nothing after the decode can see it, so the
+    fallback's decode records what the codec returned before the
+    extension, and the row says it. The row reports; the array is the
+    same as before.
     """
-    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
+    got = _run(tmp_path, _file(ts, [_ljpeg(FILED, 12)],
                                bits_stored=12, pr=1), pydicom_cannot)
     low, high = int(got["stored"].min()), int(got["stored"].max())
 
     assert got["stored"].dtype == np.dtype("int16")
     assert (low, high) == (-1996, 1470)
-    assert -2048 <= low and high <= 2047, "masked into the precision"
+    assert int(FILED[7, 7]) == 4970 and int(got["stored"][7, 7]) == 874
+    assert _beyond_rows(got["rows"]) == [("WARNING", MASKED_ROW)], got["rows"]
+    assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
+
+
+def test_a_conformant_signed_t81_stream_at_its_precision_writes_no_row(
+        tmp_path, pydicom_cannot):
+    """The masked half's twin: every sample inside precision 12, the same
+    stored range, no row. A hook keyed on the stored array could not tell
+    the two apart."""
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FITS, 12)],
+                               bits_stored=12, pr=1), pydicom_cannot)
+
+    assert (int(got["stored"].min()), int(got["stored"].max())) == (-1996, 1470)
     assert not _beyond_rows(got["rows"]), got["rows"]
     assert "PASS" in got["grade"], got["grade"]
+
+
+@pytest.mark.parametrize("samples, rows_wanted, reads", [
+    (AT_LIMIT, 1, 0),
+    (UNDER_LIMIT, 0, None),
+], ids=["exactly-2^12", "exactly-2^12-minus-1"])
+def test_the_masked_bound_is_two_to_the_precision_minus_one(
+        tmp_path, pydicom_cannot, samples, rows_wanted, reads):
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(samples, 12)],
+                               bits_stored=12, pr=1), pydicom_cannot)
+
+    rows = _beyond_rows(got["rows"])
+    assert len(rows) == rows_wanted, got["rows"]
+    if rows_wanted:
+        assert ("encodes a sample of 4096, which 12 bits cannot hold" in
+                rows[0][1]), rows[0][1]
+        assert f"so it reads {reads} here;" in rows[0][1], rows[0][1]
+
+
+@pytest.mark.parametrize("bits_stored, sample", [(13, -3992), (16, 4970)],
+                         ids=["bs13", "bs16"])
+def test_above_its_precision_the_row_is_the_post_decode_one_alone(
+        tmp_path, pydicom_cannot, bits_stored, sample):
+    """Where the decoded array already shows the sample, its row is the one
+    written, in its own words, and the hook adds no second row."""
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
+                               bits_stored=bits_stored, pr=1), pydicom_cannot)
+
+    (row,) = _beyond_rows(got["rows"])
+    assert row[1] == FILED_ROW.replace("reads 4970,", f"reads {sample},")
+
+
+def test_an_unsigned_stream_at_its_precision_keeps_its_row(
+        tmp_path, pydicom_cannot):
+    """PixelRepresentation 0 is not hooked: nothing is extended, the
+    decoded array shows the sample, and its row is the post-decode one."""
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
+                               bits_stored=12), pydicom_cannot)
+
+    assert _beyond_rows(got["rows"]) == [("WARNING", FILED_ROW)], got["rows"]
+
+
+def test_the_masked_row_names_the_widest_frame(tmp_path, pydicom_cannot):
+    """Frame 0 declares precision 8, frame 1 declares 12 and encodes 4970.
+    The row names frame 1's, as the post-decode row names the widest
+    frame. (Same-precision frames: the test below.)"""
+    ds = _file(LJPEG_SV1, [_ljpeg(NARROW, 8), _ljpeg(FILED, 12)],
+               bits_stored=12, pr=1, frames=2)
+    got = _run(tmp_path, ds, pydicom_cannot)
+
+    assert _beyond_rows(got["rows"]) == [("WARNING", MASKED_ROW)], got["rows"]
 
 
 def test_the_signed_bound_would_fire_on_a_conformant_stream(tmp_path,
@@ -678,3 +757,33 @@ def test_the_shape_is_only_constructible_for_t81():
     codestream = imagecodecs.jpeg2k_encode(FILED, level=0, codecformat="J2K",
                                            bitspersample=12)
     assert int(imagecodecs.jpeg2k_decode(codestream).max()) == 4095
+
+
+@pytest.mark.parametrize("pr, facts", [
+    (1, {"precision": 12, "stream": "JPEG Lossless stream", "sample": 4970,
+         "reads": 874, "width": 12}),
+    (0, {}),
+], ids=["signed", "unsigned"])
+def test_the_decoders_hook_fills_only_under_pixel_representation_1(pr, facts):
+    """Directly, because at ingest the unsigned case is covered twice over:
+    the post-decode row sees the sample there, and wins. The facts are
+    plain types, since they ride `meta` out of a spawned worker."""
+    from isocenter.imagecodecs_handler import decode_declared_frames
+
+    ds = _file(LJPEG_SV1, [_ljpeg(FILED, 12)], bits_stored=12, pr=pr)
+    beyond = {}
+    decode_declared_frames(ds, 1, beyond)
+    assert beyond == facts
+    for value in beyond.values():
+        assert type(value) in (int, str), (value, type(value))
+
+
+def test_the_masked_row_names_the_largest_sample_across_frames(
+        tmp_path, pydicom_cannot):
+    """Both frames at precision 12, frame 0 encoding 4096 and frame 1
+    4970: the row names 4970, not the first frame's."""
+    ds = _file(LJPEG_SV1, [_ljpeg(AT_LIMIT, 12), _ljpeg(FILED, 12)],
+               bits_stored=12, pr=1, frames=2)
+    got = _run(tmp_path, ds, pydicom_cannot)
+
+    assert _beyond_rows(got["rows"]) == [("WARNING", MASKED_ROW)], got["rows"]
