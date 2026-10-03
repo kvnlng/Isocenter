@@ -284,9 +284,13 @@ def test_a_standard_loss_is_not_described_as_a_private_one(tmp_path):
 def test_palette_lut_data_is_reported(tmp_path):
     """`(0028,1201)` Red Palette Color LUT Data is the same case in an
     even group that is not an overlay, so it pins the rule rather than
-    the one tag it was found through."""
+    the one tag it was found through. A palette is kept up to its own
+    ceiling, `LUT_RETENTION_MAX_BYTES` (#902), so the value here is just
+    over that, not over the vendor-blob limit."""
+    from isocenter.io_handlers import LUT_RETENTION_MAX_BYTES
+
     def add_lut(ds):
-        ds.add_new(0x00281201, 'OW', BIG)
+        ds.add_new(0x00281201, 'OW', b"\x01\x02" * (LUT_RETENTION_MAX_BYTES // 2 + 1))
 
     _attrs, rows = _ingest_with(tmp_path, "lut", add_lut)
 

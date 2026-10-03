@@ -38073,20 +38073,6 @@
       ],
       "rows": [
        [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
         "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
@@ -38211,6 +38197,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38325,6 +38313,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -38439,6 +38429,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38489,20 +38481,6 @@
        "element_tag"
       ],
       "rows": [
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
        [
         "EXPORT",
         "<out:B.dicom-j2k>",
@@ -38614,6 +38592,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -38728,6 +38708,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -38779,20 +38761,6 @@
       ],
       "rows": [
        [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
         "EXPORT",
         "<out:A.dicom-j2k>",
         "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
@@ -38917,6 +38885,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39031,6 +39001,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -39145,6 +39117,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39195,20 +39169,6 @@
        "element_tag"
       ],
       "rows": [
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1221 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
-       [
-        "DATA_LOSS",
-        "1.2.392.200039.102.3.1096.10.20020524.114049.826",
-        "Standard tag 0028,1222 (OW) was not ingested; its value exceeds the 65534-byte retention threshold, so it is not held in the object graph, so it is not in the exported file.",
-        "STANDARD",
-        null
-       ],
        [
         "EXPORT",
         "<out:B.dicom-j2k>",
@@ -39320,6 +39280,8 @@
           "0028,1102": "US/implicit [0, 0, 16]",
           "0028,1103": "US/implicit [0, 0, 16]",
           "0028,1199": "UI/implicit '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW/implicit sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW/implicit sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW/implicit sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OW/implicit <pixels>"
          },
@@ -39434,6 +39396,8 @@
           "0028,1102": "US [0, 0, 16]",
           "0028,1103": "US [0, 0, 16]",
           "0028,1199": "UI '2.25.43413009339020824545486919804120674507'",
+          "0028,1221": "OW sha256:75e6f42590cec8bf len=87818",
+          "0028,1222": "OW sha256:577e3dfbd9016ef1 len=113784",
           "0028,1223": "OW sha256:18b01ba8f0575c10 len=55364",
           "7fe0,0010": "OB <pixels>"
          },
@@ -117708,6 +117672,474 @@
     "big_endian_words-1.dcm": "sha256:21d6aec6cbfee0197ac8872a00e7c8de93add57627b2efe0a43156ff651e9186"
    }
   },
+  "synthetic:big_lut": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {
+        "Subject_ANON_e0e28d4f9be1262341cabb09/Study_2022-04-28__24496/Series_1_CT__34535/2.25.196852317080436788395469017749601798928.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.196852317080436788395469017749601798928'",
+          "0008,0020": "DA/implicit '20220428'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_e0e28d4f9be1262341cabb09'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.60715215364035106157797500615921224496'",
+          "0020,000e": "UI/implicit '2.25.111151713028546646658593496952742534535'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.115880907279758848400712928721090098009'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0028,3010": "SQ/implicit items=1",
+          "0028,3010[0]>0028,3002": "US/implicit [0, 0, 16]",
+          "0028,3010[0]>0028,3003": "LO/implicit 'GOLD VOI LUT'",
+          "0028,3010[0]>0028,3006": "OW/implicit sha256:cf658c68b95f2081 len=131072",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.196852317080436788395469017749601798928'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_e0e28d4f9be1262341cabb09/Study_2022-04-28__24496/Series_1_CT__34535/2.25.196852317080436788395469017749601798928.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.196852317080436788395469017749601798928'",
+          "0008,0020": "DA '20220428'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_e0e28d4f9be1262341cabb09'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.60715215364035106157797500615921224496'",
+          "0020,000e": "UI '2.25.111151713028546646658593496952742534535'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.115880907279758848400712928721090098009'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "0028,3010": "SQ items=1",
+          "0028,3010[0]>0028,3002": "US [0, 0, 16]",
+          "0028,3010[0]>0028,3003": "LO 'GOLD VOI LUT'",
+          "0028,3010[0]>0028,3006": "OW sha256:cf658c68b95f2081 len=131072",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.196852317080436788395469017749601798928'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_e0e28d4f9be1262341cabb09/Study_2022-04-28__24496/Series_1_CT__34535/2.25.196852317080436788395469017749601798928.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.196852317080436788395469017749601798928'",
+          "0008,0020": "DA/implicit '20220428'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_e0e28d4f9be1262341cabb09'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.60715215364035106157797500615921224496'",
+          "0020,000e": "UI/implicit '2.25.111151713028546646658593496952742534535'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.115880907279758848400712928721090098009'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0028,3010": "SQ/implicit items=1",
+          "0028,3010[0]>0028,3002": "US/implicit [0, 0, 16]",
+          "0028,3010[0]>0028,3003": "LO/implicit 'GOLD VOI LUT'",
+          "0028,3010[0]>0028,3006": "OW/implicit sha256:cf658c68b95f2081 len=131072",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.196852317080436788395469017749601798928'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_e0e28d4f9be1262341cabb09/Study_2022-04-28__24496/Series_1_CT__34535/2.25.196852317080436788395469017749601798928.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.196852317080436788395469017749601798928'",
+          "0008,0020": "DA/implicit '20220428'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_e0e28d4f9be1262341cabb09'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.60715215364035106157797500615921224496'",
+          "0020,000e": "UI/implicit '2.25.111151713028546646658593496952742534535'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.115880907279758848400712928721090098009'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0028,3010": "SQ/implicit items=1",
+          "0028,3010[0]>0028,3002": "US/implicit [0, 0, 16]",
+          "0028,3010[0]>0028,3003": "LO/implicit 'GOLD VOI LUT'",
+          "0028,3010[0]>0028,3006": "OW/implicit sha256:cf658c68b95f2081 len=131072",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.196852317080436788395469017749601798928'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_e0e28d4f9be1262341cabb09/Study_2022-04-28__24496/Series_1_CT__34535/2.25.196852317080436788395469017749601798928.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.196852317080436788395469017749601798928'",
+          "0008,0020": "DA '20220428'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_e0e28d4f9be1262341cabb09'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.60715215364035106157797500615921224496'",
+          "0020,000e": "UI '2.25.111151713028546646658593496952742534535'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.115880907279758848400712928721090098009'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "0028,3010": "SQ items=1",
+          "0028,3010[0]>0028,3002": "US [0, 0, 16]",
+          "0028,3010[0]>0028,3003": "LO 'GOLD VOI LUT'",
+          "0028,3010[0]>0028,3006": "OW sha256:cf658c68b95f2081 len=131072",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.196852317080436788395469017749601798928'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "big_lut-1.dcm": "sha256:4c094a2b0aee44ebb4073f6b7ac725ddaddcc5eac1ae4ea55e4127081602850b"
+   }
+  },
   "synthetic:curve_overlay": {
    "configs": {
     "A": {
@@ -126130,12 +126562,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "2d904e6c66463f48637c206ef40d9c5b5687ade3",
-  "isocenter_version": "1.0.0rc9",
+  "git_sha": "49d57c6a715118ca5f2f4207f6dbf0c517a56cf2",
+  "isocenter_version": "1.0.0rc10",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 1032
+  "seconds": 548
  },
  "schema": 1,
  "toolchain": {

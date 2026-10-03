@@ -29,6 +29,11 @@ from isocenter.entities import DicomItem
 from isocenter.session import DicomSession
 
 
+#: What every #723/#898 note and row says, whether the value set was a
+#: float or text.
+_FIT_WORDS = "longer than DS's 16 characters"
+
+
 def _source(src, edit=None):
     src.mkdir(parents=True, exist_ok=True)
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
@@ -70,8 +75,8 @@ def _export(tmp_path, mutate=None, *, reopen=False, caplog=None):
                 rows = s.store_backend.get_audit_errors()
                 losses = s.store_backend.get_audit_losses()
     notes = [r.getMessage() for r in caplog.records
-             if "a float longer than DS" in r.getMessage() and r.levelno == logging.INFO]
-    warnings = [r for r in rows if r[1] == "WARNING" and "a float longer than DS" in r[2]]
+             if _FIT_WORDS in r.getMessage() and r.levelno == logging.INFO]
+    warnings = [r for r in rows if r[1] == "WARNING" and _FIT_WORDS in r[2]]
     (written,) = list(out.rglob("*.dcm"))
     return pydicom.dcmread(str(written)), notes, warnings, losses
 
@@ -224,3 +229,160 @@ def test_a_non_finite_float_under_a_recorded_private_ds_takes_the_fallback(value
     assert losses == []
     assert ds[0x00091001].VR == "LO"
     assert ds[0x00091001].value == str(value)
+
+
+# --- #898: a caller's `str` over 16 characters takes #723's rule ----------
+#
+# pydicom turns a `str` set into a DS into a `DSfloat` whose
+# `original_string` is the caller's text, and writes that text whatever its
+# length: `set_attr(t, '0.30000000000000004')` went out as 19 characters
+# where `set_attr(t, 0.1 + 0.2)` went out as 16 (owner ruling Q2, A). The
+# length is judged on the stripped text, because pydicom strips the padding.
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_long_decimal_text_is_rounded_as_its_float_is(tmp_path, caplog, reopen):
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", "0.30000000000000004"),
+        reopen=reopen, caplog=caplog)
+    text = _raw(ds, 0x00180050)
+    # Pinned to the literal first, so the comparison below cannot hold at
+    # two equally wrong spellings.
+    assert text == b"0.30000000000000"
+    assert len(warnings) == 1, warnings
+    assert ("Tag 0018,0050 (DS): a value longer than DS's 16 characters "
+            "cannot be written exactly, and was rounded to fit: "
+            "'0.30000000000000004' as '0.30000000000000'.") in warnings[0][2]
+    assert notes == []
+    as_float, *_ = _export(
+        tmp_path / "float", lambda i: i.set_attr("0018,0050", 0.1 + 0.2),
+        reopen=reopen, caplog=caplog)
+    assert _raw(as_float, 0x00180050) == text
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_long_whole_number_text_is_written_in_its_integer_spelling(
+        tmp_path, caplog, reopen):
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", "1234567890123456.0"),
+        reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"1234567890123456"
+    # The parent prefixes the SOP Instance UID.
+    assert len(notes) == 1, notes
+    assert notes[0].endswith(
+        ": Tag 0018,0050 (DS): a value longer than DS's 16 characters was "
+        "written in its integer spelling, the same number: "
+        "'1234567890123456.0' as '1234567890123456'."), notes
+    assert warnings == []
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_long_integer_text_past_a_float_is_rounded_with_a_warning(
+        tmp_path, caplog, reopen):
+    """17 digits: `float()` of it is 12345678901234568, and its integer
+    spelling is 17 characters too, so `format_number_as_ds` writes it. The
+    text set and the text written are not the same number, which is what
+    the row says."""
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", "12345678901234567"),
+        reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"1.2345678901e+16"
+    assert len(warnings) == 1, warnings
+    assert "'12345678901234567' as '1.2345678901e+16'" in warnings[0][2]
+    assert notes == []
+
+
+def test_text_more_precise_than_a_float_is_rounded_with_a_warning(tmp_path, caplog):
+    """19 characters naming a number a double cannot hold: it parses to the
+    float 0.1, written `'0.1'`. The floats are equal, the numbers are not,
+    so it is a WARNING row and not an INFO note -- exactness is judged on
+    the decimal text."""
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", "0.10000000000000001"),
+        caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"0.1 "
+    assert len(warnings) == 1, warnings
+    assert "'0.10000000000000001' as '0.1'" in warnings[0][2]
+    assert notes == []
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_padding_does_not_count_against_the_sixteen(tmp_path, caplog, reopen):
+    """18 characters as set, 16 once stripped: pydicom writes the stripped
+    text, which fits, so nothing is rewritten and nothing is said."""
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", " 1234567890.12345 "),
+        reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"1234567890.12345"
+    assert notes == [] and warnings == []
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_each_value_of_a_backslash_text_is_fitted(tmp_path, caplog, reopen):
+    ds, _notes, warnings, losses = _export(
+        tmp_path, lambda i: i.set_attr("0028,0030", "0.30000000000000004\\1"),
+        reopen=reopen, caplog=caplog)
+    # 18 characters: even, so no padding.
+    assert _raw(ds, 0x00280030) == b"0.30000000000000\\1"
+    assert len(warnings) == 1, warnings
+    assert "'0.30000000000000004' as '0.30000000000000'" in warnings[0][2]
+    assert not [r for r in losses if "0028,0030" in r[2]], losses
+
+
+def test_each_text_of_a_list_is_fitted(tmp_path, caplog):
+    ds, _notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,1100", ["0.30000000000000004"]),
+        caplog=caplog)
+    assert _raw(ds, 0x00181100) == b"0.30000000000000"
+    assert len(warnings) == 1, warnings
+
+
+def test_a_long_text_naming_no_finite_number_is_dropped_with_a_row(tmp_path, caplog):
+    """`'1e400000000000000'` is 17 characters and `float()` of it is `inf`,
+    which has no DS spelling: dropped with this element's DATA_LOSS row, as
+    a non-finite float is. `main` wrote the 17 characters."""
+    ds, _notes, _warnings, losses = _export(
+        tmp_path, lambda i: i.set_attr("0018,0088", "1e400000000000000"),
+        caplog=caplog)
+    assert 0x00180088 not in ds
+    rows = [r for r in losses if "Tag 0018,0088 not exported" in r[2]]
+    assert len(rows) == 1, losses
+    # The text path's own guard says why; without it `format_number_as_ds`
+    # raises on `inf` with words of its own (#924 review).
+    assert "'1e400000000000000' has no Decimal String spelling" in rows[0][2], rows
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+@pytest.mark.parametrize("text", ["1.50000000000000000", "0000000000000001.5"])
+def test_an_exact_fractional_text_is_not_called_an_integer_spelling(
+        tmp_path, caplog, reopen, text):
+    """An exact rewrite of a caller's text need not be a whole number:
+    the note says it is the same number, not that it is an integer."""
+    ds, notes, warnings, _ = _export(
+        tmp_path, lambda i: i.set_attr("0018,0050", text),
+        reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00180050) == b"1.5 "
+    assert len(notes) == 1, notes
+    assert notes[0].endswith(
+        ": Tag 0018,0050 (DS): a value longer than DS's 16 characters was "
+        "written as the same number in 16 characters or fewer: "
+        f"'{text}' as '1.5'."), notes
+    assert warnings == []
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_an_over_long_multi_valued_source_ds_keeps_its_source_text(
+        tmp_path, caplog, reopen):
+    """A source's own two-valued DS over 16 characters is the file's
+    statement. If a reopen handed it back as one backslash-joined `str`,
+    the #898 text arm would rewrite it; this pins that it does not."""
+    text = b"0.30000000000000004\\1 "
+
+    def edit(ds):
+        ds._dict[Tag(0x00280030)] = RawDataElement(
+            Tag(0x00280030), "DS", len(text), text, 0, False, True)
+
+    _source(tmp_path / "src", edit)
+    ds, notes, warnings, _ = _export(tmp_path, reopen=reopen, caplog=caplog)
+    assert _raw(ds, 0x00280030) == text
+    assert notes == [] and warnings == []

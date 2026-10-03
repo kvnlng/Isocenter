@@ -48,6 +48,7 @@ import sys
 import hashlib
 import numbers
 import struct
+from decimal import Decimal
 from math import ceil, isfinite
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
@@ -1088,6 +1089,53 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 BINARY_RETENTION_MAX_BYTES = 65534
 
 
+#: The pixel-interpretation lookup tables, which `_retention_limit_for`
+#: keeps up to `LUT_RETENTION_MAX_BYTES` rather than
+#: `BINARY_RETENTION_MAX_BYTES` (#902): LUT Data (Modality and VOI LUT
+#: sequences, at any nesting), the retired Gray LUT Data, the Red, Green and
+#: Blue Palette Color LUT Data, and their Segmented twins. All even group,
+#: so never private.
+LUT_DATA_TAGS = frozenset({
+    "0028,3006", "0028,1200",
+    "0028,1201", "0028,1202", "0028,1203",
+    "0028,1221", "0028,1222", "0028,1223",
+})
+
+#: 65536 entries x 3 words x 2 bytes, one ceiling for all eight tags (owner
+#: ruling on #902, Q4 A, reconfirmed after review). A LUT Descriptor
+#: declares at most 65536 entries, so a conformant non-segmented table is
+#: at most 131072 bytes and never reaches this. For the segmented tags the
+#: figure assumes each segment covers at least one entry for at most three
+#: words; PS3.3 C.7.9.2 fixes the expanded table's entry count and does not
+#: itself bound the segments, so this is a ruled cap, not the standard's
+#: number. Do not "tighten" it to 131072: that was tried and overruled.
+#: The cost is bounded: three tables at the cap are 1.125 MiB raw per
+#: instance, about 1.5 MiB as base64 in `attributes_json`; three full
+#: non-segmented palettes are 384 KiB, about 512 KiB. These are what decide
+#: how an image's pixels display; dropping one left a colour image with one
+#: palette of three, or a VOI LUT item with a descriptor and no data, both
+#: under PASS (a STANDARD loss does not grade).
+LUT_RETENTION_MAX_BYTES = 393216
+
+
+def _retention_limit_for(tag: str) -> int:
+    """The most bytes an unrouted binary value of `tag` is retained at (#902).
+
+    `LUT_RETENTION_MAX_BYTES` for the pixel-interpretation LUTs
+    (`LUT_DATA_TAGS`), `BINARY_RETENTION_MAX_BYTES` for everything else.
+    Read at both gates in `populate_attrs` -- the binary-VR arm and the
+    `UN` arm, so a `UN` LUT Data is still gated as its `OW` twin (review
+    of #900, F6) -- and by the drop row, so the row names the limit that
+    applied.
+
+    Args:
+        tag (str): The element's `gggg,eeee` tag, lowercase.
+    """
+    if tag in LUT_DATA_TAGS:
+        return LUT_RETENTION_MAX_BYTES
+    return BINARY_RETENTION_MAX_BYTES
+
+
 #: Private VRs whose Python value must be an integer, mapped to the
 #: inclusive range each can actually encode (PS3.5 Table 6.2-1; `AT` is
 #: a four-byte tag, so it takes `UL`'s range).
@@ -1764,8 +1812,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     are skipped as indices into those bytes (`_DERIVED_PIXEL_INDEX_TAGS`).
     Every other bulk value -- private vendor blocks, Overlay Data, the
     palette LUTs, and the `UN` spelling all of them take under Implicit VR
-    -- is retained at or below `BINARY_RETENTION_MAX_BYTES` and dropped
-    above it, whatever its wire VR. A retained value in words wider than a
+    -- is retained at or below its tag's limit (`_retention_limit_for`:
+    `BINARY_RETENTION_MAX_BYTES`, or `LUT_RETENTION_MAX_BYTES` for the
+    pixel lookup tables, #902) and dropped above it, whatever its wire VR. A retained value in words wider than a
     byte, read from a big-endian dataset, is stored little-endian (see
     `_stored_byte_order`); an `OB` value is never converted. A private
     `UN` value that re-parses byte-exactly as a sequence
@@ -1951,17 +2000,18 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             # vendor blob, and the outcome does not depend on the
             # transfer syntax, because the implicit-VR spelling of the
             # same element (`UN`, gated below) takes the same rule.
-            # Above it, DATA_LOSS: Overlay Data and the palette LUTs
-            # (`OW`, standard, routed nowhere) and the megabyte private
-            # blocks all vanish loudly, whatever their group.
+            # Above it, DATA_LOSS: Overlay Data (`OW`, standard, routed
+            # nowhere) and the megabyte private blocks vanish loudly,
+            # whatever their group. The pixel lookup tables meet their own,
+            # higher limit here and at the `UN` gate (#902).
             value = elem.value
             if value is None:
                 # A zero-length element. Nothing to lose and nothing to
                 # weigh; retained as empty bytes so it round-trips.
                 value = b""
+            b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
             if isinstance(value, (bytes, bytearray, memoryview)) \
-                    and len(value) <= BINARY_RETENTION_MAX_BYTES:
-                b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+                    and len(value) <= _retention_limit_for(b_tag):
                 item.set_attr(b_tag, _stored_byte_order(
                     bytes(value), elem.VR, b_tag, path, big_endian,
                     unconverted, waveform_bits,
@@ -2080,7 +2130,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         # blob is treated exactly as its explicit-VR twin.
         if (elem.VR == 'UN'
                 and isinstance(elem.value, (bytes, bytearray, memoryview))
-                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+                and len(elem.value) > _retention_limit_for(tag)):
             if dropped is not None:
                 dropped.append((tag, 'UN'))
             continue
@@ -2351,7 +2401,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
 
 
 def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
-                   number_of_frames=None) -> Tuple[np.ndarray, str]:
+                   number_of_frames=None,
+                   beyond=None) -> Tuple[np.ndarray, str]:
     """The array `Dataset.pixel_array` returns, and the colour space it is in.
 
     Every door that decodes a file's pixels calls this -- ingest at the top
@@ -2390,6 +2441,11 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
             With `allow_excess_frames=False`, the excess is then dropped
             here, keeping `declared_frame_count(ds)` frames; a single kept
             frame has no leading axis.
+        beyond (dict, optional): Filled by the imagecodecs fallback's
+            JPEG Lossless decode when a sample above the stream's own
+            precision is read from its low bits under PixelRepresentation
+            1 (#682); see `imagecodecs_handler._masked_beyond_precision`.
+            Only `ingest_worker` passes it. Never filled on pydicom's route.
 
     Returns:
         Tuple[np.ndarray, str]: The contiguous, native-byte-order array in
@@ -2532,7 +2588,7 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         # do, so it would change what pydicom decodes.
         _validate_like_pydicom(ds, ts)
         arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
-                                                    exc)
+                                                    exc, beyond)
     else:
         # pydicom's decode only, outside the `try`: the fallback extends
         # its own (`_decode_frame`), and a refusal here is not a reason to
@@ -2687,7 +2743,7 @@ def _validate_like_pydicom(ds, ts) -> None:
 
 
 def _decode_with_imagecodecs(ds, allow_excess_frames,
-                             pydicom_error) -> Tuple[np.ndarray, str]:
+                             pydicom_error, beyond=None) -> Tuple[np.ndarray, str]:
     """`_decode_pixels`' fallback: decode with imagecodecs, then refuse what does not fit.
 
     The decode is accepted only when it matches the header, and refused
@@ -2705,6 +2761,7 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
             declared frames; anything else refuses it.
         pydicom_error (Exception): pydicom's failure, which every refusal
             names first and chains from.
+        beyond (dict, optional): Handed to `decode_declared_frames` (#682).
 
     Returns:
         Tuple[np.ndarray, str]: The array in the shape `pixel_array`
@@ -2791,7 +2848,10 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
               else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
 
     try:
-        arr = decode_declared_frames(ds, frames)
+        # `beyond` is filled only here, on the fallback route: a pydicom
+        # plugin decodes before this is asked, and that route's clamp is
+        # what #671 accepted as route-dependent (#682).
+        arr = decode_declared_frames(ds, frames, beyond)
     except Exception as exc:  # pylint: disable=broad-except
         raise refused(describe_exception(exc)) from exc
 
@@ -3162,7 +3222,9 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     #   `2^P - 1`, so the unsigned bound's low half is a true proxy for
     #   over-precision (a precision-12 stream reads `[-3992, 3570]` at
     #   BitsStored 13 and `[0, 4970]` at 16, against `[0, 4095]` on the
-    #   plugin route; at BitsStored 12 it is masked and not visible).
+    #   plugin route; at BitsStored 12 it is masked and not visible
+    #   here, which is why the fallback's decode reports it from the
+    #   codec's array instead, `_masked_beyond_precision`, #682).
     # * `.50`/`.51` are in `T81_SYNTAXES` too, but their `_decode_frame` arm
     #   does no sign extension and no container widening. The arm is inert
     #   for them: the fallback's dtype check refuses a `uint8`/`uint16`
@@ -3212,11 +3274,15 @@ def _beyond_precision_words(facts) -> str:
     """The over-precision row, from `_samples_beyond_stream_precision`'s facts.
 
     Args:
-        facts (dict): `_samples_beyond_stream_precision`'s return value.
+        facts (dict): `_samples_beyond_stream_precision`'s return value,
+            or `imagecodecs_handler._masked_beyond_precision`'s (it carries
+            `reads`), which `_masked_beyond_precision_words` speaks for.
 
     Returns:
         str: One sentence for the `WARNING` row.
     """
+    if "reads" in facts:
+        return _masked_beyond_precision_words(facts)
     # The words must not contain `precision is`, which is how
     # `_precision_words`' row is told apart, and do not repeat its opening.
     #
@@ -3238,6 +3304,31 @@ def _beyond_precision_words(facts) -> str:
             f"declared precision reads a value inside the range "
             f"{precision} bits can hold, so another reader may see "
             f"different values.")
+
+
+def _masked_beyond_precision_words(facts) -> str:
+    """The #682 row: a sample above the stream's precision, read from its low bits.
+
+    "Read as decoded, and exported as read" would be false here: the codec
+    returned the sample, and the sign extension read it from its low bits.
+    Keeps "declares a sample precision of", which is how `_beyond_rows`
+    and the report find the row, and never "precision is" (#622's).
+
+    Args:
+        facts (dict): `_masked_beyond_precision`'s, with `reads` and
+            `width`.
+
+    Returns:
+        str: One sentence for the `WARNING` row.
+    """
+    precision, width = facts["precision"], facts["width"]
+    return (f"The {facts['stream']} declares a sample precision of "
+            f"{precision}, and encodes a sample of {facts['sample']}, which "
+            f"{precision} bits cannot hold. Under Pixel Representation 1 "
+            f"every sample is read from its low {width} bits and "
+            f"sign-extended, so it reads {facts['reads']} here; a decoder "
+            f"that clamps to the declared precision reads another value, "
+            f"so another reader may see different values.")
 
 
 #: The two transfer syntaxes whose frames are read for a DCT frame header.
@@ -4526,10 +4617,15 @@ def ingest_worker(fp: str) -> Tuple:
             # An overlay kept in Pixel Data's unused high bits (#755), asked
             # of the header before the decode like the two above.
             in_pixel_overlays = _in_pixel_overlays(ds)
+            # Filled by the fallback's T.81 decode when a sample above the
+            # stream's precision is read from its low bits (#682); read
+            # below only if the decoded array says nothing.
+            masked_beyond = {}
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
-                arr, decoded_pi = _decode_pixels(ds, **decode_kwargs)
+                arr, decoded_pi = _decode_pixels(ds, beyond=masked_beyond,
+                                                 **decode_kwargs)
                 p_bytes = arr.tobytes()
                 p_alg = 'zlib'  # Always compress the raw bytes
                 # The label has to say what the bytes are, and the bytes
@@ -4567,6 +4663,12 @@ def ingest_worker(fp: str) -> Tuple:
                 # answers it. Plain types, so it rides `meta` out of a
                 # spawned worker.
                 beyond_precision = _samples_beyond_stream_precision(ds, arr)
+                # The masked half (#682), only when the array says
+                # nothing: one row per instance, and where BitsStored is
+                # wider than the precision the array's own facts, and
+                # their words, are the ones that hold.
+                if beyond_precision is None and masked_beyond:
+                    beyond_precision = dict(masked_beyond)
                 if beyond_precision is not None:
                     meta['beyond_precision'] = beyond_precision
                 # The decode reads BitsStored bits: pydicom's
@@ -5732,7 +5834,7 @@ class DicomImporter:
                                       "held in the object graph")
                         else:
                             reason = (f"its value exceeds the "
-                                      f"{BINARY_RETENTION_MAX_BYTES}-byte "
+                                      f"{_retention_limit_for(tag)}-byte "
                                       f"retention threshold, so it is not "
                                       f"held in the object graph")
                         if scope == LOSS_SCOPE_PRIVATE:
@@ -10358,25 +10460,46 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
         value = buffer.getvalue()[8:]
         if len(value) <= _SHORT_LENGTH_MAX:
             continue
-        ds[elem.tag] = DataElement(elem.tag, "UN", value)
         where = f"{within} > " if within else ""
+        # A private `LO` -- the multi-valued text `_fallback_multivalue`
+        # writes for a caller's list, or a recorded private `LO` -- is
+        # written `UC` instead (#901): Unlimited Characters is a text VR of
+        # VM 1-n with a 4-byte Explicit VR length, so it holds the same
+        # values whole, and this library reads it back as text with no size
+        # gate. As `UN` it had no dictionary VR to decode under on
+        # re-ingest and was dropped. Private only: a standard `LO` keeps
+        # `UN`, which re-ingest decodes under the dictionary's `LO`, where
+        # `UC` would be a VR its dictionary does not give. `LO` only: any
+        # other recorded private VR is the source's, and stays.
+        if vr == "LO" and elem.tag.group % 2:
+            ds[elem.tag] = DataElement(elem.tag, "UC", elem.value)
+            corrections.append(
+                f"{where}{tag} (LO, {len(value)} bytes) is written as UC: an "
+                f"Explicit VR LO element can hold at most 65535 bytes (PS3.5 "
+                f"6.2.2), and UC holds the same values with a 4-byte length; "
+                f"this library reads them back as UC.")
+            continue
+        ds[elem.tag] = DataElement(elem.tag, "UN", value)
         corrections.append(
             f"{where}{tag} ({vr}, {len(value)} bytes) is written as UN: an "
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
-            f"Endian encoding, {_read_back_words(elem.tag, vr)}.")
+            f"Endian encoding, {_read_back_words(elem.tag, vr, len(value))}.")
 
 
-def _read_back_words(tag, vr) -> str:
+def _read_back_words(tag, vr, length) -> str:
     """What the #692 note may say about re-ingesting a relabelled value.
 
     Only what `populate_attrs` does with it. A standard tag whose
     dictionary VR is the one written, and not binary, is decoded under it
     (`_standard_un_decoded`) and kept: no size limit applies to a numeric
     or text value. Anything else stays `UN` bytes and meets the binary
-    retention limit, which a value relabelled here always exceeds -- a
-    private tag (no dictionary VR, review of #900 F2, #901) and an
-    ambiguous one such as LUT Data (gated as its `OW` twin, F6, #902).
+    retention limit for its tag (`_retention_limit_for`): a private tag
+    other than `LO` (no dictionary VR, review of #900 F2; a private `LO` is
+    written `UC` instead, #901, and has its own note) always exceeds the
+    65534 bytes it meets; an ambiguous one such as LUT Data (gated as its
+    `OW` twin, F6) is kept up to its own ceiling (#902), which `length`
+    may or may not exceed.
     """
     try:
         named = None if tag.group % 2 else dictionary_VR(tag)
@@ -10384,8 +10507,12 @@ def _read_back_words(tag, vr) -> str:
         named = None
     if named == vr:
         return f"and this library reads them back under {vr}"
+    limit = _retention_limit_for(f"{tag.group:04x},{tag.element:04x}")
+    if length <= limit:
+        return ("and this library keeps them on re-ingest as bytes, up to "
+                f"{limit} bytes for this tag")
     return ("and this library holds them as UN bytes on re-ingest, which "
-            "drops a UN over 65534 bytes with a DATA_LOSS row")
+            f"drops a UN over {limit} bytes with a DATA_LOSS row")
 
 
 #: The lowest value whose signed and unsigned 16-bit readings differ.
@@ -10475,8 +10602,9 @@ def _standard_un_decoded(elem, encoding):
     # over the limit then meets the `UN` size gate below, and is dropped
     # with the same `DATA_LOSS` row its `OW` spelling draws from the
     # binary gate. Decoding it on the `US` arm kept 80,000 bytes spelled
-    # `UN` that the same bytes spelled `OW` lost. Whether LUT Data should
-    # be exempt from the limit at all is #902.
+    # `UN` that the same bytes spelled `OW` lost. Both gates read LUT
+    # Data's own ceiling (`_retention_limit_for`, #902), so the two
+    # spellings still meet one limit.
     if (vr in AMBIGUOUS_VR or vr == "SQ"
             or vr in ("OB", "OW", "OF", "OD", "OL", "OV", "UN")):
         return None
@@ -10495,20 +10623,23 @@ _DS_MAX = 16
 
 
 def _ds_text_that_fits(value):
-    """`value` with every caller's float spelled in 16 characters or fewer (#723).
+    """`value` with every caller's float or text spelled in 16 characters or fewer (#723, #898).
 
     pydicom writes a Python `float` with `repr`, so `0.1 + 0.2` set into a
-    DS went out as `'0.30000000000000004'`, 19 characters. Each value -- the
-    atom, or each member of a list -- is rewritten only when it is a
-    `float`, carries no `original_string`, and its text is longer than 16
-    characters:
+    DS went out as `'0.30000000000000004'`, 19 characters; and it writes a
+    `str` as the text given, so `'0.30000000000000004'` went out the same.
+    Each value -- the atom, or each member of a list, or each
+    backslash-separated part of a `str` -- is rewritten only when it is a
+    `float` carrying no `original_string`, or a `str`, and its text (a
+    `str`'s stripped, as pydicom writes it) is longer than 16 characters:
 
     - a whole number whose integer spelling fits is written that way, which
       is exact (`1234567890123456.0` -> `'1234567890123456'`);
     - anything else is rounded by pydicom's `format_number_as_ds`
       (`'0.30000000000000'`).
 
-    A non-finite float has no DS spelling and raises.
+    A non-finite number has no DS spelling and raises, and so does a long
+    `str` that names no number.
 
     Args:
         value: The value about to be written under DS.
@@ -10519,8 +10650,9 @@ def _ds_text_that_fits(value):
         which case `value` is returned unchanged.
 
     Raises:
-        ValueError: A non-finite float. Raised inside `_merge`'s
-            per-element `try`, so it becomes that element's `DATA_LOSS` row.
+        ValueError: A non-finite float, or a long `str` that is not a finite
+            number. Raised inside `_merge`'s per-element `try`, so it
+            becomes that element's `DATA_LOSS` row.
     """
     # `original_string` is the exemption that keeps every source value as
     # the file wrote it: pydicom keeps it on a DS it reads, #662's tagged
@@ -10528,24 +10660,49 @@ def _ds_text_that_fits(value):
     # is the file's own statement, not ours to round. The length test alone
     # would rewrite it. Non-finite before the length test: `'nan'` and
     # `'inf'` fit, and neither is a DS value.
+    #
+    # A `str` is only ever a caller's (#898): a source DS is a `DSfloat`
+    # carrying `original_string`, never a `str`, live and across a reopen,
+    # and a configuration's valued REPLACE over 16 characters is refused at
+    # load. Its exactness is judged on the decimal text, not on floats:
+    # `'0.10000000000000001'` parses to the float 0.1, which is written
+    # `'0.1'`; the floats are equal and the numbers are not, so a float
+    # comparison would call the rewrite exact and say nothing.
     changes = []
 
+    def fit(item, number, exact_against):
+        whole = str(int(number)) if number.is_integer() else None
+        if whole is not None and len(whole) <= _DS_MAX:
+            changes.append((item, whole, exact_against(whole)))
+            return whole
+        # `format_number_as_ds` alone would write 1234567890123456.0 as
+        # '1.2345678901e+15', which is why the integer spelling comes first.
+        text = format_number_as_ds(number)
+        changes.append((item, text, exact_against(text)))
+        return text
+
+    def one_text(item):
+        if "\\" in item:
+            return "\\".join(one_text(part) for part in item.split("\\"))
+        text = item.strip()
+        if len(text) <= _DS_MAX:
+            return item
+        number = float(text)
+        if not isfinite(number):
+            raise ValueError(f"{item!r} has no Decimal String spelling")
+        return fit(item, number,
+                   lambda written: Decimal(written) == Decimal(text))
+
     def one(item):
+        if isinstance(item, str):
+            return one_text(item)
         if not isinstance(item, float) or getattr(item, "original_string", None):
             return item
         if not isfinite(item):
             raise ValueError(f"{item!r} has no Decimal String spelling")
         if len(str(item)) <= _DS_MAX:
             return item
-        whole = str(int(item)) if item.is_integer() else None
-        if whole is not None and len(whole) <= _DS_MAX:
-            changes.append((item, whole, True))
-            return whole
-        # `format_number_as_ds` alone would write 1234567890123456.0 as
-        # '1.2345678901e+15', which is why the integer spelling comes first.
-        text = format_number_as_ds(item)
-        changes.append((item, text, float(text) == item))
-        return text
+        return fit(item, item, lambda written: float(written) == item)
 
     if isinstance(value, (list, tuple, MultiValue)):
         written = [one(item) for item in value]
@@ -10571,15 +10728,111 @@ def _ds_fit_sentence(tag, within, changes) -> Tuple[bool, str]:
     where = f"{within} > " if within else ""
     pairs = ", ".join(f"{set_!r} as '{written}'"
                       for set_, written, _ok in changes)
+    # "a float" only when every value set was one: a caller's text (#898)
+    # is "a value", so the sentence never calls a `str` a float.
+    noun = ("a float" if all(isinstance(set_, float)
+                             for set_, _written, _ok in changes)
+            else "a value")
     if exact:
+        # "integer spelling" only when every value written is one. For a
+        # float an exact rewrite always is (repr is already the shortest
+        # round-tripping spelling), but a caller's text can be exact and
+        # fractional: '1.50000000000000000' is written '1.5' (#924 review).
+        spelling = ("in its integer spelling, the same number"
+                    if all(written.lstrip("-").isdigit()
+                           for _set, written, _ok in changes)
+                    else f"as the same number in {_DS_MAX} characters or "
+                         f"fewer")
         return True, (
-            f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
-            f"characters was written in its integer spelling, the same "
-            f"number: {pairs}.")
+            f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
+            f"characters was written {spelling}: {pairs}.")
     return False, (
-        f"Tag {where}{tag} (DS): a float longer than DS's {_DS_MAX} "
+        f"Tag {where}{tag} (DS): {noun} longer than DS's {_DS_MAX} "
         f"characters cannot be written exactly, and was rounded to fit: "
         f"{pairs}.")
+
+
+#: PS3.5 Table 6.2-1 (2026d), IS: "The integer, n, represented shall be in
+#: the range: -2^31 <= n <= (2^31-1)", in "12 bytes maximum".
+_IS_MIN, _IS_MAX = -2 ** 31, 2 ** 31 - 1
+
+
+def _is_value_that_fits(value):
+    """`value` with every caller's number written as an integer in IS's range (#897).
+
+    pydicom writes whatever number an IS is handed: `1e20` as 21 digits,
+    `1.5` as `'1.5'`. Each value -- the atom, or each member of a list --
+    is rewritten only when it is a real number (numpy's included), not a
+    `bool` or a `str`, and carries no `original_string`:
+
+    - a non-integer is rounded half-to-even (`1.5` -> `'2'`), and said;
+    - the integer is then checked against IS's range, and a value outside
+      it raises. So `2147483647.4` is written and `2147483647.6` is not.
+
+    An integral value in range is written as pydicom wrote it (`7.0` ->
+    `'7'`), with nothing said.
+
+    Args:
+        value: The value about to be written under IS.
+
+    Returns:
+        Tuple: `(value, changes)`; `changes` lists `(set, written)` per
+        rounded value, and is empty when nothing was rounded.
+
+    Raises:
+        ValueError: A non-finite number, or one outside IS's range after
+            rounding. Raised inside `_merge`'s per-element `try`, so it
+            becomes that element's `DATA_LOSS` row: clamping would write a
+            number with no relation to the one set.
+    """
+    # Numbers only, never `str`: a configuration writes strings, and a
+    # range check on one would change what a loaded file exports, a
+    # `CONFIG_VERSION` minor (#762). `original_string` is #723's exemption:
+    # a source IS is the file's statement, live and across a reopen.
+    # `bool` is excluded to say that `True` is not a number set here; it is
+    # equivalent today, since `True == 1` passes through unchanged, and no
+    # test is written around it.
+    changes = []
+
+    def one(item):
+        if (not isinstance(item, numbers.Real) or isinstance(item, (bool, str))
+                or getattr(item, "original_string", None)):
+            return item
+        # An integer is always finite, and `isfinite` of one past a float's
+        # range (`10**400`) raises OverflowError instead of the range words.
+        if not isinstance(item, numbers.Integral) and not isfinite(item):
+            raise ValueError(f"{item!r} has no Integer String spelling")
+        # `int(...)` around `round` is for numpy 1.x, which `setup.py`
+        # admits (`numpy>=1.26.0`): there `round()` of a numpy float is a
+        # numpy float, whose text is `'2.0'`, a decimal in an IS. numpy 2
+        # returns an `int`, so under it deleting `int(...)` changes nothing
+        # and no test here can see it (an equivalent mutant on this venv).
+        number = int(item) if item == int(item) else int(round(item))
+        if not _IS_MIN <= number <= _IS_MAX:
+            raise ValueError(
+                f"{item!r} is outside IS's range, {_IS_MIN} to {_IS_MAX}")
+        if number != item:
+            changes.append((item, str(number)))
+            return number
+        return item
+
+    if isinstance(value, (list, tuple, MultiValue)):
+        written = [one(item) for item in value]
+    else:
+        written = one(value)
+    return (written if changes else value), changes
+
+
+def _is_fit_sentence(tag, within, changes) -> str:
+    """The `WARNING` sentence for `_is_value_that_fits`' rounding.
+
+    No path and no identifier: the parent prefixes the SOP Instance UID.
+    """
+    where = f"{within} > " if within else ""
+    pairs = ", ".join(f"{set_!r} as '{written}'" for set_, written in changes)
+    return (f"Tag {where}{tag} (IS): a number that is not an integer "
+            f"cannot be written in an Integer String, and was rounded: "
+            f"{pairs}.")
 
 
 def _numeric_arm(vr, value):
@@ -11415,6 +11668,13 @@ class DicomExporter:
                     v, changes = _ds_text_that_fits(v)
                     if changes:
                         ds_note = _ds_fit_sentence(t, within, changes)
+                # Its IS sibling (#897): a caller's number rounded to an
+                # integer (a WARNING row), or outside IS's range and raised
+                # here, so it is this element's DATA_LOSS row.
+                if vr == "IS" and encoded is None:
+                    v, changes = _is_value_that_fits(v)
+                    if changes:
+                        ds_note = (False, _is_fit_sentence(t, within, changes))
                 if vr is None:
                     if encoded is None:
                         raise ValueError(
