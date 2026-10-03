@@ -219,6 +219,9 @@ def test_the_parser_reads_a_release_commits_file():
     text = (ROOT / CHANGELOG).read_text(encoding="utf-8")
     if "## [Unreleased]\n" in text:
         text = text.replace("## [Unreleased]\n", "## [9.9.9] - 2099-01-01\n", 1)
+    # A heading whose bytes drift (a trailing space, CRLF) would make the
+    # replace a no-op and this test a copy of the one above.
+    assert "Unreleased" not in sections(text)
     _parser_problem(text)
 
 
