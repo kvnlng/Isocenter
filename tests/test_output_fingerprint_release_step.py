@@ -149,6 +149,7 @@ def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
 #: this list, the cohort and the fingerprint in one change.
 COMMITTED = {
     "big_endian_words": ["big_endian_words-1.dcm"],
+    "big_lut": ["big_lut-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
     "float_pixels": ["float_pixels-1.dcm"],
