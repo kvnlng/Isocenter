@@ -109,7 +109,8 @@ VALUES = [
     pytest.param(lambda: np.uint16(7), (int, 7), "7", id="uint16"),
     pytest.param(lambda: np.float32(1.5), (float, 1.5), "1.5", id="float32"),
     pytest.param(lambda: np.bool_(True), (bool, True), "True", id="bool_"),
-    pytest.param(lambda: np.str_("x"), (str, "x"), "x", id="str_"),
+    pytest.param(lambda: np.float16(0.5), (float, 0.5), "0.5", id="float16"),
+    pytest.param(lambda: np.int8(-3), (int, -3), "-3", id="int8"),
     pytest.param(lambda: np.array(7), (int, 7), "7", id="0-d-array"),
     pytest.param(lambda: [np.int64(1), np.int64(2)],
                  [(int, 1), (int, 2)], ["1", "2"], id="list"),
@@ -289,24 +290,74 @@ def test_a_value_with_no_numpy_member_is_stored_as_the_object_given(make):
 NOT_NUMBERS = [
     pytest.param(lambda: np.array([7]), "ndarray", id="1-d-array"),
     pytest.param(lambda: np.datetime64("2020-01-02"), "datetime64", id="datetime64"),
+    # What pandas hands out. `.item()` of this one is an `int`, the
+    # nanoseconds since 1970, and until the review of #947 that integer
+    # was stored in the timestamp's place.
+    pytest.param(lambda: np.datetime64("2020-01-02T03:04:05.123456789"),
+                 "datetime64", id="datetime64-ns"),
+    pytest.param(lambda: np.timedelta64(5, "ns"), "timedelta64",
+                 id="timedelta64-ns"),
     pytest.param(lambda: np.complex64(1j), "complex64", id="complex64"),
+    # A masked value says "there is no number here". `.item()` hands back
+    # the data under the mask: 0.0 for the constant, 7 for the array.
+    pytest.param(lambda: np.ma.masked, "MaskedConstant", id="masked"),
+    pytest.param(lambda: np.ma.array(7, mask=True), "MaskedArray",
+                 id="masked-0-d"),
 ]
 
 
+@pytest.mark.parametrize("where", ["standard", "private"])
 @pytest.mark.parametrize("make, type_name", NOT_NUMBERS)
 def test_a_numpy_value_that_is_not_a_number_the_store_holds_is_left_as_given(
-        tmp_path, make, type_name):
-    """`.item()` of a datetime64 is a `date`, of a complex64 a `complex`:
-    neither is a value the store holds, so neither is converted, and the
-    save refuses it by the name the caller gave it (#775). A 1-d array
-    could mean numbers or bytes; the caller says which. Kills "convert
-    whatever `.item()` returns" and "listify arrays"."""
+        tmp_path, make, type_name, where):
+    """Only a numpy bool, integer or float is a number (#926, Q1). The
+    kind decides, never what `.item()` returns: `.item()` of a day
+    `datetime64` is a `date`, of a nanosecond one an `int`, of a masked
+    value the data under the mask. None is converted, on either tier,
+    and the save refuses each by the name the caller gave it (#775). A
+    1-d array could mean numbers or bytes; the caller says which. Kills
+    "convert whatever `.item()` returns" and "listify arrays"."""
+    session, inst, inner = _open(tmp_path)
+    item, tag = _place(inst, inner, where)
+    value = make()
+    with session:
+        item.set_attr(tag, value)
+        assert item.attributes[tag] is value
+        with pytest.raises(TypeError) as refused:
+            session.save(sync=True)
+        assert f"holds a {type_name} at {tag}," in str(refused.value)
+        assert inst.has_unsaved_changes
+
+
+def test_a_list_holding_a_numpy_timestamp_is_refused_for_the_timestamp(tmp_path):
+    """The list is rebuilt for its numbers and the timestamp is carried
+    across as it is, so the save names it and not an integer."""
+    session, inst, _inner = _open(tmp_path)
+    stamp = np.datetime64("2020-01-02T03:04:05.123456789")
+    with session:
+        inst.set_attr(STANDARD, [np.int64(1), stamp])
+        held = inst.attributes[STANDARD]
+        assert _typed(held[0]) == (int, 1) and held[1] is stamp
+        with pytest.raises(TypeError) as refused:
+            session.save(sync=True)
+        assert f"holds a datetime64 at {STANDARD}," in str(refused.value)
+
+
+@pytest.mark.parametrize("make, twin", [
+    pytest.param(lambda: np.str_("x"), "x", id="str_"),
+    pytest.param(lambda: np.bytes_(b"ab"), b"ab", id="bytes_"),
+])
+def test_numpy_text_is_not_a_number_and_saves_as_the_text_it_already_is(
+        tmp_path, make, twin):
+    """`np.str_` is a `str` and `np.bytes_` is `bytes`: both saved before
+    #926 and both save now, as the object given. Neither is a number, so
+    `set_attr` does not replace it; a reopened session holds the plain
+    `str` or `bytes`."""
     session, inst, _inner = _open(tmp_path)
     value = make()
     with session:
         inst.set_attr(STANDARD, value)
         assert inst.attributes[STANDARD] is value
-        with pytest.raises(TypeError) as refused:
-            session.save(sync=True)
-        assert f"holds a {type_name} at {STANDARD}," in str(refused.value)
-        assert inst.has_unsaved_changes
+        session.save(sync=True)
+        assert not inst.has_unsaved_changes
+    assert _typed(_reopened(tmp_path, "standard")) == (type(twin), twin)

@@ -24,6 +24,7 @@ from datetime import date
 from decimal import Decimal
 
 import numpy as np
+import pydicom
 import pytest
 from pydicom.valuerep import DSfloat, IS, PersonName
 
@@ -50,12 +51,19 @@ def _threads(monkeypatch):
     monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
 
 
-def _message(uid, type_name, path):
+def _message(uid, type_name, path, private=False):
+    """The refusal, whole. `private` for a private tag at the top level
+    of an instance, which the private-attribute table holds under a
+    narrower rule than the JSON a standard tag is stored as."""
+    rule = ("A private attribute at the top level of an instance is None, a "
+            "str, bytes, a bool, an int, a float, a pydicom DS or IS value, "
+            "or one list of those holding no bytes and no list."
+            if private else
+            "An attribute's value is None, a str, bytes, a bool, an int, a "
+            "float, a pydicom DS or IS value, or a list of those.")
     return (f"save: instance {uid} holds a {type_name} at {path}, which the "
-            "store cannot hold. An attribute's value is None, a str, bytes, "
-            "a bool, an int, a float, a pydicom DS or IS value, or a list of "
-            "those. Nothing was saved. Set a value of one of those types and "
-            "save again.")
+            f"store cannot hold. {rule} Nothing was saved. Set a value of "
+            "one of those types and save again.")
 
 
 def _instances(session):
@@ -160,7 +168,7 @@ def test_one_bad_value_saves_nothing_and_the_session_recovers_when_it_is_fixed(
     pytest.param(lambda s, out: s.export(out, format="wfdb"), id="export-wfdb"),
     pytest.param(lambda s, out: s.compact(), id="compact"),
 ])
-def test_the_doors_that_begin_with_a_save_raise_it_before_anything_is_written(
+def test_the_doors_that_begin_with_a_save_raise_it_before_any_file_is_exported(
         tmp_path, door):
     session, inst, _inner = _open(tmp_path)
     out = str(tmp_path / "out")
@@ -179,6 +187,9 @@ PRIVATE_REFUSED = [
     pytest.param(lambda: object(), "object", id="object"),
     pytest.param(lambda: PersonName("SECRETNAME^X"), "PersonName", id="PersonName"),
     pytest.param(lambda: ["a", date(2020, 1, 2)], "date", id="inside-a-list"),
+    # The two values the JSON rule's sentence would have been false for.
+    pytest.param(lambda: [b"a", b"b"], "bytes", id="list-of-bytes"),
+    pytest.param(lambda: [1, [2]], "list", id="list-in-a-list"),
 ]
 
 
@@ -194,12 +205,87 @@ def test_a_private_tag_follows_the_same_rule(tmp_path, make, type_name):
         inst.set_attr(PRIVATE, make())
         with pytest.raises(TypeError) as refused:
             session.save(sync=True)
-        assert str(refused.value) == _message(UID, type_name, PRIVATE)
+        assert str(refused.value) == _message(UID, type_name, PRIVATE,
+                                              private=True)
         assert inst.has_unsaved_changes
         assert _stored(db) == before
     with DicomSession(db) as reopened:
         (stored,) = _instances(reopened)
         assert PRIVATE not in stored.attributes
+
+
+UID_SIBLING = f"{UID}.2"
+
+
+@pytest.mark.parametrize("bad, good", [(UID, UID_SIBLING), (UID_SIBLING, UID)],
+                         ids=["first-of-the-series", "second-of-the-series"])
+def test_a_private_tier_refusal_names_the_instance_that_holds_the_value(
+        tmp_path, bad, good):
+    """Two instances of **one series** with unsaved changes, one holding
+    the value. A series' instances are written as one batch: the private
+    tier writes after every `instances` row of the batch is in, and
+    finds its instance by position in it. Whichever of the two holds the
+    value is the one named. Kills "name the batch's first instance";
+    two instances in two series would not, each being a batch of one."""
+    write_ct(tmp_path / "in" / "1.dcm", PID, "7751")
+    sibling = pydicom.dcmread(str(tmp_path / "in" / "1.dcm"))
+    sibling.SOPInstanceUID = UID_SIBLING
+    sibling.file_meta.MediaStorageSOPInstanceUID = UID_SIBLING
+    sibling.save_as(str(tmp_path / "in" / "2.dcm"))
+    session = DicomSession(str(tmp_path / "s.db"))
+    assert session.ingest(str(tmp_path / "in")).ingested == 2
+    session.save(sync=True)
+    (series,) = [se for p in session.store.patients for st in p.studies
+                 for se in st.series]
+    held = {i.sop_instance_uid: i for i in series.instances}
+    assert set(held) == {UID, UID_SIBLING}
+    with session:
+        held[good].set_attr("0008,103e", "A GOOD EDIT")
+        held[good].set_attr(PRIVATE, "A GOOD PRIVATE VALUE")
+        held[bad].set_attr(PRIVATE, {1, 2})
+        with pytest.raises(TypeError) as refused:
+            session.save(sync=True)
+        assert str(refused.value) == _message(bad, "set", PRIVATE, private=True)
+        held[bad].set_attr(PRIVATE, 7)
+
+
+@pytest.mark.parametrize("tag, private", [(STANDARD, False), (PRIVATE, True)],
+                         ids=["standard", "private"])
+def test_a_refused_save_stores_no_row_and_moves_no_revision(
+        tmp_path, tag, private):
+    """What "nothing was saved" means, measured: no `instances` row and no
+    private-attribute row changes, no audit row is written, and neither
+    instance's revision or persisted revision moves -- with another
+    instance holding unsaved pixels, whose frame the save's prepass may
+    already have appended to the sidecar by the time the refusal comes.
+    That frame is not a stored row; the next save reuses it. The
+    sidecar's size is deliberately not asserted."""
+    session, inst, _inner = _open(tmp_path, files=2)
+    db = str(tmp_path / "s.db")
+    other = next(i for i in _instances(session) if i.sop_instance_uid == UID_2)
+
+    def vertical():
+        with sqlite3.connect(db) as conn:
+            return conn.execute(
+                "SELECT * FROM instance_attributes ORDER BY 1, 2, 3").fetchall()
+
+    with session:
+        other.set_pixel_data(other.get_pixel_data() + np.int16(1))
+        inst.set_attr(tag, {1, 2})
+        rows, private_rows = _stored(db), vertical()
+        revisions = [(i._revision, i._persisted_revision) for i in (inst, other)]
+        with pytest.raises(TypeError) as refused:
+            session.save(sync=True)
+        assert str(refused.value) == _message(UID, "set", tag, private=private)
+        assert _stored(db) == rows and vertical() == private_rows
+        assert [(i._revision, i._persisted_revision)
+                for i in (inst, other)] == revisions
+        assert inst.has_unsaved_changes and other.has_unsaved_changes
+        assert _rows(db) == []
+        # The same save, once the value is one the store holds.
+        inst.set_attr(tag, 7)
+        session.save(sync=True)
+        assert not inst.has_unsaved_changes and not other.has_unsaved_changes
 
 
 @pytest.mark.parametrize("make, text", [

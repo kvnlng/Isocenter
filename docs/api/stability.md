@@ -298,7 +298,8 @@ refuses an unsaved replacement; `discard` throws it away, with the
 descriptors `set_pixel_data()` wrote for it — and a `set_attr()` edit
 to any of those descriptors made since the set). On `DicomItem`:
 `set_attr()`. It stores the value it is given, except that a numpy
-scalar or 0-d array, and a `list` or `tuple` directly holding one, is
+bool, integer or float (a scalar or a 0-d array), and a `list` or
+`tuple` directly holding one, is
 stored as the Python number it equals (`np.int64(7)` as the `int` 7), so
 `attributes[tag]` equals what was set and is not the same object. It
 raises nothing for a value the store cannot hold; the save does
@@ -359,20 +360,26 @@ otherwise.
   a save): `TypeError` when an instance with unsaved changes holds an
   attribute value the store cannot hold. An attribute's value is `None`,
   a `str`, `bytes`, a `bool`, an `int`, a `float`, a pydicom DS or IS
-  value, or a list of those; a numpy number is saved as the Python
-  number it equals. The message names the instance, the tag (with its
-  path inside a sequence) and the type, never the value. Raised before
-  anything is written: no row of the save is stored, no file is
-  exported, no audit row is written, and the instances stay unsaved, so
-  the same call succeeds once the value is one of those types. A private
-  tag follows the same rule. `save()` without `sync=True` returns before
-  the write, and logs the same message at ERROR.
+  value, or a list of those; a numpy bool, integer or float is saved as
+  the Python number it equals. The message names the instance, the tag
+  (with its path inside a sequence) and the type, never the value.
+  Nothing of the save is stored: no row reaches the database, no
+  instance's revision moves, no file is exported, no audit row is
+  written, and the instances stay unsaved, so the same call succeeds
+  once the value is one of those types. A pixel frame of another unsaved
+  instance may already have been appended to the sidecar; the next save
+  reuses it, and `compact()` reclaims it otherwise. A private tag at the
+  top level of an instance follows the same rule, narrower in one
+  respect: a list under it holds no `bytes` and no list. `save()`
+  without `sync=True` returns before the write, and logs the same
+  message at ERROR.
   `lock_identities(persist=True)` raises it after the tokens are
   embedded in memory, as it does the `sqlite3.Error` below.
 - `save(sync=True)`, `compact()` and `export()`: `ValueError` when an
-  instance with unsaved changes holds no SOP Instance UID (`None`),
-  giving the count. Raised by the save before it stores anything, so
-  nothing is saved or exported. Under `export(check_burned_in=True)` the
+  instance with unsaved changes holds a SOP Instance UID that is not a
+  `str` (`None`, or a value of another type), giving the count. Raised
+  by the save before it stores or appends anything, so nothing is saved
+  or exported. Under `export(check_burned_in=True)` the
   pre-export scan has already run.
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.

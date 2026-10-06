@@ -2253,10 +2253,14 @@ def _read_element(ds, tag, little_endian=True):
     # under `US or OW` it would reach the generic arm, which has no
     # threshold, and what is retained would depend on the transfer syntax.
     #
-    # `[ds]` is the whole ancestor chain that matters: pydicom raised, so
-    # neither the item nor any ancestor that propagated a `_pixel_rep`
-    # into it declares Pixel Representation, and a LUT's descriptor is in
-    # the LUT's own item. That holds only because every item carries the
+    # `[ds]` is the whole ancestor chain that matters. For pydicom's
+    # `AttributeError` that is an inference: it raised, so neither the
+    # item nor any ancestor that propagated a `_pixel_rep` into it
+    # declares Pixel Representation. Its `TypeError` (#703) says nothing
+    # about Pixel Representation, and needs nothing said: it is raised
+    # only for LUT Data, whose arm reads the descriptor and never the
+    # representation, and a LUT's descriptor is in the LUT's own item.
+    # The inference holds only because every item carries the
     # `_pixel_rep` its ancestors imply: pydicom stamps it when it reads an
     # `SQ`, and `populate_attrs` stamps the items `_sequence_from_un_bytes`
     # re-parses, which nothing else does.
@@ -10023,11 +10027,14 @@ _LUT_DESCRIPTOR_TAG = 0x00283002
 def _lut_descriptor_values(ds) -> int:
     """How many values the LUT Descriptor in `ds` holds (#703).
 
-    Read with `get_item`, so nothing is converted: on the read side the
-    element may still be raw, and `ds[tag]` would resolve the descriptor's
-    own `US or SS`, which can raise.
+    Read with `get_item(..., keep_deferred=True)`, the one spelling that
+    converts nothing: on the read side the element may still be raw, and
+    `ds[tag]` would resolve the descriptor's own `US or SS`, which can
+    raise. A bare `get_item(tag)` is not that spelling: it converts a raw
+    element through `ds[tag]` and leaves the converted one in the dataset
+    (review of #947).
     """
-    value = ds.get_item(_LUT_DESCRIPTOR_TAG).value
+    value = ds.get_item(_LUT_DESCRIPTOR_TAG, keep_deferred=True).value
     if value is None:
         return 0
     if isinstance(value, (bytes, bytearray)):

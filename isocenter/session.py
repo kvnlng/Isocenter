@@ -3109,8 +3109,13 @@ class DicomSession:
                   "ID and may be more than one subject; re-ingest their source "
                   "files into a new store to separate them.")
         get_logger().warning(detail)
+        # The store's own path, absolute since #722, never
+        # `self.persistence_file`: the three other notices about a store
+        # from before 1.0 are keyed on `db_path`, and one store spelt two
+        # ways in one audit log reads as two stores (owner ruling on the
+        # review of #947).
         self.store_backend.log_audit(action_type="WARNING",
-                                     entity_uid=self.persistence_file,
+                                     entity_uid=self.store_backend.db_path,
                                      details=detail)
 
     def phi_status_summary(self) -> Dict[str, Counter]:
@@ -6673,8 +6678,8 @@ class DicomSession:
                 query that does not run, or a `subset` DataFrame with none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
                 PatientID. Also, on both formats, from the save an export
-                begins with, when an instance with unsaved changes holds no
-                SOP Instance UID (`None`): the message gives the count, and
+                begins with, when an instance with unsaved changes holds a
+                SOP Instance UID that is not a `str`: it gives the count, and
                 nothing is saved or written (#721; this was sqlite's
                 `IntegrityError`).
             TypeError: For an option name the selected exporter does not

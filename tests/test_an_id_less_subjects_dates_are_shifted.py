@@ -146,3 +146,19 @@ def test_every_open_names_a_pre_1_0_id_less_group(tmp_path, ids, expected):
                for details in rows), rows
     # Counts only: no Patient ID, name or UID.
     assert all("Legacy^" not in d and "9998" not in d for d in rows)
+
+
+def test_the_notice_names_the_store_by_its_absolute_path(tmp_path, monkeypatch):
+    """A store opened by a relative path is one store, and the audit log
+    spells it one way: the three other notices about a store from before
+    1.0 are keyed on the store's own path, absolute since #722, and this
+    one was keyed on the string the caller passed (review of #947, owner
+    ruling). `Session.persistence_file` stays what the caller passed."""
+    import os
+    db = _legacy_store(tmp_path, ["UnknownPatient"])
+    monkeypatch.chdir(db.parent)
+    with Session(db.name) as session:
+        assert session.persistence_file == db.name
+        uids = [uid for uid, details in _rows(session, "WARNING")
+                if "no Patient ID" in details]
+    assert uids == [os.path.abspath(str(db))]

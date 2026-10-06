@@ -706,12 +706,22 @@ def _refuse_unstorable(instance, vertical: bool = True) -> None:
                 continue
             where = " > ".join(
                 [f"{seq}[{index}]" for seq, index in path] + [str(tag)])
+            # Two sentences, because the two tiers hold different things
+            # and one sentence was false on the private tier: a list of
+            # `bytes` under a private tag was refused for "a bytes" by a
+            # message saying bytes and lists of them are held (review of
+            # #947).
+            rule = (
+                "A private attribute at the top level of an instance is "
+                "None, a str, bytes, a bool, an int, a float, a pydicom DS "
+                "or IS value, or one list of those holding no bytes and no "
+                "list." if to_vertical else
+                "An attribute's value is None, a str, bytes, a bool, an "
+                "int, a float, a pydicom DS or IS value, or a list of those.")
             raise TypeError(
                 f"save: instance {instance.sop_instance_uid} holds a {found} "
-                f"at {where}, which the store cannot hold. An attribute's "
-                "value is None, a str, bytes, a bool, an int, a float, a "
-                "pydicom DS or IS value, or a list of those. Nothing was "
-                "saved. Set a value of one of those types and save again."
+                f"at {where}, which the store cannot hold. {rule} Nothing "
+                "was saved. Set a value of one of those types and save again."
             ) from None
 
 
@@ -4137,8 +4147,8 @@ class SqliteStore:
                 patient's original row surviving under its old identifier.
 
         Raises:
-            ValueError: An instance with unsaved changes holds no SOP
-                Instance UID (not a `str`); the message gives the count.
+            ValueError: An instance with unsaved changes holds a SOP
+                Instance UID that is not a `str`; the message gives the count.
                 Raised before the gate is taken: nothing is appended to
                 the sidecar and nothing is stored (#721).
             RuntimeError: The sidecar gate was not acquired within
@@ -4166,10 +4176,11 @@ class SqliteStore:
             and not isinstance(inst.sop_instance_uid, str))
         if nameless:
             raise ValueError(
-                f"save: {nameless} instance(s) hold no SOP Instance UID, and "
-                "the store keys an instance by it, so nothing was saved. "
-                "Give each one (instance.sop_instance_uid = ...) or remove "
-                "it from its series.")
+                f"save: {nameless} instance(s) hold a SOP Instance UID that "
+                "is not a str (None, or a value of another type), and the "
+                "store keys an instance by that text, so nothing was saved. "
+                "Give each one a str (instance.sop_instance_uid = ...) or "
+                "remove it from its series.")
 
         tally = _SaveTally()
         _warn_on_shared_patient_ids(self.logger, patients)

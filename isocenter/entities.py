@@ -46,19 +46,26 @@ def _canonical_tag(tag: str) -> str:
     return tag.lower() if isinstance(tag, str) else tag
 
 
-#: The Python types a numpy scalar may become in the graph: the atoms the
-#: store holds. `type(...) in`, so a subclass is never one of them.
-_NUMPY_TWIN_TYPES = (bool, int, float, str, bytes)
+#: The numpy dtype kinds that are numbers: bool, signed and unsigned
+#: integer, float. Not `M`/`m` (a timestamp, a duration), `c` (complex),
+#: `U`/`S` (text, already a `str` or `bytes`), `V` or `O`.
+_NUMPY_NUMBER_KINDS = "biuf"
+
+#: The Python types a numpy number may become in the graph. `type(...)
+#: in`, so a subclass is never one of them.
+_NUMPY_TWIN_TYPES = (bool, int, float)
 
 
 def _python_value(value):
-    """`value`, with a numpy scalar or 0-d array replaced by its Python twin.
+    """`value`, with a numpy number replaced by the Python number it equals.
 
-    A numpy scalar (`np.int64(7)`, what indexing an array or
-    `pixel_array.max()` returns) or a 0-d array becomes the Python `bool`,
-    `int`, `float`, `str` or `bytes` it equals. A `list` or `tuple` that
-    directly holds one becomes a new `list` with each such member replaced.
-    Everything else is returned **as the same object**.
+    A numpy bool, integer or float, as a scalar (`np.int64(7)`, what
+    indexing an array or `pixel_array.max()` returns) or a 0-d array,
+    becomes the Python `bool`, `int` or `float` it equals. A `list` or
+    `tuple` that directly holds a numpy value becomes a new `list` with
+    each such number replaced. Everything else is returned **as the same
+    object**: a masked value, a `datetime64`, a `timedelta64`, a complex
+    number, `np.str_` and `np.bytes_` among them.
 
     Args:
         value: Any attribute value.
@@ -71,11 +78,16 @@ def _python_value(value):
     # the store calls it again (`IsocenterJSONEncoder.default`,
     # `_vertical_atom_text`) for a value written around the entity.
     #
-    # - **The `type(twin) in` test stays.** `.item()` of a `datetime64` is
-    #   a `date` or an `int`, of a `complex64` a `complex`, of a
-    #   `longdouble` possibly a `longdouble`: none is a number the store
-    #   holds, so those stay as given and the save refuses them by the
-    #   name the caller used.
+    # - **The kind decides, never what `.item()` returns** (review of
+    #   #947). `.item()` of a nanosecond `datetime64` or `timedelta64` is
+    #   an `int`, and of a masked value the data under the mask, so a
+    #   gate on the returned type stored 1577934245123456789 for a
+    #   timestamp and 0.0 for `np.ma.masked`. Those stay as given and
+    #   the save refuses them by the name the caller used.
+    # - **The `type(twin) in` test stays as well**: `.item()` of a
+    #   `longdouble` may be a `longdouble`.
+    # - **`np.str_` and `np.bytes_` are not numbers** and are left alone;
+    #   they are a `str` and `bytes` already and save as they always did.
     # - **An array of one or more dimensions is not converted**,
     #   `np.array([7])` included. It could mean numbers or bytes, and the
     #   caller says which (`.tolist()`, `.tobytes()`). Listing it here or
@@ -90,6 +102,9 @@ def _python_value(value):
     #   has never copied the value it is given.
     if isinstance(value, np.generic) or (
             isinstance(value, np.ndarray) and value.ndim == 0):
+        if (value.dtype.kind not in _NUMPY_NUMBER_KINDS
+                or isinstance(value, np.ma.MaskedArray)):
+            return value
         twin = value.item()
         return twin if type(twin) in _NUMPY_TWIN_TYPES else value
     if type(value) in (list, tuple) and any(
@@ -523,7 +538,7 @@ class DicomItem(TrackedEntity):
         another casing would read as absent rather than raise.
 
         The value is stored as the object given, with one exception: a
-        numpy scalar or 0-d array, and a `list` or `tuple` directly holding
+        numpy bool, integer or float, and a `list` or `tuple` directly holding
         one, is stored as the Python number it equals (`np.int64(7)` as the
         `int` 7; a list as a new list), so a live export writes what a
         reopened session writes. An array of one or more dimensions is not
@@ -539,7 +554,20 @@ class DicomItem(TrackedEntity):
             tag (str): The DICOM tag string. Case-insensitive.
             value (Any): The value to set.
         """
-        self.attributes[_canonical_tag(tag)] = _python_value(value)
+        self._write_attr(_canonical_tag(tag), _python_value(value))
+
+    def _write_attr(self, tag: str, value: Any):
+        """Store `value` under `tag` as given, and mark the edit.
+
+        Args:
+            tag (str): The tag, already lowercase.
+            value (Any): The value, already what `_python_value` returns.
+        """
+        # The write half of `set_attr`, for a caller that has converted
+        # the value already: `Instance.set_attr` converts once, judges a
+        # descriptor edit by the result, and writes it here. Delegating
+        # to `set_attr` scanned a list a second time (review of #947).
+        self.attributes[tag] = value
         self.mark_modified()
 
     def record_attr_vr(self, tag: str, vr: str):
@@ -1591,12 +1619,13 @@ class Instance(DicomItem):
                 written: the attribute and the revision are unchanged.
         """
         tag = _canonical_tag(tag)
-        # Here as well as in `DicomItem.set_attr` (#926): the descriptor
-        # arm below judges the edit by `value` before it delegates, and
-        # it judges the number the graph will hold.
+        # Converted once, here (#926): the descriptor arm below judges the
+        # edit by `value` before it writes, and it judges the number the
+        # graph will hold. Every arm then writes through `_write_attr`,
+        # never `DicomItem.set_attr`, which would convert a second time.
         value = _python_value(value)
         if tag not in _LOADER_DESCRIBED_TAGS:
-            DicomItem.set_attr(self, tag, value)
+            self._write_attr(tag, value)
             return
         # Local: `io_handlers` imports this module. Taken before the lock,
         # never under it -- an import can take the import lock, and the
@@ -1619,18 +1648,18 @@ class Instance(DicomItem):
                 if self.pixel_array is not array:
                     continue
                 if array is None:
-                    DicomItem.set_attr(self, tag, value)
+                    self._write_attr(tag, value)
                     return
                 edited = dict(self.attributes)
                 before = _reading_or_none(reading_of, edited)
                 edited[tag] = value
                 after = _reading_or_none(reading_of, edited)
                 if before is not None and before == after:
-                    DicomItem.set_attr(self, tag, value)
+                    self._write_attr(tag, value)
                     return
                 written = not self._pixel_array_unwritten
                 if written:
-                    DicomItem.set_attr(self, tag, value)
+                    self._write_attr(tag, value)
                 elif after is None or array.nbytes != (
                         _element_count(after[1]) * after[0].itemsize):
                     # Judged here; worded after the hold. The message
@@ -1639,7 +1668,7 @@ class Instance(DicomItem):
                     # under the leaf.
                     refused = (edited, after)
                 else:
-                    DicomItem.set_attr(self, tag, value)
+                    self._write_attr(tag, value)
                     self.pixel_array = (contiguous.reshape(-1)
                                         .view(after[0]).reshape(after[1]))
                     return
