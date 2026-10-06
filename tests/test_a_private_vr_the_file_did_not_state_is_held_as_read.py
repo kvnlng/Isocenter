@@ -100,8 +100,8 @@ def _mr_block(ds):
 
 def _raw(path, tag):
     """(wire VR, value bytes) of a top-level element as the file holds it."""
-    raw = pydicom.dcmread(str(path)).get_item(_tag(tag))
-    return (None, None) if raw is None else (raw.VR, bytes(raw.value))
+    raw = pydicom.dcmread(str(path)).get_item(_tag(tag), keep_deferred=True)
+    return (None, None) if raw is None else (raw.VR, bytes(raw.value or b""))
 
 
 def _session(tmp_path, src, *, reopen=False, config=None, name="s"):
@@ -246,6 +246,44 @@ def test_bytes_that_do_not_fit_the_dictionary_vr_no_longer_refuse_the_file(
     assert _raw(explicit, "0019,1012") == ("UN", MISMATCH)
     assert not [r for r in rows if r[1] == "ERROR"], rows
     assert not [r for r in rows + losses if "0019," in r[2]], (rows, losses)
+
+
+@reopened
+def test_a_zero_length_element_is_held_the_same_way(tmp_path, reopen):
+    """An empty value is still no statement of a VR.
+
+    pydicom's `get_item` reads and converts a raw element whose value is
+    None, which is every zero-length one, unless told to keep it; asked
+    plainly, the empty element was relabelled like any other (and an
+    empty LUT Data with no descriptor refused its file again). Killing
+    mutation: `keep_deferred=True` dropped.
+    """
+    def extra(ds):
+        ds.add_new(0x00190010, "LO", MR)
+        ds.add_new(0x00191008, "CS", "")
+        ds.add_new(0x0019100A, "US", None)
+        ds.add_new(0x00110010, "LO", "ACME")
+        ds.add_new(0x00111001, "LO", "")
+
+    src = _source(tmp_path / "src", ImplicitVRLittleEndian, extra)
+    assert _raw(src, "0019,1008") == (None, b"")
+
+    session = _session(tmp_path, src, reopen=reopen)
+    try:
+        inst = _instance(session)
+        # As an unknown creator's empty element is, and always was.
+        assert "0011,1001" in inst.attributes
+        for tag in ("0019,1008", "0019,100a"):
+            assert tag in inst.attributes
+            assert inst.attributes[tag] == inst.attributes["0011,1001"]
+            assert inst.attributes[tag] is None, (tag, inst.attributes[tag])
+            assert tag not in inst.attribute_vrs
+        explicit = _export(session, tmp_path / "j2k", True)
+    finally:
+        session.close()
+
+    assert _raw(explicit, "0019,1008") == ("UN", b"")
+    assert _raw(explicit, "0019,100a") == ("UN", b"")
 
 
 def test_an_unknown_creator_is_unchanged(tmp_path):

@@ -1970,9 +1970,20 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         # Never by toggling `pydicom.config.replace_un_with_known_vr`: it
         # is process-global, ingest runs on threads under a free-threaded
         # build, and `_standard_un_decoded` relies on it for standard tags.
-        raw = ds.get_item(tag_key)
+        #
+        # `keep_deferred=True`, and it is not about deferred reads: without
+        # it `get_item` reads and converts any raw element whose value is
+        # None, which is every zero-length one. That relabels an empty
+        # private element after all, and raises here, outside
+        # `_read_element`'s handling, for an empty LUT Data with no
+        # descriptor.
+        raw = ds.get_item(tag_key, keep_deferred=True)
         if _vr_unstated_private(raw):
-            elem = DataElement(raw.tag, "UN", bytes(raw.value or b""))
+            # A zero-length raw element's value is None, and pydicom hands
+            # back None for a zero-length `UN` it converts; kept, so an
+            # unknown creator's empty element is held exactly as before.
+            elem = DataElement(raw.tag, "UN", None if raw.value is None
+                               else bytes(raw.value))
         else:
             elem = _read_element(ds, tag_key, not big_endian)
         if elem.tag.group == 0x7fe0:
