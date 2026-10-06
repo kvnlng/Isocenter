@@ -6349,9 +6349,55 @@ class ExportError(RuntimeError):
             "rest.")
 
 
+def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
+    """The sentence for each declared descriptor the array's geometry overrides (#736).
+
+    Rows, Columns, SamplesPerPixel and NumberOfFrames as `attributes`
+    declares them, held against `geom`; None when every one that is
+    declared agrees.
+
+    Args:
+        geom (PixelGeometry): The one resolved geometry being written.
+        attributes (dict): The instance's attributes.
+
+    Returns:
+        Optional[str]: One sentence naming every disagreeing descriptor
+            in tag order, or None.
+    """
+    # Read by `declared_int`, as the PixelRepresentation note's is: nothing
+    # declared is not a correction of anything. That is the whole rule for
+    # NumberOfFrames too, which the write below adds to a multi-frame file
+    # that never declared one. Do not compare an absent one with 1.
+    rewritten = [
+        (keyword, declared, written)
+        for keyword, tag, written in (
+            ("SamplesPerPixel", "0028,0002", geom.samples),
+            ("NumberOfFrames", "0028,0008", geom.frames),
+            ("Rows", "0028,0010", geom.rows),
+            ("Columns", "0028,0011", geom.cols))
+        for declared in (declared_int(attributes, tag),)
+        if declared is not None and declared != written]
+    if not rewritten:
+        return None
+
+    def listed(pairs):
+        words = [f"{keyword} {value}" for keyword, value in pairs]
+        return (words[0] if len(words) == 1
+                else f"{', '.join(words[:-1])} and {words[-1]}")
+
+    return (
+        f"{listed((k, d) for k, d, _ in rewritten)} "
+        f"{'does' if len(rewritten) == 1 else 'do'} not describe the array, "
+        f"which holds {geom.frames} frame{'' if geom.frames == 1 else 's'} "
+        f"of {geom.rows} x {geom.cols} at {geom.samples} "
+        f"sample{'' if geom.samples == 1 else 's'} per pixel; written with "
+        f"{listed((k, w) for k, _, w in rewritten)}, the array's own")
+
+
 def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
                           syntax_uid: str, warnings=None,
-                          remedy: Optional[str] = None) -> None:
+                          remedy: Optional[str] = None,
+                          corrections=None) -> None:
     """Write the descriptors that describe the pixel element just written.
 
     Writes `Rows`, `Columns`, `SamplesPerPixel`, `NumberOfFrames` (when
@@ -6382,6 +6428,10 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
             sentence, for a door where the table's is false: the #771
             fallback passes `_PHOTOMETRIC_J2K_FALLBACK`. None keeps the
             table's.
+        corrections (list): Where the note goes for each declared Rows,
+            Columns, SamplesPerPixel or NumberOfFrames this write
+            overrides (#736), for the parent to log at INFO. `None` means
+            the caller does not collect them.
 
     Raises:
         _PhotometricRefusal: if the *file* would carry more than one
@@ -6410,6 +6460,19 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # has to say which module's Photometric Interpretation rules apply and
     # what it is writing: inheriting the integer path's rules, or
     # "uncompressed", by omission would warn about every compressed export.
+    #
+    # A declaration this overrides is said (#736), as the integer arm says
+    # a PixelRepresentation it overrides: INFO on `corrections`, no row,
+    # because the file written agrees with its bytes. Only a write around
+    # the entity reaches it -- `set_attr` refuses a geometry the resident
+    # array cannot be read under, and a stored frame is re-read under the
+    # edit or fails the export (#595) -- and it was the one rewrite here
+    # that left no line at all. Here, not in the worker, so both pixel
+    # arms say it.
+    if corrections is not None:
+        rewrite = _geometry_rewrite_note(geom, attributes)
+        if rewrite is not None:
+            corrections.append(rewrite)
     ds.Rows = geom.rows
     ds.Columns = geom.cols
     ds.SamplesPerPixel = geom.samples
@@ -8068,7 +8131,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 _write_pixel_geometry(ds, geom, attributes,
                                       float_element=True,
                                       syntax_uid=written_syntax,
-                                      warnings=warnings)
+                                      warnings=warnings,
+                                      corrections=corrections)
 
             arr = None
 
@@ -8137,7 +8201,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                                   syntax_uid=written_syntax,
                                   warnings=warnings,
                                   remedy=(_PHOTOMETRIC_J2K_FALLBACK
-                                          if j2k_fallback else None))
+                                          if j2k_fallback else None),
+                                  corrections=corrections)
 
             # Derived from the array, never read from `attributes`, as Rows
             # and SamplesPerPixel are: `ds.PixelData = arr.tobytes()` is

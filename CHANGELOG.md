@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A declared Rows, Columns, SamplesPerPixel or NumberOfFrames that the export overrides from the array is named (#736, owner ruling Q6 A).** The export writes those four from the one resolved geometry of the array it is writing (#217), over whatever the instance declared. Measured on `main` at de5b26d9 on 3.12.14 and 3.14.7t, through `write_tree()` on a hand-built instance holding a 4x4 `int16` array: `attributes["0028,0010"] = 2` with `attributes["0028,0011"] = 8` was written 4x4, `attributes["0028,0002"] = 3` was written 1, and `attributes["0028,0008"] = 2` was written 1, each **with no log line and no row**, while the same rewrite of PixelRepresentation has been named at INFO since #499. A caller who had written a geometry the array did not have was not told the file says something else.
+  - **Now** `_write_pixel_geometry` appends one sentence per instance to `ExportOutcome.corrections`, which the parent logs at INFO, naming every declared descriptor it overrides in tag order: `Rows 2 and Columns 8 do not describe the array, which holds 1 frame of 4 x 4 at 1 sample per pixel; written with Rows 4 and Columns 4, the array's own`. Both pixel arms say it, Float Pixel Data included. The PixelRepresentation note is unchanged and stays its own line.
+  - **No audit row, and the grade does not move.** The file written agrees with its bytes; a `WARNING` row is for output that contradicts what the source declared, and here the source agreed and the graph was edited around the entity. Nothing declared is not a correction: a multi-frame array with no NumberOfFrames declared is written with one, and draws no note.
+  - **Who reaches it.** Only a write that goes around the entity (`instance.attributes[...] = `). `set_attr` on Rows or Columns over a resident array it cannot be read under raises `ValueError`, and an ingested instance is re-read under the edit or fails the export (#595). A nested icon's Rows and Columns are not rewritten at export and are out of scope.
+  - No exported byte changes, so `fingerprint/output.json` does not move, and `CONFIG_VERSION` is unchanged. `tests/test_a_geometry_rewrite_at_export_is_said.py` pins each sentence whole, the float arm, the agreeing and never-declared controls, and the PixelRepresentation note beside the new one; `scripts/mutation_probe.py` lists it in the `io_handlers` row.
+
 ## [1.0.0rc12] - 2026-10-03
 
 **Exported output changes in this release**, each named by its entry's `**Output:**` line, where the details are. `compare --base v1.0.0rc11` reports the first in the reference cohort and nothing else; the rest change no cohort file:
