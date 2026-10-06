@@ -26,6 +26,21 @@ methods shown, such as `Instance.regenerate_uid()` and the sequence
 methods, are tier 2, and so are `pixel_array` and `waveform_array` in
 `Instance`'s attribute table.
 
+**What `set_attr()` stores.** The value it is given, with one exception:
+a numpy scalar or 0-d array, and a `list` or `tuple` directly holding
+one, is stored as the Python number it equals, so
+`set_attr("0018,1150", np.int64(7))` leaves the `int` 7 in `attributes`
+and a live export writes what a reopened session writes. An array of one
+or more dimensions is not converted; pass `.tolist()` or `.tobytes()`.
+A value written straight into `attributes` is not seen by the entity
+(call `mark_modified()`), and a numpy number written that way is
+converted when it is saved. The store holds `None`, `str`, `bytes`,
+`bool`, `int`, `float`, pydicom's DS and IS values, and lists of those;
+`set_attr()` raises nothing for anything else, and the next
+`save(sync=True)`, `export()` or `compact()` raises `TypeError` naming
+the instance, the tag and the type ([API stability](stability.md),
+Exceptions).
+
 ::: isocenter.entities
     handler: python
     options:
