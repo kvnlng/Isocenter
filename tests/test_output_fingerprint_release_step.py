@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pydicom
 import pytest
+from pydicom.errors import BytesLengthException
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -152,6 +153,7 @@ COMMITTED = {
     "big_lut": ["big_lut-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
+    "encapsulated_pdf": ["encapsulated_pdf-1.dcm"],
     "float_pixels": ["float_pixels-1.dcm"],
     "graphic_annotation": ["graphic_annotation-1.dcm"],
     "implicit": ["implicit-1.dcm"],
@@ -165,6 +167,9 @@ COMMITTED = {
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
+    "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
+                            "unstated_private_vr-implicit.dcm",
+                            "unstated_private_vr-mismatch.dcm"],
     "withheld": ["withheld-1.dcm"],
 }
 
@@ -211,8 +216,20 @@ def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_ta
 
 
 def _uids(ds):
-    for elem in ds.iterall():
-        if elem.VR == "UI" and elem.value:
+    # Over the tags, never `ds.iterall()`: one committed input
+    # (`unstated_private_vr-mismatch.dcm`, #740) holds a private element
+    # whose bytes do not fit the VR pydicom's private dictionary names, and
+    # pydicom raises on reading it, which ended the walk. An element
+    # pydicom cannot read is not a UID it generated.
+    for tag in list(ds.keys()):
+        try:
+            elem = ds[tag]
+        except BytesLengthException:
+            continue
+        if elem.VR == "SQ":
+            for item in elem.value:
+                yield from _uids(item)
+        elif elem.VR == "UI" and elem.value:
             yield from (elem.value if isinstance(elem.value, list) else [elem.value])
 
 
