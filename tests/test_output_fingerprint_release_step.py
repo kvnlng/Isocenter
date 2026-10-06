@@ -166,6 +166,9 @@ COMMITTED = {
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
+    "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
+                            "unstated_private_vr-implicit.dcm",
+                            "unstated_private_vr-mismatch.dcm"],
     "withheld": ["withheld-1.dcm"],
 }
 

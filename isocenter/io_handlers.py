@@ -1817,6 +1817,10 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     pixel lookup tables, #902) and dropped above it, whatever its wire VR. A retained value in words wider than a
     byte, read from a big-endian dataset, is stored little-endian (see
     `_stored_byte_order`); an `OB` value is never converted. A private
+    data element whose VR the file did not state -- Implicit VR, or
+    Explicit VR `UN` -- is held as `UN` with the file's bytes, whatever
+    pydicom's private dictionary names for its creator
+    (`_vr_unstated_private`, #740). A private
     `UN` value that re-parses byte-exactly as a sequence
     (`_sequence_from_un_bytes`) is stored as a sequence, not an attribute.
 
@@ -1934,7 +1938,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # private element whose creator it knows -- `SIEMENS CSA HEADER`
     # (0029,xx10) reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF` -- which
     # is pydicom's guess, not the file's statement, so a binary value's VR
-    # is not recorded from such a dataset. `is True`, for the reason the
+    # is not recorded from such a dataset. (The loop below does not let
+    # pydicom make that guess for a raw element at all, #740; this is for
+    # one already converted.) `is True`, for the reason the
     # line above is `is False`: a bare `Dataset` says (None, None).
     implicit = getattr(ds, "original_encoding", (None, None))[0] is True
 
@@ -1952,7 +1958,23 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # construction rather than by the accident of a file read's `_dict`
     # already being in tag order.
     for tag_key in sorted(ds.keys()):
-        elem = _read_element(ds, tag_key, not big_endian)
+        # A private element whose VR the file did not state is held as the
+        # file's bytes, `UN`, whatever pydicom's private dictionary says
+        # of its creator (#740). Asked of the raw element, before anything
+        # converts it: `ds[tag]` is where pydicom relabels and decodes, and
+        # where a length that does not fit the dictionary's VR refused the
+        # whole file. From here it is the `UN` path an unknown creator's
+        # element has always taken: the sequence re-parse, the size gate,
+        # no recorded VR, and `UN` at export.
+        #
+        # Never by toggling `pydicom.config.replace_un_with_known_vr`: it
+        # is process-global, ingest runs on threads under a free-threaded
+        # build, and `_standard_un_decoded` relies on it for standard tags.
+        raw = ds.get_item(tag_key)
+        if _vr_unstated_private(raw):
+            elem = DataElement(raw.tag, "UN", bytes(raw.value or b""))
+        else:
+            elem = _read_element(ds, tag_key, not big_endian)
         if elem.tag.group == 0x7fe0:
             # The whole group is skipped, not only its binary VRs:
             # (7fe0,0001) and (7fe0,0002), the Extended Offset Table pair,
@@ -2162,6 +2184,39 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     ambiguous.append((path, tag, held))
 
 
+def _vr_unstated_private(raw) -> bool:
+    """Whether `raw` is a private data element whose VR the file did not state (#740).
+
+    True for an element pydicom has not yet converted, in an odd group at
+    element 0x1000 or above, of defined length, whose wire VR is absent
+    (Implicit VR) or `UN` (Explicit VR; PS3.5 6.2.2, "VR unknown").
+
+    Args:
+        raw: What `Dataset.get_item` returned: a `RawDataElement` until
+            something reads the element, a `DataElement` after.
+
+    Returns:
+        bool: Whether to hold the element as `UN` bytes.
+    """
+    # Each clause is a population left to pydicom, and why:
+    #   - already converted: nothing here un-reads it, so it keeps the
+    #     reading it had before #740. That direction refuses no file that
+    #     was not refused before; `_record_private_vr`'s Implicit VR gate
+    #     is still behind it.
+    #   - a private creator (element below 0x1000): pydicom reads it `LO`
+    #     with no dictionary, and every private block depends on it.
+    #   - a standard tag: its VR is the standard dictionary's, not a
+    #     vendor's guess.
+    #   - a stated VR: the file's own statement, recorded and written.
+    #   - undefined length: a sequence on the wire, which pydicom parses as
+    #     one for every creator.
+    return (isinstance(raw, RawDataElement)
+            and raw.tag.group % 2 == 1
+            and raw.tag.element >= 0x1000
+            and raw.VR in (None, "UN")
+            and raw.length != 0xFFFFFFFF)
+
+
 def _read_element(ds, tag, little_endian=True):
     """`ds[tag]`, or the element whose ambiguous VR pydicom could not resolve.
 
@@ -2299,10 +2354,13 @@ def _process_safe(value):
 def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     """Record the VR of a private element beside its value on `item`.
 
-    Recorded for an odd-group element only, never for `UN`, and never for
-    a binary-VR element read from an Implicit VR dataset. A bytes value's
-    VR is recorded when the file stated it, and so is the private
-    creator's `LO`.
+    Recorded for an odd-group element only, and only a VR the file
+    stated: never `UN`, which is what `populate_attrs` holds a private
+    data element under when the file stated no VR for it (Implicit VR, or
+    Explicit VR `UN`; #740), whatever pydicom's private dictionary names
+    for its creator. A bytes value's VR is recorded when the file stated
+    it, and so is the private creator's `LO`. Behind that, never for a
+    binary-VR element read from an Implicit VR dataset.
 
     Args:
         item (DicomItem): The item the element was read into.
@@ -2329,8 +2387,14 @@ def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     # (700D,xx90) `OF`). Recorded, the guess would be written as though
     # the file had said it, and a six-byte `OF` would draw a re-VR
     # `WARNING` over a VR the file never declared. So a binary-VR element
-    # from such a dataset records nothing and is written `UN`; a text
-    # value's dictionary VR is still recorded.
+    # from such a dataset records nothing and is written `UN`.
+    #
+    # Since #740 this gate is the second line, not the first:
+    # `populate_attrs` holds every private data element whose VR the file
+    # did not state as `UN` before pydicom relabels it, text and numbers
+    # included, so such an element stops at the `UN` test above. This one
+    # still speaks for an element something converted before
+    # `populate_attrs` asked (`_vr_unstated_private`'s first clause).
     #
     # A bytes value from an explicit-VR file is recorded: a kept private
     # element is written faithfully. Its VR lives in `attributes_json`
