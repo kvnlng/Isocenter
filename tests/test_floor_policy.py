@@ -404,7 +404,16 @@ def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identit
     written only through its Patient, which the pass never touched, so it
     holds the original the file carries, and the re-lock stashes it (the
     refusal is pinned where a replacement can still reach a copy, above
-    and in `test_a_relock_cannot_lose_a_held_identity.py`)."""
+    and in `test_a_relock_cannot_lose_a_held_identity.py`).
+
+    **Since #764 the instance-only pass no longer removes the copy
+    either**: an instance REMOVE on Patient's Name follows the Patient, as
+    #624 made REPLACE do, so the copy holds the original the file carries
+    and the re-lock stashes it. That was this test's route to an absent
+    copy, so the copy is now also removed by hand, which is what still
+    reaches the fallback (a copy an earlier owners' pass removed, with the
+    name set back on the Patient, is the same graph), and M17 is still
+    killed there."""
     _ct_small_into(str(tmp_path / "in"))
     locked = ["0010,0010", "0010,0020"]
     with Session(str(tmp_path / "s.db")) as session:
@@ -417,10 +426,19 @@ def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identit
         session.lock_identities("1CT1", tags_to_lock=locked)
 
         session.anonymize([f for f in session.audit() if f.entity_type == "Instance"])
-        assert "0010,0010" not in inst.attributes, "the policy did not remove the copy"
+        assert inst.attributes["0010,0010"] == "CompressedSamples^CT1", \
+            "the instance REMOVE ran without its owner (#764)"
         assert (str(patient.patient_name), patient.patient_id) == (
             "CompressedSamples^CT1", "1CT1"), "the patient was anonymized too"
 
+        session.lock_identities(patient.patient_id, tags_to_lock=locked)
+        again = session.reversibility_service.recover_original_data(inst)
+        assert again["0010,0010"] == "CompressedSamples^CT1", again
+        assert again["0010,0020"] == "1CT1", again
+
+        # The absent copy, which the pass no longer leaves.
+        del inst.attributes["0010,0010"]
+        inst.mark_modified()
         session.lock_identities(patient.patient_id, tags_to_lock=locked)
         again = session.reversibility_service.recover_original_data(inst)
     assert again["0010,0010"] == "CompressedSamples^CT1", again
