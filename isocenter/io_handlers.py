@@ -8449,7 +8449,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # in `ds.file_meta`, never `written_syntax`: a pixel-less file stays
         # native under compression. Under Implicit VR every length is
         # 4 bytes and nothing is relabelled.
-        if not ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+        #
+        # First, a private value this library's own ingest would drop is
+        # said (#921), under either syntax, while each element still has
+        # the VR `_merge` gave it.
+        implicit_vr = ds.file_meta.TransferSyntaxUID.is_implicit_VR
+        _said_dropped_on_re_ingest(ds, corrections, implicit=implicit_vr)
+        if not implicit_vr:
             _relabel_long_short_length_values(ds, corrections)
 
         # Ensure dir exists (race safe)
@@ -10550,6 +10556,113 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
             f"Endian encoding, {_read_back_words(elem.tag, vr, len(value))}.")
+
+
+#: The VRs `populate_attrs` holds as bytes and weighs against the retention
+#: limit when the file states them: its `BINARY_VRS` arm, and `UN`.
+_DROPPED_OVER_THE_LIMIT_VRS = frozenset(_BINARY_VR_WORD) | {"UN"}
+
+
+def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
+                               encodings=None, within="") -> None:
+    """Say each private value written that this library's own ingest drops (#921).
+
+    `populate_attrs` holds a private value as bytes, and drops it over its
+    retention limit (`_retention_limit_for`) with a `DATA_LOSS` row, in two
+    cases: the file states a binary VR or `UN` for it, or states none
+    (#740). A caller's `set_attr` can put such a value in the graph, and
+    the export writes it as asked. This appends one INFO note per element
+    saying so; it edits nothing. Call it before
+    `_relabel_long_short_length_values`, after every ambiguous VR is
+    resolved.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be written; sequence
+            items are walked.
+        corrections (list): Where each note goes.
+        implicit (bool): Whether the file is written under Implicit VR.
+            Keyword-only, no default: the two syntaxes drop different
+            values.
+        encodings: The character sets text is encoded with; the dataset's
+            own when None.
+        within (str): The enclosing sequence path, for the note.
+    """
+    # **Before the relabel, and the two never speak of one element.** Under
+    # Explicit VR this notes binary VRs only, and the relabel acts on the
+    # 2-byte-length VRs only, a disjoint set; run after it, this would see
+    # #692's `UN` and say a second time what that note already says, and
+    # miss that #901's `UC` is kept.
+    #
+    # Private data elements only (odd group, element 0x1000 and above). A
+    # private creator is read as `LO` whatever the syntax; a standard
+    # element has a dictionary VR to be read back under, and an even-group
+    # binary value over its limit is a known limit of this note, not
+    # covered here.
+    if encodings is None:
+        encodings = getattr(ds, "_character_set", None) or default_encoding
+    for elem in list(ds):
+        vr = str(elem.VR)
+        tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+        if vr == "SQ":
+            # A sequence is restored as structure on re-ingest, never
+            # weighed; its items' own elements are.
+            for index, item in enumerate(elem.value or []):
+                path = (f"{within} > ({tag}) item {index}" if within
+                        else f"({tag}) item {index}")
+                _said_dropped_on_re_ingest(
+                    item, corrections, implicit=implicit,
+                    encodings=encodings, within=path)
+            continue
+        if (elem.tag.group % 2 != 1 or elem.tag.element < 0x1000
+                or elem.is_empty):
+            continue
+        # Under Explicit VR the file states each VR, and ingest weighs
+        # only the ones it holds as bytes; a `UT`, a `UC` or a number list
+        # is read back under its VR whatever its size. Under Implicit VR
+        # every private data element is weighed.
+        if not implicit and vr not in _DROPPED_OVER_THE_LIMIT_VRS:
+            continue
+        limit = _retention_limit_for(tag)
+        if isinstance(elem.value, (bytes, bytearray, memoryview)):
+            # As written: an odd length is padded to an even one, and the
+            # padded length is what re-ingest weighs.
+            value = bytes(elem.value)
+            value += b"\x00" * (len(value) % 2)
+        elif not _could_exceed_short_length(vr, elem.value):
+            # The relabel's pre-filter serves here: every encoded length
+            # is even, so over 65534 and over 0xFFFF are one test.
+            continue
+        else:
+            buffer = DicomBytesIO()
+            buffer.is_little_endian = True
+            buffer.is_implicit_VR = True
+            write_data_element(buffer, elem, encodings=encodings)
+            # Tag (4) and 4-byte length (4): the rest is the value.
+            value = buffer.getvalue()[8:]
+        if len(value) <= limit:
+            continue
+        # Bytes that re-parse byte-exactly as a sequence are restored as
+        # one before any size gate (`populate_attrs`), wherever the file
+        # leaves the VR unknown: every private element under Implicit VR,
+        # and `UN` under Explicit VR. Saying those are dropped would be
+        # false.
+        if ((implicit or vr == "UN") and value.startswith(_ITEM_TAG_LE)
+                and _sequence_from_un_bytes(value, elem.tag,
+                                            encodings) is not None):
+            continue
+        where = f"{within} > " if within else ""
+        if implicit:
+            corrections.append(
+                f"{where}{tag} ({len(value)} bytes) is written as it stands, "
+                f"under Implicit VR, which names no VR: this library's "
+                f"ingest reads a private element whose VR the file does not "
+                f"state as UN bytes, and drops one over {limit} bytes with "
+                f"a DATA_LOSS row.")
+        else:
+            corrections.append(
+                f"{where}{tag} ({vr}, {len(value)} bytes) is written as it "
+                f"stands: this library's ingest drops a binary value over "
+                f"{limit} bytes with a DATA_LOSS row.")
 
 
 def _read_back_words(tag, vr, length) -> str:
