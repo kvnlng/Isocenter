@@ -1194,10 +1194,12 @@ class RemediationService:
         """Whether the `REMOVE_TAG` Python-attribute arm has something to
         remove on `entity`.
 
-        False where the entity lacks the attribute or the field is already
-        gone (`_owner_field_gone`): the removal then falls past every arm
-        to the bottom `else`, where it is satisfied when the object at its
-        address reads gone too, and declines otherwise.
+        False where `attr` is not a field the exporter stamps
+        (`ENTITY_FIELD_TAGS`), where the entity lacks the attribute, and
+        where the field is already gone (`_owner_field_gone`): the removal
+        then falls past every arm to the bottom `else`, where it is
+        satisfied when the object at its address reads gone too, and
+        declines otherwise.
 
         Args:
             entity: The entity the removal targets.
@@ -1212,7 +1214,18 @@ class RemediationService:
         # `_replace_attr_refused` is, and defined below the five line-cited
         # `mark_modified()` calls so the arm's condition stays a same-line
         # call.
-        return hasattr(entity, attr) and not cls._owner_field_gone(entity, attr)
+        #
+        # Only the fields the exporter stamps (#679). The arm is
+        # `setattr(entity, attr, None)`, so any other name the entity
+        # carries was cleared too: a hand-built finding naming
+        # `Patient.studies` left the patient with no list, and the next
+        # `save()`, `export()` and `generate_report()` raised `TypeError`.
+        # Such a name falls to the bottom `else` and its `matched no
+        # applicable arm` row. `patient_id` and the owned UIDs are in the
+        # table, so a hand-built REMOVE on one of them still clears a
+        # field the store keys on (#949).
+        return (attr in cls.ENTITY_FIELD_TAGS and hasattr(entity, attr)
+                and not cls._owner_field_gone(entity, attr))
 
     @classmethod
     def _owner_field_gone(cls, entity, attr) -> bool:
