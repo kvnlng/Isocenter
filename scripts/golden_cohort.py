@@ -43,6 +43,7 @@ COHORT = REPO / "fingerprint" / "cohort"
 
 CT = "1.2.840.10008.5.1.4.1.1.2"
 PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
+ENCAPSULATED_PDF = "1.2.840.10008.5.1.4.1.1.104.1"
 NAMESPACE = uuid.UUID("6f1c2b1e-7170-4a17-9f0e-000000000717")
 IMPLEMENTATION_VERSION = "ISOCENTER_GOLD"
 
@@ -343,10 +344,36 @@ def graphic_annotation(out: Path):
     write(ds, out / "graphic_annotation-1.dcm")
 
 
+def encapsulated_pdf(out: Path):
+    """An Encapsulated PDF: a 1000-byte document with Encapsulated Document
+    Length 1000, and no pixels (#757). `basic@2026c` writes its two-byte
+    dummy over the document, and the length written follows it. No other
+    member carries (0042,0011) or (0042,0015)."""
+    sop = uid("encapsulated_pdf", 1, 1, 1)
+    ds = FileDataset(None, {}, file_meta=_meta(ENCAPSULATED_PDF, sop, ExplicitVRLittleEndian),
+                     preamble=b"\0" * 128)
+    ds.PatientID, ds.PatientName = "GOLD-pdf", "GOLDEN^PDF"
+    ds.StudyInstanceUID = uid("encapsulated_pdf", 1)
+    ds.SeriesInstanceUID = uid("encapsulated_pdf", 1, 1)
+    ds.SOPInstanceUID, ds.SOPClassUID = sop, ENCAPSULATED_PDF
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "DOC", 1, 1
+    ds.StudyDate, ds.StudyTime = "20230101", "120000"
+    ds.ContentDate, ds.ContentTime = "20230101", "120000"
+    ds.ConversionType = "WSD"
+    ds.BurnedInAnnotation = "NO"
+    ds.DocumentTitle = "GOLD report"
+    ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+    head = b"%PDF-1.4\n% GOLDEN^PDF 1960-01-01\n"
+    ds.EncapsulatedDocument = head + b"x" * (1000 - len(head))
+    ds.EncapsulatedDocumentLength = 1000
+    write(ds, out / "encapsulated_pdf-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id, withheld, prior_markers, graphic_annotation, big_lut)}
+    no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
+    encapsulated_pdf)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

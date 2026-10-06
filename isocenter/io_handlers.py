@@ -8436,6 +8436,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if warning is not None:
                 warnings.append(warning)
 
+        # Encapsulated Document Length follows the document this file
+        # carries (#757). After every merge and the finalize, so it reads
+        # the bytes that will be written.
+        _encapsulated_document_length(ds, corrections)
+
         # Every ambiguous VR gets a concrete arm here, while the dataset
         # is complete and before `save_as` asks the same question and
         # fails the file over it. `save_as` asks again and finds nothing
@@ -10556,6 +10561,68 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"Explicit VR {vr} element can hold at most 65535 bytes (PS3.5 "
             f"6.2.2). The bytes are the value's own, in Implicit VR Little "
             f"Endian encoding, {_read_back_words(elem.tag, vr, len(value))}.")
+
+
+def _encapsulated_document_length(ds, corrections) -> None:
+    """Make Encapsulated Document Length describe the document `ds` carries (#757).
+
+    PS3.3 C.24.2, Encapsulated Document Length (0042,0015), Type 3: "The
+    length of the Encapsulated Document stream, not including any trailing
+    padding added for encapsulation as a DICOM object. If present, shall
+    be equal to the Value Length if even, or one less than the Value
+    Length if odd." When the element is present it is kept if it says
+    that of the Encapsulated Document (0042,0011) in `ds`, rewritten to
+    that document's length otherwise, and deleted when `ds` holds no
+    document. It is never added. Top level only: the module is the
+    instance's.
+
+    Args:
+        ds (pydicom.Dataset): The dataset as it will be written, after
+            every merge; edited in place.
+        corrections (list): Where the INFO note goes for a rewrite or a
+            removal.
+    """
+    # The document changes under the length without the length being
+    # anyone's rule: `basic@2026c` writes a two-byte dummy over (0042,0011)
+    # (Table E.1-1, D) and no row of the table names (0042,0015); a
+    # document over the retention limit is dropped at ingest; a caller
+    # sets another. So the length is derived here, from the bytes about to
+    # be written, for every configuration alike -- which is why it is not
+    # a `CONFIG_VERSION` matter (owner ruling Q4 A) -- and whatever a rule
+    # wrote on (0042,0015) itself: the standard says "shall be equal"
+    # (Q3 A). A rule that removed the element is honoured by the first
+    # line, since nothing is added.
+    if 0x00420015 not in ds:
+        return
+    held = ds[0x00420015].value
+    # Read leniently: anything that is not one integer disagrees.
+    declared = held if isinstance(held, int) and not isinstance(held, bool) \
+        else None
+    said = (f" {held}" if declared is not None
+            else ", which holds no value," if held in (None, "", b"")
+            else f" {held!r}")
+    if 0x00420011 not in ds:
+        del ds[0x00420015]
+        corrections.append(
+            f"(0042,0015) Encapsulated Document Length{said} is not "
+            f"written: the file carries no Encapsulated Document "
+            f"(0042,0011) for it to describe.")
+        return
+    value = bytes(ds[0x00420011].value or b"")
+    length = len(value)
+    # A value read from a file holds its pad byte, so a length one less
+    # than an even value ending in NUL is the conformant odd-length
+    # document. One less than a value ending in anything else is a
+    # document byte uncounted. A caller's odd-length value has no pad yet
+    # (the writer adds it), and its own length is the answer.
+    if declared == length or (declared == length - 1 and length % 2 == 0
+                              and value[-1:] == b"\x00"):
+        return
+    ds[0x00420015] = DataElement(0x00420015, "UL", length)
+    corrections.append(
+        f"(0042,0015) Encapsulated Document Length{said} does not describe "
+        f"the {length}-byte Encapsulated Document (0042,0011) written; "
+        f"written as {length} (PS3.3 C.24.2).")
 
 
 #: The VRs `populate_attrs` holds as bytes and weighs against the retention

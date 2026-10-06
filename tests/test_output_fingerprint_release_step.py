@@ -152,6 +152,7 @@ COMMITTED = {
     "big_lut": ["big_lut-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
+    "encapsulated_pdf": ["encapsulated_pdf-1.dcm"],
     "float_pixels": ["float_pixels-1.dcm"],
     "graphic_annotation": ["graphic_annotation-1.dcm"],
     "implicit": ["implicit-1.dcm"],

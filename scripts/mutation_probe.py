@@ -466,6 +466,7 @@ TARGETS = {
                                   "tests/test_an_over_long_short_length_value_round_trips.py",
                                   "tests/test_a_geometry_rewrite_at_export_is_said.py",
                                   "tests/test_a_private_value_our_ingest_drops_is_said_at_export.py",
+                                  "tests/test_encapsulated_document_length_describes_the_document_written.py",
                                   "tests/test_an_implicit_ambiguous_value_is_said.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
