@@ -119599,6 +119599,329 @@
     "ecg-1.dcm": "sha256:1929fe09a6e70432d6872b0611b769fb55d4d4a95963103a97050f5bbb420e0b"
    }
   },
+  "synthetic:encapsulated_pdf": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {
+        "Subject_ANON_abde7deeaa011d74fb6d66c4/Study_2022-05-28_Study_72805/Series_1_DOC_Series_89904/2.25.273952788443883473415893184585556516000.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.273952788443883473415893184585556516000'",
+          "0008,0020": "DA/implicit '20220528'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_abde7deeaa011d74fb6d66c4'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.51886357863431113679686693277440272805'",
+          "0020,000e": "UI/implicit '2.25.181043809596712715201782685510607189904'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.273952788443883473415893184585556516000'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_abde7deeaa011d74fb6d66c4/Study_2022-05-28_Study_72805/Series_1_DOC_Series_89904/2.25.273952788443883473415893184585556516000.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.273952788443883473415893184585556516000'",
+          "0008,0020": "DA/implicit '20220528'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_abde7deeaa011d74fb6d66c4'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.51886357863431113679686693277440272805'",
+          "0020,000e": "UI/implicit '2.25.181043809596712715201782685510607189904'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.273952788443883473415893184585556516000'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_abde7deeaa011d74fb6d66c4/Study_2022-05-28_Study_72805/Series_1_DOC_Series_89904/2.25.273952788443883473415893184585556516000.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.273952788443883473415893184585556516000'",
+          "0008,0020": "DA/implicit '20220528'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_abde7deeaa011d74fb6d66c4'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.51886357863431113679686693277440272805'",
+          "0020,000e": "UI/implicit '2.25.181043809596712715201782685510607189904'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.273952788443883473415893184585556516000'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_abde7deeaa011d74fb6d66c4/Study_2022-05-28_Study_72805/Series_1_DOC_Series_89904/2.25.273952788443883473415893184585556516000.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.273952788443883473415893184585556516000'",
+          "0008,0020": "DA/implicit '20220528'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_abde7deeaa011d74fb6d66c4'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.51886357863431113679686693277440272805'",
+          "0020,000e": "UI/implicit '2.25.181043809596712715201782685510607189904'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.273952788443883473415893184585556516000'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_abde7deeaa011d74fb6d66c4/Study_2022-05-28_Study_72805/Series_1_DOC_Series_89904/2.25.273952788443883473415893184585556516000.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.273952788443883473415893184585556516000'",
+          "0008,0020": "DA/implicit '20220528'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_abde7deeaa011d74fb6d66c4'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.51886357863431113679686693277440272805'",
+          "0020,000e": "UI/implicit '2.25.181043809596712715201782685510607189904'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.273952788443883473415893184585556516000'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "encapsulated_pdf-1.dcm": "sha256:2c4a211eed11574c9fa3c4f93770c65c46f002be0dacccc7c54c5531e5e63936"
+   }
+  },
   "synthetic:float_pixels": {
    "configs": {
     "A": {
@@ -126146,6 +126469,1096 @@
     "redacted-1.dcm": "sha256:ae9f44fd20828f350b0d205e23d0b87446b93cda852590c8a8048e5009c613b0"
    }
   },
+  "synthetic:unstated_private_vr": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 3 of 3 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 3 of 3 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 3 of 3 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.219620464278053409570346421565780496383.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.219620464278053409570346421565780496383'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '3'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\3.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.219620464278053409570346421565780496383'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:7526ec41e8376880"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.234257803331135721828169664595180863425.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.234257803331135721828169664595180863425'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234257803331135721828169664595180863425'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.301865457284047898483080514699101016935.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.301865457284047898483080514699101016935'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '2'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\2.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.301865457284047898483080514699101016935'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:273c311c16f7f6ec"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 3
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.219620464278053409570346421565780496383.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.219620464278053409570346421565780496383'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '3'",
+          "0020,0032": "DS '0\\\\0\\\\3.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.219620464278053409570346421565780496383'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:7526ec41e8376880"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.234257803331135721828169664595180863425.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.234257803331135721828169664595180863425'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234257803331135721828169664595180863425'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.301865457284047898483080514699101016935.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.301865457284047898483080514699101016935'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '2'",
+          "0020,0032": "DS '0\\\\0\\\\2.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.301865457284047898483080514699101016935'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:273c311c16f7f6ec"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 3
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.219620464278053409570346421565780496383.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.219620464278053409570346421565780496383'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '3'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\3.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.219620464278053409570346421565780496383'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:7526ec41e8376880"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.234257803331135721828169664595180863425.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.234257803331135721828169664595180863425'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234257803331135721828169664595180863425'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.301865457284047898483080514699101016935.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.301865457284047898483080514699101016935'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '2'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\2.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.301865457284047898483080514699101016935'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:273c311c16f7f6ec"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 3
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 3,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 3 of 3 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 3 of 3 planned instances from 1 patients.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.219620464278053409570346421565780496383.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.219620464278053409570346421565780496383'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0019,0010": "LO/implicit 'SIEMENS MR HEADER'",
+          "0019,1012": "None/implicit unreadable: BytesLengthException: Expected total bytes to be an even multiple of bytes per value. Instead received b'12.5 \\x00' with length 6 and struct format 'l' which corresponds to bytes per value of 4. This occurred while trying to parse (0019,1012) according to VR 'None'. To replace this error with a warning set pydicom.config.convert_wrong_length_to_UN = True.",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '3'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\3.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.219620464278053409570346421565780496383'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:7526ec41e8376880"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.234257803331135721828169664595180863425.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.234257803331135721828169664595180863425'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0019,0010": "LO/implicit 'SIEMENS MR HEADER'",
+          "0019,1008": "CS/implicit 'IMAGE NUM 4'",
+          "0019,1009": "LO/implicit '1.0'",
+          "0019,100a": "US/implicit [16]",
+          "0019,100e": "FD/implicit ['0.0', '0.5', '-1.0']",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0029,0010": "LO/implicit 'SIEMENS CSA HEADER'",
+          "0029,1010": "OB/implicit sha256:2eb85a50e07ac000 len=8",
+          "3109,0010": "LO/implicit 'Applicare/RadWorks/Version 5.0'",
+          "3109,100a": "DA/implicit '20230115'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234257803331135721828169664595180863425'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.301865457284047898483080514699101016935.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.301865457284047898483080514699101016935'",
+          "0008,0020": "DA/implicit '20221207'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0019,0010": "LO/implicit 'SIEMENS MR HEADER'",
+          "0019,1008": "CS/implicit 'IMAGE NUM 4'",
+          "0019,1009": "LO/implicit '1.0'",
+          "0019,100a": "US/implicit [16]",
+          "0019,100e": "FD/implicit ['0.0', '0.5', '-1.0']",
+          "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '2'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\2.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0029,0010": "LO/implicit 'SIEMENS CSA HEADER'",
+          "0029,1010": "OB/implicit sha256:2eb85a50e07ac000 len=8",
+          "3109,0010": "LO/implicit 'Applicare/RadWorks/Version 5.0'",
+          "3109,100a": "DA/implicit '20230115'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.301865457284047898483080514699101016935'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:273c311c16f7f6ec"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 3
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.219620464278053409570346421565780496383.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.219620464278053409570346421565780496383'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0019,0010": "LO 'SIEMENS MR HEADER'",
+          "0019,1012": "UN unreadable: BytesLengthException: Expected total bytes to be an even multiple of bytes per value. Instead received b'12.5 \\x00' with length 6 and struct format 'l' which corresponds to bytes per value of 4. This occurred while trying to parse (0019,1012) according to VR 'UN'. To replace this error with a warning set pydicom.config.convert_wrong_length_to_UN = True.",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '3'",
+          "0020,0032": "DS '0\\\\0\\\\3.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.219620464278053409570346421565780496383'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:7526ec41e8376880"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.234257803331135721828169664595180863425.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.234257803331135721828169664595180863425'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0019,0010": "LO 'SIEMENS MR HEADER'",
+          "0019,1008": "UN sha256:4f611281b8941fcf len=12",
+          "0019,1009": "UN sha256:efa11fa7d9e54857 len=4",
+          "0019,100a": "UN sha256:707bf0b938f307b5 len=2",
+          "0019,100e": "UN sha256:a16085c67965f3e6 len=24",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "0029,0010": "LO 'SIEMENS CSA HEADER'",
+          "0029,1010": "UN sha256:2eb85a50e07ac000 len=8",
+          "3109,0010": "LO 'Applicare/RadWorks/Version 5.0'",
+          "3109,100a": "UN sha256:ea4a6d4571178715 len=8",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234257803331135721828169664595180863425'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_5738e393a4236b0e0e9a635a/Study_2022-12-07__92020/Series_1_CT__50866/2.25.301865457284047898483080514699101016935.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.301865457284047898483080514699101016935'",
+          "0008,0020": "DA '20221207'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5738e393a4236b0e0e9a635a'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0019,0010": "LO 'SIEMENS MR HEADER'",
+          "0019,1008": "UN sha256:4f611281b8941fcf len=12",
+          "0019,1009": "UN sha256:efa11fa7d9e54857 len=4",
+          "0019,100a": "UN sha256:707bf0b938f307b5 len=2",
+          "0019,100e": "UN sha256:a16085c67965f3e6 len=24",
+          "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
+          "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '2'",
+          "0020,0032": "DS '0\\\\0\\\\2.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.217429411246571949119857631392030402204'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "0029,0010": "LO 'SIEMENS CSA HEADER'",
+          "0029,1010": "UN sha256:2eb85a50e07ac000 len=8",
+          "3109,0010": "LO 'Applicare/RadWorks/Version 5.0'",
+          "3109,100a": "UN sha256:ea4a6d4571178715 len=8",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.301865457284047898483080514699101016935'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:273c311c16f7f6ec"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 3
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 3,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "unstated_private_vr-explicit-un.dcm": "sha256:cfeefc362be1395a47c37322094f9ac69d73c5ff8f6a35c828a23e58aa9dafc4",
+    "unstated_private_vr-implicit.dcm": "sha256:a135a87334b95497ae869437833c0fb106071e1173e5a5a4208817b9bd2385db",
+    "unstated_private_vr-mismatch.dcm": "sha256:f828235f6119ff439d77f4751661c13b2c52745859a4aed7373cf5182f324f51"
+   }
+  },
   "synthetic:withheld": {
    "configs": {
     "A": {
@@ -126562,12 +127975,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "49d57c6a715118ca5f2f4207f6dbf0c517a56cf2",
-  "isocenter_version": "1.0.0rc10",
+  "git_sha": "5100c17813d79f3ce71fb7956ddf2946e32a2eee",
+  "isocenter_version": "1.0.0rc12",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 548
+  "seconds": 560
  },
  "schema": 1,
  "toolchain": {
