@@ -4445,6 +4445,46 @@ def _refuse_an_infinite_frame_count(ds) -> None:
             f"one") from exc
 
 
+#: The four elements ingest links a file by, each of which takes one value.
+_LINKAGE_KEY_NAMES = (
+    ("SOPInstanceUID", "SOP Instance UID (0008,0018)"),
+    ("StudyInstanceUID", "Study Instance UID (0020,000D)"),
+    ("SeriesInstanceUID", "Series Instance UID (0020,000E)"),
+    ("PatientID", "Patient ID (0010,0020)"),
+)
+
+
+def _refuse_a_multi_valued_key(ds) -> None:
+    """Refuse a file one of whose linkage keys holds several values (#747).
+
+    A value holding a backslash is read by pydicom as a `MultiValue`. Until
+    #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
+    maps as an unhashable key and was refused as `Linkage Failed: TypeError:
+    unhashable type: 'MultiValue'`, after its frame had been appended to
+    the sidecar; a multi-valued Study or Series Instance UID was linked
+    under `str()` of the list and exported as `['1.2.3', '1.2.4']`.
+
+    Raises:
+        ValueError: Naming the element and how many values it holds.
+    """
+    # Never a value in the message: a Patient ID is the identifier, and
+    # the row this becomes is kept. Never joined into one string: #584's
+    # synthetic key starts with a backslash because no single-valued
+    # Patient ID read from a file can hold one, and a joined `A\B` would
+    # be exactly that. All blanks is refused too -- two blank values are
+    # two values, not "no Patient ID".
+    #
+    # The words are this function's and not an interpreter's: CPython
+    # reworded the `TypeError` this replaces between 3.12 and 3.14, and a
+    # row that quotes it is two recordings of one run.
+    for keyword, name in _LINKAGE_KEY_NAMES:
+        value = ds.get(keyword)
+        if isinstance(value, MultiValue):
+            raise ValueError(
+                f"{name} holds {len(value)} values and takes one; the file "
+                f"is linked by it, and none is chosen for it.")
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4499,6 +4539,10 @@ def ingest_worker(fp: str) -> Tuple:
 
         if not meta['sop']:
             raise ValueError("Missing SOPInstanceUID. Likely not a valid DICOM file.")
+        # Here, in the worker, so the parent never appends this file's
+        # frame to the sidecar; and before `_linkage_keys`, which would
+        # hand the parent an unhashable Patient ID or a list's text.
+        _refuse_a_multi_valued_key(ds)
         _refuse_an_infinite_frame_count(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))

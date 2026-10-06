@@ -343,10 +343,31 @@ def graphic_annotation(out: Path):
     write(ds, out / "graphic_annotation-1.dcm")
 
 
+def multi_valued_keys(out: Path):
+    """Four CTs, each with one linkage key holding two values: Patient ID,
+    SOP Instance UID, Study Instance UID, Series Instance UID (#747). Every
+    file is refused at ingest with an `ERROR` row naming the element and
+    the count, so this member exports nothing and its rows are the whole
+    recording. No other member holds a multi-valued key; and the row this
+    one replaced quoted a `TypeError` whose words differ between 3.12 and
+    3.14t."""
+    for n, (keyword, label) in enumerate((
+            ("PatientID", "patient-id"), ("SOPInstanceUID", "sop-uid"),
+            ("StudyInstanceUID", "study-uid"),
+            ("SeriesInstanceUID", "series-uid")), start=1):
+        ds = ct("multi_valued_keys", study=n)
+        first = getattr(ds, keyword)
+        second = ("GOLD-multi_valued_keys-B" if keyword == "PatientID"
+                  else uid("multi_valued_keys", "second", keyword))
+        setattr(ds, keyword, [first, second])
+        write(ds, out / f"multi_valued_keys-{label}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id, withheld, prior_markers, graphic_annotation, big_lut)}
+    no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
+    multi_valued_keys)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
