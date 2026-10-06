@@ -218,8 +218,18 @@ def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_ta
 
 
 def _uids(ds):
-    for elem in ds.iterall():
-        if elem.VR == "UI" and elem.value:
+    # Not `ds.iterall()`: reading LUT Data makes pydicom resolve its
+    # `US or OW` from the LUT Descriptor beside it, and it raises
+    # `TypeError` for the descriptor `lut_unusable_descriptor` exists to
+    # hold (#703). LUT Data is never a UI, so it is not read.
+    for tag in list(ds.keys()):
+        if tag == 0x00283006:
+            continue
+        elem = ds[tag]
+        if elem.VR == "SQ":
+            for item in elem.value:
+                yield from _uids(item)
+        elif elem.VR == "UI" and elem.value:
             yield from (elem.value if isinstance(elem.value, list) else [elem.value])
 
 

@@ -527,7 +527,7 @@ class DicomItem(TrackedEntity):
         one, is stored as the Python number it equals (`np.int64(7)` as the
         `int` 7; a list as a new list), so a live export writes what a
         reopened session writes. An array of one or more dimensions is not
-        converted: pass `.tolist()` or `.tobytes()`.
+        converted: pass its numbers as a list, or its bytes.
 
         Nothing is refused here. The store holds `None`, `str`, `bytes`,
         `bool`, `int`, `float`, pydicom's DS and IS values, and lists of
