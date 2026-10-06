@@ -1817,6 +1817,10 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     pixel lookup tables, #902) and dropped above it, whatever its wire VR. A retained value in words wider than a
     byte, read from a big-endian dataset, is stored little-endian (see
     `_stored_byte_order`); an `OB` value is never converted. A private
+    data element whose VR the file did not state -- Implicit VR, or
+    Explicit VR `UN` -- is held as `UN` with the file's bytes, whatever
+    pydicom's private dictionary names for its creator
+    (`_vr_unstated_private`, #740). A private
     `UN` value that re-parses byte-exactly as a sequence
     (`_sequence_from_un_bytes`) is stored as a sequence, not an attribute.
 
@@ -1934,7 +1938,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # private element whose creator it knows -- `SIEMENS CSA HEADER`
     # (0029,xx10) reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF` -- which
     # is pydicom's guess, not the file's statement, so a binary value's VR
-    # is not recorded from such a dataset. `is True`, for the reason the
+    # is not recorded from such a dataset. (The loop below does not let
+    # pydicom make that guess for a raw element at all, #740; this is for
+    # one already converted.) `is True`, for the reason the
     # line above is `is False`: a bare `Dataset` says (None, None).
     implicit = getattr(ds, "original_encoding", (None, None))[0] is True
 
@@ -1952,7 +1958,36 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # construction rather than by the accident of a file read's `_dict`
     # already being in tag order.
     for tag_key in sorted(ds.keys()):
-        elem = _read_element(ds, tag_key, not big_endian)
+        # A private element whose VR the file did not state is held as the
+        # file's bytes, `UN`, whatever pydicom's private dictionary says
+        # of its creator (#740). Asked of the raw element, before anything
+        # converts it: `ds[tag]` is where pydicom relabels and decodes, and
+        # where a length that does not fit the dictionary's VR refused the
+        # whole file. From here it is the `UN` path an unknown creator's
+        # element has always taken: the sequence re-parse, the size gate,
+        # no recorded VR, and `UN` at export.
+        #
+        # Never by toggling `pydicom.config.replace_un_with_known_vr`: it
+        # is process-global, ingest runs on threads under a free-threaded
+        # build, and `_standard_un_decoded` relies on it for standard tags.
+        #
+        # `keep_deferred=True`, and it is not about deferred reads: without
+        # it `get_item` reads and converts any raw element whose value is
+        # None, which is every zero-length one. That relabels an empty
+        # private element after all, and raises here, outside
+        # `_read_element`'s handling, for an empty LUT Data with no
+        # descriptor.
+        raw = ds.get_item(tag_key, keep_deferred=True)
+        if _vr_unstated_private(raw):
+            # pydicom hands back None for a zero-length `UN` it converts;
+            # kept, so an unknown creator's empty element is held exactly
+            # as before. By the length, never by `raw.value is None`: a
+            # deferred value is None too, and `_vr_unstated_private` has
+            # already left that one to pydicom.
+            elem = DataElement(raw.tag, "UN", None if raw.length == 0
+                               else bytes(raw.value))
+        else:
+            elem = _read_element(ds, tag_key, not big_endian)
         if elem.tag.group == 0x7fe0:
             # The whole group is skipped, not only its binary VRs:
             # (7fe0,0001) and (7fe0,0002), the Extended Offset Table pair,
@@ -2162,6 +2197,46 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     ambiguous.append((path, tag, held))
 
 
+def _vr_unstated_private(raw) -> bool:
+    """Whether `raw` is a private data element whose VR the file did not state (#740).
+
+    True for an element pydicom has not yet converted, in an odd group at
+    element 0x1000 or above, of defined length, whose wire VR is absent
+    (Implicit VR) or `UN` (Explicit VR; PS3.5 6.2.2, "VR unknown"), and
+    whose value is in hand (not deferred).
+
+    Args:
+        raw: What `Dataset.get_item` returned: a `RawDataElement` until
+            something reads the element, a `DataElement` after.
+
+    Returns:
+        bool: Whether to hold the element as `UN` bytes.
+    """
+    # Each clause is a population left to pydicom, and why:
+    #   - already converted: nothing here un-reads it, so it keeps the
+    #     reading it had before #740. That direction refuses no file that
+    #     was not refused before; `_record_private_vr`'s Implicit VR gate
+    #     is still behind it.
+    #   - a private creator (element below 0x1000): pydicom reads it `LO`
+    #     with no dictionary, and every private block depends on it.
+    #   - a standard tag: its VR is the standard dictionary's, not a
+    #     vendor's guess.
+    #   - a stated VR: the file's own statement, recorded and written.
+    #   - undefined length: a sequence on the wire, which pydicom parses as
+    #     one for every creator.
+    #   - a deferred value (None, under a length that is not zero): the
+    #     bytes are not in hand. No read in this package passes
+    #     `defer_size`; one that did would otherwise have a long value
+    #     taken for an empty one, with no row. Left to pydicom, which reads
+    #     it from the file, like an element already converted.
+    return (isinstance(raw, RawDataElement)
+            and raw.tag.group % 2 == 1
+            and raw.tag.element >= 0x1000
+            and raw.VR in (None, "UN")
+            and raw.length != 0xFFFFFFFF
+            and (raw.value is not None or raw.length == 0))
+
+
 def _read_element(ds, tag, little_endian=True):
     """`ds[tag]`, or the element whose ambiguous VR pydicom could not resolve.
 
@@ -2313,10 +2388,13 @@ def _process_safe(value):
 def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     """Record the VR of a private element beside its value on `item`.
 
-    Recorded for an odd-group element only, never for `UN`, and never for
-    a binary-VR element read from an Implicit VR dataset. A bytes value's
-    VR is recorded when the file stated it, and so is the private
-    creator's `LO`.
+    Recorded for an odd-group element only, and only a VR the file
+    stated: never `UN`, which is what `populate_attrs` holds a private
+    data element under when the file stated no VR for it (Implicit VR, or
+    Explicit VR `UN`; #740), whatever pydicom's private dictionary names
+    for its creator. A bytes value's VR is recorded when the file stated
+    it, and so is the private creator's `LO`. Behind that, never for a
+    binary-VR element read from an Implicit VR dataset.
 
     Args:
         item (DicomItem): The item the element was read into.
@@ -2343,8 +2421,14 @@ def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     # (700D,xx90) `OF`). Recorded, the guess would be written as though
     # the file had said it, and a six-byte `OF` would draw a re-VR
     # `WARNING` over a VR the file never declared. So a binary-VR element
-    # from such a dataset records nothing and is written `UN`; a text
-    # value's dictionary VR is still recorded.
+    # from such a dataset records nothing and is written `UN`.
+    #
+    # Since #740 this gate is the second line, not the first:
+    # `populate_attrs` holds every private data element whose VR the file
+    # did not state as `UN` before pydicom relabels it, text and numbers
+    # included, so such an element stops at the `UN` test above. This one
+    # still speaks for an element something converted before
+    # `populate_attrs` asked (`_vr_unstated_private`'s first clause).
     #
     # A bytes value from an explicit-VR file is recorded: a kept private
     # element is written faithfully. Its VR lives in `attributes_json`
@@ -6407,9 +6491,55 @@ class ExportError(RuntimeError):
             "rest.")
 
 
+def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
+    """The sentence for each declared descriptor the array's geometry overrides (#736).
+
+    Rows, Columns, SamplesPerPixel and NumberOfFrames as `attributes`
+    declares them, held against `geom`; None when every one that is
+    declared agrees.
+
+    Args:
+        geom (PixelGeometry): The one resolved geometry being written.
+        attributes (dict): The instance's attributes.
+
+    Returns:
+        Optional[str]: One sentence naming every disagreeing descriptor
+            in tag order, or None.
+    """
+    # Read by `declared_int`, as the PixelRepresentation note's is: nothing
+    # declared is not a correction of anything. That is the whole rule for
+    # NumberOfFrames too, which the write below adds to a multi-frame file
+    # that never declared one. Do not compare an absent one with 1.
+    rewritten = [
+        (keyword, declared, written)
+        for keyword, tag, written in (
+            ("SamplesPerPixel", "0028,0002", geom.samples),
+            ("NumberOfFrames", "0028,0008", geom.frames),
+            ("Rows", "0028,0010", geom.rows),
+            ("Columns", "0028,0011", geom.cols))
+        for declared in (declared_int(attributes, tag),)
+        if declared is not None and declared != written]
+    if not rewritten:
+        return None
+
+    def listed(pairs):
+        words = [f"{keyword} {value}" for keyword, value in pairs]
+        return (words[0] if len(words) == 1
+                else f"{', '.join(words[:-1])} and {words[-1]}")
+
+    return (
+        f"{listed((k, d) for k, d, _ in rewritten)} "
+        f"{'does' if len(rewritten) == 1 else 'do'} not describe the array, "
+        f"which holds {geom.frames} frame{'' if geom.frames == 1 else 's'} "
+        f"of {geom.rows} x {geom.cols} at {geom.samples} "
+        f"sample{'' if geom.samples == 1 else 's'} per pixel; written with "
+        f"{listed((k, w) for k, _, w in rewritten)}, the array's own")
+
+
 def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
                           syntax_uid: str, warnings=None,
-                          remedy: Optional[str] = None) -> None:
+                          remedy: Optional[str] = None,
+                          corrections=None) -> None:
     """Write the descriptors that describe the pixel element just written.
 
     Writes `Rows`, `Columns`, `SamplesPerPixel`, `NumberOfFrames` (when
@@ -6440,6 +6570,10 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
             sentence, for a door where the table's is false: the #771
             fallback passes `_PHOTOMETRIC_J2K_FALLBACK`. None keeps the
             table's.
+        corrections (list): Where the note goes for each declared Rows,
+            Columns, SamplesPerPixel or NumberOfFrames this write
+            overrides (#736), for the parent to log at INFO. `None` means
+            the caller does not collect them.
 
     Raises:
         _PhotometricRefusal: if the *file* would carry more than one
@@ -6468,6 +6602,19 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # has to say which module's Photometric Interpretation rules apply and
     # what it is writing: inheriting the integer path's rules, or
     # "uncompressed", by omission would warn about every compressed export.
+    #
+    # A declaration this overrides is said (#736), as the integer arm says
+    # a PixelRepresentation it overrides: INFO on `corrections`, no row,
+    # because the file written agrees with its bytes. Only a write around
+    # the entity reaches it -- `set_attr` refuses a geometry the resident
+    # array cannot be read under, and a stored frame is re-read under the
+    # edit or fails the export (#595) -- and it was the one rewrite here
+    # that left no line at all. Here, not in the worker, so both pixel
+    # arms say it.
+    if corrections is not None:
+        rewrite = _geometry_rewrite_note(geom, attributes)
+        if rewrite is not None:
+            corrections.append(rewrite)
     ds.Rows = geom.rows
     ds.Columns = geom.cols
     ds.SamplesPerPixel = geom.samples
@@ -8126,7 +8273,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 _write_pixel_geometry(ds, geom, attributes,
                                       float_element=True,
                                       syntax_uid=written_syntax,
-                                      warnings=warnings)
+                                      warnings=warnings,
+                                      corrections=corrections)
 
             arr = None
 
@@ -8195,7 +8343,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                                   syntax_uid=written_syntax,
                                   warnings=warnings,
                                   remedy=(_PHOTOMETRIC_J2K_FALLBACK
-                                          if j2k_fallback else None))
+                                          if j2k_fallback else None),
+                                  corrections=corrections)
 
             # Derived from the array, never read from `attributes`, as Rows
             # and SamplesPerPixel are: `ds.PixelData = arr.tobytes()` is
@@ -8429,6 +8578,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if warning is not None:
                 warnings.append(warning)
 
+        # Encapsulated Document Length follows the document this file
+        # carries (#757). After every merge and the finalize, so it reads
+        # the bytes that will be written.
+        _encapsulated_document_length(ds, corrections)
+
         # Every ambiguous VR gets a concrete arm here, while the dataset
         # is complete and before `save_as` asks the same question and
         # fails the file over it. `save_as` asks again and finds nothing
@@ -8442,7 +8596,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # in `ds.file_meta`, never `written_syntax`: a pixel-less file stays
         # native under compression. Under Implicit VR every length is
         # 4 bytes and nothing is relabelled.
-        if not ds.file_meta.TransferSyntaxUID.is_implicit_VR:
+        #
+        # First, a private value this library's own ingest would drop is
+        # said (#921), under either syntax, while each element still has
+        # the VR `_merge` gave it.
+        implicit_vr = ds.file_meta.TransferSyntaxUID.is_implicit_VR
+        _said_dropped_on_re_ingest(ds, corrections, implicit=implicit_vr)
+        if not implicit_vr:
             _relabel_long_short_length_values(ds, corrections)
 
         # Ensure dir exists (race safe)
@@ -10591,6 +10751,175 @@ def _relabel_long_short_length_values(ds, corrections, *, encodings=None,
             f"Endian encoding, {_read_back_words(elem.tag, vr, len(value))}.")
 
 
+def _encapsulated_document_length(ds, corrections) -> None:
+    """Make Encapsulated Document Length describe the document `ds` carries (#757).
+
+    PS3.3 C.24.2, Encapsulated Document Length (0042,0015), Type 3: "The
+    length of the Encapsulated Document stream, not including any trailing
+    padding added for encapsulation as a DICOM object. If present, shall
+    be equal to the Value Length if even, or one less than the Value
+    Length if odd." When the element is present it is kept if it says
+    that of the Encapsulated Document (0042,0011) in `ds`, rewritten to
+    that document's length otherwise, and deleted when `ds` holds no
+    document. It is never added. Top level only: the module is the
+    instance's.
+
+    Args:
+        ds (pydicom.Dataset): The dataset as it will be written, after
+            every merge; edited in place.
+        corrections (list): Where the INFO note goes for a rewrite or a
+            removal.
+    """
+    # The document changes under the length without the length being
+    # anyone's rule: `basic@2026c` writes a two-byte dummy over (0042,0011)
+    # (Table E.1-1, D) and no row of the table names (0042,0015); a
+    # document over the retention limit is dropped at ingest; a caller
+    # sets another. So the length is derived here, from the bytes about to
+    # be written, for every configuration alike -- which is why it is not
+    # a `CONFIG_VERSION` matter (owner ruling Q4 A) -- and whatever a rule
+    # wrote on (0042,0015) itself: the standard says "shall be equal"
+    # (Q3 A). A rule that removed the element is honoured by the first
+    # line, since nothing is added.
+    if 0x00420015 not in ds:
+        return
+    held = ds[0x00420015].value
+    # Read leniently: anything that is not one integer disagrees.
+    declared = held if isinstance(held, int) and not isinstance(held, bool) \
+        else None
+    said = (f" {held}" if declared is not None
+            else ", which holds no value," if held in (None, "", b"")
+            else f" {held!r}")
+    if 0x00420011 not in ds:
+        del ds[0x00420015]
+        corrections.append(
+            f"(0042,0015) Encapsulated Document Length{said} is not "
+            f"written: the file carries no Encapsulated Document "
+            f"(0042,0011) for it to describe.")
+        return
+    value = bytes(ds[0x00420011].value or b"")
+    length = len(value)
+    # A value read from a file holds its pad byte, so a length one less
+    # than an even value ending in NUL is the conformant odd-length
+    # document. One less than a value ending in anything else is a
+    # document byte uncounted. A caller's odd-length value has no pad yet
+    # (the writer adds it), and its own length is the answer.
+    if declared == length or (declared == length - 1 and length % 2 == 0
+                              and value[-1:] == b"\x00"):
+        return
+    ds[0x00420015] = DataElement(0x00420015, "UL", length)
+    corrections.append(
+        f"(0042,0015) Encapsulated Document Length{said} does not describe "
+        f"the {length}-byte Encapsulated Document (0042,0011) written; "
+        f"written as {length} (PS3.3 C.24.2).")
+
+
+#: The VRs `populate_attrs` holds as bytes and weighs against the retention
+#: limit when the file states them: its `BINARY_VRS` arm, and `UN`.
+_DROPPED_OVER_THE_LIMIT_VRS = frozenset(_BINARY_VR_WORD) | {"UN"}
+
+
+def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
+                               encodings=None, within="") -> None:
+    """Say each private value written that this library's own ingest drops (#921).
+
+    `populate_attrs` holds a private value as bytes, and drops it over its
+    retention limit (`_retention_limit_for`) with a `DATA_LOSS` row, in two
+    cases: the file states a binary VR or `UN` for it, or states none
+    (#740). A caller's `set_attr` can put such a value in the graph, and
+    the export writes it as asked. This appends one INFO note per element
+    saying so; it edits nothing. Call it before
+    `_relabel_long_short_length_values`, after every ambiguous VR is
+    resolved.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be written; sequence
+            items are walked.
+        corrections (list): Where each note goes.
+        implicit (bool): Whether the file is written under Implicit VR.
+            Keyword-only, no default: the two syntaxes drop different
+            values.
+        encodings: The character sets text is encoded with; the dataset's
+            own when None.
+        within (str): The enclosing sequence path, for the note.
+    """
+    # **Before the relabel, and the two never speak of one element.** Under
+    # Explicit VR this notes binary VRs only, and the relabel acts on the
+    # 2-byte-length VRs only, a disjoint set; run after it, this would see
+    # #692's `UN` and say a second time what that note already says, and
+    # miss that #901's `UC` is kept.
+    #
+    # Private data elements only (odd group, element 0x1000 and above). A
+    # private creator is read as `LO` whatever the syntax; a standard
+    # element has a dictionary VR to be read back under, and an even-group
+    # binary value over its limit is a known limit of this note, not
+    # covered here.
+    if encodings is None:
+        encodings = getattr(ds, "_character_set", None) or default_encoding
+    for elem in list(ds):
+        vr = str(elem.VR)
+        tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+        if vr == "SQ":
+            # A sequence is restored as structure on re-ingest, never
+            # weighed; its items' own elements are.
+            for index, item in enumerate(elem.value or []):
+                path = (f"{within} > ({tag}) item {index}" if within
+                        else f"({tag}) item {index}")
+                _said_dropped_on_re_ingest(
+                    item, corrections, implicit=implicit,
+                    encodings=encodings, within=path)
+            continue
+        if (elem.tag.group % 2 != 1 or elem.tag.element < 0x1000
+                or elem.is_empty):
+            continue
+        # Under Explicit VR the file states each VR, and ingest weighs
+        # only the ones it holds as bytes; a `UT`, a `UC` or a number list
+        # is read back under its VR whatever its size. Under Implicit VR
+        # every private data element is weighed.
+        if not implicit and vr not in _DROPPED_OVER_THE_LIMIT_VRS:
+            continue
+        limit = _retention_limit_for(tag)
+        if isinstance(elem.value, (bytes, bytearray, memoryview)):
+            # As written: an odd length is padded to an even one, and the
+            # padded length is what re-ingest weighs.
+            value = bytes(elem.value)
+            value += b"\x00" * (len(value) % 2)
+        elif not _could_exceed_short_length(vr, elem.value):
+            # The relabel's pre-filter serves here: every encoded length
+            # is even, so over 65534 and over 0xFFFF are one test.
+            continue
+        else:
+            buffer = DicomBytesIO()
+            buffer.is_little_endian = True
+            buffer.is_implicit_VR = True
+            write_data_element(buffer, elem, encodings=encodings)
+            # Tag (4) and 4-byte length (4): the rest is the value.
+            value = buffer.getvalue()[8:]
+        if len(value) <= limit:
+            continue
+        # Bytes that re-parse byte-exactly as a sequence are restored as
+        # one before any size gate (`populate_attrs`), wherever the file
+        # leaves the VR unknown: every private element under Implicit VR,
+        # and `UN` under Explicit VR. Saying those are dropped would be
+        # false.
+        if ((implicit or vr == "UN") and value.startswith(_ITEM_TAG_LE)
+                and _sequence_from_un_bytes(value, elem.tag,
+                                            encodings) is not None):
+            continue
+        where = f"{within} > " if within else ""
+        if implicit:
+            corrections.append(
+                f"{where}{tag} ({len(value)} bytes) is written as it stands, "
+                f"under Implicit VR, which names no VR: this library's "
+                f"ingest reads a private element whose VR the file does not "
+                f"state as UN bytes, and drops one over {limit} bytes with "
+                f"a DATA_LOSS row.")
+        else:
+            corrections.append(
+                f"{where}{tag} ({vr}, {len(value)} bytes) is written as it "
+                f"stands: this library's ingest drops a binary value over "
+                f"{limit} bytes with a DATA_LOSS row.")
+
+
 def _read_back_words(tag, vr, length) -> str:
     """What the #692 note may say about re-ingesting a relabelled value.
 
@@ -10599,7 +10928,9 @@ def _read_back_words(tag, vr, length) -> str:
     (`_standard_un_decoded`) and kept: no size limit applies to a numeric
     or text value. Anything else stays `UN` bytes and meets the binary
     retention limit for its tag (`_retention_limit_for`): a private tag
-    other than `LO` (no dictionary VR, review of #900 F2; a private `LO` is
+    other than `LO` (no dictionary VR that ingest reads: a `UN` is the file
+    stating none, and a known creator's is held as `UN` too, #740; review
+    of #900 F2; a private `LO` is
     written `UC` instead, #901, and has its own note) always exceeds the
     65534 bytes it meets; an ambiguous one such as LUT Data (gated as its
     `OW` twin, F6) is kept up to its own ceiling (#902), which `length`

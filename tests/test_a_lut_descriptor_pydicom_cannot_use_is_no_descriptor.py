@@ -177,6 +177,65 @@ def test_lut_data_is_written_ow_with_one_warning_and_no_loss(
     assert _rows(db, "WARNING") == [_unusable(count)]
 
 
+PRIVATE_CREATOR, PRIVATE_US = 0x00190010, 0x0019100A
+PRIVATE_BYTES = b"\x10\x00"                          # 16, as the file holds it
+
+
+def _with_unstated_private(ds, seq, implicit):
+    """Add, at the root and inside the LUT item, a private element of a
+    creator pydicom's private dictionary knows as `US`, with no VR stated
+    on the wire: Implicit VR names none, and Explicit VR says `UN`."""
+    for holder in (ds, ds[seq][0]):
+        holder.add_new(PRIVATE_CREATOR, "LO", "SIEMENS MR HEADER")
+        if implicit:
+            holder.add_new(PRIVATE_US, "US", 16)
+        else:
+            holder.add_new(PRIVATE_US, "UN", PRIVATE_BYTES)
+    return ds
+
+
+def _written_private(out, seq):
+    """The private element's bytes as the exported file holds them, at
+    the root and in the LUT item, unconverted."""
+    (path,) = [os.path.join(r, f) for r, _d, fs in os.walk(out)
+               for f in fs if f.endswith(".dcm")]
+    ds = pydicom.dcmread(path)
+    return [bytes(holder.get_item(PRIVATE_US, keep_deferred=True).value)
+            for holder in (ds, ds[seq][0])]
+
+
+@pytest.mark.parametrize("compress, wire_vr", EXPORTS)
+@pytest.mark.parametrize("implicit", SOURCES)
+@pytest.mark.parametrize("descriptor, count, seq", UNUSABLE[::2])
+def test_an_unusable_descriptor_beside_an_unstated_private_vr_keeps_both(
+        tmp_path, descriptor, count, seq, implicit, compress, wire_vr):
+    """#703 beside #740, in one file and in one item. #740 asks each tag's
+    raw element whether it is a private element with no stated VR before
+    anything reads it, and holds such an element as the file's bytes;
+    #703 lets a LUT Data whose descriptor cannot decide be read as `OW`.
+    Both read the dataset without converting what they are not about
+    (`get_item(..., keep_deferred=True)`), so neither changes what the
+    other finds: the file is ingested, LUT Data is `OW` with its bytes
+    and its one clause, and the private element is the two bytes the
+    file held, at both depths, in the graph and in the export."""
+    ds = _with_unstated_private(_dataset(descriptor, seq), seq, implicit)
+    folder = _save(str(tmp_path / "src"), ds, implicit)
+    db = str(tmp_path / "t.db")
+    out = str(tmp_path / "out")
+    with DicomSession(persistence_file=db) as session:
+        summary = session.ingest(folder)
+        assert (summary.ingested, summary.failures) == (1, [])
+        graph = _graph(session)
+        assert graph[()]["0019,100a"] == PRIVATE_BYTES
+        assert graph[_path(seq)]["0019,100a"] == PRIVATE_BYTES
+        assert graph[_path(seq)]["0028,3006"] == b"\x01\x00\x02\x00"
+        assert session.export(out, use_compression=compress).written == 1
+    assert _written_lut_data(out, seq) == (wire_vr, b"\x01\x00\x02\x00")
+    assert _written_private(out, seq) == [PRIVATE_BYTES, PRIVATE_BYTES]
+    assert _rows(db, "ERROR") == [] and _rows(db, "DATA_LOSS") == []
+    assert _unusable(count) in _rows(db, "WARNING")
+
+
 @pytest.mark.parametrize("descriptor, _count, seq", UNUSABLE)
 def test_the_twins_rows_are_the_same_words(tmp_path, descriptor, _count, seq):
     ds = _dataset(descriptor, seq)

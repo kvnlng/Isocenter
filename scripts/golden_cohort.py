@@ -27,6 +27,7 @@ the mark retires itself.
 from __future__ import annotations
 
 import argparse
+import struct
 import sys
 import uuid
 from pathlib import Path
@@ -43,6 +44,7 @@ COHORT = REPO / "fingerprint" / "cohort"
 
 CT = "1.2.840.10008.5.1.4.1.1.2"
 PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
+ENCAPSULATED_PDF = "1.2.840.10008.5.1.4.1.1.104.1"
 NAMESPACE = uuid.UUID("6f1c2b1e-7170-4a17-9f0e-000000000717")
 IMPLEMENTATION_VERSION = "ISOCENTER_GOLD"
 
@@ -385,10 +387,78 @@ def lut_unusable_descriptor(out: Path):
         write(ds, out / f"lut_unusable_descriptor-{label}.dcm")
 
 
+def encapsulated_pdf(out: Path):
+    """An Encapsulated PDF: a 1000-byte document with Encapsulated Document
+    Length 1000, and no pixels (#757). `basic@2026c` writes its two-byte
+    dummy over the document, and the length written follows it. No other
+    member carries (0042,0011) or (0042,0015)."""
+    sop = uid("encapsulated_pdf", 1, 1, 1)
+    ds = FileDataset(None, {}, file_meta=_meta(ENCAPSULATED_PDF, sop, ExplicitVRLittleEndian),
+                     preamble=b"\0" * 128)
+    ds.PatientID, ds.PatientName = "GOLD-pdf", "GOLDEN^PDF"
+    ds.StudyInstanceUID = uid("encapsulated_pdf", 1)
+    ds.SeriesInstanceUID = uid("encapsulated_pdf", 1, 1)
+    ds.SOPInstanceUID, ds.SOPClassUID = sop, ENCAPSULATED_PDF
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "DOC", 1, 1
+    ds.StudyDate, ds.StudyTime = "20230101", "120000"
+    ds.ContentDate, ds.ContentTime = "20230101", "120000"
+    ds.ConversionType = "WSD"
+    ds.BurnedInAnnotation = "NO"
+    ds.DocumentTitle = "GOLD report"
+    ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+    head = b"%PDF-1.4\n% GOLDEN^PDF 1960-01-01\n"
+    ds.EncapsulatedDocument = head + b"x" * (1000 - len(head))
+    ds.EncapsulatedDocumentLength = 1000
+    write(ds, out / "encapsulated_pdf-1.dcm")
+
+
+def unstated_private_vr(out: Path):
+    """Private elements of creators pydicom's private dictionary knows,
+    whose VR the file does not state (#740): `-implicit` under Implicit
+    VR, `-explicit-un` with `UN` on the wire, and `-mismatch`, six text
+    bytes where the dictionary says `SL`, which refused the whole file.
+    A Siemens MR header's CS, LO, US and FD, a Siemens CSA header, and a
+    private date, so the `(0028,0303)` effect is on the fingerprint too.
+    Each is held as the file's bytes and written `UN` in B.dicom-j2k. A
+    scan of every other input found no such element."""
+    block = (  # element, the dictionary's VR, the value, its bytes
+        (0x00191008, "CS", "IMAGE NUM 4", b"IMAGE NUM 4 "),
+        (0x00191009, "LO", "1.0", b"1.0 "),
+        (0x0019100A, "US", 16, struct.pack("<H", 16)),
+        (0x0019100E, "FD", [0.0, 0.5, -1.0], struct.pack("<3d", 0.0, 0.5, -1.0)),
+        (0x00291010, "OB", b"SV10\x04\x03\x02\x01", b"SV10\x04\x03\x02\x01"),
+        (0x3109100A, "DA", "20230115", b"20230115"))
+
+    def creators(ds):
+        ds.add_new(0x00190010, "LO", "SIEMENS MR HEADER")
+        ds.add_new(0x00290010, "LO", "SIEMENS CSA HEADER")
+        ds.add_new(0x31090010, "LO", "Applicare/RadWorks/Version 5.0")
+
+    # Implicit VR writes no VR, so the dictionary's own VRs are the way to
+    # put these bytes on the wire with none.
+    ds = ct("unstated_private_vr", inst=1, syntax=ImplicitVRLittleEndian)
+    creators(ds)
+    for tag, vr, value, _ in block:
+        ds.add_new(tag, vr, value)
+    write(ds, out / "unstated_private_vr-implicit.dcm")
+
+    ds = ct("unstated_private_vr", inst=2)
+    creators(ds)
+    for tag, _, _, raw in block:
+        ds.add_new(tag, "UN", raw)
+    write(ds, out / "unstated_private_vr-explicit-un.dcm")
+
+    ds = ct("unstated_private_vr", inst=3)
+    ds.add_new(0x00190010, "LO", "SIEMENS MR HEADER")
+    ds.add_new(0x00191012, "UN", b"12.5 \x00")
+    write(ds, out / "unstated_private_vr-mismatch.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
+    encapsulated_pdf, unstated_private_vr,
     multi_valued_keys, lut_unusable_descriptor)}
 
 

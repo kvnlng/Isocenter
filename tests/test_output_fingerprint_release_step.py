@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pydicom
 import pytest
+from pydicom.errors import BytesLengthException
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -152,6 +153,7 @@ COMMITTED = {
     "big_lut": ["big_lut-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
+    "encapsulated_pdf": ["encapsulated_pdf-1.dcm"],
     "float_pixels": ["float_pixels-1.dcm"],
     "graphic_annotation": ["graphic_annotation-1.dcm"],
     "implicit": ["implicit-1.dcm"],
@@ -172,6 +174,9 @@ COMMITTED = {
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
+    "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
+                            "unstated_private_vr-implicit.dcm",
+                            "unstated_private_vr-mismatch.dcm"],
     "withheld": ["withheld-1.dcm"],
 }
 
@@ -218,14 +223,24 @@ def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_ta
 
 
 def _uids(ds):
-    # Not `ds.iterall()`: reading LUT Data makes pydicom resolve its
-    # `US or OW` from the LUT Descriptor beside it, and it raises
+    # Over the tags, never `ds.iterall()`: one committed input
+    # (`unstated_private_vr-mismatch.dcm`, #740) holds a private element
+    # whose bytes do not fit the VR pydicom's private dictionary names, and
+    # pydicom raises on reading it, which ended the walk. An element
+    # pydicom cannot read is not a UID it generated.
+    #
+    # And LUT Data is not read at all: reading it makes pydicom resolve
+    # its `US or OW` from the LUT Descriptor beside it, and it raises
     # `TypeError` for the descriptor `lut_unusable_descriptor` exists to
-    # hold (#703). LUT Data is never a UI, so it is not read.
+    # hold (#703). LUT Data is never a UI. Skipped by tag rather than by
+    # catching `TypeError`, which would hide a bug in this walk.
     for tag in list(ds.keys()):
         if tag == 0x00283006:
             continue
-        elem = ds[tag]
+        try:
+            elem = ds[tag]
+        except BytesLengthException:
+            continue
         if elem.VR == "SQ":
             for item in elem.value:
                 yield from _uids(item)

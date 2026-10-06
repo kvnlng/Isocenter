@@ -348,14 +348,14 @@ decided by its **size**, not its VR:
 
 | Private tag | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
-| Text or numeric VR (`LO`, `SH`, `DS`, ...) | Removed | **Kept**, and written to the exported file |
-| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, `OV`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
-| Binary value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
+| Text or numeric VR the source stated (`LO`, `SH`, `DS`, ...) | Removed | **Kept**, and written to the exported file |
+| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, `OV`, or `UN`) of 65534 bytes or less, and any value of 65534 bytes or less whose VR the source did not state | Removed | **Kept**, and written to the exported file under the VR the source stated (`UN` when it stated none) |
+| Such a value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
 
 65534 bytes is the largest value an explicit-VR 16-bit length field can
 carry. Because the limit weighs the value rather than the VR it was read
 with, explicit-VR and implicit-VR copies of one study give the same
-answer: under implicit VR pydicom reads every private tag as `UN`, and a
+answer: under implicit VR every private tag is held as `UN`, and a
 `UN` blob takes exactly the same size rule.
 
 A kept binary value whose bytes are not a whole number of its VR's words
@@ -365,9 +365,29 @@ read with and the one it was written under. The VR is
 visible only in an explicit-VR export -- the compressed export of an
 instance with pixels; an uncompressed export, and any export of an
 instance without pixels, is Implicit VR and carries no VR on the wire.
-A binary value read from an Implicit VR source is written `UN` even when
-pydicom's private dictionary names a VR for its creator (a Siemens CSA
-header reads back as `OB`): the file itself stated none.
+**A private element is written under the VR its source stated, and
+`UN` when the source stated none.** A source states no VR for a private
+element in two ways: it is Implicit VR, which names none, or it is
+Explicit VR and says `UN` ("VR unknown", PS3.5 6.2.2). Such an element
+is held as the source's own bytes and written `UN`, text and numbers
+included, even when pydicom's private dictionary names a VR for its
+creator (a Siemens CSA header `OB`, a Siemens MR header's `US` and `CS`
+elements): the dictionary's VR is a guess about the vendor's software
+version, not the file's statement. The bytes exported are the bytes read.
+Three things follow. A file whose bytes do not fit the dictionary's VR
+is ingested like any other. A text or numeric value over 65534 bytes from
+such a source is dropped with a `DATA_LOSS` row, as a binary one is; the
+row is written at ingest, before any configuration is loaded, so the run
+grades `REVIEW_REQUIRED` even when `remove_private_tags` would have
+removed the element. And a rule
+that needs to read the value -- a date shift on a private key -- cannot
+read `UN` bytes: the proposal is declined with a `REMEDIATION_DECLINED`
+row and the run grades `REVIEW_REQUIRED`; `REMOVE`, `EMPTY` and a valued
+`REPLACE` act on it as on any private value, and an explicit-VR export
+writes the replacement as `LO` and the emptied element as a zero-length
+`UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
+row per such element at ingest, since the byte order of `UN` words is
+unknown. The private creator element itself is always read as `LO`.
 
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
@@ -536,7 +556,7 @@ The markers rest on the same status the report's grade reads, so any edit after 
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
     * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides. The fingerprint includes the configuration schema version, so a release that raises that version's minor moves the hex in every file it writes, under an unchanged configuration.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
-* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element from an implicit-VR source has no recorded VR, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
+* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
     * `REMOVED` when every date is empty or the dummy `19000101`.
     * `MODIFIED` when the rest are shifts this store wrote.
     * Nothing when any date is as it was ingested; the source's value, if any, then stays.
