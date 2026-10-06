@@ -5566,8 +5566,19 @@ class DicomSession:
                         values = opened[content]
                         if "0008,0020" in values and id(st) not in study_dates:
                             study_dates[id(st)] = (st, values["0008,0020"])
+                    # Each instance its own copy (#733). `values` is one
+                    # dict per distinct token, the one `fallback` for
+                    # every tokenless instance, or a new dict over the
+                    # same value objects on the partial arm; a
+                    # multi-valued tag's value is a `list` once the
+                    # token's JSON is read, and `set_attr` stores the
+                    # object it is given. Shared, an in-place edit on one
+                    # instance showed on its siblings in the graph, moved
+                    # only its own revision, and was saved for it alone.
+                    # Here, where all three arms meet. `deepcopy`: a
+                    # record is JSON, so a list may hold a list.
                     for tag, val in values.items():
-                        inst.set_attr(tag, val)
+                        inst.set_attr(tag, copy.deepcopy(val))
                     count += 1
                 # Log lines, not audit rows: a restore is not a
                 # de-identification step. Counts only, never an ID.
