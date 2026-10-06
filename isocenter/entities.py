@@ -46,6 +46,58 @@ def _canonical_tag(tag: str) -> str:
     return tag.lower() if isinstance(tag, str) else tag
 
 
+#: The Python types a numpy scalar may become in the graph: the atoms the
+#: store holds. `type(...) in`, so a subclass is never one of them.
+_NUMPY_TWIN_TYPES = (bool, int, float, str, bytes)
+
+
+def _python_value(value):
+    """`value`, with a numpy scalar or 0-d array replaced by its Python twin.
+
+    A numpy scalar (`np.int64(7)`, what indexing an array or
+    `pixel_array.max()` returns) or a 0-d array becomes the Python `bool`,
+    `int`, `float`, `str` or `bytes` it equals. A `list` or `tuple` that
+    directly holds one becomes a new `list` with each such member replaced.
+    Everything else is returned **as the same object**.
+
+    Args:
+        value: Any attribute value.
+
+    Returns:
+        The Python twin, a new list, or `value` itself.
+    """
+    # #926. `set_attr` calls this so the graph holds one representation,
+    # and the scan, a live export and a reopened export read one value;
+    # the store calls it again (`IsocenterJSONEncoder.default`,
+    # `_vertical_atom_text`) for a value written around the entity.
+    #
+    # - **The `type(twin) in` test stays.** `.item()` of a `datetime64` is
+    #   a `date` or an `int`, of a `complex64` a `complex`, of a
+    #   `longdouble` possibly a `longdouble`: none is a number the store
+    #   holds, so those stay as given and the save refuses them by the
+    #   name the caller used.
+    # - **An array of one or more dimensions is not converted**,
+    #   `np.array([7])` included. It could mean numbers or bytes, and the
+    #   caller says which (`.tolist()`, `.tobytes()`). Listing it here or
+    #   at the store alone would make a reopened export differ from the
+    #   live one, which drops it with a row.
+    # - **`type(value) in (list, tuple)`, never `isinstance`.** A
+    #   `MultiValue` is what pydicom hands ingest for every multi-valued
+    #   element and holds no numpy member; scanning it would charge every
+    #   such element of every file. One level deep for the same reason:
+    #   this runs once per element at ingest.
+    # - **A list with no numpy member is returned itself.** `set_attr`
+    #   has never copied the value it is given.
+    if isinstance(value, np.generic) or (
+            isinstance(value, np.ndarray) and value.ndim == 0):
+        twin = value.item()
+        return twin if type(twin) in _NUMPY_TWIN_TYPES else value
+    if type(value) in (list, tuple) and any(
+            isinstance(member, (np.generic, np.ndarray)) for member in value):
+        return [_python_value(member) for member in value]
+    return value
+
+
 def normalize_study_date(value):
     """The one spelling of "text that names a day becomes a `date`".
 
@@ -470,11 +522,24 @@ class DicomItem(TrackedEntity):
         one attribute: ingested keys are always lowercase, and a key in
         another casing would read as absent rather than raise.
 
+        The value is stored as the object given, with one exception: a
+        numpy scalar or 0-d array, and a `list` or `tuple` directly holding
+        one, is stored as the Python number it equals (`np.int64(7)` as the
+        `int` 7; a list as a new list), so a live export writes what a
+        reopened session writes. An array of one or more dimensions is not
+        converted: pass `.tolist()` or `.tobytes()`.
+
+        Nothing is refused here. The store holds `None`, `str`, `bytes`,
+        `bool`, `int`, `float`, pydicom's DS and IS values, and lists of
+        those; for any other value the next `save(sync=True)`, `export()`
+        or `compact()` raises `TypeError` naming the instance, the tag and
+        the type.
+
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
             value (Any): The value to set.
         """
-        self.attributes[_canonical_tag(tag)] = value
+        self.attributes[_canonical_tag(tag)] = _python_value(value)
         self.mark_modified()
 
     def record_attr_vr(self, tag: str, vr: str):
@@ -1526,6 +1591,10 @@ class Instance(DicomItem):
                 written: the attribute and the revision are unchanged.
         """
         tag = _canonical_tag(tag)
+        # Here as well as in `DicomItem.set_attr` (#926): the descriptor
+        # arm below judges the edit by `value` before it delegates, and
+        # it judges the number the graph will hold.
+        value = _python_value(value)
         if tag not in _LOADER_DESCRIBED_TAGS:
             DicomItem.set_attr(self, tag, value)
             return
