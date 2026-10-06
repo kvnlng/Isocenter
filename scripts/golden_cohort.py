@@ -363,11 +363,33 @@ def multi_valued_keys(out: Path):
         write(ds, out / f"multi_valued_keys-{label}.dcm")
 
 
+def lut_unusable_descriptor(out: Path):
+    """Three CTs whose Modality LUT has a LUT Descriptor pydicom cannot
+    read a first value from (#703): empty in an Implicit VR and in an
+    Explicit VR source, and holding one value in an Explicit VR source.
+    The implicit file was refused at ingest and the explicit ones lost
+    their LUT Data at export; all three now export it as `OW` with one
+    `WARNING` clause. `lut_ambiguous` carries a three-value descriptor and
+    never reached either door's fallback."""
+    for inst, (label, descriptor, syntax) in enumerate((
+            ("empty-implicit", None, ImplicitVRLittleEndian),
+            ("empty-explicit", None, ExplicitVRLittleEndian),
+            ("one-value-explicit", [4], ExplicitVRLittleEndian)), start=1):
+        ds = ct("lut_unusable_descriptor", inst=inst, syntax=syntax)
+        item = Dataset()
+        item.add_new(0x00283002, "US", descriptor)
+        item.add_new(0x00283003, "LO", "GOLD LUT")
+        item.add_new(0x00283004, "LO", "HU")
+        item.add_new(0x00283006, "OW", np.array([0, 1000, 40000, 65535], dtype="<u2").tobytes())
+        ds.ModalityLUTSequence = Sequence([item])
+        write(ds, out / f"lut_unusable_descriptor-{label}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
-    multi_valued_keys)}
+    multi_valued_keys, lut_unusable_descriptor)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
