@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pydicom
 import pytest
+from pydicom.errors import BytesLengthException
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -215,8 +216,20 @@ def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_ta
 
 
 def _uids(ds):
-    for elem in ds.iterall():
-        if elem.VR == "UI" and elem.value:
+    # Over the tags, never `ds.iterall()`: one committed input
+    # (`unstated_private_vr-mismatch.dcm`, #740) holds a private element
+    # whose bytes do not fit the VR pydicom's private dictionary names, and
+    # pydicom raises on reading it, which ended the walk. An element
+    # pydicom cannot read is not a UID it generated.
+    for tag in list(ds.keys()):
+        try:
+            elem = ds[tag]
+        except BytesLengthException:
+            continue
+        if elem.VR == "SQ":
+            for item in elem.value:
+                yield from _uids(item)
+        elif elem.VR == "UI" and elem.value:
             yield from (elem.value if isinstance(elem.value, list) else [elem.value])
 
 

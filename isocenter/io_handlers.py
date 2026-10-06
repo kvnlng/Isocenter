@@ -10804,7 +10804,9 @@ def _read_back_words(tag, vr, length) -> str:
     (`_standard_un_decoded`) and kept: no size limit applies to a numeric
     or text value. Anything else stays `UN` bytes and meets the binary
     retention limit for its tag (`_retention_limit_for`): a private tag
-    other than `LO` (no dictionary VR, review of #900 F2; a private `LO` is
+    other than `LO` (no dictionary VR that ingest reads: a `UN` is the file
+    stating none, and a known creator's is held as `UN` too, #740; review
+    of #900 F2; a private `LO` is
     written `UC` instead, #901, and has its own note) always exceeds the
     65534 bytes it meets; an ambiguous one such as LUT Data (gated as its
     `OW` twin, F6) is kept up to its own ceiling (#902), which `length`
