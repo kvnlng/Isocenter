@@ -188,6 +188,25 @@ def test_an_odd_length_document_set_by_a_caller_is_described_unpadded(
     assert notes == [REWRITTEN.format(declared=1000, length=35)]
 
 
+def test_an_odd_length_document_ending_in_nul_is_not_taken_for_padded(
+        tmp_path, caplog, reopen):
+    """37 bytes whose last is NUL, under a declared 36: the NUL is the
+    document's own. A pad byte makes a value even, so an odd-length value
+    holds none.
+
+    Killing mutation: the padding clause without its even-length test
+    (kept at 36).
+    """
+    whole = b"%PDF" * 9 + b"\x00"
+    ds, notes, _rows = _run(
+        tmp_path, caplog, 36, reopen=reopen,
+        mutate=lambda inst: inst.set_attr(DOCUMENT, whole))
+
+    assert _wire_length(ds) == 38
+    assert ds.get("EncapsulatedDocumentLength") == 37
+    assert notes == [REWRITTEN.format(declared=36, length=37)]
+
+
 def test_a_length_with_no_document_is_not_written(tmp_path, caplog, reopen):
     """A 70000-byte document is dropped at ingest; its length goes too.
 

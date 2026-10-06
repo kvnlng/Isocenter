@@ -178,6 +178,55 @@ def test_an_explicit_export_says_a_binary_value_re_ingest_drops(
     assert len([r for r in again if "0009,1004" in r[2]]) == 1, again
 
 
+def _sequence_shaped(n=70000):
+    """Bytes over the limit that re-encode byte for byte as a sequence."""
+    item = Dataset()
+    item.add_new(0x00091010, "UN", b"\x02" * n)
+    buffer = DicomBytesIO()
+    buffer.is_little_endian, buffer.is_implicit_VR = True, True
+    holder = Dataset()
+    holder.add_new(0x00091004, "SQ", Sequence([item]))
+    write_dataset(buffer, holder)
+    # Tag (4) and length (4), then the items.
+    encoded = buffer.getvalue()[8:]
+    assert len(encoded) > n
+    return encoded
+
+
+@pytest.mark.parametrize("vr", ["OB", "OW", "OF", "OD", "OL", "OV"])
+@pytest.mark.parametrize("shaped", [False, True],
+                         ids=["plain", "sequence-shaped"])
+def test_an_explicit_export_says_a_value_under_a_stated_binary_vr(
+        tmp_path, caplog, vr, shaped):
+    """A private value the source stated as a binary VR, grown past the
+    limit by a caller: the commonest real case (a vendor header blob).
+
+    Ingest drops such a value by size alone, with no sequence re-parse
+    (that is for a VR the file left unknown), so sequence-shaped bytes
+    are said too. Killing mutations: the Explicit VR set cut to `OW` and
+    `UN`; the sequence exemption applied to a stated binary VR.
+    """
+    def recorded(ds):
+        ds.add_new(0x00091006, vr, b"\x01" * 8)
+
+    # 70000 is a whole number of every binary VR's words (1, 2, 4, 8).
+    value = _sequence_shaped() if shaped else b"\x01" * 70000
+    value += b"\x00" * (-len(value) % 8)
+    written, notes, rows, _losses = _export(
+        tmp_path, caplog, compress=True, extra=recorded,
+        mutate=lambda i: i.set_attr("0009,1006", value))
+
+    assert pydicom.dcmread(str(written)).get_item(0x00091006).VR == vr
+    assert notes == [EXPLICIT.format(where="", tag="0009,1006", vr=vr,
+                                     n=len(value))]
+    assert not [r for r in rows if "0009," in r[2]], rows
+
+    held, again = _reingest_losses(tmp_path, written)
+    assert "0009,1006" not in held
+    dropped = [r for r in again if "0009,1006" in r[2]]
+    assert len(dropped) == 1 and dropped[0][3] == "PRIVATE", again
+
+
 def test_an_explicit_export_does_not_say_it_twice(tmp_path, caplog):
     """A value #692 relabels or #901 writes `UC` keeps that one note.
 
@@ -301,16 +350,7 @@ def test_bytes_our_ingest_reads_back_as_a_sequence_are_not_said_to_drop(
     saying it is dropped would be false. Killing mutation: the note raised
     on size alone.
     """
-    item = Dataset()
-    item.add_new(0x00091010, "UN", b"\x02" * 70000)
-    buffer = DicomBytesIO()
-    buffer.is_little_endian, buffer.is_implicit_VR = True, True
-    holder = Dataset()
-    holder.add_new(0x00091004, "SQ", Sequence([item]))
-    write_dataset(buffer, holder)
-    # Tag (4) and length (4), then the items.
-    encoded = buffer.getvalue()[8:]
-    assert len(encoded) > 70000
+    encoded = _sequence_shaped()
 
     written, notes, _rows, _losses = _export(
         tmp_path, caplog, compress=compress,

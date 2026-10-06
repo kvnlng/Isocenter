@@ -375,13 +375,19 @@ creator (a Siemens CSA header `OB`, a Siemens MR header's `US` and `CS`
 elements): the dictionary's VR is a guess about the vendor's software
 version, not the file's statement. The bytes exported are the bytes read.
 Three things follow. A file whose bytes do not fit the dictionary's VR
-is ingested like any other. A text value over 65534 bytes from such a
-source is dropped with a `DATA_LOSS` row, as a binary one is. And a rule
+is ingested like any other. A text or numeric value over 65534 bytes from
+such a source is dropped with a `DATA_LOSS` row, as a binary one is; the
+row is written at ingest, before any configuration is loaded, so the run
+grades `REVIEW_REQUIRED` even when `remove_private_tags` would have
+removed the element. And a rule
 that needs to read the value -- a date shift on a private key -- cannot
 read `UN` bytes: the proposal is declined with a `REMEDIATION_DECLINED`
 row and the run grades `REVIEW_REQUIRED`; `REMOVE`, `EMPTY` and a valued
-`REPLACE` act on it as on any private value. The private creator
-element itself is always read as `LO`.
+`REPLACE` act on it as on any private value, and an explicit-VR export
+writes the replacement as `LO` and the emptied element as a zero-length
+`UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
+row per such element at ingest, since the byte order of `UN` words is
+unknown. The private creator element itself is always read as `LO`.
 
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte

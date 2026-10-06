@@ -1979,10 +1979,12 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         # descriptor.
         raw = ds.get_item(tag_key, keep_deferred=True)
         if _vr_unstated_private(raw):
-            # A zero-length raw element's value is None, and pydicom hands
-            # back None for a zero-length `UN` it converts; kept, so an
-            # unknown creator's empty element is held exactly as before.
-            elem = DataElement(raw.tag, "UN", None if raw.value is None
+            # pydicom hands back None for a zero-length `UN` it converts;
+            # kept, so an unknown creator's empty element is held exactly
+            # as before. By the length, never by `raw.value is None`: a
+            # deferred value is None too, and `_vr_unstated_private` has
+            # already left that one to pydicom.
+            elem = DataElement(raw.tag, "UN", None if raw.length == 0
                                else bytes(raw.value))
         else:
             elem = _read_element(ds, tag_key, not big_endian)
@@ -2200,7 +2202,8 @@ def _vr_unstated_private(raw) -> bool:
 
     True for an element pydicom has not yet converted, in an odd group at
     element 0x1000 or above, of defined length, whose wire VR is absent
-    (Implicit VR) or `UN` (Explicit VR; PS3.5 6.2.2, "VR unknown").
+    (Implicit VR) or `UN` (Explicit VR; PS3.5 6.2.2, "VR unknown"), and
+    whose value is in hand (not deferred).
 
     Args:
         raw: What `Dataset.get_item` returned: a `RawDataElement` until
@@ -2221,11 +2224,17 @@ def _vr_unstated_private(raw) -> bool:
     #   - a stated VR: the file's own statement, recorded and written.
     #   - undefined length: a sequence on the wire, which pydicom parses as
     #     one for every creator.
+    #   - a deferred value (None, under a length that is not zero): the
+    #     bytes are not in hand. No read in this package passes
+    #     `defer_size`; one that did would otherwise have a long value
+    #     taken for an empty one, with no row. Left to pydicom, which reads
+    #     it from the file, like an element already converted.
     return (isinstance(raw, RawDataElement)
             and raw.tag.group % 2 == 1
             and raw.tag.element >= 0x1000
             and raw.VR in (None, "UN")
-            and raw.length != 0xFFFFFFFF)
+            and raw.length != 0xFFFFFFFF
+            and (raw.value is not None or raw.length == 0))
 
 
 def _read_element(ds, tag, little_endian=True):

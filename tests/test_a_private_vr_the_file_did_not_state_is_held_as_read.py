@@ -31,10 +31,11 @@ import pytest
 from pydicom.dataelem import RawDataElement
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.sequence import Sequence
-from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
+from pydicom.uid import (ExplicitVRBigEndian, ExplicitVRLittleEndian,
+                         ImplicitVRLittleEndian)
 
 import isocenter.io_handlers as io_handlers
-from isocenter.entities import PhiStatus
+from isocenter.entities import Instance, PhiStatus
 from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
@@ -84,7 +85,7 @@ def _source(folder, syntax, extra):
     path = folder / "a.dcm"
     ds.save_as(str(path), enforce_file_format=True,
                implicit_vr=syntax == ImplicitVRLittleEndian,
-               little_endian=True)
+               little_endian=syntax != ExplicitVRBigEndian)
     return path
 
 
@@ -415,6 +416,7 @@ def test_a_known_creators_sequence_is_still_a_sequence(tmp_path, undefined,
     (0x0019, 0x1008, "CS", 12, False),          # the file's own statement
     (0x0019, 0x0010, None, 18, False),          # a private creator
     (0x0019, 0x0fff, None, 2, False),
+    (0x0019, 0x1000, None, 12, True),           # the first data element
     (0x0018, 0x1008, None, 12, False),          # a standard tag
     (0x0071, 0x1018, None, 0xFFFFFFFF, False),  # a sequence on the wire
     (0x0071, 0x1018, "UN", 0xFFFFFFFF, False),
@@ -432,6 +434,50 @@ def test_which_raw_elements_are_held_as_un(group, element, vr, length,
     converted = pydicom.dataelem.DataElement(
         pydicom.tag.Tag(group, element), vr or "UN", b"IMAGE NUM 4 ")
     assert io_handlers._vr_unstated_private(converted) is False
+
+
+def test_a_zero_length_raw_element_is_one_whose_length_is_zero():
+    """Zero length is read off the length, never off a value of None.
+
+    A raw element pydicom has deferred also has a value of None, with the
+    length the file gave it; it is not in hand, and is left to pydicom to
+    read. Killing mutation: the deferred clause dropped.
+    """
+    tag = pydicom.tag.Tag(0x0019, 0x1008)
+    empty = RawDataElement(tag, None, 0, None, 0, True, True)
+    deferred = RawDataElement(tag, None, 12, None, 0, True, True)
+    assert io_handlers._vr_unstated_private(empty) is True
+    assert io_handlers._vr_unstated_private(deferred) is False
+
+
+def test_a_deferred_element_is_not_taken_for_an_empty_one(tmp_path):
+    """No read in this library defers a value; one that did must not lose it.
+
+    `get_item(keep_deferred=True)` hands back a deferred raw element with
+    a value of None. Read as zero-length, a long private value would be
+    held as empty with no row. Killing mutation: zero length keyed on
+    `raw.value is None`.
+    """
+    def extra(ds):
+        ds.add_new(0x00190010, "LO", MR)
+        ds.add_new(0x00191009, "LO", "A LONG PRIVATE VALUE")
+        ds.add_new(0x00191008, "CS", "")
+
+    src = _source(tmp_path / "src", ImplicitVRLittleEndian, extra)
+    ds = pydicom.dcmread(str(src), defer_size=8)
+    raw = ds.get_item(0x00191009, keep_deferred=True)
+    assert isinstance(raw, RawDataElement) and raw.value is None \
+        and raw.length == 20, "setup: the value is deferred"
+
+    item = Instance(SOP, SC, 1)
+    io_handlers.populate_attrs(ds, item, [])
+
+    held = item.attributes["0019,1009"]
+    assert held is not None
+    assert (held.decode() if isinstance(held, bytes) else str(held)).strip() \
+        == "A LONG PRIVATE VALUE"
+    # The empty one beside it is still held as empty.
+    assert item.attributes["0019,1008"] is None
 
 
 def test_a_known_creators_value_over_the_limit_is_dropped_as_any_un_is(
@@ -570,3 +616,126 @@ def test_a_shift_rule_on_such_a_private_key_declines(tmp_path):
     grade = [line for line in report.read_text().splitlines()
              if "Grade Basis" in line]
     assert grade and "REVIEW_REQUIRED" in grade[0], grade
+
+
+# --- What the ruling costs at ingest, under every configuration (Q-R1 A) ----
+#
+# The size gate and the byte-order row are ingest's, written before any
+# configuration exists, and a PRIVATE loss or a WARNING row grades whatever
+# the sweep then removes. The grade is read from the report file.
+
+def _grade(session, tmp_path):
+    report = tmp_path / "report.md"
+    session.generate_report(str(report))
+    (line,) = [line for line in report.read_text().splitlines()
+               if "Grade Basis" in line]
+    return "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in line else (
+        "PASS" if "PASS" in line else line)
+
+
+def _long_text(ds):
+    ds.add_new(0x00510010, "LO", MR)
+    ds.add_new(0x00511019, "LT", "y" * 70000)       # dictionary: LO
+
+
+def _long_numbers(ds):
+    ds.add_new(0x00190010, "LO", MR)
+    ds.add_new(0x0019100E, "FD", [0.25] * 9000)      # 72000 bytes
+
+
+BASIC = {"privacy_profile": "basic"}
+
+
+@pytest.mark.parametrize("extra, tag", [
+    (_long_text, "0051,1019"), (_long_numbers, "0019,100e")],
+    ids=["text", "numbers"])
+@pytest.mark.parametrize("config", [
+    BASIC, {**BASIC, "remove_private_tags": False}],
+    ids=["default-sweep", "private-kept"])
+def test_a_known_creators_value_over_the_limit_costs_the_run_its_pass(
+        tmp_path, extra, tag, config):
+    """**The accepted cost (Q-R1 A), pinned so it is seen.**
+
+    A known creator's value over 65534 bytes, from a source that stated
+    no VR for it, is dropped at ingest with a PRIVATE `DATA_LOSS` row, as
+    an unknown creator's is. On `main` it was held under pydicom's VR: the
+    default sweep removed it and the run graded PASS, and with private tags
+    kept the number list was exported under PASS (the text was written
+    `UT` with a `WARNING` row). Now every one of the four grades
+    REVIEW_REQUIRED, and with private tags kept the value is not exported.
+
+    Killing mutation: the `UN` substitution deleted (three of the four go
+    back to PASS).
+    """
+    src = _source(tmp_path / "src", ImplicitVRLittleEndian, extra)
+    session = _session(tmp_path, src, config=config)
+    try:
+        held = tag in _instance(session).attributes
+        explicit = _export(session, tmp_path / "j2k", True)
+        _rows_, losses = _rows(session)
+        grade = _grade(session, tmp_path)
+    finally:
+        session.close()
+
+    # The grade first: it is the statement the CHANGELOG makes.
+    assert grade == "REVIEW_REQUIRED"
+    named = [r for r in losses if tag in r[2]]
+    assert len(named) == 1 and named[0][3] == "PRIVATE", losses
+    assert "65534-byte retention threshold" in named[0][2]
+    assert not held
+    assert _raw(explicit, tag) == (None, None)
+
+
+def test_a_big_endian_source_that_says_un_draws_the_byte_order_row(tmp_path):
+    """An Explicit VR Big Endian `UN` of a known creator is `UN` bytes whose
+    word size nothing states, so ingest cannot convert them and says so
+    with one `WARNING` row per element, as for an unknown creator. On
+    `main` pydicom decoded them under its dictionary VR and no row was
+    written. The run grades REVIEW_REQUIRED under any configuration.
+
+    Killing mutation: the `UN` substitution deleted (no row, PASS).
+    """
+    def extra(ds):
+        ds.add_new(0x00190010, "LO", MR)
+        ds.add_new(0x0019100A, "UN", struct.pack(">H", 16))
+        ds.add_new(0x00191008, "UN", b"IMAGE NUM 4 ")
+
+    src = _source(tmp_path / "src", ExplicitVRBigEndian, extra)
+    session = _session(tmp_path, src, config=BASIC)
+    try:
+        rows, _losses = _rows(session)
+        grade = _grade(session, tmp_path)
+    finally:
+        session.close()
+
+    assert grade == "REVIEW_REQUIRED"
+    named = sorted(r[2] for r in rows if "0019,10" in r[2])
+    assert len(named) == 2, rows
+    assert "0019,1008" in named[0] and "0019,100a" in named[1]
+    assert all("byte order" in text for text in named), named
+    assert all(r[1] == "WARNING" for r in rows if "0019,10" in r[2]), rows
+
+
+@pytest.mark.parametrize("rule, wire", [
+    ({"action": "REPLACE", "value": "SITE"}, ("LO", b"SITE")),
+    ({"action": "EMPTY"}, ("UN", b"")),
+], ids=["valued-replace", "empty"])
+def test_a_rule_on_such_a_key_writes_the_vr_of_an_unstated_element(
+        tmp_path, rule, wire):
+    """With private tags kept, a valued `REPLACE` on such a key is written
+    `LO` (the exporter's fallback for text with no recorded VR) and an
+    `EMPTY` as a zero-length `UN`. On `main` both went out under the
+    dictionary's `CS`, which the file had never stated.
+
+    Killing mutation: the `UN` substitution deleted (`CS`).
+    """
+    src = _source(tmp_path / "src", ImplicitVRLittleEndian, _mr_block)
+    config = {**BASIC, "remove_private_tags": False, "phi_tags": {
+        "0019,1008": {**rule, "name": "Private text"}}}
+    session = _session(tmp_path, src, config=config)
+    try:
+        explicit = _export(session, tmp_path / "j2k", True)
+    finally:
+        session.close()
+
+    assert _raw(explicit, "0019,1008") == wire
