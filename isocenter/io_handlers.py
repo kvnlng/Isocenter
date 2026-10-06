@@ -2177,8 +2177,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                              waveform_bits=waveform_bits,
                              ambiguous=ambiguous)
         elif elem.VR == 'PN':
-            # Sanitize PersonName for pickle safety
-            item.set_attr(tag, str(elem.value))
+            # A `str`, not pydicom's `PersonName`, for pickle safety.
+            item.set_attr(tag, _pn_text(elem.value))
             _record_private_vr(item, tag, elem)
         else:
             # `UN` lands here, not in the `BINARY_VRS` arm.
@@ -2331,6 +2331,34 @@ def _read_element(ds, tag, little_endian=True):
     # both twins, word for word.
     _resolve_one_ambiguous_vr(elem, ds, [ds], [], [], little_endian)
     return elem
+
+
+def _pn_text(value) -> str:
+    """A Person Name element's value as the file's own text.
+
+    Args:
+        value: What pydicom read for a PN element: a `PersonName`, or a
+            `MultiValue` of them when the element holds several values.
+
+    Returns:
+        str: One value's text, or several joined by the backslash that
+            delimited them in the file (PS3.5 6.4).
+    """
+    # `str()` of a `MultiValue` is the text of a Python list, so a name
+    # written `A^B\C^D` was held, and exported as one value, `[A^B, C^D]`
+    # (#937). The joined text is one `str`, which is what
+    # `Patient.patient_name`, its store column and the identity token
+    # hold, and pydicom splits it on the backslash at export, so the file
+    # carries the source's values with the source's VM -- two Operators'
+    # Names (VM 1-n) stay two, and a Patient's Name the source wrote with
+    # two (VM 1, non-conformant) is written as the source wrote it, as a
+    # multi-valued LO is. The one place this costs: a *private* PN of
+    # several values is written `UT` with the re-VR WARNING row, because
+    # `_merge`'s private arm does not put a backslash-bearing `str` under
+    # a multi-valued VR (owner ruling Q6 A).
+    if isinstance(value, MultiValue):
+        return "\\".join(str(v) for v in value)
+    return str(value)
 
 
 def _process_safe(value):
@@ -4567,7 +4595,9 @@ def ingest_worker(fp: str) -> Tuple:
             # and the scan had to exempt the literal by name, so a file
             # really carrying `Unknown` kept it. Empty is what Type 2
             # "unknown" is, and what #584 does for a Patient ID.
-            'pname': str(ds.PatientName) if "PatientName" in ds else "",
+            # `_pn_text`, never `str()`: a name holding two values is a
+            # `MultiValue`, whose `str()` is the text of a Python list (#937).
+            'pname': _pn_text(ds.PatientName) if "PatientName" in ds else "",
             # Absent stays absent. A placeholder date cannot be told from a
             # real one downstream: SHIFT_DATE would jitter it and export
             # it as genuine study timing.

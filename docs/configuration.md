@@ -389,6 +389,17 @@ writes the replacement as `LO` and the emptied element as a zero-length
 row per such element at ingest, since the byte order of `UN` words is
 unknown. The private creator element itself is always read as `LO`.
 
+**A Person Name holding several values is kept as the source wrote it.**
+A `PN` element whose value holds a backslash (`Smith^Ann\Jones^Bo`) holds
+two values (PS3.5 6.4), whether or not the attribute allows more than one.
+Isocenter holds the element's text as the file wrote it and, where the
+policy keeps the element, exports the same values: two Operators' Names
+stay two, and a Patient's Name the source wrote with two is written with
+two. One case is written differently: a *private* `PN` holding several
+values is written `UT`, the same text, with one `WARNING` row naming the
+tag and both VRs, so the run grades `REVIEW_REQUIRED`
+([#937](https://github.com/kvnlng/Isocenter/issues/937)).
+
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
