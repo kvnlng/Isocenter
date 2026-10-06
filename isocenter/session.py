@@ -6672,7 +6672,11 @@ class DicomSession:
                 Also on `dicom`, before anything is written, for a `subset`
                 query that does not run, or a `subset` DataFrame with none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
-                PatientID.
+                PatientID. Also, on both formats, from the save an export
+                begins with, when an instance with unsaved changes holds no
+                SOP Instance UID (`None`): the message gives the count, and
+                nothing is saved or written (#721; this was sqlite's
+                `IntegrityError`).
             TypeError: For an option name the selected exporter does not
                 recognise; nothing is written. The two formats do not accept
                 the same options, so a caller forwarding one dict to both

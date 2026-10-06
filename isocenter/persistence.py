@@ -1005,8 +1005,23 @@ class SqliteStore:
         store uses a temporary sidecar file that `stop()` deletes.
 
         Args:
-            db_path (str): Path to the SQLite DB file. Use ":memory:" for transient storage.
+            db_path (str): Path to the SQLite DB file. Use ":memory:" for
+                transient storage. A relative path is made absolute here,
+                against the directory the process is in now, so the store
+                stays where it was opened.
         """
+        # Absolute, and first, before anything is derived from it (#722).
+        # Every connection, the sidecar, both lock paths and every pixel
+        # loader are built from `db_path` and `sidecar_path`, and a
+        # relative string is resolved again each time it is used. After an
+        # `os.chdir`, `sqlite3.connect("t.db")` does not fail: it creates
+        # a new, empty store in the new directory, and the gate creates a
+        # sidecar and a lock file beside it. A pickled clone handed to a
+        # spawned worker carries these strings too. `Session` keeps the
+        # caller's spelling in `persistence_file`; only the store's own
+        # paths move. `":memory:"` is not a path.
+        if db_path != ":memory:":
+            db_path = os.path.abspath(db_path)
         self.db_path = db_path
         self.logger = get_logger()
         if db_path == ":memory:":
@@ -4011,6 +4026,10 @@ class SqliteStore:
                 patient's original row surviving under its old identifier.
 
         Raises:
+            ValueError: An instance with unsaved changes holds no SOP
+                Instance UID (not a `str`); the message gives the count.
+                Raised before the gate is taken: nothing is appended to
+                the sidecar and nothing is stored (#721).
             RuntimeError: The sidecar gate was not acquired within
                 `_SIDECAR_GATE_TIMEOUT_S`.
             Exception: Any failure inside the transaction, logged and
@@ -4018,6 +4037,28 @@ class SqliteStore:
         """
         self.logger.info(
             "Saving %d patients to %s (Incremental)...", len(patients), self.db_path)
+
+        # #721. Before the gate, before a frame is appended, before any
+        # connection: `instances.sop_instance_uid` is `NOT NULL`, and an
+        # instance bound with None reached sqlite as `IntegrityError: NOT
+        # NULL constraint failed`, inside the transaction, after this
+        # save's pixel frames were already in the sidecar. Counted over
+        # the instances the prepass would claim (unsaved changes), and a
+        # count is all that is said: an instance with no UID has no name,
+        # and its path does not go in an exception. `not isinstance(...,
+        # str)`, never `not uid`: `""` is a value sqlite stores, and the
+        # write door refuses a UID-less file its own way (#613).
+        nameless = sum(
+            1 for patient in patients for study in patient.studies
+            for series in study.series for inst in series.instances
+            if inst.has_unsaved_changes
+            and not isinstance(inst.sop_instance_uid, str))
+        if nameless:
+            raise ValueError(
+                f"save: {nameless} instance(s) hold no SOP Instance UID, and "
+                "the store keys an instance by it, so nothing was saved. "
+                "Give each one (instance.sop_instance_uid = ...) or remove "
+                "it from its series.")
 
         tally = _SaveTally()
         _warn_on_shared_patient_ids(self.logger, patients)
