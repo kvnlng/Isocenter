@@ -181,3 +181,49 @@ def test_the_refusal_is_one_files_and_the_file_beside_it_is_ingested(tmp_path):
         session.save(sync=True)
     assert len(_error_rows(db)) == 1
     assert _sidecar_bytes(db) > 0
+
+
+def _grade(session, folder):
+    """The grade as the report file states it."""
+    path = os.path.join(folder, "report.md")
+    session.generate_report(path)
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    return [g for g in ("PASS", "REVIEW_REQUIRED", "FAIL") if f"**{g}**" in text]
+
+
+@pytest.mark.parametrize("keyword", [None, "StudyInstanceUID", "SeriesInstanceUID"],
+                         ids=["control", "study-instance-uid", "series-instance-uid"])
+def test_a_run_over_a_refused_file_exports_only_the_file_beside_it_and_does_not_pass(
+        tmp_path, keyword):
+    """What the 1.0.0rc14 `**Output:**` line for #747 left out: the grade,
+    and that the file is no longer in the export. At v1.0.0rc13 a file
+    with a two-valued Study or Series Instance UID was ingested, and under
+    the floor its UID (the text of a Python list) was replaced like any
+    other, so the run exported two files, each stamped `(0012,0062) YES`,
+    and graded PASS. Now the one clean file is exported, stamped, and the
+    run grades REVIEW_REQUIRED on the `ERROR` row. The control, with no
+    such file, exports the same one file and grades PASS. Both export
+    arms, read from the folder."""
+    folder = str(tmp_path / "in")
+    _write(folder, "b-clean.dcm")
+    if keyword:
+        _write(folder, "a-refused.dcm", SOPInstanceUID="1.2.826.747.99",
+               **{keyword: f"{FIRST}\\{SECOND}"})
+    db = str(tmp_path / "t.db")
+    with DicomSession(persistence_file=db) as session:
+        session.ingest(folder)
+        session.anonymize(session.audit())
+        for arm, compress in (("native", False), ("j2k", True)):
+            out = str(tmp_path / f"out-{arm}")
+            session.export(out, use_compression=compress)
+            written = [os.path.join(r, f) for r, _d, fs in os.walk(out)
+                       for f in fs if f.endswith(".dcm")]
+            assert len(written) == 1
+            ds = pydicom.dcmread(written[0])
+            assert str(ds[0x0012, 0x0062].value) == "YES"
+            for tag in (0x0020000D, 0x0020000E):
+                assert b"[" not in bytes(ds.get_item(tag).value)
+        assert _grade(session, str(tmp_path)) == [
+            "REVIEW_REQUIRED" if keyword else "PASS"]
+    assert len(_error_rows(db)) == (1 if keyword else 0)

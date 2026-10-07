@@ -697,3 +697,44 @@ def test_a_remove_naming_a_field_the_export_stamps_still_clears_it(
         assert _remediation_rows(session) == [(
             "REMEDIATION_REMOVE",
             f"Cleared Attribute {attr} on {uid}; removed from 1 instance copy")]
+
+
+@pytest.mark.parametrize("hand_built", [True, False], ids=["declined", "control"])
+def test_a_declined_stray_remove_after_a_full_pass_exports_no_marker(
+        tmp_path, monkeypatch, hand_built):
+    """What the 1.0.0rc14 `**Output:**` line for #679 left out. After a
+    full pass the file carries `(0012,0062) YES`, `(0012,0063)` and
+    `(0028,0303)` and the run grades PASS (the control). A hand-built
+    REMOVE on `Series.modality` then declines, the decline holds the Series'
+    instance at IDENTIFIED, and the same export carries none of the three
+    and grades REVIEW_REQUIRED. At v1.0.0rc13 the arm ran, the markers
+    stayed and the run graded PASS. Modality is `CT` in the file either
+    way. Read from the exported files, both arms."""
+    import pydicom
+
+    session, _owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        session.anonymize(session.audit())
+        series = session.store.patients[0].studies[0].series[0]
+        if hand_built:
+            # Not asserted on its count: the file is what this test reads.
+            session.anonymize([_attribute_removal(
+                series, series.series_instance_uid, "Series", "modality")])
+        markers, modality = [], []
+        for arm, compress in (("native", False), ("j2k", True)):
+            out = tmp_path / f"out-{arm}"
+            session.export(str(out), use_compression=compress)
+            [path] = list(out.rglob("*.dcm"))
+            ds = pydicom.dcmread(str(path))
+            markers.append([tag in ds for tag in (
+                (0x0012, 0x0062), (0x0012, 0x0063), (0x0028, 0x0303))])
+            modality.append(bytes(ds.get_item((0x0008, 0x0060)).value))
+        assert modality == [b"CT"] * 2
+        assert markers == [[not hand_built] * 3] * 2
+        session.generate_report(str(tmp_path / "r.md"))
+        report = (tmp_path / "r.md").read_text(encoding="utf-8")
+        assert ("**REVIEW_REQUIRED**" in report) is hand_built
+        assert ("**PASS**" in report) is not hand_built
+        declined = [row for row in _remediation_rows(session)
+                    if row[0] == "REMEDIATION_DECLINED"]
+        assert len(declined) == (1 if hand_built else 0)

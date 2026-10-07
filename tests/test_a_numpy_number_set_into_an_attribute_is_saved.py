@@ -247,6 +247,42 @@ def test_a_live_export_writes_what_a_reopened_export_writes(tmp_path):
     assert [d for a, d in live_rows if a == "DATA_LOSS"] == []
 
 
+def _grade(session, tmp_path):
+    """The grade as the report file states it."""
+    session.generate_report(str(tmp_path / "report.md"))
+    text = (tmp_path / "report.md").read_text(encoding="utf-8")
+    return [g for g in ("PASS", "REVIEW_REQUIRED", "FAIL") if f"**{g}**" in text]
+
+
+@pytest.mark.parametrize("tag, make, written, rows, grade", [
+    pytest.param(PRIVATE, lambda: np.int64(7), ("LO", b"7 "), [], "PASS",
+                 id="private-int64"),
+    pytest.param(PRIVATE, lambda: [np.int64(1), np.int64(2)], ("LO", b"1\\2 "),
+                 [], "PASS", id="private-list"),
+    pytest.param("0028,1050", lambda: np.float32(0.1), ("DS", b"0.10000000149012"),
+                 ["WARNING"], "REVIEW_REQUIRED", id="ds-float32"),
+])
+def test_what_export_writes_records_and_grades_for_a_numpy_number(
+        tmp_path, tag, make, written, rows, grade):
+    """What the 1.0.0rc14 `**Output:**` line for #926 left out, through
+    `set_attr` and `export()`, the route a caller takes. At v1.0.0rc13 the
+    private cells exported the file without the tag under one PRIVATE
+    `DATA_LOSS` row and graded REVIEW_REQUIRED, and the DS cell raised
+    json's `TypeError` and wrote nothing. Now the private value is written
+    `LO` with no row and the run grades PASS; the DS value is written
+    rounded to 16 characters with #723's `WARNING`, which grades
+    REVIEW_REQUIRED. The element, the rows and the report file."""
+    session, inst, _inner = _open(tmp_path)
+    with session:
+        inst.set_attr(tag, make())
+        assert session.export(str(tmp_path / "out"), use_compression=True).written == 1
+        group, element = (int(part, 16) for part in tag.split(","))
+        assert _element(tmp_path / "out", (group, element)) == written
+        session.store_backend.flush_audit_queue()
+        assert [a for a, _d in _accounting(str(tmp_path / "s.db"))] == rows
+        assert _grade(session, tmp_path) == [grade]
+
+
 def test_a_numpy_descriptor_edit_under_resident_pixels_is_stored_as_an_int(tmp_path):
     """`Instance.set_attr` judges a descriptor edit against the resident
     array before it writes. Rows 4 over a 4x4 array reads as it read, so

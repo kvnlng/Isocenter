@@ -364,3 +364,52 @@ def test_an_edit_in_place_after_a_restore_is_one_instances_and_the_store_agrees(
                   for p in reopened.store.patients for st in p.studies
                   for se in st.series for inst in se.instances}
     assert stored == graph
+
+
+def test_an_edit_in_place_after_a_restore_is_exported_for_one_instance(tmp_path):
+    """What the 1.0.0rc14 `**Output:**` line for #733 ("none") left out:
+    the exported files. Two CT files of one patient, Other Patient Names
+    locked, a pass, a restore, then one instance's list edited in place.
+    At v1.0.0rc13 the live export wrote the edit into **both** files, and
+    a reopened session's export into one. Now the live export and the
+    reopened one both write it into the edited instance's file alone.
+    Both export arms, each element read raw."""
+    import pydicom
+    from pydicom.data import get_testdata_file
+
+    for n in (1, 2):
+        ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+        ds.PatientID, ds.PatientName = PID, NAME
+        ds.SOPInstanceUID = f"1.2.826.0.1.3680043.10.9999.733.1.{n}"
+        ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+        (tmp_path / "in").mkdir(exist_ok=True)
+        ds.save_as(str(tmp_path / "in" / f"{n}.dcm"))
+
+    def exported(session, name, compress):
+        out = tmp_path / name
+        session.export(str(out), use_compression=compress)
+        return {path.stem: bytes(pydicom.dcmread(str(path)).get_item(
+                    (0x0010, 0x1001)).value).rstrip(b" ")
+                for path in out.rglob("*.dcm")}
+
+    with _session(tmp_path) as session:
+        assert session.ingest(str(tmp_path / "in")).ingested == 2
+        instances = [inst for p in session.store.patients for st in p.studies
+                     for se in st.series for inst in se.instances]
+        for inst in instances:
+            inst.set_attr(ALIASES, list(NAMES))
+        session.lock_identities(PID, tags_to_lock=["0010,0010", "0010,0020", ALIASES])
+        session.anonymize(session.audit())
+        session.recover_patient_identity(
+            session.store.patients[0].patient_id, restore=True)
+        session.save(sync=True)
+        edited, other = instances
+        edited.attributes[ALIASES].append("EDIT^A")
+        edited.mark_modified()
+        expected = {edited.sop_instance_uid: b"Alias^One\\Alias^Two\\EDIT^A",
+                    other.sop_instance_uid: b"Alias^One\\Alias^Two"}
+        # Red at v1.0.0rc13: both files carried `EDIT^A`.
+        assert exported(session, "live-native", False) == expected
+        assert exported(session, "live-j2k", True) == expected
+    with DicomSession(str(tmp_path / "s.db")) as reopened:
+        assert exported(reopened, "reopened", False) == expected

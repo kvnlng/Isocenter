@@ -1045,3 +1045,97 @@ def test_an_instance_remove_beside_an_owner_replace_declines(tmp_path):
         assert inst.phi_status is PhiStatus.IDENTIFIED
         assert _exported(_exported_file(session, tmp_path), "0010,0010") == "ANONYMIZED"
         assert _grade_of(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+# -- what the exported file carries while the instance reads IDENTIFIED ------
+#
+# The 1.0.0rc14 `**Output:**` line for #764 said "none. No exported byte
+# changes". The owner's value in the file is unchanged, but the three
+# de-identification markers go only on an instance whose own status is
+# REMEDIATED or CLEARED, so the two sequences #764 leaves IDENTIFIED export a
+# file without them where they exported one with them. Measured against
+# v1.0.0rc13 on 3.12 and 3.14t; the tests below read the exported files.
+
+MARKERS = ((0x0012, 0x0062), (0x0012, 0x0063), (0x0028, 0x0303))
+
+
+def _markers_in_both_exports(session, tmp_path, name):
+    """Which of `(0012,0062)`, `(0012,0063)`, `(0028,0303)` the one exported
+    file carries, from the Implicit VR export and from the JPEG 2000 one,
+    which names its VRs on the wire. Also the files."""
+    present, files = [], []
+    for arm, compress in (("native", False), ("j2k", True)):
+        folder = tmp_path / f"{name}-{arm}"
+        session.export(str(folder), use_compression=compress)
+        [path] = list(folder.rglob("*.dcm"))
+        ds = pydicom.dcmread(str(path))
+        files.append(ds)
+        present.append([tag in ds for tag in MARKERS])
+    return present, files
+
+
+@pytest.mark.parametrize("paired", [True, False], ids=["pairing", "whole-report"])
+def test_the_replace_and_remove_pairing_exports_no_marker(tmp_path, paired):
+    """Q2 A's pairing under the floor: the file carries `ANONYMIZED` either
+    way. With the hand-built instance REMOVE the instance reads IDENTIFIED,
+    so the file carries none of the three markers and the run grades
+    REVIEW_REQUIRED; at v1.0.0rc13 it carried all three and graded PASS.
+    The whole report, unpaired, is the control: all three, and PASS. Kills
+    the REMOVE running on a copy its owner stamps."""
+    import copy
+
+    from isocenter.privacy import PhiRemediation
+
+    write_ct(tmp_path / "in" / "a.dcm", "PID-624", "7652", name="Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        handed = []
+        for finding in session.audit().findings:
+            proposal = finding.remediation_proposal
+            if (paired and finding.entity_type == "Instance"
+                    and not finding.entity_path
+                    and proposal and proposal.target_attr == "0010,0010"):
+                finding = copy.copy(finding)
+                finding.remediation_proposal = PhiRemediation(
+                    "REMOVE_TAG", "0010,0010", original_value=proposal.original_value)
+            handed.append(finding)
+        session.anonymize(handed)
+        present, files = _markers_in_both_exports(session, tmp_path, "out")
+        assert [_exported(ds, "0010,0010") for ds in files] == ["ANONYMIZED"] * 2
+        assert present == [[not paired] * 3] * 2
+        assert _grade_of(session, tmp_path) == [
+            "REVIEW_REQUIRED" if paired else "PASS"]
+        if not paired:
+            assert [str(ds[0x0012, 0x0062].value) for ds in files] == ["YES"] * 2
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_the_owners_removal_in_a_later_pass_exports_no_marker_until_a_reaudit(
+        tmp_path, which):
+    """Instance findings first, owners later, under a REMOVE rule: the
+    element is written empty either way. Until a re-audit the instance
+    reads IDENTIFIED, the file carries neither `(0012,0062)` nor
+    `(0012,0063)` and the run grades REVIEW_REQUIRED; at v1.0.0rc13 it
+    carried both at once and graded PASS. After `anonymize(audit())` both
+    are back, and PASS. `(0028,0303)` is in neither: the file keeps Series
+    Date and the other dates as the source held them, and the marker is
+    written only when no date in the file is as found (under the name rule
+    Study Date is shifted all the same). The absent third is the control
+    that the helper does not read every tag as present."""
+    rules, tag, _owner, _field, _source = REMOVED[which]
+    session, report, _patient, _study, inst = _remove_session(tmp_path, "7653", rules)
+    with session:
+        session.anonymize(_instance_findings(report))
+        session.anonymize(_owner_findings(report))
+        present, files = _markers_in_both_exports(session, tmp_path, "before")
+        assert [_exported(ds, tag) for ds in files] == [""] * 2
+        # The file first: it is what the line under correction is about.
+        assert present == [[False, False, False]] * 2
+        assert _grade_of(session, tmp_path) == ["REVIEW_REQUIRED"]
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+
+        session.anonymize(session.audit())
+        present, files = _markers_in_both_exports(session, tmp_path, "after")
+        assert [_exported(ds, tag) for ds in files] == [""] * 2
+        assert present == [[True, True, False]] * 2
+        assert _grade_of(session, tmp_path) == ["PASS"]
