@@ -5,7 +5,16 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0rc14] - 2026-10-07
+
+**Exported output changes in this release**, each named by its entry's `**Output:**` line, where the details are. `compare --base v1.0.0rc13` reports three new members of the reference cohort, one for each, and nothing else; no existing member's output changes:
+- **#937 (#958):** a `PN` element holding several values that the policy keeps is exported with those values, as the source held them, where it was exported as one value holding the text of a Python list (`[A^B, C^D]`); under a rule that replaces, empties or removes it nothing changes. A private `PN` of several values, kept, is written `UT` with a re-VR `WARNING` row under an Explicit VR export, where it was written `PN` with the bracket text and no row. The new member is `synthetic:multi_valued_pn`.
+- **#747 (#947):** a file whose Study or Series Instance UID holds more than one value is refused at ingest with an `ERROR` row that names the element and the count; it was ingested and exported with the UID written as a Python list's text. A file whose Patient ID or SOP Instance UID holds more than one value is refused as before, with the same named row. The new member is `synthetic:multi_valued_keys`.
+- **#703 (#947):** a file whose LUT Descriptor is present and holds no value or one value is ingested from an Implicit VR source (it was refused, with an `ERROR` row) and keeps its LUT Data from an Explicit VR source (it was dropped at export with a `DATA_LOSS` row); both write LUT Data as `OW` with one `WARNING` clause saying the descriptor could not decide. The new member is `synthetic:lut_unusable_descriptor`.
+
+**A correction to the 1.0.0rc13 record (#965)** is the first entry under Fixed: since 1.0.0rc13, with `remove_private_tags: false`, a `SHIFT` or `JITTER` rule on a private date whose VR the source did not state is declined, and the export carries the source's date where it carried a shifted one, with a `REMEDIATION_DECLINED` row and `REVIEW_REQUIRED` where it was `PASS`. Nothing about it changes in this release.
+
+The other entries change no exported byte: their `**Output:**` lines say none.
 
 ### Breaking
 
