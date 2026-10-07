@@ -87,6 +87,15 @@ minor's work. A PR with neither is the next unreleased line's work.
      #744). Where the walk goes and what the literal is for are not
      read, so this over-selects; it never narrows. A tree read with
      none of those calls, or kept by no suffix, is not seen.
+   - a changed `isocenter/**/*.py` also selects the test files that read
+     that one module's source: a `tests/test_*.py` whose text holds the
+     module's file name (`wfdb.py`), or that holds `getsource`,
+     `getsourcelines`, `ast.parse(` or `.__file__` and the module's name
+     as a whole word (#779). This applies to a function the map covers
+     too, which otherwise selects only the tests that ran it. The word
+     and the spelling may sit anywhere in the file, so this over-selects;
+     a reader that reaches the source through a helper in another file,
+     or through `importlib`, `pkgutil` or `inspect.getfile`, is not seen.
    - a selected test in a file with a module-, class-, package- or
      session-scoped fixture brings its whole file.
 

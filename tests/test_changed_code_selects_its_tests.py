@@ -189,9 +189,12 @@ EXPORT_BATCH = ("isocenter/io_handlers.py", "DicomExporter.export_batch")
 C = test_map.Change
 
 def _select(changes=(), other=(), mapping=MAP, **kw):
-    # The glob and wide-fixture detectors read the real tests/; each has
-    # its own tests below, so the rule tests here see neither.
+    # The glob, source-reader and wide-fixture detectors read the real
+    # tests/; each has its own tests (the source readers' are in
+    # test_the_selector_reads_the_live_source.py), so the rule tests here
+    # see none of them.
     kw.setdefault("readers", lambda path: set())
+    kw.setdefault("by_name", lambda path: set())
     kw.setdefault("wide", lambda test_file: False)
     return test_map.select(mapping, set(changes), list(other), TARGETS,
                            kw.pop("repo", REPO),
@@ -846,10 +849,14 @@ def test_a_compact_edit_selects_the_compaction_tests_only(small_real_map):
         {}, proj)
     assert not sel.full, sel.reasons
     # The tests that read every `*.py` by glob come along with any
-    # package edit (#734 review); what rule 1 chose is the rest.
-    readers = test_map.glob_readers(proj, "isocenter/session.py")
-    assert readers <= sel.files
-    assert _files(sel) - readers == {"tests/test_compaction.py"}
+    # package edit (#734 review), and so do the ones that read this
+    # module's source by name (#779); what rule 1 chose is the rest.
+    by_glob = test_map.glob_readers(proj, "isocenter/session.py")
+    by_name = test_map.source_readers(proj, "isocenter/session.py")
+    assert by_glob and by_name - by_glob
+    assert "tests/test_compaction.py" not in by_glob | by_name
+    assert by_glob | by_name <= sel.files
+    assert _files(sel) - by_glob - by_name == {"tests/test_compaction.py"}
 
 
 @pytest.mark.parametrize("path, qualname", [

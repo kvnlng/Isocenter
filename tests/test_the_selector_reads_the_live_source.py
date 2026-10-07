@@ -117,3 +117,124 @@ def test_the_glob_detector_finds_the_tests_that_read_docs_and_source():
     assert "tests/test_changed_code_selects_its_tests.py" not in py, (
         "the selector's slow test file reads the package by glob, so every "
         "package edit now selects it; keep live-source checks in this file")
+
+
+# --- a test that reads one named module's source (#779) -------------------
+#
+# Kept in this file because the first two read the live suite, and this
+# file is already selected by every package edit. The synthetic sources
+# below are spelled in pieces where a whole spelling would make this file
+# say something about itself that the assertions then read back.
+
+C = test_map.Change
+#: The two tests of the issue: (module, a function in it, the test file
+#: that reads the module's source and runs none of that function).
+ISSUE_779 = [
+    ("isocenter/pixel_geometry.py", "_contradiction",
+     "tests/test_pixel_geometry.py"),
+    ("isocenter/exporters/wfdb.py", "WfdbExporter.export",
+     "tests/test_wfdb_privacy.py"),
+]
+
+
+def _a_function_edit(path, qualname, **kw):
+    """`select()` over the live suite for one function a map covers.
+
+    The map is made here and `unspoken` is empty, on purpose: a stale map
+    in this checkout selects both files by the widening for tests it
+    cannot speak for, and the test would pass with the detector deleted.
+    """
+    mapping = {"functions": {path: {qualname: ["tests/test_ran_it.py::test_x"]}},
+               "workers": {}, "unmapped": []}
+    return test_map.select(mapping, {C(path, qualname)}, [], {}, REPO,
+                           dispatching={}, unspoken=frozenset(),
+                           wide=lambda test_file: False, **kw)
+
+
+def test_a_function_edit_selects_the_tests_that_read_its_modules_source():
+    """Kills: the detector asked only of paths outside any function (rule
+    7's place), or not asked at all."""
+    for path, qualname, reader in ISSUE_779:
+        sel = _a_function_edit(path, qualname)
+        assert not sel.full
+        # The map was consulted: this is a function edit, not a fallback.
+        assert sel.nodeids == {"tests/test_ran_it.py::test_x"}
+        assert reader in sel.files, (path, sel.reasons)
+        assert any(reason.startswith(f"{path}: ") and reason.endswith(
+            "test files read its source by name -> added")
+            for reason in sel.reasons), sel.reasons
+        # And it is this detector that brought it: nothing else selects
+        # the file for this change.
+        without = _a_function_edit(path, qualname, by_name=lambda p: set())
+        assert reader not in without.files
+        assert not any("by name" in reason for reason in without.reasons)
+
+
+def _suite(tmp_path, **sources):
+    (tmp_path / "tests").mkdir()
+    for name, text in sources.items():
+        (tmp_path / "tests" / f"test_{name}.py").write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def _readers(repo, path):
+    return {Path(rel).stem[len("test_"):]
+            for rel in test_map.source_readers(repo, path)}
+
+
+def test_the_stem_alone_is_not_a_reader(tmp_path):
+    """Rule 7's needle (the stem anywhere) over a function edit is the
+    whole suite for `session.py` and five more. Kills: the source-reading
+    spelling no longer required beside the word."""
+    spelling = "inspect.get" + "source(thing)"
+    repo = _suite(tmp_path,
+                  says="session = Session('x.db')\nsession.audit()\n",
+                  reads_another=f"import session_helpers\n{spelling}\n",
+                  reads=f"from isocenter import session\n{spelling}\n")
+    assert _readers(repo, "isocenter/session.py") == {"reads"}
+
+    # The live suite: the readers of the module most files mention are a
+    # few, not everything, and not nothing.
+    live = test_map.source_readers(REPO, "isocenter/session.py")
+    every = test_map.SuiteIndex(REPO).texts()
+    assert 0 < len(live) < 60 < len(every), (len(live), len(every))
+    assert "tests/test_the_selector_reads_the_live_source.py" in live
+
+
+def test_the_stem_is_a_word_not_a_substring(tmp_path):
+    """Kills: `in` for a word boundary."""
+    spelling = "ast.par" + "se(text)"
+    repo = _suite(tmp_path,
+                  manager=f"from isocenter import persistence_manager\n{spelling}\n",
+                  store=f"from isocenter import persistence\n{spelling}\n")
+    assert _readers(repo, "isocenter/persistence.py") == {"store"}
+    assert _readers(repo, "isocenter/persistence_manager.py") == {"manager"}
+
+
+def test_a_basename_in_a_test_is_a_reader_with_no_ast_at_all(tmp_path):
+    """A reader spelled `(ROOT / "isocenter" / "exporters" / "x.py")
+    .read_text()` and a regular expression has none of the spellings.
+    Kills: the file-name half dropped."""
+    name = "wfdb" + ".py"
+    repo = _suite(tmp_path,
+                  opens=f'TEXT = (ROOT / "exporters" / "{name}").read_text()\n',
+                  mentions="import wfdb\nrecord = wfdb.rdrecord('r')\n")
+    assert _readers(repo, "isocenter/exporters/wfdb.py") == {"opens"}
+    assert _readers(repo, "isocenter/exporters/dicom.py") == set()
+
+
+def test_each_source_reading_spelling_counts_and_only_a_module_has_readers(tmp_path):
+    """Kills: a spelling dropped from the list; a page or a script given
+    source readers (rule 7 already names those)."""
+    spellings = {"getsource": "inspect.get" + "source(m)",
+                 "getsourcelines": "inspect.get" + "sourcelines(m)",
+                 "parse": "ast.par" + "se(t)",
+                 "file": "Path(uids._" + "_file__)"}
+    repo = _suite(tmp_path, own_file="HERE = Path(_" + "_file__)\nuids = 1\n",
+                  **{key: f"from isocenter import uids\n{text}\n"
+                     for key, text in spellings.items()})
+    # `own_file` holds the word and its own path, with no dot before it:
+    # nearly every test file does, and it reads nobody's source.
+    assert _readers(repo, "isocenter/uids.py") == set(spellings)
+    assert test_map.source_readers(repo, "docs/uids.md") == set()
+    assert test_map.source_readers(repo, "scripts/uids.py") == set()
