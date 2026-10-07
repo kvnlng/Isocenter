@@ -609,3 +609,439 @@ def test_t_u4_a_full_pass_folds_the_uid_copies(tmp_path):
     assert _exported(ds, "0020,000e") != str(src.SeriesInstanceUID)
     assert inst.phi_status is PhiStatus.REMEDIATED
     assert "**PASS**" in grade
+
+
+# --- REMOVE on an owner-stamped copy (#764, the REMOVE half of #624) ---------
+#
+# #624 covered REPLACE and SHIFT. An instance REMOVE on such a copy still ran
+# on its own: it removed the copy, wrote `REMEDIATION_REMOVE Removed Tag ...`
+# and stamped the instance REMEDIATED, while the export went on stamping the
+# owner's value into the file. Measured at de5b26d9 and a7f8aeb9.
+#
+# **Every session test here but the last two runs `privacy_profile: none`
+# plus the one REMOVE rule** (the no-session control has no policy). Under the floor the same pass leaves the instance
+# IDENTIFIED on main too, for another reason (the floor also raises Patient ID
+# and the two UIDs on the instance, #624 leaves those unhandled, and the tally
+# demotes it), so a floor test of the status passes with the fix deleted. And
+# every test asserts the copy's *value* against the exported value, not only
+# a status.
+#
+# The last two run under the floor because they need its owner REPLACE:
+# `test_a_remove_on_a_copy_ingested_after_its_owner_wrote_is_left_to_the_owner`
+# and `test_an_instance_remove_beside_an_owner_replace_declines`. In both, the
+# row, the value and the vouch record carry the test; their IDENTIFIED
+# assertion alone would pass with the fix deleted, for the reason above.
+#
+# Owner rulings (2026-10-06): Q1 A, an owner holding no value leaves the copy
+# `''`, as Q-C2 does; Q2 A, an instance REMOVE beside an owner REPLACE on the
+# same tag declines with a row.
+
+REMOVE_REASON = (
+    "{tag} is written by the export from the {owner}, which still holds a "
+    "value, so removing the instance's copy would not remove it from the "
+    "file; the copy holds the value the export writes")
+NAME_RULE = "  '0010,0010': {action: REMOVE, name: Name}\n"
+DATE_RULE = "  '0008,0020': {action: REMOVE, name: Date}\n"
+#: `(rule, tag, owner type, owner field, CT_small's source value)`.
+REMOVED = {
+    "name": (NAME_RULE, "0010,0010", "Patient", "patient_name", "Alpha^One"),
+    "date": (DATE_RULE, "0008,0020", "Study", "study_date", "20040119"),
+}
+
+
+def _all_rows(session):
+    session.store_backend.flush_audit_queue()
+    with sqlite3.connect(session.persistence_file) as conn:
+        return conn.execute(
+            "SELECT action_type, entity_uid, details FROM audit_log").fetchall()
+
+
+def _remove_session(tmp_path, suffix, rules, nested=False):
+    """CT_small as `PID-624`/`Alpha^One` under `privacy_profile: none` plus
+    `rules`, audited. Returns the open session, the report, and the
+    patient, study and instance."""
+    path = write_ct(tmp_path / "in" / "a.dcm", "PID-624", suffix, name="Alpha^One")
+    if nested:
+        ds = pydicom.dcmread(str(path))
+        item = pydicom.Dataset()
+        item.ReferencedSOPClassUID = ds.SOPClassUID
+        item.ReferencedSOPInstanceUID = ds.SOPInstanceUID + ".9"
+        item.StudyDate = ds.StudyDate
+        ds.ReferencedImageSequence = pydicom.Sequence([item])
+        ds.save_as(str(path))
+    config = tmp_path / "c.yaml"
+    config.write_text("privacy_profile: none\nphi_tags:\n" + rules, encoding="utf-8")
+    session = Session(str(tmp_path / "s.db"))
+    session.load_config(str(config))
+    session.ingest(str(tmp_path / "in"))
+    report = session.audit()
+    [patient] = session.store.patients
+    [study] = patient.studies
+    [inst] = [i for se in study.series for i in se.instances]
+    return session, report, patient, study, inst
+
+
+def _instance_findings(report):
+    return [f for f in report.findings if f.entity_type == "Instance"]
+
+
+def _owner_findings(report):
+    return [f for f in report.findings if f.entity_type != "Instance"]
+
+
+def _exported_file(session, tmp_path, name="out"):
+    session.export(str(tmp_path / name), use_compression=False)
+    [out] = list((tmp_path / name).rglob("*.dcm"))
+    return pydicom.dcmread(str(out))
+
+
+def _grade_of(session, tmp_path):
+    session.generate_report(str(tmp_path / "r.md"))
+    text = (tmp_path / "r.md").read_text(encoding="utf-8")
+    return [g for g in ("PASS", "REVIEW_REQUIRED", "FAIL") if f"**{g}**" in text]
+
+
+def _removal_rows(rows, inst, tag):
+    """The `REMEDIATION_REMOVE` rows that say `tag` was removed from the
+    instance itself."""
+    return [details for action, uid, details in rows
+            if action == "REMEDIATION_REMOVE" and uid == inst.sop_instance_uid
+            and tag in details]
+
+
+def _declined(rows):
+    return [(uid, details) for action, uid, details in rows
+            if action == "REMEDIATION_DECLINED"]
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_a_remove_given_only_the_instance_findings_leaves_the_copy_as_the_file(
+        tmp_path, which):
+    """The owner not handed in: the copy stays, holding what the file
+    carries (Q-C1), no row is written (Q-C5), and the instance reads
+    IDENTIFIED through the tally. On main the copy was removed, the row
+    said `Removed Tag`, the instance read REMEDIATED and the file carried
+    the source value. Handed the same findings again, nothing moves."""
+    rules, tag, _owner, _field, source = REMOVED[which]
+    session, report, _patient, _study, inst = _remove_session(tmp_path, "7641", rules)
+    with session:
+        sop = inst.sop_instance_uid
+        session.anonymize(_instance_findings(report))
+        once = (dict(inst.attributes), inst.phi_status, _all_rows(session))
+        assert inst.attributes[tag] == source
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert _declined(once[2]) == []
+        assert _removal_rows(once[2], inst, tag) == []
+        assert not inst.remediation_vouches_for(tag, source)
+        session.anonymize(_instance_findings(report))
+        assert (dict(inst.attributes), inst.phi_status, _all_rows(session)) == once
+        assert inst.sop_instance_uid == sop
+        assert _exported(_exported_file(session, tmp_path), tag) == source
+        assert _grade_of(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_a_remove_whose_owner_declined_writes_one_row_and_keeps_the_copy(
+        tmp_path, which):
+    """The owner's finding handed in and declined (it names an entity the
+    graph does not hold): the instance's REMOVE declines with its own row,
+    asserted whole, and never with `matched no applicable arm`. On main
+    there was no row for the instance and it read REMEDIATED."""
+    import copy
+
+    rules, tag, owner, _field, source = REMOVED[which]
+    session, report, _patient, _study, inst = _remove_session(tmp_path, "7642", rules)
+    with session:
+        handed = []
+        for finding in report.findings:
+            if finding.entity_type == owner:
+                finding = copy.copy(finding)
+                finding.entity, finding.entity_uid = None, "NO-SUCH-ENTITY"
+            handed.append(finding)
+        session.anonymize(handed)
+        rows = _all_rows(session)
+        mine = [details for uid, details in _declined(rows)
+                if uid == inst.sop_instance_uid]
+        assert mine == [f"Remediation declined for {inst.sop_instance_uid}: "
+                        + REMOVE_REASON.format(tag=tag, owner=owner)]
+        assert not [d for _uid, d in _declined(rows) if "matched no applicable arm" in d]
+        assert _removal_rows(rows, inst, tag) == []
+        assert inst.attributes[tag] == source
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert _exported(_exported_file(session, tmp_path), tag) == source
+        assert _grade_of(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+def test_an_absent_copy_is_not_read_as_removed_while_the_owner_holds_a_value(tmp_path):
+    """A report kept from the first audit. The owners' pass removes the
+    copy and clears the Patient; the name is then set back on the Patient
+    by hand; then **every** instance finding of the first report is handed
+    in. The copy is not re-created (#624's rule), and its absence says
+    nothing about the file, which carries the name: the instance reads
+    IDENTIFIED, with no row. On main the absence was read as the REMOVE's
+    end state and the instance read REMEDIATED.
+
+    Two things keep this honest. The second pass is handed every instance
+    finding: handed the one alone, the instance is IDENTIFIED on main too,
+    over the rest. And only the instance is asserted: the hand edit leaves
+    the Patient UNSCANNED (#767) on both trees."""
+    rules, tag, _owner, _field, source = REMOVED["name"]
+    session, report, patient, _study, inst = _remove_session(tmp_path, "7643", rules)
+    with session:
+        session.anonymize(_owner_findings(report))
+        assert tag not in inst.attributes and patient.patient_name is None
+        patient.patient_name = source
+        before = _all_rows(session)
+        session.anonymize(_instance_findings(report))
+        assert tag not in inst.attributes
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        new = _all_rows(session)[len(before):]
+        assert not [row for row in new if tag in row[2]], new
+        assert _exported(_exported_file(session, tmp_path), tag) == source
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_a_remove_under_an_owner_holding_no_value_leaves_the_copy_empty(
+        tmp_path, which):
+    """Q1 A. The owner cleared by hand and not handed in: the export writes
+    the element empty, so the copy is set to `''` (Q-C2), nothing is left
+    in the graph or the file, and the finding is satisfied: REMEDIATED, no
+    row. The `''` reaches the store. Kills an owner holding None read as
+    "not handed in" (the copy would keep the source value)."""
+    rules, tag, _owner, field, _source = REMOVED[which]
+    session, report, patient, study, inst = _remove_session(tmp_path, "7644", rules)
+    with session:
+        setattr(patient if which == "name" else study, field, None)
+        session.anonymize(_instance_findings(report))
+        rows = _all_rows(session)
+        assert inst.attributes[tag] == ""
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert _declined(rows) == []
+        assert _removal_rows(rows, inst, tag) == []
+        assert _exported(_exported_file(session, tmp_path), tag) == ""
+        session.save(sync=True)
+    with Session(str(tmp_path / "s.db")) as reopened:
+        [again] = [i for p in reopened.store.patients for st in p.studies
+                   for se in st.series for i in se.instances]
+        assert again.attributes[tag] == ""
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_the_owners_removal_in_an_earlier_pass_satisfies_the_instances(
+        tmp_path, which):
+    """The owners first: their removal takes the copy, and the instance
+    findings in the next pass find nothing left in the graph or the file.
+    No row, REMEDIATED, PASS."""
+    rules, tag, _owner, _field, _source = REMOVED[which]
+    session, report, _patient, _study, inst = _remove_session(tmp_path, "7645", rules)
+    with session:
+        session.anonymize(_owner_findings(report))
+        session.anonymize(_instance_findings(report))
+        assert tag not in inst.attributes
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert _declined(_all_rows(session)) == []
+        assert _exported(_exported_file(session, tmp_path), tag) == ""
+        assert _grade_of(session, tmp_path) == ["PASS"]
+
+
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_the_owners_removal_in_a_later_pass_needs_a_reaudit(tmp_path, which):
+    """Q-C5's consequence, now for REMOVE as for REPLACE: instance findings
+    first, owners later. The owners' pass removes the copy, and the
+    instance stays IDENTIFIED until a re-audit, which clears it; no row is
+    ever written, so the run then grades PASS. On main the instance read
+    REMEDIATED after the first pass. Kills a row written for the
+    not-handed case, which would hold the grade at REVIEW_REQUIRED for
+    good."""
+    rules, tag, _owner, _field, _source = REMOVED[which]
+    session, report, patient, _study, inst = _remove_session(tmp_path, "7646", rules)
+    with session:
+        session.anonymize(_instance_findings(report))
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.anonymize(_owner_findings(report))
+        assert tag not in inst.attributes
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert _declined(_all_rows(session)) == []
+        session.anonymize(session.audit())
+        assert {inst.phi_status, patient.phi_status} == {PhiStatus.CLEARED}
+        assert _declined(_all_rows(session)) == []
+        assert _exported(_exported_file(session, tmp_path), tag) == ""
+        assert _grade_of(session, tmp_path) == ["PASS"]
+
+
+@pytest.mark.parametrize("times", [1, 2], ids=["once", "twice"])
+@pytest.mark.parametrize("which", ["name", "date"])
+def test_a_full_report_folds_the_remove_and_declines_nothing(tmp_path, which, times):
+    """Control. With the whole report the owner's removal reaches the copy
+    and the instance finding folds into it, as before: the owner's row
+    names the fold, the copy is gone, PASS. Handed the same report a
+    second time, the removal is already there: no row names the tag or
+    the field, and it is still PASS (#567). Kills a decline written when
+    the owner holds no value."""
+    rules, tag, _owner, field, _source = REMOVED[which]
+    session, report, _patient, _study, inst = _remove_session(tmp_path, "7647", rules)
+    with session:
+        session.anonymize(report)
+        rows = _all_rows(session)
+        [owners] = [d for a, _u, d in rows
+                    if a == "REMEDIATION_REMOVE" and f"Cleared Attribute {field} " in d]
+        assert owners.endswith("removed from 1 instance copy; "
+                               "1 instance-level finding on this tag folded into it")
+        if times == 2:
+            session.anonymize(report)
+            again = _all_rows(session)[len(rows):]
+            assert not [row for row in again if tag in row[2] or field in row[2]], again
+        assert tag not in inst.attributes
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert _declined(_all_rows(session)) == []
+        assert _exported(_exported_file(session, tmp_path), tag) == ""
+        assert _grade_of(session, tmp_path) == ["PASS"]
+
+
+def test_a_nested_copy_is_removed_by_its_own_finding(tmp_path):
+    """Control. `0008,1140[0] > 0008,0020` is not stamped from the Study:
+    with the owners not handed in the top-level copy stays and the nested
+    one is removed by its own finding. Kills a gate keyed on the tag
+    alone."""
+    session, report, _patient, _study, inst = _remove_session(
+        tmp_path, "7648", DATE_RULE, nested=True)
+    with session:
+        [item] = inst.sequences["0008,1140"].items
+        assert item.attributes["0008,0020"] == "20040119"
+        session.anonymize(_instance_findings(report))
+        assert "0008,0020" not in item.attributes
+        assert inst.attributes["0008,0020"] == "20040119"
+        ds = _exported_file(session, tmp_path)
+        [nested] = ds.ReferencedImageSequence
+        assert "StudyDate" not in nested
+        assert _exported(ds, "0008,0020") == "20040119"
+
+
+def test_a_remove_on_a_tag_no_owner_stamps_still_removes_it(tmp_path):
+    """Control. Institution Name beside the name rule, in the same pass
+    and on the same instance: removed, with its `REMEDIATION_REMOVE` row.
+    Kills a gate that is true of every tag."""
+    session, report, _patient, _study, inst = _remove_session(
+        tmp_path, "7649", NAME_RULE + "  '0008,0080': {action: REMOVE, name: Inst}\n")
+    with session:
+        assert inst.attributes["0008,0080"]
+        session.anonymize(_instance_findings(report))
+        assert "0008,0080" not in inst.attributes
+        assert _removal_rows(_all_rows(session), inst, "0008,0080") == [
+            f"Removed Tag 0008,0080 from {inst.sop_instance_uid}"]
+        assert inst.attributes["0010,0010"] == "Alpha^One"
+        assert "InstitutionName" not in _exported_file(session, tmp_path)
+
+
+def test_without_a_session_a_remove_on_the_name_still_removes_it():
+    """Control. A service with no session has no owners to stamp from
+    (`write_tree()`'s case, and the direct tests'): the removal runs.
+    Kills a gate that does not read the session's owners."""
+    from isocenter.entities import Instance
+    from isocenter.privacy import PhiFinding, PhiRemediation
+    from isocenter.remediation import RemediationService
+
+    inst = Instance("1.2.3.764", "1.2.840.10008.5.1.4.1.1.2", 1)
+    inst.set_attr("0010,0010", "Alpha^One")
+    finding = PhiFinding(
+        entity_uid=inst.sop_instance_uid, entity_type="Instance",
+        field_name="0010,0010", value="Alpha^One", reason="test", tag="0010,0010",
+        entity=inst, remediation_proposal=PhiRemediation(
+            action_type="REMOVE_TAG", target_attr="0010,0010", metadata={}))
+    assert RemediationService().apply_remediation([finding]) == 1
+    assert "0010,0010" not in inst.attributes
+    assert inst.phi_status is PhiStatus.REMEDIATED
+
+
+def test_a_remove_on_a_copy_ingested_after_its_owner_wrote_is_left_to_the_owner(tmp_path):
+    """#894's shape under a REMOVE. The owners wrote in a full pass under
+    the floor; a second file of the study is then ingested carrying the
+    source name, and its instance findings are handed in with the name's
+    turned into a REMOVE. The copy is synced to `ANONYMIZED`, which its
+    sibling vouches for -- the end state a REPLACE reads as already there
+    -- and for a REMOVE that is still a file carrying the value: the
+    finding is left to the owner, which this pass was not handed, with no
+    row. Kills the vouched sync read as satisfied for a removal, which
+    wrote a `REMEDIATION_DECLINED` row with an empty reason."""
+    import copy
+
+    from isocenter.privacy import PhiRemediation
+
+    write_ct(tmp_path / "in1" / "a.dcm", "PID-624", "7651", name="Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        session.anonymize(session.audit())
+        [patient] = [p for p in session.store.patients if p.studies]
+        [study] = patient.studies
+        ds = pydicom.dcmread(str(tmp_path / "in1" / "a.dcm"))
+        ds.SOPInstanceUID = ds.SOPInstanceUID + ".7"
+        (tmp_path / "in2").mkdir()
+        ds.save_as(str(tmp_path / "in2" / "b.dcm"))
+        session.ingest(str(tmp_path / "in2"))
+        [late] = [i for se in study.series for i in se.instances
+                  if i.sop_instance_uid.endswith(".7")]
+        assert late.attributes["0010,0010"] == "Alpha^One"
+        mine, swapped = [], 0
+        for finding in session.audit().findings:
+            if (finding.entity_type != "Instance"
+                    or finding.entity_uid != late.sop_instance_uid):
+                continue
+            proposal = finding.remediation_proposal
+            if not finding.entity_path and proposal.target_attr == "0010,0010":
+                finding = copy.copy(finding)
+                finding.remediation_proposal = PhiRemediation(
+                    "REMOVE_TAG", "0010,0010", original_value=proposal.original_value)
+                swapped += 1
+            mine.append(finding)
+        assert swapped == 1
+        before = _all_rows(session)
+        session.anonymize(mine)
+        new = _all_rows(session)[len(before):]
+        assert late.attributes["0010,0010"] == "ANONYMIZED" == patient.patient_name
+        assert late.remediation_vouches_for("0010,0010", "ANONYMIZED")
+        assert _declined(new) == []
+        assert _removal_rows(new, late, "0010,0010") == []
+        assert late.phi_status is PhiStatus.IDENTIFIED
+
+
+def test_an_instance_remove_beside_an_owner_replace_declines(tmp_path):
+    """Q2 A. A hand-built list under the floor: the Patient's REPLACE
+    writes `ANONYMIZED` onto the copy, and the instance's finding on the
+    same copy is a REMOVE. The file carries `ANONYMIZED`, so the REMOVE
+    declines with its row, the copy keeps the owner's value, and the run
+    grades REVIEW_REQUIRED. On main the copy was removed, the instance
+    read REMEDIATED and the run graded PASS beside a file carrying the
+    value. Kills the owner's vouched value read as the REMOVE's end
+    state."""
+    import copy
+
+    from isocenter.privacy import PhiRemediation
+
+    write_ct(tmp_path / "in" / "a.dcm", "PID-624", "7650", name="Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        [inst] = [i for p in session.store.patients for st in p.studies
+                  for se in st.series for i in se.instances]
+        sop = inst.sop_instance_uid
+        handed, swapped = [], 0
+        for finding in report.findings:
+            proposal = finding.remediation_proposal
+            if (finding.entity_type == "Instance" and not finding.entity_path
+                    and proposal and proposal.target_attr == "0010,0010"):
+                finding = copy.copy(finding)
+                finding.remediation_proposal = PhiRemediation(
+                    "REMOVE_TAG", "0010,0010", original_value=proposal.original_value)
+                swapped += 1
+            handed.append(finding)
+        assert swapped == 1
+        session.anonymize(handed)
+        rows = _all_rows(session)
+        assert inst.attributes["0010,0010"] == "ANONYMIZED"
+        # The instance's row is filed under the UID the scan saw.
+        assert [d for _uid, d in _declined(rows) if "0010,0010" in d] == [
+            f"Remediation declined for {sop}: "
+            + REMOVE_REASON.format(tag="0010,0010", owner="Patient")]
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert _exported(_exported_file(session, tmp_path), "0010,0010") == "ANONYMIZED"
+        assert _grade_of(session, tmp_path) == ["REVIEW_REQUIRED"]
