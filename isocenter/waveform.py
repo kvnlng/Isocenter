@@ -128,6 +128,8 @@ def _normalized_scheme(designator: str) -> str:
 #   - MDC: PS3.16 2026d, CID 3001 "ECG Lead", version 20130613
 #     (ISO/IEEE 11073-10101). Not an earlier edition: 2011's table listed
 #     `2:3` for both Lead III and Lead V1; 2026d gives III as `2:61`.
+#     `WaveformChannel._cid_3001_name` reads the one row this table cannot
+#     hold, the earlier edition's `2:3` Lead III (#832).
 #   - SCPECG: PS3.16 2007, CID 3001 "ECG Leads", version 20020904, scheme
 #     version 1.3 -- the "prior version of this Context Group [that] used
 #     codes from the SCP-ECG vocabulary", in 2026d's note. Carts still write
@@ -197,10 +199,16 @@ def _is_known_lead_name(label: str) -> bool:
     "lead " prefix before comparing, so "I", "Lead I" and "LEAD  I" all
     match.
     """
-    normalized = " ".join(str(label or "").split()).lower()
+    return _normalized_lead_name(label) in KNOWN_LEAD_NAMES
+
+
+def _normalized_lead_name(text: str) -> str:
+    """`text` as a lead name is compared: lower-cased, internal whitespace
+    collapsed, and one optional "lead " prefix dropped."""
+    normalized = " ".join(str(text or "").split()).lower()
     if normalized.startswith("lead "):
         normalized = normalized[len("lead "):]
-    return normalized in KNOWN_LEAD_NAMES
+    return normalized
 
 
 class UnsupportedInterpretation(ValueError):
@@ -425,6 +433,10 @@ class WaveformChannel:
     correction_factor: float = 1.0
     units: str = "mV"
     baseline: float = 0.0
+    # The Channel Source item's Code Meaning (0008,0104). Read for one
+    # decision only (`_cid_3001_name`) and never written anywhere. Last, so
+    # a positional caller's arguments keep their places.
+    source_meaning: str = ""
 
     def gain(self) -> float:
         """ADC units per physical unit, as WFDB defines gain.
@@ -469,10 +481,12 @@ class WaveformChannel:
 
         source_code = ""
         source_scheme = ""
+        source_meaning = ""
         src = seqs.get(TAG_CHANNEL_SOURCE_SEQ)
         if src is not None and src.items:
             source_code = str(src.items[0].attributes.get(TAG_CODE_VALUE, "") or "")
             source_scheme = str(src.items[0].attributes.get(TAG_CODING_SCHEME, "") or "")
+            source_meaning = str(src.items[0].attributes.get(TAG_CODE_MEANING, "") or "")
 
         units = "mV"
         unit_seq = seqs.get(TAG_CHANNEL_SENSITIVITY_UNITS_SEQ)
@@ -487,7 +501,55 @@ class WaveformChannel:
             correction_factor=_as_float(attrs.get(TAG_CHANNEL_SENSITIVITY_CORRECTION), 1.0),
             units=units,
             baseline=_as_float(attrs.get(TAG_CHANNEL_BASELINE), 0.0),
+            source_meaning=source_meaning,
         )
+
+    def _cid_3001_name(self) -> Optional[str]:
+        """The lead name DICOM CID 3001 gives this channel's coded source.
+
+        Returns:
+            Optional[str]: The name (`I`, `aVR`, `V1` ...), or None when
+                there is no coded source or the lead table does not name
+                it. A `2:3` in scheme MDC is `III` when the item's Code
+                Meaning says Lead III and `V1` otherwise.
+        """
+        if not self.source_code:
+            return None
+        # The scheme is compared as `_is_known_coding_scheme` compares
+        # it, case-insensitively, since carts write `sct` for `SCT`;
+        # the two must not disagree about which scheme a code is in.
+        # The Code Value is compared case-sensitively (every key is
+        # digits and punctuation) and without its surrounding whitespace:
+        # it is SH, "a character string that may be padded with leading
+        # and/or trailing spaces" (PS3.5 §6.2), and pydicom strips only
+        # the trailing one on read, so ` 2:1` reaches here (#832).
+        # `str.strip()` on purpose, which takes any whitespace and not
+        # the space alone (owner ruling on the review of #832; the docs
+        # say "whitespace"). Do not narrow it to `strip(" ")`. A `99...`
+        # scheme matches no key, so a local code is never named.
+        key = (_normalized_scheme(self.source_scheme),
+               str(self.source_code).strip())
+        # MDC 2:3 is the one code the context group gave to two leads:
+        # PS3.16 2011, CID 3001 "ECG Leads" (version 20080927) prints both
+        # `MDC 2:3 Lead III` and `MDC 2:3 Lead V1`, and the 2013 version
+        # moved III to `2:61`. So a cart built between the two coded Lead
+        # III as `2:3`, and the code cannot say which lead it is.
+        #
+        # The Code Meaning can, and PS3.3 §8.3 says it "shall never be used
+        # as a key, index or decision value". It is read here all the same,
+        # by owner ruling Q1 A on #832, **for this key only**: the
+        # standard's own table made the code ambiguous, and naming every
+        # such Lead III `V1` is the worse error. Do not "clean this up" by
+        # deleting the read, and do not widen it to another key. The
+        # comparison is exact (`==`, after `_normalized_lead_name`), never
+        # a substring: "Derived Lead III" is not Lead III. An empty or
+        # foreign meaning ("Ableitung III") stays `V1`, which is the
+        # ruling's stated limit. Nothing of the meaning is written: the
+        # answer is one of two fixed strings.
+        if (key == ("MDC", "2:3")
+                and _normalized_lead_name(self.source_meaning) == "iii"):
+            return "III"
+        return _CID_3001_LEAD_NAMES.get(key)
 
     def wfdb_description(self, index: Optional[int] = None) -> str:
         """Signal description for the .hea signal line and annotations `lead`.
@@ -495,7 +557,13 @@ class WaveformChannel:
         The coded channel source when there is one: the lead's name
         (`I`, `aVR`, `V1` ...) when the source is an ECG lead of DICOM CID
         3001 in scheme MDC or SCPECG, and otherwise its Code Value
-        verbatim. A verbatim value is not filtered, so a non-conformant
+        verbatim. The Code Value is compared without surrounding
+        whitespace.
+        `MDC 2:3` is `III` when its Code Meaning says Lead III and `V1`
+        otherwise. This is one channel's answer: the exporter resolves
+        names two signals of a record share
+        (`exporters.wfdb._signal_descriptions`).
+        A verbatim value is not filtered, so a non-conformant
         source can put anything here, an embedded newline included;
         callers writing it into a line-based format must sanitize it.
         Otherwise the Channel Label (003A,0203),
@@ -516,14 +584,10 @@ class WaveformChannel:
         # whose policy carries it, and `privacy_profile: none` or a `KEEP`
         # on Channel Label leaves the label to this check alone.
         if self.source_code:
-            # The scheme is compared as `_is_known_coding_scheme` compares
-            # it, case-insensitively, since carts write `sct` for `SCT`;
-            # the two must not disagree about which scheme a code is in.
-            # The Code Value is compared exactly: it is case-sensitive, and
-            # every key is digits and punctuation. A `99...` scheme matches
-            # no key, so a local code is never named.
-            key = (_normalized_scheme(self.source_scheme), self.source_code)
-            return _CID_3001_LEAD_NAMES.get(key, self.source_code)
+            # Only the table's comparison strips the Code Value: a code
+            # the table does not name is returned as held.
+            name = self._cid_3001_name()
+            return self.source_code if name is None else name
         if self.label and _is_known_lead_name(self.label):
             return self.label.strip()
         return f"ch{index}" if index is not None else "signal"

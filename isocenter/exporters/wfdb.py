@@ -169,6 +169,121 @@ def _sanitize_description(value: str) -> str:
     return _LINE_BREAK_CHARS.sub(" ", str(value)).strip()
 
 
+def _signal_descriptions(waveform: Waveform, n_signals: Optional[int] = None):
+    """The description of each signal of one record, sanitized, with the
+    lead names two signals share resolved.
+
+    When two or more descriptions are equal, compared without regard to
+    case, each one the lead table produced is written as its Channel
+    Source Code Value instead. A verbatim Code Value, a kept Channel
+    Label and a `ch<N>` token are left as they are: they have no other
+    spelling to fall back to. The result can still hold equal
+    descriptions (one code on two channels).
+
+    Args:
+        waveform (Waveform): The record's multiplex group.
+        n_signals (int, optional): How many signal lines the header
+            writes, the sample columns. Defaults to the defined channels.
+            A signal past the defined channels takes the last defined
+            channel, and every signal a positional placeholder when none
+            is defined, as `format_header` writes them.
+
+    Returns:
+        tuple[List[str], Dict[str, List[int]]]: `(descriptions, clashes)`.
+            `clashes` maps each lead name that was shared to the 1-based
+            numbers of the channels the lead table gave it, which are the
+            ones written as their Code Value; in the order of each name's
+            first channel. Empty when nothing fell back.
+    """
+    # One list for the whole record, computed once by `_write_instance`
+    # and handed to both writers. `format_header` and `murmur._lead_for`
+    # each see one channel at a time, so a rule about two channels has no
+    # place to stand in either, and a rule in one of them alone would make
+    # the `.hea` and annotations.json disagree about a lead's name (#832).
+    if n_signals is None:
+        n_signals = len(waveform.channels)
+    descriptions = []
+    named = []   # the lead table's name for the signal, or None
+    codes = []
+    for idx in range(n_signals):
+        if waveform.channels:
+            channel = waveform.channels[min(idx, len(waveform.channels) - 1)]
+        else:
+            # See `format_header`: no definition at all is a placeholder.
+            channel = WaveformChannel(label=f"unknown_channel_{idx}")
+        named.append(channel._cid_3001_name())  # pylint: disable=protected-access
+        codes.append(channel.source_code)
+        descriptions.append(_sanitize_description(channel.wfdb_description(idx)))
+
+    # `casefold`, because the consumer #832 names matches leads without
+    # regard to case: a local code `v1` beside a coded V1 is one name to it.
+    folded = [description.casefold() for description in descriptions]
+    clashes = {}
+    for idx, name in enumerate(named):
+        # Only a name the table produced falls back. Whether the table
+        # produced it is the lookup's answer, never a comparison of the
+        # description with the table's values: a local code spelled `V1`
+        # and a kept label `II` are not table names.
+        if name is not None and folded.count(folded[idx]) > 1:
+            clashes.setdefault(name, []).append(idx + 1)
+    for numbers in clashes.values():
+        for number in numbers:
+            descriptions[number - 1] = _sanitize_description(codes[number - 1])
+    return descriptions, clashes
+
+
+def _lead_name_clash_detail(clashes, descriptions=()) -> str:
+    """The `WARNING` row for a record whose lead names clashed.
+
+    Args:
+        clashes (Dict[str, List[int]]): `_signal_descriptions`' second
+            value, not empty.
+        descriptions (Sequence[str]): `_signal_descriptions`' first value,
+            read only to see whether a signal that did not fall back still
+            carries a clashed name.
+
+    Returns:
+        str: One line with no `|`, holding channel numbers and lead names.
+    """
+    # Channel numbers (1-based, as DICOM numbers them) and the table's own
+    # name. Never a Code Value or a Code Meaning: a non-conformant source
+    # can put anything in either, and this renders into the report.
+    clauses = []
+    for name, numbers in clashes.items():
+        if len(numbers) == 1:
+            # The other holder is not a lead code: a local code spelled
+            # like the name, or a kept Channel Label.
+            clauses.append(
+                f"channel {numbers[0]} resolves to the lead name {name}, "
+                "which another signal of the record carries without a lead "
+                "code")
+        else:
+            texts = [str(number) for number in numbers]
+            clauses.append(
+                f"channels {', '.join(texts[:-1])} and {texts[-1]} "
+                f"{'both' if len(numbers) == 2 else 'all'} resolve to the "
+                f"lead name {name}")
+    one = len(clashes) == 1 and len(next(iter(clashes.values()))) == 1
+    two = len(clashes) == 1 and len(next(iter(clashes.values()))) == 2
+    if two:
+        # "Shared by two signals" is true only when the two that fell back
+        # are all that carried the name. A third holder that the table did
+        # not name (a local code `v1` beside two coded V1) keeps its
+        # description, so it is still in the list under that name; a
+        # channel that fell back is there as its code, which is never a
+        # lead name. Compared as the clash was found, without case.
+        name = next(iter(clashes)).casefold()
+        two = not any(text.casefold() == name for text in descriptions)
+    return (
+        f"WFDB record: {'; '.join(clauses)}, so "
+        f"{'it is' if one else 'each is'} written as its Channel Source "
+        "Code Value. "
+        + ("A name shared by two signals cannot say which lead either is."
+           if two else
+           "A name shared by more than one signal cannot say which lead "
+           "each of them is."))
+
+
 def _sanitize_units(value: str) -> str:
     """Remove ALL whitespace/control characters from the `units` field.
 
@@ -190,12 +305,15 @@ def format_header(record_name: str,
                   samples: np.ndarray,
                   dat_filename: str,
                   start_datetime=None,
-                  start_date_note: Optional[str] = None) -> str:
+                  start_date_note: Optional[str] = None,
+                  descriptions: Optional[List[str]] = None) -> str:
     """Render a WFDB `.hea` file.
 
     Emits no `#` comment lines except `start_date_note`, which follows the
     signal lines. A channel description is sanitized so it cannot
-    manufacture a comment line.
+    manufacture a comment line. Two signals do not share a lead name the
+    lead table wrote: each such signal is described by its Channel Source
+    Code Value instead (`_signal_descriptions`).
 
     Args:
         record_name (str): Record name (must match the .hea basename).
@@ -217,6 +335,11 @@ def format_header(record_name: str,
             really was shifted, `start date: ...` otherwise. Sanitized like a
             description, and written as one `#` line. Omitted (no comment
             line at all) when None or empty.
+        descriptions (List[str], optional): The description of each
+            signal line, as `_signal_descriptions(waveform, <columns>)`
+            returned them; computed here when None. The exporter passes
+            the list it also hands `murmur.build_annotations`, so the two
+            files name a lead the same way.
 
     Returns:
         str: Complete header text, newline-terminated.
@@ -242,6 +365,9 @@ def format_header(record_name: str,
         record_fields.append(start_datetime.strftime("%d/%m/%Y"))
 
     lines = [" ".join(record_fields)]
+
+    if descriptions is None:
+        descriptions, _clashes = _signal_descriptions(waveform, n_channels)
 
     for idx in range(n_channels):
         if waveform.channels:
@@ -277,7 +403,9 @@ def format_header(record_name: str,
             str(int(column[0]) if column.size else 0),
             str(signal_checksum(column)),
             "0",
-            _sanitize_description(channel.wfdb_description(idx)),
+            # Sanitized again although `_signal_descriptions` sanitizes:
+            # a caller may hand in a list of its own.
+            _sanitize_description(descriptions[idx]),
         ]))
 
     if start_date_note:
@@ -794,11 +922,21 @@ class WfdbExporter(Exporter):
         with open(dat_path, "wb") as f:
             f.write(np.ascontiguousarray(samples, dtype="<i2").tobytes())
 
+        # Once, over the sample columns, and the same list to both writers
+        # below. Two lists of different lengths would disagree: with one
+        # definition (`MDC 2:8`) under three columns the header's names
+        # clash (`2:8 2:8 2:8`) while a list of the defined channel alone
+        # does not (`V6`), and a mark on channel 1 would say `V6` beside a
+        # header that says `2:8` (#832).
+        descriptions, clashes = _signal_descriptions(
+            waveform, int(samples.shape[1]) if samples.ndim == 2 else 0)
+
         start_datetime, start_date_note = self._start_datetime(instance, study)
         header = format_header(
             record_name, waveform, samples, dat_filename,
             start_datetime=start_datetime,
-            start_date_note=start_date_note)
+            start_date_note=start_date_note,
+            descriptions=descriptions)
 
         hea_path = os.path.join(out_dir, f"{record_name}.hea")
         with open(hea_path, "w", encoding="utf-8") as f:
@@ -820,7 +958,25 @@ class WfdbExporter(Exporter):
         write_annotations(
             os.path.join(out_dir, f"{record_name}.annotations.json"),
             build_annotations(instance, waveform, source, include_annotation_text,
-                              dropped_groups=dropped_groups))
+                              dropped_groups=dropped_groups,
+                              descriptions=descriptions))
+
+        # A record whose lead names clashed is one a person should look at:
+        # the export could not name those leads, and wrote their codes. One
+        # `WARNING` row per instance, which grades the run
+        # `REVIEW_REQUIRED` (owner ruling Q2 A on #832). The detail is
+        # composed as one line with no `|` and holds no value from the
+        # file (`_lead_name_clash_detail`).
+        if clashes:
+            detail = _lead_name_clash_detail(clashes, descriptions)
+            uid = (instance.sop_instance_uid or instance.source_path
+                   or "UNKNOWN")
+            logger.warning(f"{uid}: {detail}")
+            if store_backend is not None:
+                # `log_audit`, never `log_audit_batch` -- the reason is at
+                # the export loop's `except` arm.
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
 
         # Warn-plus-audit, the shape of the multiplex discard itself: an
         # annotation dropped without a word is as wrong as a mislabelled

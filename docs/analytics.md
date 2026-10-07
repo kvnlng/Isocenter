@@ -43,7 +43,8 @@ The report includes:
         - an instance OCR could not read;
         - a store an older release de-identified, where what that release did cannot be vouched for (see [Upgrading from 0.9.x](migration.md));
         - a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim;
-        - an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared.
+        - an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared;
+        - a WFDB record in which two signals would share a lead name, so each one named from the lead table is written as its Code Value ([Lead names](waveforms.md#lead-names)).
 5. **Validation & Verification**: the **Grade Basis** -- every reason this run is not `PASS`, one line each, or a statement that nothing costs it its `PASS` -- then how many `REMEDIATION_*` rows the audit trail holds, what each `scan_pixel_content()` call in this session read and could not read, and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row. Every condition behind it is listed under [How the grade is decided](#how-the-grade-is-decided).
 
 A per-instance manifest is not part of the report. It is a separate document, written by `generate_manifest()`; see [Manifests](#manifests).
