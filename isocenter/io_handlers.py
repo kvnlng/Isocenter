@@ -2269,6 +2269,8 @@ def _read_element(ds, tag, little_endian=True):
     Raises:
         AttributeError: Any `AttributeError` from `ds[tag]` other than an
             unresolved ambiguous VR, which refuses the file.
+        TypeError: Any `TypeError` from `ds[tag]` other than an unresolved
+            ambiguous VR (#703), which refuses the file.
         OverflowError: From an element whose VR is not IS.
     """
     # `__getitem__` stores the converted element *before* it resolves the
@@ -2277,9 +2279,17 @@ def _read_element(ds, tag, little_endian=True):
     # (VR None under Implicit VR), the VR check re-raises, and the file is
     # refused loudly. Checked by VR, not by message: matching pydicom's
     # wording would break on a rephrase.
+    #
+    # `TypeError` is #703: pydicom's LUT Data rule is
+    # `ds.LUTDescriptor[0] == 1`, and a descriptor that is present but
+    # empty reads as None, one holding a single value as an int, so the
+    # subscript raises `TypeError` where an absent descriptor raises
+    # `AttributeError`. pydicom's own wrapper re-raises only the latter.
+    # The gate below is the same for both, and it is what keeps a
+    # `TypeError` out of any other element's read a refusal of the file.
     try:
         return ds[tag]
-    except AttributeError:
+    except (AttributeError, TypeError):
         elem = ds.get_item(tag)
         if str(elem.VR) not in AMBIGUOUS_VR:
             raise
@@ -2318,10 +2328,14 @@ def _read_element(ds, tag, little_endian=True):
     # under `US or OW` it would reach the generic arm, which has no
     # threshold, and what is retained would depend on the transfer syntax.
     #
-    # `[ds]` is the whole ancestor chain that matters: pydicom raised, so
-    # neither the item nor any ancestor that propagated a `_pixel_rep`
-    # into it declares Pixel Representation, and a LUT's descriptor is in
-    # the LUT's own item. That holds only because every item carries the
+    # `[ds]` is the whole ancestor chain that matters. For pydicom's
+    # `AttributeError` that is an inference: it raised, so neither the
+    # item nor any ancestor that propagated a `_pixel_rep` into it
+    # declares Pixel Representation. Its `TypeError` (#703) says nothing
+    # about Pixel Representation, and needs nothing said: it is raised
+    # only for LUT Data, whose arm reads the descriptor and never the
+    # representation, and a LUT's descriptor is in the LUT's own item.
+    # The inference holds only because every item carries the
     # `_pixel_rep` its ancestors imply: pydicom stamps it when it reads an
     # `SQ`, and `populate_attrs` stamps the items `_sequence_from_un_bytes`
     # re-parses, which nothing else does.
@@ -4529,6 +4543,46 @@ def _refuse_an_infinite_frame_count(ds) -> None:
             f"one") from exc
 
 
+#: The four elements ingest links a file by, each of which takes one value.
+_LINKAGE_KEY_NAMES = (
+    ("SOPInstanceUID", "SOP Instance UID (0008,0018)"),
+    ("StudyInstanceUID", "Study Instance UID (0020,000D)"),
+    ("SeriesInstanceUID", "Series Instance UID (0020,000E)"),
+    ("PatientID", "Patient ID (0010,0020)"),
+)
+
+
+def _refuse_a_multi_valued_key(ds) -> None:
+    """Refuse a file one of whose linkage keys holds several values (#747).
+
+    A value holding a backslash is read by pydicom as a `MultiValue`. Until
+    #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
+    maps as an unhashable key and was refused as `Linkage Failed: TypeError:
+    unhashable type: 'MultiValue'`, after its frame had been appended to
+    the sidecar; a multi-valued Study or Series Instance UID was linked
+    under `str()` of the list and exported as `['1.2.3', '1.2.4']`.
+
+    Raises:
+        ValueError: Naming the element and how many values it holds.
+    """
+    # Never a value in the message: a Patient ID is the identifier, and
+    # the row this becomes is kept. Never joined into one string: #584's
+    # synthetic key starts with a backslash because no single-valued
+    # Patient ID read from a file can hold one, and a joined `A\B` would
+    # be exactly that. All blanks is refused too -- two blank values are
+    # two values, not "no Patient ID".
+    #
+    # The words are this function's and not an interpreter's: CPython
+    # reworded the `TypeError` this replaces between 3.12 and 3.14, and a
+    # row that quotes it is two recordings of one run.
+    for keyword, name in _LINKAGE_KEY_NAMES:
+        value = ds.get(keyword)
+        if isinstance(value, MultiValue):
+            raise ValueError(
+                f"{name} holds {len(value)} values and takes one; the file "
+                f"is linked by it, and none is chosen for it.")
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4583,6 +4637,10 @@ def ingest_worker(fp: str) -> Tuple:
 
         if not meta['sop']:
             raise ValueError("Missing SOPInstanceUID. Likely not a valid DICOM file.")
+        # Here, in the worker, so the parent never appends this file's
+        # frame to the sidecar; and before `_linkage_keys`, which would
+        # hand the parent an unhashable Patient ID or a list's text.
+        _refuse_a_multi_valued_key(ds)
         _refuse_an_infinite_frame_count(ds)
         # After the SOP check: a generated study falls back to the SOP UID.
         meta.update(_linkage_keys(ds))
@@ -10122,6 +10180,30 @@ _AMBIGUOUS_WAVEFORM_TAGS = frozenset({0x54000110, 0x54000112,
 #: source can make that this pass has to choose an arm for.
 _LUT_DATA_TAG = 0x00283006
 
+#: (0028,3002) LUT Descriptor, the sibling that decides it.
+_LUT_DESCRIPTOR_TAG = 0x00283002
+
+
+def _lut_descriptor_values(ds) -> int:
+    """How many values the LUT Descriptor in `ds` holds (#703).
+
+    Read with `get_item(..., keep_deferred=True)`, the one spelling that
+    converts nothing: on the read side the element may still be raw, and
+    `ds[tag]` would resolve the descriptor's own `US or SS`, which can
+    raise. A bare `get_item(tag)` is not that spelling: it converts a raw
+    element through `ds[tag]` and leaves the converted one in the dataset
+    (review of #947).
+    """
+    value = ds.get_item(_LUT_DESCRIPTOR_TAG, keep_deferred=True).value
+    if value is None:
+        return 0
+    if isinstance(value, (bytes, bytearray)):
+        return len(value) // 2
+    if isinstance(value, (list, tuple, MultiValue)):
+        return len(value)
+    return 1
+
+
 #: How many elements `_ambiguous_vr_warning` names before counting the rest,
 #: for the same reason `_RE_VR_NAMED` exists: a 12-channel ECG whose waveform
 #: item never declared its bit depth has 25 of them.
@@ -10396,9 +10478,19 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
     unresolved = False
     try:
         correct_ambiguous_vr_element(elem, ds, little_endian, ancestors)
-    except AttributeError:
+    except (AttributeError, TypeError):
         # pydicom's wrapped raise: the sibling its rule reads is absent
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
+        #
+        # `TypeError` (#703): the sibling is there and pydicom cannot
+        # subscript it -- LUT Data beside a LUT Descriptor holding no
+        # value (None) or one (an int), the only arm of pydicom 3.0.2's
+        # resolver that subscripts. Its wrapper does not re-raise it, so
+        # until #703 it reached `_resolve_ambiguous_vrs`' `except
+        # Exception` and the table was dropped with a row in pydicom's
+        # words. `TypeError` and no wider: anything else is not "the
+        # decider cannot decide" and keeps that route. Re-read
+        # `_correct_ambiguous_vr_element` on every pydicom bump.
         unresolved = True
     if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
         # pydicom answered, so what it answered is what the header names
@@ -10433,6 +10525,18 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
                         f"({tag}): no Waveform Bits Allocated is declared "
                         f"anywhere above it, and PS3.5 8.3 decides between "
                         f"OB and OW by the bit depth, so {elem.VR} was "
+                        f"written")
+                elif elem.tag == _LUT_DATA_TAG and _LUT_DESCRIPTOR_TAG in ds:
+                    # #703. "Declares no LUT Descriptor" would be false
+                    # of this file: it has one, and pydicom could not
+                    # read a first value off it. Only 0 and 1 reach
+                    # here; two values or more are a `MultiValue`, whose
+                    # `[0]` pydicom reads, and the element resolves.
+                    held = _lut_descriptor_values(ds)
+                    rows.append(
+                        f"({tag}): the LUT Descriptor beside it holds "
+                        f"{held} value(s), not the three whose first "
+                        f"decides between US and OW, so {elem.VR} was "
                         f"written")
                 elif elem.tag == _LUT_DATA_TAG:
                     rows.append(

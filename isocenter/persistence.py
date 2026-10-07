@@ -34,7 +34,7 @@ from pydicom.valuerep import DSdecimal, DSfloat, IS, ISfloat
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
                        PhiStatus, ScanPolicy, normalize_study_date,
-                       resolve_item_path)
+                       resolve_item_path, iter_item_tree, _python_value)
 from . import entities
 from .blob_kind import parse_blob_kind, serialize_blob_kind
 from .sidecar import SidecarManager
@@ -622,6 +622,109 @@ _VERTICAL_VR_PARSERS = {
 }
 
 
+#: What the store's JSON tier holds as one value (#775). `bool`, `IS`,
+#: `DSfloat` and `ISfloat` are `int` and `float` subclasses. A `dict` is
+#: here because `json` encodes one: it is not a DICOM value, nothing in
+#: the pipeline produces one, and it is not refused.
+_JSON_ATOM_TYPES = (str, bytes, int, float, DSdecimal, dict)
+
+#: What the private tier holds as one atom: what `str()` renders as text a
+#: reader can take back. `bytes` is absent: a private `bytes` value is
+#: routed to the JSON tier whole, and one inside a list would be stored as
+#: the text `b'...'`.
+_VERTICAL_ATOM_TYPES = (str, int, float, DSdecimal)
+
+
+def _unstorable_type(value, vertical: bool = False) -> Optional[str]:
+    """The type name of the first part of `value` the store cannot hold.
+
+    Args:
+        value: One attribute's value.
+        vertical (bool): Judge by the private tier's rule: its atoms, in
+            at most one container. The JSON tier's rule otherwise.
+
+    Returns:
+        Optional[str]: `type(...).__name__` of the offending value, or
+            None when the store holds all of it.
+    """
+    # The same reading the writers make, in the same order: the numpy
+    # twin first (`_python_value`), then the type. Never the value.
+    value = _python_value(value)
+    if isinstance(value, (list, tuple, MultiValue)):
+        for member in value:
+            member = _python_value(member)
+            if vertical:
+                if member is not None and not isinstance(
+                        member, _VERTICAL_ATOM_TYPES):
+                    return type(member).__name__
+            else:
+                found = _unstorable_type(member)
+                if found:
+                    return found
+        return None
+    atoms = _VERTICAL_ATOM_TYPES if vertical else _JSON_ATOM_TYPES
+    if value is None or isinstance(value, atoms):
+        return None
+    return type(value).__name__
+
+
+def _refuse_unstorable(instance, vertical: bool = True) -> None:
+    """Name the value that made a write of `instance` raise `TypeError` (#775).
+
+    Walks the instance's attributes, then every nested item's, for the
+    first value the store cannot hold, and raises a `TypeError` naming the
+    instance, the tag's path and the value's type. Returns when it finds
+    none, and the caller re-raises what it caught: a `TypeError` of
+    another origin, or one from the root-only bookkeeping keys, which are
+    not attributes and which only this library writes.
+
+    Args:
+        instance (Instance): The instance whose write raised.
+        vertical (bool): Whether the root's private tags are bound for
+            the private tier (`save_all`), and so judged by its rule.
+            False for `update_attributes`, which writes them as JSON.
+
+    Raises:
+        TypeError: Naming the instance, the path and the type.
+    """
+    # `from None`: the write's own `TypeError` is `json`'s sentence, and
+    # `describe_exception` appends a cause to every reason it spells --
+    # the background save's log line among them -- so chaining it would
+    # put an interpreter's wording back into text this exists to own.
+    # Called only from an `except TypeError`, so a save that holds nothing
+    # unstorable pays nothing for it. The value is never in the message:
+    # the same rule as `Instance.set_attr`'s refusal, and for the same
+    # reason -- it may be a name. No audit row is written by anyone:
+    # nothing was lost and nothing was stored, and a row would cost the
+    # store its PASS for good over a value the caller replaces in one line.
+    for item, path in iter_item_tree(instance):
+        for tag, value in item.attributes.items():
+            to_vertical = (vertical and not path and _is_private_tag(tag)
+                           and not isinstance(value, bytes))
+            found = _unstorable_type(value, vertical=to_vertical)
+            if not found:
+                continue
+            where = " > ".join(
+                [f"{seq}[{index}]" for seq, index in path] + [str(tag)])
+            # Two sentences, because the two tiers hold different things
+            # and one sentence was false on the private tier: a list of
+            # `bytes` under a private tag was refused for "a bytes" by a
+            # message saying bytes and lists of them are held (review of
+            # #947).
+            rule = (
+                "A private attribute at the top level of an instance is "
+                "None, a str, bytes, a bool, an int, a float, a pydicom DS "
+                "or IS value, or one list of those holding no bytes and no "
+                "list." if to_vertical else
+                "An attribute's value is None, a str, bytes, a bool, an "
+                "int, a float, a pydicom DS or IS value, or a list of those.")
+            raise TypeError(
+                f"save: instance {instance.sop_instance_uid} holds a {found} "
+                f"at {where}, which the store cannot hold. {rule} Nothing "
+                "was saved. Set a value of one of those types and save again."
+            ) from None
+
+
 def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
     """The one rendering of a private value into `value_text`.
 
@@ -634,7 +737,25 @@ def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
     Returns:
         Optional[str]: None for None (stored as SQL NULL); the decimal
             integer for an `AT` value; `str(atom)` otherwise.
+
+    Raises:
+        TypeError: `atom` is not None, a `str`, an `int`, a `float` or a
+            pydicom DS value once a numpy number is read as its Python
+            twin (#775). Names the type, never the value; the save names
+            the instance and the tag (`_refuse_unstorable`).
     """
+    # #926: a numpy number written around `set_attr` is stored as its
+    # twin's text, which is what `set_attr` would have left in the graph
+    # (`str(np.float32(0.1))` is `'0.1'`; the float it equals is not).
+    atom = _python_value(atom)
+    # #775: until then `str(atom)` took anything, so a private tag saved
+    # an array as `'[1 2 3]'`, a set as `'{1, 2}'` and an object as its
+    # `repr`, and a reopened session exported that text. A standard tag
+    # holding the same value has always failed the save.
+    if atom is not None and not isinstance(atom, _VERTICAL_ATOM_TYPES):
+        raise TypeError(
+            f"a {type(atom).__name__} is not a value the private-attribute "
+            "table can hold")
     # `AT`'s `str()` is the display spelling `'(0010,0010)'`, which `Tag()`
     # refuses to read back, so it is stored as the decimal integer it is.
     #
@@ -1005,8 +1126,23 @@ class SqliteStore:
         store uses a temporary sidecar file that `stop()` deletes.
 
         Args:
-            db_path (str): Path to the SQLite DB file. Use ":memory:" for transient storage.
+            db_path (str): Path to the SQLite DB file. Use ":memory:" for
+                transient storage. A relative path is made absolute here,
+                against the directory the process is in now, so the store
+                stays where it was opened.
         """
+        # Absolute, and first, before anything is derived from it (#722).
+        # Every connection, the sidecar, both lock paths and every pixel
+        # loader are built from `db_path` and `sidecar_path`, and a
+        # relative string is resolved again each time it is used. After an
+        # `os.chdir`, `sqlite3.connect("t.db")` does not fail: it creates
+        # a new, empty store in the new directory, and the gate creates a
+        # sidecar and a lock file beside it. A pickled clone handed to a
+        # spawned worker carries these strings too. `Session` keeps the
+        # caller's spelling in `persistence_file`; only the store's own
+        # paths move. `":memory:"` is not a path.
+        if db_path != ":memory:":
+            db_path = os.path.abspath(db_path)
         self.db_path = db_path
         self.logger = get_logger()
         if db_path == ":memory:":
@@ -4011,6 +4147,10 @@ class SqliteStore:
                 patient's original row surviving under its old identifier.
 
         Raises:
+            ValueError: An instance with unsaved changes holds a SOP
+                Instance UID that is not a `str`; the message gives the count.
+                Raised before the gate is taken: nothing is appended to
+                the sidecar and nothing is stored (#721).
             RuntimeError: The sidecar gate was not acquired within
                 `_SIDECAR_GATE_TIMEOUT_S`.
             Exception: Any failure inside the transaction, logged and
@@ -4018,6 +4158,29 @@ class SqliteStore:
         """
         self.logger.info(
             "Saving %d patients to %s (Incremental)...", len(patients), self.db_path)
+
+        # #721. Before the gate, before a frame is appended, before any
+        # connection: `instances.sop_instance_uid` is `NOT NULL`, and an
+        # instance bound with None reached sqlite as `IntegrityError: NOT
+        # NULL constraint failed`, inside the transaction, after this
+        # save's pixel frames were already in the sidecar. Counted over
+        # the instances the prepass would claim (unsaved changes), and a
+        # count is all that is said: an instance with no UID has no name,
+        # and its path does not go in an exception. `not isinstance(...,
+        # str)`, never `not uid`: `""` is a value sqlite stores, and the
+        # write door refuses a UID-less file its own way (#613).
+        nameless = sum(
+            1 for patient in patients for study in patient.studies
+            for series in study.series for inst in series.instances
+            if inst.has_unsaved_changes
+            and not isinstance(inst.sop_instance_uid, str))
+        if nameless:
+            raise ValueError(
+                f"save: {nameless} instance(s) hold a SOP Instance UID that "
+                "is not a str (None, or a value of another type), and the "
+                "store keys an instance by that text, so nothing was saved. "
+                "Give each one a str (instance.sop_instance_uid = ...) or "
+                "remove it from its series.")
 
         tally = _SaveTally()
         _warn_on_shared_patient_ids(self.logger, patients)
@@ -4461,9 +4624,19 @@ class SqliteStore:
 
         # Deferred until the instances exist: instance_attributes has a
         # foreign key onto instances(sop_instance_uid).
-        for uid, attributes, attribute_vrs in vertical_rows:
-            self.save_vertical_attributes(uid, attributes, conn=conn,
-                                          vrs=attribute_vrs)
+        #
+        # `vertical_rows` holds one entry per instance of `unsaved`, in
+        # its order, which is how a refusal finds the instance to name.
+        for (inst, _revision), (uid, attributes, attribute_vrs) in zip(
+                unsaved, vertical_rows):
+            try:
+                self.save_vertical_attributes(uid, attributes, conn=conn,
+                                              vrs=attribute_vrs)
+            except TypeError:
+                # #775: an atom the private tier cannot hold. Named, or
+                # re-raised as it came when the walk finds nothing.
+                _refuse_unstorable(inst)
+                raise
 
         tally.instances += len(unsaved)
         return unsaved
@@ -4494,7 +4667,20 @@ class SqliteStore:
         rows, blob_rows, vertical_rows = [], [], []
 
         for inst, revision in unsaved:
-            core, private = _split_core_and_private(self._serialize_item(inst))
+            # #775. `json` raises `TypeError: Object of type X is not JSON
+            # serializable` for a value the store cannot hold, naming
+            # neither the instance nor the tag, inside a transaction that
+            # then rolls back whole -- and again at every later save,
+            # because the instance stays unsaved. Diagnosed only once it
+            # has raised: `_refuse_unstorable` raises the named error, or
+            # returns and this one leaves unchanged.
+            try:
+                core, private = _split_core_and_private(
+                    self._serialize_item(inst))
+                attributes_json = json.dumps(core, cls=IsocenterJSONEncoder)
+            except TypeError:
+                _refuse_unstorable(inst)
+                raise
             # The VRs for exactly the tags that made it to the private
             # tier, re-keyed to that tier's `("gggg", "eeee")` shape. Only
             # those: an entry for a tag whose value stayed in
@@ -4538,7 +4724,7 @@ class SqliteStore:
                 # offset into the path column without raising.
                 inst.instance_number, inst.file_path, inst.source_path,
                 frame.offset, frame.length, frame.hash, frame.alg,
-                json.dumps(core, cls=IsocenterJSONEncoder),
+                attributes_json,
                 # UNSCANNED for an entity edited since the scan, as the
                 # property reads -- the row's attributes are the edited
                 # ones -- with the status the edit left in the last column
@@ -5125,8 +5311,17 @@ class SqliteStore:
                 data = []
                 for inst in instances:
                     # Serialize attributes AND sequences
-                    full_data = self._serialize_item(inst)
-                    attrs_json = json.dumps(full_data, cls=IsocenterJSONEncoder)
+                    try:
+                        full_data = self._serialize_item(inst)
+                        attrs_json = json.dumps(full_data, cls=IsocenterJSONEncoder)
+                    except TypeError:
+                        # #775, as in `_build_instance_writes`. Every
+                        # tag is JSON here, the private ones too. Raised
+                        # inside the `with`, so nothing of this write is
+                        # stored; no row, unlike the arms below: the
+                        # store refused nothing.
+                        _refuse_unstorable(inst, vertical=False)
+                        raise
                     data.append((attrs_json, inst.sop_instance_uid))
 
                 cur.executemany("""
@@ -5668,14 +5863,15 @@ class IsocenterJSONEncoder(json.JSONEncoder):
         return super().iterencode(_tag_number_strings(o), _one_shot)
 
     def default(self, obj):
-        """Encode a value `json` cannot: `bytes` and `MultiValue`.
+        """Encode a value `json` cannot: `bytes`, `MultiValue`, a numpy number.
 
         Args:
             obj (Any): The value `json` could not encode.
 
         Returns:
-            dict | list: `{"__type__": "bytes", "data": <base64>}` for
-                `bytes`, a list for a `MultiValue`.
+            dict | list | bool | int | float | str: `{"__type__": "bytes",
+                "data": <base64>}` for `bytes`, a list for a `MultiValue`,
+                the Python twin of a numpy scalar or 0-d array.
 
         Raises:
             TypeError: For any other type (from `json.JSONEncoder.default`).
@@ -5685,6 +5881,18 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
         if isinstance(obj, MultiValue):
             return list(obj)
+
+        # #926: a numpy scalar or 0-d array written around `set_attr`
+        # (`attributes[...] =`, a hand-built graph), at any depth, for
+        # `save_all` and `update_attributes` alike. `set_attr` converts
+        # what it is given; this is for what it never saw. `json` calls
+        # `default` only for a type it does not know, so a save holding
+        # none pays nothing. A value `_python_value` leaves as it is (an
+        # array of one or more dimensions, a `datetime64`) falls through
+        # to the `TypeError` below, which the save names (#775).
+        twin = _python_value(obj)
+        if twin is not obj:
+            return twin
 
         return super().default(obj)
 
