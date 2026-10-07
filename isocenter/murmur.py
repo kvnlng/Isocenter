@@ -121,8 +121,10 @@ def _lead_for(waveform, referenced_channels,
 
     Returns:
         Optional[str]: The lead name, as the `.hea` signal line of that
-            channel carries it, or None when the reference names no
-            single channel of the ingested group.
+            channel carries it. None when the reference names no single
+            channel of the ingested group, and when it names a defined
+            channel that `descriptions` has no entry for: one past the
+            record's sample columns, which has no signal line (#963).
     """
     # The name comes from the list the `.hea` writer reads, never from
     # `wfdb_description()` here: that is one channel's answer, and a name
@@ -139,12 +141,14 @@ def _lead_for(waveform, referenced_channels,
     if descriptions is None:
         descriptions, _clashes = _signal_descriptions(waveform)
     index = channel_number - 1
-    # Bounded by the defined channels, not by the list: the header's list
-    # also covers sample columns past the definitions, and a mark naming
-    # one of those resolves to no lead, as it always has.
+    # Two bounds, and each is needed. First the defined channels: the
+    # header's list also covers sample columns past the definitions (each
+    # takes the last definition's name), and a mark naming one of those
+    # resolves to no lead, as it always has -- the group defines no such
+    # channel. The list's length alone would hand it that column's name.
     if not 0 <= index < len(waveform.channels):
         return None
-    # And bounded by the list: a defined channel with no signal line (more
+    # Then the list: a defined channel with no signal line (more
     # Channel Definitions than sample columns) is no signal of the record,
     # so a mark on it carries no lead (#963, owner ruling). Do not fall
     # back to the channel's own `wfdb_description()` here: that named a

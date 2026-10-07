@@ -232,12 +232,15 @@ def _signal_descriptions(waveform: Waveform, n_signals: Optional[int] = None):
     return descriptions, clashes
 
 
-def _lead_name_clash_detail(clashes) -> str:
+def _lead_name_clash_detail(clashes, descriptions=()) -> str:
     """The `WARNING` row for a record whose lead names clashed.
 
     Args:
         clashes (Dict[str, List[int]]): `_signal_descriptions`' second
             value, not empty.
+        descriptions (Sequence[str]): `_signal_descriptions`' first value,
+            read only to see whether a signal that did not fall back still
+            carries a clashed name.
 
     Returns:
         str: One line with no `|`, holding channel numbers and lead names.
@@ -262,6 +265,15 @@ def _lead_name_clash_detail(clashes) -> str:
                 f"lead name {name}")
     one = len(clashes) == 1 and len(next(iter(clashes.values()))) == 1
     two = len(clashes) == 1 and len(next(iter(clashes.values()))) == 2
+    if two:
+        # "Shared by two signals" is true only when the two that fell back
+        # are all that carried the name. A third holder that the table did
+        # not name (a local code `v1` beside two coded V1) keeps its
+        # description, so it is still in the list under that name; a
+        # channel that fell back is there as its code, which is never a
+        # lead name. Compared as the clash was found, without case.
+        name = next(iter(clashes)).casefold()
+        two = not any(text.casefold() == name for text in descriptions)
     return (
         f"WFDB record: {'; '.join(clauses)}, so "
         f"{'it is' if one else 'each is'} written as its Channel Source "
@@ -956,7 +968,7 @@ class WfdbExporter(Exporter):
         # composed as one line with no `|` and holds no value from the
         # file (`_lead_name_clash_detail`).
         if clashes:
-            detail = _lead_name_clash_detail(clashes)
+            detail = _lead_name_clash_detail(clashes, descriptions)
             uid = (instance.sop_instance_uid or instance.source_path
                    or "UNKNOWN")
             logger.warning(f"{uid}: {detail}")

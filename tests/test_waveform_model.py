@@ -334,16 +334,20 @@ def test_mdc_2_3_is_v1_when_its_meaning_does_not_say_lead_iii(meaning):
     assert channel.wfdb_description(0) == "V1"
 
 
-@pytest.mark.parametrize("scheme,code,name", [
-    ("SCPECG", "5.6.3-9-3", "V1"),   # SCP-ECG never printed its V1 twice
-    ("MDC", "2:4", "V2"),
-    ("MDC", "2:61", "III"),
-    ("MDC", "2:1", "I"),
-])
+_EVERY_OTHER_ROW = [(s, c, n) for s, c, _m, n in CID_3001_NAMED_ROWS
+                    if (s, c) != ("MDC", "2:3")]
+
+
+@pytest.mark.parametrize("scheme,code,name", _EVERY_OTHER_ROW,
+                         ids=[f"{s}:{c}" for s, c, _n in _EVERY_OTHER_ROW])
 def test_no_other_code_reads_its_meaning(scheme, code, name):
     """PS3.3 §8.3: Code Meaning "shall never be used as a key, index or
-    decision value". The exception is `MDC 2:3` alone; a meaning read for
-    any other key names these III."""
+    decision value". The exception is `MDC 2:3` alone, so every other row
+    of the table is asked, not a sample: a meaning read for one more key
+    (`MDC 2:9`, say) names that one III and four sampled keys do not see
+    it (review of #832). `SCPECG 5.6.3-9-3` is among them: SCP-ECG never
+    printed its V1 twice."""
+    assert len(_EVERY_OTHER_ROW) == len(CID_3001_NAMED_ROWS) - 1
     channel = WaveformChannel(source_code=code, source_scheme=scheme,
                               source_meaning="Lead III")
     assert channel.wfdb_description(0) == name

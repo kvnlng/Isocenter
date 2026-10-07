@@ -176,7 +176,7 @@ def _names(header_text, n_signals):
             for line in header_text.splitlines()[1:1 + n_signals]]
 
 
-def _dataset(channels, patient_id, definitions=None):
+def _dataset(channels, patient_id, definitions=None, marks=None):
     from scripts.generate_waveform_test_data import (add_annotation,
                                                      build_ecg_dataset)
     ds = build_ecg_dataset(
@@ -193,19 +193,20 @@ def _dataset(channels, patient_id, definitions=None):
             del chdef.ChannelLabel
     if definitions is not None:
         ds.WaveformSequence[0].ChannelDefinitionSequence = list(defs)[:definitions]
-    for number in range(1, (definitions or len(channels)) + 1):
+    # One mark per defined channel, unless the test names the channels.
+    for number in marks or range(1, (definitions or len(channels)) + 1):
         add_annotation(ds, 10 * number, channel=number)
     return ds
 
 
-def _exported(tmp_path, channels, name, definitions=None):
+def _exported(tmp_path, channels, name, definitions=None, marks=None):
     """Ingest one file and export it as WFDB: `(session, .hea path)`."""
     import pydicom
 
     source = tmp_path / f"src_{name}"
     source.mkdir()
     pydicom.dcmwrite(str(source / "x.dcm"),
-                     _dataset(channels, f"P-{name}", definitions),
+                     _dataset(channels, f"P-{name}", definitions, marks),
                      enforce_file_format=True)
     session = Session(str(tmp_path / f"{name}.db"))
     session.ingest(str(source))
@@ -275,13 +276,25 @@ def test_the_annotations_agree_with_a_header_longer_than_the_definitions(
         tmp_path):
     """One definition (`MDC 2:8`) under three sample columns: the header's
     three names clash, a list of the defined channels alone would not, and
-    the mark on channel 1 must say what the header's first line says."""
+    the mark on channel 1 must say what the header's first line says.
+
+    The marks on channels 2 and 3 name sample columns past the one
+    definition. Such a mark carried no lead before #832 and carries none
+    now: the group defines no channel 2, whatever the header calls the
+    column. The list the exporter hands the bridge is three names long, so
+    only the bound on the defined channels in `murmur._lead_for` keeps
+    `2:8` off them (review of #832: dropping that bound went unseen)."""
     session, hea = _exported(tmp_path, [("MDC", "2:8", "Lead V6", "")] * 3,
-                             "overflow", definitions=1)
+                             "overflow", definitions=1, marks=(1, 2, 3))
     try:
         # 6. The clash test covers what the header writes.
         assert _header_names(hea, 3) == ["2:8", "2:8", "2:8"]
-        assert _leads(hea) == ["2:8"]
+        with open(os.path.splitext(hea)[0] + ".annotations.json",
+                  encoding="utf-8") as handle:
+            findings = json.load(handle)["findings"]
+        assert [f["startSample"] for f in findings] == [9, 19, 29]
+        assert [f.get("lead", "<absent>") for f in findings] == [
+            "2:8", "<absent>", "<absent>"]
         warned = [row for row in _rows(session) if row[0] in WARNED]
         assert [(kind, details) for kind, _uid, details in warned] == [
             ("WARNING", ROW_THREE)]
@@ -424,6 +437,44 @@ def test_the_row_is_one_sentence_pair_whatever_clashed(clashes, detail):
     from isocenter.exporters.wfdb import _lead_name_clash_detail
 
     assert _lead_name_clash_detail(clashes) == detail
+
+
+ROW_TWO_OF_THREE = (
+    "WFDB record: channels 1 and 2 both resolve to the lead name V1, so each "
+    "is written as its Channel Source Code Value. A name shared by more than "
+    "one signal cannot say which lead each of them is.")
+
+TWO_CODED_V1_AND_A_LOCAL_ONE = [
+    ("SCPECG", "5.6.3-9-3", "Lead V1", ""), ("MDC", "2:3", "Lead V1", ""),
+    ("99LOCAL", "v1", "my v1", "")]
+
+
+def test_two_signals_is_said_only_when_two_signals_share_the_name():
+    """Two coded V1 beside a local code `v1`: two channels fell back and
+    three signals carried the name, so "a name shared by two signals" is
+    false of it (review of #832). The closing sentence about two is kept
+    for the record where the two that fell back are all that shared it."""
+    from isocenter.exporters.wfdb import (_lead_name_clash_detail,
+                                          _signal_descriptions)
+
+    descriptions, clashes = _signal_descriptions(
+        _waveform(TWO_CODED_V1_AND_A_LOCAL_ONE))
+    assert (descriptions, clashes) == (["5.6.3-9-3", "2:3", "v1"],
+                                       {"V1": [1, 2]})
+    assert _lead_name_clash_detail(clashes, descriptions) == ROW_TWO_OF_THREE
+    # The control: the same two channels with nothing else of that name.
+    assert _lead_name_clash_detail({"II": [1, 2]}, ["2:2", "2:2"]) == ROW_H
+    assert _lead_name_clash_detail({"II": [1, 2]}, ["2:2", "2:2", "V1"]) == ROW_H
+
+
+def test_the_exported_row_says_more_than_one_when_three_signals_share(tmp_path):
+    session, hea = _exported(tmp_path, TWO_CODED_V1_AND_A_LOCAL_ONE, "three")
+    try:
+        assert _header_names(hea, 3) == ["5.6.3-9-3", "2:3", "v1"]
+        details = [d for kind, _uid, d in _rows(session) if kind in WARNED]
+        assert details == [ROW_TWO_OF_THREE]
+    finally:
+        session.close()
 
 
 def test_a_direct_caller_with_no_store_writes_no_row_and_still_falls_back(

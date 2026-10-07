@@ -519,11 +519,14 @@ class WaveformChannel:
         # it, case-insensitively, since carts write `sct` for `SCT`;
         # the two must not disagree about which scheme a code is in.
         # The Code Value is compared case-sensitively (every key is
-        # digits and punctuation) and without its surrounding spaces:
+        # digits and punctuation) and without its surrounding whitespace:
         # it is SH, "a character string that may be padded with leading
         # and/or trailing spaces" (PS3.5 §6.2), and pydicom strips only
-        # the trailing one on read, so ` 2:1` reaches here (#832). A
-        # `99...` scheme matches no key, so a local code is never named.
+        # the trailing one on read, so ` 2:1` reaches here (#832).
+        # `str.strip()` on purpose, which takes any whitespace and not
+        # the space alone (owner ruling on the review of #832; the docs
+        # say "whitespace"). Do not narrow it to `strip(" ")`. A `99...`
+        # scheme matches no key, so a local code is never named.
         key = (_normalized_scheme(self.source_scheme),
                str(self.source_code).strip())
         # MDC 2:3 is the one code the context group gave to two leads:
@@ -554,7 +557,8 @@ class WaveformChannel:
         The coded channel source when there is one: the lead's name
         (`I`, `aVR`, `V1` ...) when the source is an ECG lead of DICOM CID
         3001 in scheme MDC or SCPECG, and otherwise its Code Value
-        verbatim. The Code Value is compared without surrounding spaces.
+        verbatim. The Code Value is compared without surrounding
+        whitespace.
         `MDC 2:3` is `III` when its Code Meaning says Lead III and `V1`
         otherwise. This is one channel's answer: the exporter resolves
         names two signals of a record share

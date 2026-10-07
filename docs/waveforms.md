@@ -127,12 +127,16 @@ MDC only, `MCL1`, `MCL6`, `ES`, `AS` and `AI`. Both schemes the context
 group has used are read: IEEE 11073 `MDC` (`2:1` is lead I) and the
 SCP-ECG codes it used before, `SCPECG` (`5.6.3-9-1` is lead I), which
 carts still write. The Coding Scheme Designator is compared ignoring
-case, and the Code Value without the spaces around it (` 2:1` is `2:1`).
-Any other code, in any scheme, is written as its Code Value: a
+case, and the Code Value without the whitespace around it (` 2:1` is
+`2:1`). Any other code, in any scheme, is written as its Code Value: a
 derived or Frank lead, a calibration lead, a lead with no conventional
 short name (`-aVR`, `V2R`, `V6R` to `V9R`), a code under a local `99`
 scheme, and a source that is not a lead (a pressure or respiration
-waveform).
+waveform). That Code Value is written as the file holds it, so a local
+code is exported as the cart's operator typed it, and a rule of your own
+that replaces Code Value `(0008,0100)` exports its dummy, `ANONYMIZED`,
+as every signal's name. Both are as they were before 1.0.2; whether a
+code outside a published scheme should be written at all is issue #973.
 
 **`MDC 2:3` is Lead III or Lead V1.** The 2008 version of the context
 group (printed in PS3.16 2011) gave `MDC 2:3` to both leads; the 2013
@@ -142,7 +146,10 @@ which lead it is. For this code only, Isocenter reads the Channel Source
 item's Code Meaning `(0008,0104)`: when it says Lead III (`Lead III`,
 `lead iii` or `III`) the signal is named `III`, and otherwise `V1`. The
 limit: a Lead III coded `2:3` whose Code Meaning is empty, or says it
-another way (`Ableitung III`), is still named `V1`. No other code's name
+another way (`Ableitung III`), is still named `V1`. The same holds when a
+rule of your own replaces, empties or removes Code Meaning `(0008,0104)`:
+a 2008 Lead III is then named `V1` again, with no row saying so (the
+`basic` profile has no such rule). No other code's name
 depends on its Code Meaning, and nothing from the Code Meaning is written.
 
 **Two signals of one record do not share a lead name.** When two or more
