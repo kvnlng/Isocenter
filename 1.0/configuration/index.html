@@ -2938,17 +2938,17 @@ decided by its <strong>size</strong>, not its VR:</p>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;">Text or numeric VR (<code>LO</code>, <code>SH</code>, <code>DS</code>, ...)</td>
+<td style="text-align: left;">Text or numeric VR the source stated (<code>LO</code>, <code>SH</code>, <code>DS</code>, ...)</td>
 <td style="text-align: left;">Removed</td>
 <td style="text-align: left;"><strong>Kept</strong>, and written to the exported file</td>
 </tr>
 <tr>
-<td style="text-align: left;">Binary value (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>, <code>OV</code>, or <code>UN</code>) of 65534 bytes or less</td>
+<td style="text-align: left;">Binary value (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>, <code>OV</code>, or <code>UN</code>) of 65534 bytes or less, and any value of 65534 bytes or less whose VR the source did not state</td>
 <td style="text-align: left;">Removed</td>
-<td style="text-align: left;"><strong>Kept</strong>, and written to the exported file under the VR it was read with (<code>UN</code> when the source was Implicit VR, which states none)</td>
+<td style="text-align: left;"><strong>Kept</strong>, and written to the exported file under the VR the source stated (<code>UN</code> when it stated none)</td>
 </tr>
 <tr>
-<td style="text-align: left;">Binary value over 65534 bytes</td>
+<td style="text-align: left;">Such a value over 65534 bytes</td>
 <td style="text-align: left;">Dropped at ingest, <code>DATA_LOSS</code> row</td>
 <td style="text-align: left;">Dropped at ingest, <code>DATA_LOSS</code> row</td>
 </tr>
@@ -2957,7 +2957,7 @@ decided by its <strong>size</strong>, not its VR:</p>
 <p>65534 bytes is the largest value an explicit-VR 16-bit length field can
 carry. Because the limit weighs the value rather than the VR it was read
 with, explicit-VR and implicit-VR copies of one study give the same
-answer: under implicit VR pydicom reads every private tag as <code>UN</code>, and a
+answer: under implicit VR every private tag is held as <code>UN</code>, and a
 <code>UN</code> blob takes exactly the same size rule.</p>
 <p>A kept binary value whose bytes are not a whole number of its VR's words
 -- an <code>OL</code> of six bytes, say -- is written <code>UN</code> instead, and the
@@ -2966,9 +2966,29 @@ read with and the one it was written under. The VR is
 visible only in an explicit-VR export -- the compressed export of an
 instance with pixels; an uncompressed export, and any export of an
 instance without pixels, is Implicit VR and carries no VR on the wire.
-A binary value read from an Implicit VR source is written <code>UN</code> even when
-pydicom's private dictionary names a VR for its creator (a Siemens CSA
-header reads back as <code>OB</code>): the file itself stated none.</p>
+<strong>A private element is written under the VR its source stated, and
+<code>UN</code> when the source stated none.</strong> A source states no VR for a private
+element in two ways: it is Implicit VR, which names none, or it is
+Explicit VR and says <code>UN</code> ("VR unknown", PS3.5 6.2.2). Such an element
+is held as the source's own bytes and written <code>UN</code>, text and numbers
+included, even when pydicom's private dictionary names a VR for its
+creator (a Siemens CSA header <code>OB</code>, a Siemens MR header's <code>US</code> and <code>CS</code>
+elements): the dictionary's VR is a guess about the vendor's software
+version, not the file's statement. The bytes exported are the bytes read.
+Three things follow. A file whose bytes do not fit the dictionary's VR
+is ingested like any other. A text or numeric value over 65534 bytes from
+such a source is dropped with a <code>DATA_LOSS</code> row, as a binary one is; the
+row is written at ingest, before any configuration is loaded, so the run
+grades <code>REVIEW_REQUIRED</code> even when <code>remove_private_tags</code> would have
+removed the element. And a rule
+that needs to read the value -- a date shift on a private key -- cannot
+read <code>UN</code> bytes: the proposal is declined with a <code>REMEDIATION_DECLINED</code>
+row and the run grades <code>REVIEW_REQUIRED</code>; <code>REMOVE</code>, <code>EMPTY</code> and a valued
+<code>REPLACE</code> act on it as on any private value, and an explicit-VR export
+writes the replacement as <code>LO</code> and the emptied element as a zero-length
+<code>UN</code>. An Explicit VR Big Endian source that says <code>UN</code> draws one <code>WARNING</code>
+row per such element at ingest, since the byte order of <code>UN</code> words is
+unknown. The private creator element itself is always read as <code>LO</code>.</p>
 <p><strong>One <code>UN</code> value is resolved rather than kept opaque.</strong> If a private
 <code>UN</code> value begins with the item tag <code>(FFFE,E000)</code> and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
@@ -3143,7 +3163,7 @@ section but does not change the grade.</p>
 <li>No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.</li>
 </ul>
 </li>
-<li><strong>Longitudinal Temporal Information Modified <code>(0028,0303)</code></strong>, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element from an implicit-VR source has no recorded VR, so a date in it is not read and does not stop <code>MODIFIED</code>; it is exported as <code>UN</code>, and <code>remove_private_tags</code> (on by default) removes it.<ul>
+<li><strong>Longitudinal Temporal Information Modified <code>(0028,0303)</code></strong>, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says <code>UN</code>) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop <code>MODIFIED</code>; it is exported as <code>UN</code>, and <code>remove_private_tags</code> (on by default) removes it.<ul>
 <li><code>REMOVED</code> when every date is empty or the dummy <code>19000101</code>.</li>
 <li><code>MODIFIED</code> when the rest are shifts this store wrote.</li>
 <li>Nothing when any date is as it was ingested; the source's value, if any, then stays.</li>
