@@ -117,6 +117,34 @@ minor's work. A PR with neither is the next unreleased line's work.
    **The full suite is not a merge requirement.** It runs before a merge
    only when the rules above select it.
 
+   **Whenever `main` is taken into the branch, by rebase or by merge, check
+   where the branch's `CHANGELOG.md` entries landed** (#956). Git places a
+   hunk by its context and raises no conflict when the context has moved:
+   once a record-back ("Cutting a release", step 8) has put a released
+   heading above the entries a hunk was anchored on, the branch's entries
+   follow them under that heading. After `git fetch origin main`:
+   - `git diff --unified=0 origin/main -- CHANGELOG.md` shows the branch's
+     own entries and nothing else, and every hunk starts above `main`'s
+     first released heading: the `a` of each `@@ -a,b +c,d @@` is less
+     than the line number that
+     `git show origin/main:CHANGELOG.md | grep -n -m1 '^## \[[0-9]'`
+     prints. A hunk at or below that line is an entry under a released
+     heading. Move it up into `[Unreleased]` by hand, in the merge commit
+     or the next one.
+   - `tests/test_released_changelog_sections_stay_as_released.py` passes.
+     `pytest --changed` selects it for any change to `CHANGELOG.md`, so
+     the runs above include it. It compares each released section with
+     `origin/main`'s as well as with its tag's, because a clone seldom
+     has the newest tag: release tags sit on `release/X.Y`, and `git
+     fetch origin main` does not bring them. On a branch that adds no
+     released section, a skip naming `origin/main` means the ref is
+     missing or stale: fetch, and run it again.
+
+   The merge of the 1.0.0rc13 record-back into #958's branch did this on
+   2026-10-07: three entries, 37 lines, at the end of `[1.0.0rc13]`, with
+   no conflict. The developer moved them by hand. The rc10 and rc11
+   record-backs did it before (#927).
+
    **A change that alters exported output updates the output fingerprint
    in the same PR.** `fingerprint/output.json` records what the golden
    cohort exports (`scripts/output_fingerprint.py` says what it covers
@@ -457,7 +485,9 @@ fixes, never features.
      find its own new entries under the released heading with no
      conflict; `tests/test_released_changelog_sections_stay_as_released.py`
      fails a released section whose lines are not those of the newest
-     tag that holds it, other than a line rewritten in place;
+     tag that holds it, or of `origin/main`, other than a line rewritten
+     in place ("Changes land on `main`", step 3, has the check to run
+     after such a merge);
    - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that
@@ -599,6 +629,23 @@ cut this way (#818, #821, #822).
        record-back changed (`RELEASING.md` at rc2), is resolved with `git checkout --ours <file>` (ours is the
        branch), `git add <file>`, then `git cherry-pick --continue`. The
        last commit deals with both.
+     - **A pick whose `CHANGELOG.md` hunk applies with no conflict has
+       still put its entry in the wrong place,** and is left as it is.
+       The branch has no `[Unreleased]` heading, so git places the hunk
+       by its context, under a released one. Whatever a pick leaves in
+       `CHANGELOG.md`, with a conflict or without, is provisional: the
+       last commit writes the file again from `main`'s (below). Three of
+       the four picks for 1.0.0rc14 did this (#967, 2026-10-07): before
+       the last commit the file differed from `main`'s by 7 insertions
+       and 56 deletions, and nothing had conflicted.
+     - **A pick whose whole diff is `CHANGELOG.md`** and that conflicts
+       would come out empty under `--ours`, and an empty pick reads as a
+       forward-port (above). Resolve it to `main`'s file at that commit
+       instead: `git checkout <its sha> -- CHANGELOG.md`, `git add
+       CHANGELOG.md`, then `git cherry-pick --continue`. The pick stays
+       on the branch with its `-x` line, and the last commit writes the
+       file like any other pick's (#956; the picks for rc12, #928, and
+       for rc13, #955, were resolved this way before the rule said so).
      - **Never resolve `fingerprint/output.json` by hand.** Keep the
        branch's copy (`--ours`) and retake it, as below.
      - Any other conflict, which a left-out commit upstream of a pick can
