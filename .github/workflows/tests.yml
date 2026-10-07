@@ -72,22 +72,49 @@ jobs:
         # publish.yml after 30 runs of the four-way matrix produced zero
         # divergences that were not step timeouts.
         python-version: ${{ fromJSON(inputs.python-versions || '["3.12", "3.14t"]') }}
-        # Four duration-balanced shards per version (#707). Four because
-        # the release runs four versions: 16 jobs stays under the plan's
-        # 20-job concurrency limit. Membership is a pure function of
-        # tests/shard_timings.json (tests/support/shards.py), and
+        # Duration-balanced shards per version (#707). Membership is a
+        # pure function of tests/shard_timings.json
+        # (tests/support/shards.py), and
         # tests/test_shards_partition_the_suite.py pins that this list is
         # exactly 1..N for the N the run step divides by -- a shard left
-        # off this list is a quarter of the suite nobody runs, and green.
+        # off this list is a part of the suite nobody runs, and green.
         # A test file added after the timings were recorded weighs the
-        # median and still lands in exactly one shard. Regenerate the
-        # timings on 3.12 with `--record-shard-timings=<abs path>` when the
-        # balance drifts; drift costs wall time, never a test.
+        # median and still lands in exactly one shard; drift in the
+        # balance costs wall time, never a test.
+        #
+        # Four from #707 (2026-09-21) until #935, chosen because the
+        # release runs four versions and 16 jobs stayed under the plan's
+        # 20-job concurrency limit, with timings recorded locally on 3.12
+        # by `--record-shard-timings=<abs path>`.
+        #
+        # Eight since #935 (2026-10-07, owner ruling Q1 A). The suite had
+        # grown to 4,100-5,000 runner-seconds per version, so a perfectly
+        # even quarter was already 1,020-1,255 s of the 1,500 s step, and
+        # one runner was measured 1.75 times slower than another at one
+        # commit. Three shard-4 or shard-3 steps reached the cap or came
+        # within 40 s of it at the rc12 publish and the rc13 rehearsal
+        # with every test passing. The Run Tests step below has the
+        # figures. The count moved and the cap did not: an eighth is
+        # predicted at 575 s (38%) on an ordinary runner and 1,006 s (67%)
+        # on the slowest seen.
+        #
+        # A release is now 32 test jobs (a dispatch of this file is 16),
+        # which is over the 20 the paragraph above was sized for. Over a
+        # concurrency limit jobs queue; none fails, and a job's and a
+        # step's timeout run from its own start, not from the dispatch.
+        #
+        # tests/shard_timings.json has held runner seconds since #935, one
+        # number per file: the median of the four versions' `Run Tests`
+        # logs of run 37555211835 (the rc13 rehearsal). The local
+        # recording it replaced had no number for 78 of 413 files, which
+        # were 36% of the suite's seconds, and a runner is about 2.3 times
+        # slower per file. A local recording and a runner's are different
+        # units: do not mix them in one file.
         #
         # The concurrency group above needs no shard in it: it is declared
         # at workflow level, so it scopes the run, and matrix jobs inside
         # one run do not compete for it.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     # Backstop only, against what no step timeout covers -- it must exceed
     # the SUM of the step allowances below, or some step's own timeout
     # becomes unreachable and a hang there dies as 'cancelled' with no
@@ -192,9 +219,33 @@ jobs:
       # stays under half of this. The shards are uneven on a runner
       # (shard 1 lightest) because the timings were recorded locally; that
       # costs wall time, not coverage.
+      #
+      # Unchanged at 25 when the suite became eight shards per version
+      # (#935, 2026-10-07, owner ruling Q1 A): the room came from the
+      # shard count, so the step sum (38), the job cap (45) and the
+      # faulthandler relation stand as they were. What four shards had
+      # come to, from the `Run Tests` step of each release run: the
+      # suite went from 6,118 passed tests at rc1 (2026-09-24) to 7,392
+      # at rc13 (2026-10-06), and a version's four steps from 3,448-3,666
+      # s to 4,344-4,380 s. Killed at the cap with every listed test
+      # passing: `(3.14t, 4)` at the rc12 publish (run 37089244834,
+      # 1,513 s; its rerun took 1,229 s) and at the rc13 rehearsal (run
+      # 37555211835, 1,513 s; its rerun 1,463 s), where `(3.14t, 3)` took
+      # 1,495 s in the same run. The killed rc13 attempt was a slow
+      # runner, not a stall: the same 1,015 tests, 1.38 times slower
+      # than the rerun in every quarter of the run, longest gap 22 s.
+      # One commit (7fd9e302) ran that shard in 1,156 s at the tag and
+      # was on course for about 2,020 s in the killed attempt: 1.75
+      # times between the fastest and slowest runner seen. Rebalancing
+      # alone would not have been enough: four shards cut from runner
+      # timings peak at 1,128 s (75%) on the fast runner and 1,974 s
+      # (132%) on the slow one. Eight peak at 575 s (38%) and 1,006 s
+      # (67%), and at about 1,210 s (80%) on the slow runner after
+      # another 20% of growth. Past that, add shards or raise this,
+      # and if it is raised, raise the family with it as said above.
       timeout-minutes: 25
       run: |
-        pytest -v --shard=${{ matrix.shard }}/4
+        pytest -v --shard=${{ matrix.shard }}/8
       env:
         # Derived from the version rather than carried in a parallel
         # `include:` block, so adding a version to the matrix cannot
@@ -220,6 +271,6 @@ jobs:
       run: |
         outcome="${{ steps.suite.outcome }}"
         [ "$outcome" = "success" ] && mark="pass" || mark="**$outcome**"
-        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}) shard ${{ matrix.shard }}/4: $mark" \
+        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}) shard ${{ matrix.shard }}/8: $mark" \
           >> "$GITHUB_STEP_SUMMARY"
 
