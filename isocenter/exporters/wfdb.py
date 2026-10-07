@@ -245,11 +245,6 @@ def _lead_name_clash_detail(clashes) -> str:
     # Channel numbers (1-based, as DICOM numbers them) and the table's own
     # name. Never a Code Value or a Code Meaning: a non-conformant source
     # can put anything in either, and this renders into the report.
-    def listed(numbers):
-        texts = [str(number) for number in numbers]
-        return (texts[0] if len(texts) == 1
-                else f"{', '.join(texts[:-1])} and {texts[-1]}")
-
     clauses = []
     for name, numbers in clashes.items():
         if len(numbers) == 1:
@@ -260,8 +255,9 @@ def _lead_name_clash_detail(clashes) -> str:
                 "which another signal of the record carries without a lead "
                 "code")
         else:
+            texts = [str(number) for number in numbers]
             clauses.append(
-                f"channels {listed(numbers)} "
+                f"channels {', '.join(texts[:-1])} and {texts[-1]} "
                 f"{'both' if len(numbers) == 2 else 'all'} resolve to the "
                 f"lead name {name}")
     one = len(clashes) == 1 and len(next(iter(clashes.values()))) == 1
