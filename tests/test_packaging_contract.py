@@ -1488,6 +1488,19 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
 #: 20 (faulthandler_timeout = 300 s must sit well inside half of it).
 #: That gives 25, which puts the peak at 50%. A floor still: the job cap
 #: and faulthandler tests below move with it.
+#:
+#: Unchanged at 25 when the suite became eight shards per version (#935,
+#: 2026-10-07, owner ruling Q1 A). By then a step ran a quarter of a
+#: suite that had grown from 6,118 to 7,392 tests in twelve days: the
+#: `(3.14t, 4)` step was killed at 1,513 s with every listed test passing
+#: at the rc12 publish (run 37089244834) and at the rc13 rehearsal (run
+#: 37555211835), and one commit's shard took 1.75 times as long on the
+#: slowest runner seen as on the fastest, which the 60% rule could no
+#: longer absorb. The room was made by the shard count, not here: an
+#: eighth, cut from runner timings, is predicted at 575 s (38% of this)
+#: on an ordinary runner and 1,006 s (67%) on the slowest. So the
+#: figure in the message below, 751 s, is still the peak this floor was
+#: sized from; it is no longer the peak of a shard.
 _RUN_TESTS_STEP_MINUTES_FLOOR = 25
 
 
