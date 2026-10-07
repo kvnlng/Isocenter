@@ -285,9 +285,10 @@ def test_without_a_session_absence_is_read_on_the_entity():
 def test_an_attribute_that_is_not_an_exported_field_is_untouched_by_the_rule(tmp_path):
     """The gate is `ENTITY_FIELD_TAGS`, as #626's is well-formed tags:
     absence under a name the export never writes is no evidence about an
-    element. A hand-built REMOVE on such a name behaves exactly as it
-    did -- the boundary of the rule, not an endorsement of the arm's
-    looseness, which is #679.
+    element, so a hand-built REMOVE on such a name is never read as
+    satisfied. Until #679 the arm then ran on it (`setattr(..., None)`,
+    counted as applied); since #679 the arm writes only the fields the
+    export stamps, so it declines: nothing applied, and one row.
     """
     with _session(tmp_path) as session:
         series = session.store.patients[0].studies[0].series[0]
@@ -295,4 +296,8 @@ def test_an_attribute_that_is_not_an_exported_field_is_untouched_by_the_rule(tmp
         finding = _finding(series, "Series", series.series_instance_uid,
                            "modality")
 
-        assert session.anonymize([finding]) == 1
+        assert session.anonymize([finding]) == 0
+        session.store_backend.flush_audit_queue()
+        [row] = session.store_backend.get_audit_declines()
+        assert ("REMOVE_TAG on modality matched no applicable arm for Series"
+                in " ".join(str(value) for value in tuple(row)))

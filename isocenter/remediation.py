@@ -415,7 +415,7 @@ class RemediationService:
         elif proposal.action_type == "REMOVE_TAG":
             # 1. A DicomItem.
             if hasattr(entity, "attributes") and isinstance(entity.attributes, dict):
-                if proposal.target_attr in entity.attributes:
+                if self._holds_tag_to_remove(entity, proposal.target_attr):
                     self._record_what_is_left(entity, proposal.target_attr, None)
                     del entity.attributes[proposal.target_attr]
                     # `attributes` is a plain dict, so `del` bumps no revision,
@@ -512,7 +512,11 @@ class RemediationService:
             return True
         else:
             # Every other non-success path above `return`s, so reaching
-            # here with an empty `action_type` means one of four things:
+            # here with an empty `action_type` means one of five things:
+            # a `REMOVE_TAG` on an instance's top-level copy of a tag the
+            # export stamps from its owner, present or not, which is the
+            # owner's to decide (handled first, below, and not counted in
+            # what follows);
             # a `REMOVE_TAG` whose target is in neither `attributes` nor
             # `sequences`; a `REMOVE_TAG` against an entity with no
             # `attributes` dict *and* no matching Python attribute (the
@@ -524,7 +528,8 @@ class RemediationService:
             # proposal carrying an action type this method does not
             # implement.
             #
-            # The first and the third are the end state REMOVE asks for,
+            # Of the other four, the first and the third are the end
+            # state REMOVE asks for,
             # already there: satisfied, not a decline, or
             # `anonymize(report)` handed one report twice would write a
             # decline row for every removal the first call made and grade
@@ -546,6 +551,20 @@ class RemediationService:
             # while the live graph still held it. On the session path the
             # findings are already bound to that object, so the two
             # differ only for an entity filed at another address.
+            #
+            # Before any of that, an instance's top-level copy of a tag
+            # the export stamps from its owner (#764). The item arm above
+            # left it alone (`_holds_tag_to_remove`), and its absence is
+            # no end state either: the file carries the owner's value
+            # whatever the instance holds. `_owner_stamps_copy` decides,
+            # as it does for REPLACE and SHIFT, and its reason wins;
+            # `_record_decline` routes the two that are not declines. Here
+            # and not in the arm, which ends in a line-cited
+            # `mark_modified()`.
+            stamped = self._owner_stamps_removal(entity, finding)
+            if stamped is not None:
+                self._record_decline(finding, stamped, audit_buffer)
+                return False
             subject = self._removal_subject(finding, entity)
             if self._remove_is_satisfied(subject, proposal):
                 self.logger.info(
@@ -831,7 +850,8 @@ class RemediationService:
         Two reasons from `_owner_stamps_copy` are not declines and write
         no row: a `_CopyLeftEmpty` is routed to `_satisfied`, and an
         `_OwnerNotHandedIn` does nothing, leaving the finding unhandled
-        for the scan tally.
+        for the scan tally. Its three callers -- REPLACE, SHIFT and, since
+        #764, a REMOVE that reached no arm -- all route them here.
 
         Args:
             finding (PhiFinding): The finding that declined.
@@ -1144,15 +1164,45 @@ class RemediationService:
         return (f"{proposal.target_attr}: the value is not this store's "
                 "replacement for the UID the scan saw, so it is not written")
 
+    def _holds_tag_to_remove(self, entity, tag) -> bool:
+        """Whether the `REMOVE_TAG` item arm has an element to remove on
+        `entity`.
+
+        False where the item does not hold `tag` in `attributes`, and for
+        an instance's top-level copy of a tag the export stamps from its
+        owner (`_owner_stamps_tag`): removing that copy would not remove
+        the element from the file (#764). Both fall past the arm; the
+        bottom `else` asks `_owner_stamps_copy` about a stamped copy
+        before it reads absence as done.
+
+        Args:
+            entity: The `DicomItem` the removal targets.
+            tag (str): The proposal's `target_attr`, as given.
+
+        Returns:
+            bool: True when the arm should delete the element.
+        """
+        # Pure, with no `audit_buffer`, and defined below the five
+        # line-cited `mark_modified()` calls so the arm's condition stays
+        # one same-line call, as `_holds_attr_to_remove` is for the arm
+        # below it. The raw key, as the arm has always read it: a tag
+        # spelled in upper case falls past. In the bottom `else` an
+        # owner-stamped one (`0020,000D`) is decided by
+        # `_owner_stamps_removal`, which canonicalises it; any other
+        # declines.
+        return tag in entity.attributes and not self._owner_stamps_tag(entity, tag)
+
     @classmethod
     def _holds_attr_to_remove(cls, entity, attr) -> bool:
         """Whether the `REMOVE_TAG` Python-attribute arm has something to
         remove on `entity`.
 
-        False where the entity lacks the attribute or the field is already
-        gone (`_owner_field_gone`): the removal then falls past every arm
-        to the bottom `else`, where it is satisfied when the object at its
-        address reads gone too, and declines otherwise.
+        False where `attr` is not a field the exporter stamps
+        (`ENTITY_FIELD_TAGS`), where the entity lacks the attribute, and
+        where the field is already gone (`_owner_field_gone`): the removal
+        then falls past every arm to the bottom `else`, where it is
+        satisfied when the object at its address reads gone too, and
+        declines otherwise.
 
         Args:
             entity: The entity the removal targets.
@@ -1167,7 +1217,18 @@ class RemediationService:
         # `_replace_attr_refused` is, and defined below the five line-cited
         # `mark_modified()` calls so the arm's condition stays a same-line
         # call.
-        return hasattr(entity, attr) and not cls._owner_field_gone(entity, attr)
+        #
+        # Only the fields the exporter stamps (#679). The arm is
+        # `setattr(entity, attr, None)`, so any other name the entity
+        # carries was cleared too: a hand-built finding naming
+        # `Patient.studies` left the patient with no list, and the next
+        # `save()`, `export()` and `generate_report()` raised `TypeError`.
+        # Such a name falls to the bottom `else` and its `matched no
+        # applicable arm` row. `patient_id` and the owned UIDs are in the
+        # table, so a hand-built REMOVE on one of them still clears a
+        # field the store keys on (#949).
+        return (attr in cls.ENTITY_FIELD_TAGS and hasattr(entity, attr)
+                and not cls._owner_field_gone(entity, attr))
 
     @classmethod
     def _owner_field_gone(cls, entity, attr) -> bool:
@@ -1702,7 +1763,8 @@ class RemediationService:
         self._copy_owners = self._MappingProxyType(dict(owners))
         self._owners_handed = frozenset(handed)
 
-    def _owner_stamps_copy(self, entity, finding: PhiFinding) -> Optional[str]:
+    def _owner_stamps_copy(self, entity, finding: PhiFinding,
+                           removal: bool = False) -> Optional[str]:
         """Why an instance finding on an owner-stamped copy must not run, or
         None when the copy is not one.
 
@@ -1713,12 +1775,23 @@ class RemediationService:
         top-level copy of one of them is never what the file carries, and
         an instance finding on it that reaches an arm (its owner's write
         did not reach it) does not run. None also when there is no session
-        (`_copy_owners` unset) or the instance has no entry.
+        (`_copy_owners` unset) or the instance has no entry
+        (`_stamping_owner`).
 
         **Already there**: when the copy holds the owner's value and a
         remediation record vouches for it, returns `""`, which the
         callers read as satisfied (REPLACE) or run their own checks on
         (SHIFT).
+
+        **A removal** (`removal=True`, #764) is never "already there" on
+        the strength of a value, so it never returns `""`: a copy holding
+        the owner's value is a file carrying it. Its end state is the
+        owner holding *no* value. Then the export writes the element
+        empty, the copy is left `''` (or absent), and a `_CopyLeftEmpty`
+        is returned whether or not the owner was handed in: an owner
+        whose removal ran has not declined. An owner still holding a
+        value gives the two answers below, the decline in a sentence of
+        its own.
 
         Otherwise the copy is first set to what the export writes: the
         owner's current value, rendered as the export renders it
@@ -1755,48 +1828,35 @@ class RemediationService:
         Args:
             entity: The entity the finding targets.
             finding (PhiFinding): The instance finding.
+            removal (bool): True for a `REMOVE_TAG` finding.
 
         Returns:
             Optional[str]: None when the copy is not owner-stamped; `""`
-                when the end state is already there; otherwise a reason (a
-                plain str, a `_CopyLeftEmpty` or an `_OwnerNotHandedIn`).
+                when the end state is already there (never for a
+                removal); otherwise a reason (a plain str, a
+                `_CopyLeftEmpty` or an `_OwnerNotHandedIn`).
         """
         # An owner's write in this pass reaches the copy and the instance
         # finding folds into it before any arm runs, so a finding here is
         # one whose owner did not write; run anyway, it would write a value
         # no file carries and stamp REMEDIATED over it. No `audit_buffer`:
         # the frozen-surface pin (Pin A) refuses a callee that takes one.
-        from .entities import _canonical_tag, exported_patient_id  # pylint: disable=import-outside-toplevel
+        from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
 
-        owners = (self._copy_owners or {}).get(id(entity))
-        if owners is None:
-            return None
-        patient, study, series = owners
         tag = _canonical_tag(finding.remediation_proposal.target_attr)
-        if tag == "0010,0010":
-            owner, value = patient, patient.patient_name
-        elif tag == "0010,0020":
-            owner, value = patient, exported_patient_id(patient)
-        elif tag == "0008,0020":
-            from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
-            owner, value = study, format_study_date(study.study_date)
-        # The owned UIDs: the export stamps them from the Study and the
-        # Series as they stand, so a copy written as the replacement while
-        # its owner kept the source would be a file carrying the source
-        # beside a graph and a REMEDIATED stamp that said otherwise.
-        elif tag == "0020,000d":
-            owner, value = study, study.study_instance_uid
-        elif tag == "0020,000e":
-            owner, value = series, series.series_instance_uid
-        else:
+        stamp = self._stamping_owner(entity, tag)
+        if stamp is None:
             return None
+        owner, value = stamp
         value = "" if value is None else value
         # The copy already holds what an owner's write left on it -- an
         # earlier pass handed the owner and this one the instance: the
         # end state is there, and a decline would be REVIEW_REQUIRED over
         # nothing. `""` tells the callers so: REPLACE reads it as
-        # satisfied, SHIFT runs its own checks.
-        if (entity.attributes.get(tag) == value
+        # satisfied, SHIFT runs its own checks. Never for a removal: a
+        # copy holding the owner's value is a file carrying that value,
+        # which is the opposite of what REMOVE asks (#764).
+        if (not removal and entity.attributes.get(tag) == value
                 and entity.remediation_vouches_for(tag, value)):
             return ""
         if tag in entity.attributes and entity.attributes[tag] != value:
@@ -1840,7 +1900,7 @@ class RemediationService:
                 # does not demote it -- an earlier pass already acted on
                 # this key. Not a decline: no row.
                 self._declined_entities.append(entity)
-            if vouched:
+            if vouched and not removal:
                 # The copy now holds what an owner's write left on its
                 # siblings, with the record to say so: the end state the
                 # check above reads as already there, so it is read the
@@ -1852,7 +1912,17 @@ class RemediationService:
                 # re-audit that raised nothing (#894).
                 return ""
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
-        if not {(id(owner), field), (None, field)} & self._owners_handed:
+        handed = bool({(id(owner), field), (None, field)} & self._owners_handed)
+        if removal and value == "":
+            # The owner holds no value, so the export writes the element
+            # empty, and the copy is `''` (synced above) or absent:
+            # nothing is left in the graph or the file, which is the end
+            # state REMOVE asks for. Whether or not the owner was handed
+            # in: an owner whose own removal ran, or was already there,
+            # has not declined, and a row here would grade a report
+            # handed twice REVIEW_REQUIRED over a clean graph (#567).
+            return _CopyLeftEmpty(tag)
+        if not handed:
             if value == "" and entity.attributes.get(tag, "") == "":
                 # The owner holds no value -- a Study Date the source
                 # spelled `1994.11.05`, which no Study holds -- so the
@@ -1874,12 +1944,102 @@ class RemediationService:
                 f"{tag} on {self._log_subject(finding)} follows its "
                 f"{type(owner).__name__}, which this pass was not handed")
             return _OwnerNotHandedIn(tag)
-        reason = (f"{tag} is written by the export from the "
-                  f"{type(owner).__name__}, whose value this pass did not write; "
-                  "the instance's copy holds the value the export writes")
+        if removal:
+            # Its own sentence: #624's "whose value this pass did not
+            # write" is false where the owner's REPLACE did write, in the
+            # same pass, beside a hand-built instance REMOVE (Q2 A).
+            reason = (f"{tag} is written by the export from the "
+                      f"{type(owner).__name__}, which still holds a value, so "
+                      "removing the instance's copy would not remove it from "
+                      "the file; the copy holds the value the export writes")
+        else:
+            reason = (f"{tag} is written by the export from the "
+                      f"{type(owner).__name__}, whose value this pass did not write; "
+                      "the instance's copy holds the value the export writes")
         self.logger.warning(
             f"Remediation declined for {self._log_subject(finding)}: {reason}")
         return reason
+
+    def _stamping_owner(self, entity, tag):
+        """The owner the export stamps `tag` from on `entity`, and the
+        value it stamps.
+
+        The one table of "the tags an owner stamps" on this path:
+        `_owner_stamps_copy` reads the value, `_owner_stamps_tag` only
+        whether there is one.
+
+        Args:
+            entity: The entity a finding targets.
+            tag (str): The canonical `gggg,eeee` tag.
+
+        Returns:
+            Optional[tuple]: `(owner, value)` -- the Patient, Study or
+                Series, and its value as the export renders it
+                (`exported_patient_id`, `format_study_date`), None for a
+                field holding none. None as the whole answer when there
+                is no session (`_copy_owners` unset), `entity` is not an
+                instance of the graph (a nested item never is), or `tag`
+                is not one the export stamps from an owner.
+        """
+        # Not `ENTITY_FIELD_TAGS`: that also holds Study Time
+        # `0008,0030`, which has no arm here (ingest never populates
+        # `Study.study_time`).
+        from .entities import exported_patient_id  # pylint: disable=import-outside-toplevel
+
+        owners = (self._copy_owners or {}).get(id(entity))
+        if owners is None:
+            return None
+        patient, study, series = owners
+        if tag == "0010,0010":
+            return patient, patient.patient_name
+        if tag == "0010,0020":
+            return patient, exported_patient_id(patient)
+        if tag == "0008,0020":
+            from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
+            return study, format_study_date(study.study_date)
+        # The owned UIDs: the export stamps them from the Study and the
+        # Series as they stand, so a copy written as the replacement while
+        # its owner kept the source would be a file carrying the source
+        # beside a graph and a REMEDIATED stamp that said otherwise.
+        if tag == "0020,000d":
+            return study, study.study_instance_uid
+        if tag == "0020,000e":
+            return series, series.series_instance_uid
+        return None
+
+    def _owner_stamps_tag(self, entity, tag) -> bool:
+        """Whether `tag` on `entity` is an instance's top-level copy of a
+        tag the export stamps from its owner.
+
+        Args:
+            entity: The entity a finding targets.
+            tag (str): The tag, in any case.
+
+        Returns:
+            bool: True when `_stamping_owner` names an owner for it; False
+                with no session, for a nested item, and for any other tag.
+        """
+        from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+
+        return self._stamping_owner(entity, _canonical_tag(tag)) is not None
+
+    def _owner_stamps_removal(self, entity, finding: PhiFinding) -> Optional[str]:
+        """`_owner_stamps_copy` for a `REMOVE_TAG` that reached no arm.
+
+        Args:
+            entity: The entity the finding targets.
+            finding (PhiFinding): The finding.
+
+        Returns:
+            Optional[str]: None for any other action, for an entity that
+                is not a `DicomItem`, and for a copy no owner stamps;
+                otherwise `_owner_stamps_copy`'s answer for a removal,
+                which is never `""`.
+        """
+        if (finding.remediation_proposal.action_type != "REMOVE_TAG"
+                or not hasattr(entity, "set_attr")):
+            return None
+        return self._owner_stamps_copy(entity, finding, removal=True)
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on.
@@ -2094,9 +2254,11 @@ class RemediationService:
         A REMOVE folds only into a write that *removed* the copy, and
         anything else only into one that wrote a value (`_owner_copies`
         records which). An owner that wrote a value does not absorb an
-        instance REMOVE, which still runs and removes the copy; one rule
-        feeds both levels on every scanned path, so that pairing only
-        arises from a hand-built list.
+        instance REMOVE: that finding reaches `_owner_stamps_copy`, which
+        declines it with a row and leaves the copy holding the owner's
+        value, since the file carries it (#764). One rule feeds both
+        levels on every scanned path, so that pairing only arises from a
+        hand-built list.
 
         Three things never fold:
 
