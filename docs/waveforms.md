@@ -400,6 +400,13 @@ resolved against the surviving group, which would give a plausible lead
 name at a plausible sample position, both belonging to a signal that is
 not in the record.
 
+A mark that names a channel of the kept group which the record has no
+signal for is kept, with no `lead`. That is a file with more Channel
+Definitions than `NumberOfWaveformChannels`: the `.hea` has one signal
+line per sample column, so a mark on a channel past the last column names
+a lead no signal of the record carries. Its sample position is still on
+the record's axis, so the mark stays.
+
 The same filtering happens on the object graph at ingest, so a **DICOM**
 export does not carry a Waveform Annotation Sequence `(0040,B020)` item
 whose reference names a group that is not in the file. The filter works

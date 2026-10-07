@@ -13,7 +13,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from .config_manager import _vr_dummy
-from .exporters.wfdb import _sanitize_description, _signal_descriptions
+from .exporters.wfdb import _signal_descriptions
 # The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
 # iteration -- lives in waveform.py, because the graph-side
 # dangling-reference filter must read the pairs exactly as this bridge
@@ -144,15 +144,16 @@ def _lead_for(waveform, referenced_channels,
     # one of those resolves to no lead, as it always has.
     if not 0 <= index < len(waveform.channels):
         return None
-    if index < len(descriptions):
-        return descriptions[index]
-    # A defined channel with no signal line: more Channel Definitions than
-    # sample columns. The header has no name for it, so it keeps its own
-    # channel's answer, as before #832 (measured at bb5e6f1f: three
-    # definitions over two columns, a mark on channel 3, `lead` `III`).
-    # Whether such a mark should carry a lead at all is an open question,
-    # not one #832 ruled on.
-    return _sanitize_description(waveform.channels[index].wfdb_description(index))
+    # And bounded by the list: a defined channel with no signal line (more
+    # Channel Definitions than sample columns) is no signal of the record,
+    # so a mark on it carries no lead (#963, owner ruling). Do not fall
+    # back to the channel's own `wfdb_description()` here: that named a
+    # lead the `.hea` has no line for (three definitions over two columns,
+    # a mark on channel 3, `lead` `III`). A caller that hands no list gets
+    # one over the defined channels, where this arm cannot fire.
+    if index >= len(descriptions):
+        return None
+    return descriptions[index]
 
 
 def _sample_positions(item, waveform) -> List[int]:

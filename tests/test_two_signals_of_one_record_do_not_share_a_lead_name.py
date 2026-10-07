@@ -308,11 +308,16 @@ def test_the_murmur_bridge_reads_the_list_it_is_handed(tmp_path):
         session.close()
 
 
-def test_a_mark_on_a_defined_channel_with_no_signal_line_keeps_its_lead(tmp_path):
-    """Three definitions over two sample columns: the header writes two
-    signal lines, and the exporter's list holds two names. A mark on
-    channel 3 took the third definition's name before #832 (measured at
-    bb5e6f1f: `['I', 'II', 'III']`), and #832 does not change that."""
+def test_a_mark_on_a_channel_the_record_has_no_signal_for_carries_no_lead(
+        tmp_path):
+    """Three definitions over two sample columns (#963, owner ruling): the
+    header writes two signal lines, so the record has no third signal, and
+    a mark on channel 3 names none. It took the third definition's name
+    (measured at bb5e6f1f: `['I', 'II', 'III']`), a lead no signal of the
+    record carries. The mark is kept; its `lead` key is absent, which is
+    how the bridge writes every mark with no lead (the schema does not
+    require the key and the bridge never writes null). The header does not
+    move and no row is written: none was ruled."""
     import pydicom
 
     channels = [("MDC", "2:1", "Lead I", ""), ("MDC", "2:2", "Lead II", ""),
@@ -328,8 +333,20 @@ def test_a_mark_on_a_defined_channel_with_no_signal_line_keeps_its_lead(tmp_path
     try:
         session.ingest(str(source))
         records = session.export(str(tmp_path / "out"), format="wfdb")
+        with open(records[0], encoding="utf-8") as handle:
+            header = handle.read().splitlines()
+        # Two signal lines and no third, as before.
+        assert header[0].split()[1] == "2"
         assert _header_names(records[0], 2) == ["I", "II"]
-        assert _leads(records[0]) == ["I", "II", "III"]
+        assert [line for line in header[3:] if not line.startswith("#")] == []
+        with open(os.path.splitext(records[0])[0] + ".annotations.json",
+                  encoding="utf-8") as handle:
+            findings = json.load(handle)["findings"]
+        assert [f["startSample"] for f in findings] == [9, 19, 29]
+        assert [f.get("lead", "<absent>") for f in findings] == [
+            "I", "II", "<absent>"]
+        assert "lead" not in findings[2]
+        assert [row for row in _rows(session) if row[0] in WARNED] == []
     finally:
         session.close()
 

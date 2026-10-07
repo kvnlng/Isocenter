@@ -455,14 +455,17 @@ def unstated_private_vr(out: Path):
 
 
 def ecg_lead_codes(out: Path):
-    """Four ECGs of four patients whose Channel Source codes the WFDB lead
+    """Five ECGs of five patients whose Channel Source codes the WFDB lead
     names turn on (#832). `-2008-12lead`: twelve leads coded to PS3.16's
     2008 lead table, where `MDC 2:3` is both Lead III and Lead V1, with a
     mark on each (channels 3 and 7); the Code Meaning tells them apart.
     `-2008-limb`: leads I, II and III of that table, a `2:3` with no V1
     beside it. `-padded`: Code Values with a space in front, behind and on
     both sides. `-coded-twice`: Lead II on two channels, so both are
-    written as `2:2`, with the `WARNING` row and a mark on channel 2. The
+    written as `2:2`, with the `WARNING` row and a mark on channel 2.
+    `-short`: three Channel Definitions over two sample columns, with a
+    mark on channel 2 and one on channel 3, which the record has no signal
+    for and which therefore carries no `lead` (#963). The
     `ecg` member's codes are reference IDs, which no table names, and
     pydicom's own ECG is SCP-ECG coded: neither holds a `2:3`, a padded
     code or a shared name."""
@@ -487,7 +490,12 @@ def ecg_lead_codes(out: Path):
             (" 2:61 ", "Lead III", "III"),
             ("2:62", "aVR, augmented voltage, right", "aVR"))),
         ("coded-twice", (2,), (
-            ("2:2", "Lead II", "II"), ("2:2", "Lead II", "II"))))
+            ("2:2", "Lead II", "II"), ("2:2", "Lead II", "II"))),
+        ("short", (2, 3), (
+            ("2:1", "Lead I", "I"), ("2:2", "Lead II", "II"),
+            ("2:61", "Lead III", "III"))))
+    # `-short` alone holds fewer sample columns than Channel Definitions.
+    columns = {"short": 2}
     for n, (label, marked, channels) in enumerate(files, start=1):
         # The committed bytes are the authority for good, so the member is
         # conformant apart from what it is there to show. The fixture
@@ -513,6 +521,12 @@ def ecg_lead_codes(out: Path):
                 chdef.ChannelSourceSequence[0].CodeMeaning = meaning
             for channel in marked:
                 add_annotation(ds, 100 * channel, channel=channel)
+            if label in columns:
+                group = ds.WaveformSequence[0]
+                samples = np.frombuffer(group.WaveformData, dtype="<i2")
+                group.NumberOfWaveformChannels = columns[label]
+                group.WaveformData = samples.reshape(
+                    -1, len(channels))[:, :columns[label]].tobytes()
             fds = FileDataset(None, ds, file_meta=ds.file_meta, preamble=b"\0" * 128)
             write(fds, out / f"ecg_lead_codes-{label}.dcm", ExplicitVRLittleEndian)
 
