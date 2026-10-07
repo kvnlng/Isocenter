@@ -1983,7 +1983,8 @@
 <li>an instance OCR could not read;</li>
 <li>a store an older release de-identified, where what that release did cannot be vouched for (see <a href="../migration/">Upgrading from 0.9.x</a>);</li>
 <li>a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim;</li>
-<li>an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared.</li>
+<li>an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared;</li>
+<li>a WFDB record in which two signals would share a lead name, so each one named from the lead table is written as its Code Value (<a href="../waveforms/#lead-names">Lead names</a>).</li>
 </ul>
 </li>
 </ul>

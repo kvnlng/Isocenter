@@ -1990,7 +1990,8 @@ header, so this page leaves it alone.</p>
 coded source is written <code>ch0</code>, <code>ch1</code> and so on, because the Basic Profile
 removes Channel Label <code>(003A,0203)</code> (give it <code>action: KEEP</code> to keep lead
 names); a code outside the lead context group is written as its code
-value. Either shows up here:</p>
+value; and a record in which two signals would share a lead name shows
+code values for them, with a <code>WARNING</code> in the report. Each shows up here:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">TWELVE_LEADS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"I"</span><span class="p">,</span> <span class="s2">"II"</span><span class="p">,</span> <span class="s2">"III"</span><span class="p">,</span> <span class="s2">"aVR"</span><span class="p">,</span> <span class="s2">"aVL"</span><span class="p">,</span> <span class="s2">"aVF"</span><span class="p">,</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                <span class="s2">"V1"</span><span class="p">,</span> <span class="s2">"V2"</span><span class="p">,</span> <span class="s2">"V3"</span><span class="p">,</span> <span class="s2">"V4"</span><span class="p">,</span> <span class="s2">"V5"</span><span class="p">,</span> <span class="s2">"V6"</span><span class="p">}</span>
 </code></pre></div>

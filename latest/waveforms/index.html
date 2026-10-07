@@ -1862,41 +1862,59 @@ PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
 as WFDB, for tools like <a href="https://github.com/kvnlng/Murmur">Murmur Studio</a>
 to read. Isocenter does not read WFDB back in.</p>
 <h2 id="quick-start">Quick start</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">with</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"ecg_study.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"ecg"</span><span class="p">)</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="c1"># Write and load a configuration before auditing. An unconfigured</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="c1"># session applies the floor policy (see below); the configuration</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="c1"># is where you record the policy you actually want.</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
+<!-- tutorial: inputs=waveform_ecg.dcm -->
+
+<p>This section runs as written, as part of Isocenter's test suite, over the
+12-lead ECG bundled with pydicom. Start in a new, empty folder and copy
+that file into <code>input/</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pydicom.data</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">Path</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">shutil</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">pydicom</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">get_testdata_file</span><span class="p">(</span><span class="s2">"waveform_ecg.dcm"</span><span class="p">),</span> <span class="s2">"input"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">with</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"ecg_study.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"input"</span><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="c1"># Write and load a configuration before auditing. An unconfigured</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="c1"># session applies the floor policy (see below); the configuration</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="c1"># is where you record the policy you actually want.</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">records</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
 </code></pre></div>
 <p><a href="../tutorials/physionet-challenge-ecgs/">Prepare your own ECGs for a PhysioNet Challenge</a>
 walks this path end to end, and then shapes each header the way the
 Challenge's code reads it.</p>
-<p>Run it as a script: the <code>if __name__ == "__main__":</code> guard is required,
-because ingest starts worker processes that re-import the script. A WFDB
+<p>In a <code>.py</code> script, put the second block under
+<code>if __name__ == "__main__":</code>
+(<a href="../quickstart/#1-initialize-a-session">why</a>): ingest starts worker
+processes that re-import the script. A WFDB
 export saves the session before it writes, as a DICOM export does, so the
 de-identified graph is in the store when the block ends.</p>
 <p>Each waveform instance becomes one WFDB record, written into the same
 directory tree the DICOM exporter uses, so a record's <code>.hea</code>/<code>.dat</code> files
 sit alongside that series' <code>.dcm</code> files if you also export
-<code>format="dicom"</code> into the same folder. For the <code>waveform_ecg.dcm</code> file
-bundled with pydicom (<code>pydicom.data.get_testdata_file("waveform_ecg.dcm")</code>),
-copied into <code>ecg/</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>out/Subject_ANON_afd45d1d36f4892754cd8246/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>└─ Study_2012-07-23__39467/
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   └─ Series_NoNumber_ECG_Series_47942/
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_1.hea               header
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>      ├─ ANON_afd45d1d36f4892754cd8246_0_1.dat               format-16 samples
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      └─ ANON_afd45d1d36f4892754cd8246_0_1.annotations.json  cart findings, when present
+<code>format="dicom"</code> into the same folder. <code>export()</code> returns the path of each
+record's header:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">records</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="p">[</span><span class="s1">'out/Subject_ANON_.../Study_..._..._.../Series_NoNumber_ECG_Series_.../ANON_..._0_1.hea'</span><span class="p">]</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">Path</span><span class="p">(</span><span class="n">records</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">iterdir</span><span class="p">())</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">[</span><span class="s1">'ANON_..._0_1.annotations.json'</span><span class="p">,</span> <span class="s1">'ANON_..._0_1.dat'</span><span class="p">,</span> <span class="s1">'ANON_..._0_1.hea'</span><span class="p">]</span>
+</code></pre></div>
+<p>The <code>.hea</code> file is the header, the <code>.dat</code> file holds the format-16
+samples, and <code>.annotations.json</code> holds the cart's findings, when the file
+has any. The header's signal lines end with each lead's name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">records</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">header</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="o">...</span>     <span class="p">[</span><span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">header</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">:</span><span class="mi">13</span><span class="p">]]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">[</span><span class="s1">'I'</span><span class="p">,</span> <span class="s1">'II'</span><span class="p">,</span> <span class="s1">'III'</span><span class="p">,</span> <span class="s1">'aVR'</span><span class="p">,</span> <span class="s1">'aVL'</span><span class="p">,</span> <span class="s1">'aVF'</span><span class="p">,</span> <span class="s1">'V1'</span><span class="p">,</span> <span class="s1">'V2'</span><span class="p">,</span> <span class="s1">'V3'</span><span class="p">,</span> <span class="s1">'V4'</span><span class="p">,</span> <span class="s1">'V5'</span><span class="p">,</span> <span class="s1">'V6'</span><span class="p">]</span>
 </code></pre></div>
 <p>The folder names are <code>Subject_&lt;Patient ID&gt;</code>, <code>Study_&lt;date&gt;_&lt;description&gt;_&lt;last
 5 characters of the Study UID&gt;</code> and <code>Series_&lt;number&gt;_&lt;modality&gt;_&lt;description&gt;_&lt;last 5
@@ -1945,7 +1963,7 @@ its own <code>DATA_LOSS</code> row), attempted nothing and returns <code>[]</cod
 </tr>
 <tr>
 <td>signal description</td>
-<td>Channel Source Sequence <code>(003A,0208)</code>: the lead's name (<code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>, <code>aVL</code>, <code>aVF</code>, <code>V1</code>...<code>V6</code>; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>: the lead's name (<code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>, <code>aVL</code>, <code>aVF</code>, <code>V1</code>...<code>V6</code>; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; a lead name two signals of the record would share is written as each one's Code Value, with a <code>WARNING</code> row; falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
 </tr>
 </tbody>
 </table>
@@ -1956,17 +1974,48 @@ spec-conformant <code>header(5)</code> form, <code>gain(baseline)/units</code>. 
 downstream tool mis-parses that field, check the tool's parser first.</p>
 <h3 id="lead-names">Lead names</h3>
 <p>A lead whose Channel Source is coded in DICOM's ECG lead context group,
-CID 3001, is named as PhysioNet records name it: <code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>,
+CID 3001, is named by its conventional short name, the spelling
+<code>KNOWN_LEAD_NAMES</code> uses: <code>I</code>, <code>II</code>, <code>III</code>, <code>aVR</code>,
 <code>aVL</code>, <code>aVF</code>, <code>V1</code> to <code>V9</code>, <code>V3R</code>, <code>V4R</code>, <code>V5R</code>, <code>X</code>, <code>Y</code>, <code>Z</code>, and, in
 MDC only, <code>MCL1</code>, <code>MCL6</code>, <code>ES</code>, <code>AS</code> and <code>AI</code>. Both schemes the context
 group has used are read: IEEE 11073 <code>MDC</code> (<code>2:1</code> is lead I) and the
 SCP-ECG codes it used before, <code>SCPECG</code> (<code>5.6.3-9-1</code> is lead I), which
 carts still write. The Coding Scheme Designator is compared ignoring
-case. Any other code, in any scheme, is written as its Code Value: a
+case, and the Code Value without the whitespace around it (<code>2:1</code> is
+<code>2:1</code>). Any other code, in any scheme, is written as its Code Value: a
 derived or Frank lead, a calibration lead, a lead with no conventional
 short name (<code>-aVR</code>, <code>V2R</code>, <code>V6R</code> to <code>V9R</code>), a code under a local <code>99</code>
 scheme, and a source that is not a lead (a pressure or respiration
-waveform).</p>
+waveform). That Code Value is written as the file holds it, so a local
+code is exported as the cart's operator typed it, and a rule of your own
+that replaces Code Value <code>(0008,0100)</code> exports its dummy, <code>ANONYMIZED</code>,
+as every signal's name. Both are as they were before 1.0.2; whether a
+code outside a published scheme should be written at all is issue #973.</p>
+<p><strong><code>MDC 2:3</code> is Lead III or Lead V1.</strong> The 2008 version of the context
+group (printed in PS3.16 2011) gave <code>MDC 2:3</code> to both leads; the 2013
+version, current in PS3.16 2026d, moved Lead III to <code>2:61</code>. A cart built
+between the two codes Lead III as <code>2:3</code>, so the code alone cannot say
+which lead it is. For this code only, Isocenter reads the Channel Source
+item's Code Meaning <code>(0008,0104)</code>: when it says Lead III (<code>Lead III</code>,
+<code>lead iii</code> or <code>III</code>) the signal is named <code>III</code>, and otherwise <code>V1</code>. The
+limit: a Lead III coded <code>2:3</code> whose Code Meaning is empty, or says it
+another way (<code>Ableitung III</code>), is still named <code>V1</code>. The same holds when a
+rule of your own replaces, empties or removes Code Meaning <code>(0008,0104)</code>:
+a 2008 Lead III is then named <code>V1</code> again, with no row saying so (the
+<code>basic</code> profile has no such rule). No other code's name
+depends on its Code Meaning, and nothing from the Code Meaning is written.</p>
+<p><strong>Two signals of one record do not share a lead name.</strong> When two or more
+signals of a record would carry the same name, compared ignoring case,
+each one that got its name from the table above is written as its Code
+Value instead, in the <code>.hea</code> file and in <code>annotations.json</code> alike. Two
+channels both coded <code>MDC 2:2</code> are written <code>2:2</code> and <code>2:2</code>, not <code>II</code> and
+<code>II</code>: the file says one code twice, and so does the header. A name that
+did not come from the table (a Code Value written as it stands, a kept
+Channel Label, a <code>ch&lt;N&gt;</code> token) is left as it is. The export writes one
+<code>WARNING</code> row for such a record, naming the channel numbers (from 1, as
+DICOM numbers them) and the lead name, and no value from the file, so the
+compliance report grades the run <code>REVIEW_REQUIRED</code>: a person should look
+at a record whose leads the export could not name.</p>
 <p>When present, Waveform Annotation Sequence <code>(0040,B020)</code> items --
 cart-generated findings such as rhythm calls -- are exported as
 <code>&lt;record&gt;.annotations.json</code>, in the schema
@@ -2188,6 +2237,12 @@ that group's channel. It is left out of <code>annotations.json</code> rather tha
 resolved against the surviving group, which would give a plausible lead
 name at a plausible sample position, both belonging to a signal that is
 not in the record.</p>
+<p>A mark that names a channel of the kept group which the record has no
+signal for is kept, with no <code>lead</code>. That is a file with more Channel
+Definitions than <code>NumberOfWaveformChannels</code>: the <code>.hea</code> has one signal
+line per sample column, so a mark on a channel past the last column names
+a lead no signal of the record carries. Its sample position is still on
+the record's axis, so the mark stays.</p>
 <p>The same filtering happens on the object graph at ingest, so a <strong>DICOM</strong>
 export does not carry a Waveform Annotation Sequence <code>(0040,B020)</code> item
 whose reference names a group that is not in the file. The filter works
