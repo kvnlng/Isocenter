@@ -91,9 +91,9 @@ jobs:
         # grown to 4,100-5,000 runner-seconds per version, so a perfectly
         # even quarter was already 1,020-1,255 s of the 1,500 s step, and
         # one runner was measured 1.75 times slower than another at one
-        # commit. Three shard-4 or shard-3 steps reached the cap or came
+        # commit. Four shard-4 or shard-3 steps reached the cap or came
         # within 40 s of it at the rc12 publish and the rc13 rehearsal
-        # with every test passing. The Run Tests step below has the
+        # with every test passing (1,513, 1,513, 1,495 and 1,463 s). The Run Tests step below has the
         # figures. The count moved and the cap did not: an eighth is
         # predicted at 575 s (38%) on an ordinary runner and 1,006 s (67%)
         # on the slowest seen.
@@ -109,7 +109,9 @@ jobs:
         # recording it replaced had no number for 78 of 413 files, which
         # were 36% of the suite's seconds, and a runner is about 2.3 times
         # slower per file. A local recording and a runner's are different
-        # units: do not mix them in one file.
+        # units: do not mix them in one file. At #935's last
+        # commit the suite was 421 files and the 8 added since rc13 had
+        # no number.
         #
         # The concurrency group above needs no shard in it: it is declared
         # at workflow level, so it scopes the run, and matrix jobs inside
