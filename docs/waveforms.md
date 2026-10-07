@@ -9,47 +9,71 @@ to read. Isocenter does not read WFDB back in.
 
 ## Quick start
 
+<!-- tutorial: inputs=waveform_ecg.dcm -->
+
+This section runs as written, as part of Isocenter's test suite, over the
+12-lead ECG bundled with pydicom. Start in a new, empty folder and copy
+that file into `input/`:
+
+```python
+import shutil
+from pathlib import Path
+
+import pydicom.data
+
+Path("input").mkdir(exist_ok=True)
+shutil.copy(pydicom.data.get_testdata_file("waveform_ecg.dcm"), "input")
+```
+
 ```python
 from isocenter import Session
 
-if __name__ == "__main__":
-    with Session("ecg_study.db") as session:
-        session.ingest("ecg")
+with Session("ecg_study.db") as session:
+    session.ingest("input")
 
-        # Write and load a configuration before auditing. An unconfigured
-        # session applies the floor policy (see below); the configuration
-        # is where you record the policy you actually want.
-        session.create_config("config.yaml")
-        session.load_config("config.yaml")
+    # Write and load a configuration before auditing. An unconfigured
+    # session applies the floor policy (see below); the configuration
+    # is where you record the policy you actually want.
+    session.create_config("config.yaml")
+    session.load_config("config.yaml")
 
-        session.audit()
-        session.anonymize()
-        records = session.export("out", format="wfdb")
+    session.audit()
+    session.anonymize()
+    records = session.export("out", format="wfdb")
 ```
 
 [Prepare your own ECGs for a PhysioNet Challenge](tutorials/physionet-challenge-ecgs.md)
 walks this path end to end, and then shapes each header the way the
 Challenge's code reads it.
 
-Run it as a script: the `if __name__ == "__main__":` guard is required,
-because ingest starts worker processes that re-import the script. A WFDB
+In a `.py` script, put the second block under
+`if __name__ == "__main__":`
+([why](quickstart.md#1-initialize-a-session)): ingest starts worker
+processes that re-import the script. A WFDB
 export saves the session before it writes, as a DICOM export does, so the
 de-identified graph is in the store when the block ends.
 
 Each waveform instance becomes one WFDB record, written into the same
 directory tree the DICOM exporter uses, so a record's `.hea`/`.dat` files
 sit alongside that series' `.dcm` files if you also export
-`format="dicom"` into the same folder. For the `waveform_ecg.dcm` file
-bundled with pydicom (`pydicom.data.get_testdata_file("waveform_ecg.dcm")`),
-copied into `ecg/`:
+`format="dicom"` into the same folder. `export()` returns the path of each
+record's header:
 
-```text
-out/Subject_ANON_afd45d1d36f4892754cd8246/
-└─ Study_2012-07-23__39467/
-   └─ Series_NoNumber_ECG_Series_47942/
-      ├─ ANON_afd45d1d36f4892754cd8246_0_1.hea               header
-      ├─ ANON_afd45d1d36f4892754cd8246_0_1.dat               format-16 samples
-      └─ ANON_afd45d1d36f4892754cd8246_0_1.annotations.json  cart findings, when present
+```python
+>>> records
+['out/Subject_ANON_.../Study_..._..._.../Series_NoNumber_ECG_Series_.../ANON_..._0_1.hea']
+>>> sorted(path.name for path in Path(records[0]).parent.iterdir())
+['ANON_..._0_1.annotations.json', 'ANON_..._0_1.dat', 'ANON_..._0_1.hea']
+```
+
+The `.hea` file is the header, the `.dat` file holds the format-16
+samples, and `.annotations.json` holds the cart's findings, when the file
+has any. The header's signal lines end with each lead's name:
+
+```python
+>>> with open(records[0], encoding="utf-8") as header:
+...     [line.split()[-1] for line in header.read().splitlines()[1:13]]
+['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 ```
 
 The folder names are `Subject_<Patient ID>`, `Study_<date>_<description>_<last
@@ -85,7 +109,7 @@ its own `DATA_LOSS` row), attempted nothing and returns `[]`.
 | `fs` | Sampling Frequency `(003A,001A)` |
 | `gain` | Derived from Channel Sensitivity `(003A,0210)` and its correction factor |
 | `units` | Channel Sensitivity Units Sequence `(003A,0211)` |
-| signal description | Channel Source Sequence `(003A,0208)`: the lead's name (`I`, `II`, `III`, `aVR`, `aVL`, `aVF`, `V1`...`V6`; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
+| signal description | Channel Source Sequence `(003A,0208)`: the lead's name (`I`, `II`, `III`, `aVR`, `aVL`, `aVF`, `V1`...`V6`; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; a lead name two signals of the record would share is written as each one's Code Value, with a `WARNING` row; falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
 
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
@@ -96,17 +120,50 @@ downstream tool mis-parses that field, check the tool's parser first.
 ### Lead names
 
 A lead whose Channel Source is coded in DICOM's ECG lead context group,
-CID 3001, is named as PhysioNet records name it: `I`, `II`, `III`, `aVR`,
+CID 3001, is named by its conventional short name, the spelling
+`KNOWN_LEAD_NAMES` uses: `I`, `II`, `III`, `aVR`,
 `aVL`, `aVF`, `V1` to `V9`, `V3R`, `V4R`, `V5R`, `X`, `Y`, `Z`, and, in
 MDC only, `MCL1`, `MCL6`, `ES`, `AS` and `AI`. Both schemes the context
 group has used are read: IEEE 11073 `MDC` (`2:1` is lead I) and the
 SCP-ECG codes it used before, `SCPECG` (`5.6.3-9-1` is lead I), which
 carts still write. The Coding Scheme Designator is compared ignoring
-case. Any other code, in any scheme, is written as its Code Value: a
+case, and the Code Value without the whitespace around it (` 2:1` is
+`2:1`). Any other code, in any scheme, is written as its Code Value: a
 derived or Frank lead, a calibration lead, a lead with no conventional
 short name (`-aVR`, `V2R`, `V6R` to `V9R`), a code under a local `99`
 scheme, and a source that is not a lead (a pressure or respiration
-waveform).
+waveform). That Code Value is written as the file holds it, so a local
+code is exported as the cart's operator typed it, and a rule of your own
+that replaces Code Value `(0008,0100)` exports its dummy, `ANONYMIZED`,
+as every signal's name. Both are as they were before 1.0.2; whether a
+code outside a published scheme should be written at all is issue #973.
+
+**`MDC 2:3` is Lead III or Lead V1.** The 2008 version of the context
+group (printed in PS3.16 2011) gave `MDC 2:3` to both leads; the 2013
+version, current in PS3.16 2026d, moved Lead III to `2:61`. A cart built
+between the two codes Lead III as `2:3`, so the code alone cannot say
+which lead it is. For this code only, Isocenter reads the Channel Source
+item's Code Meaning `(0008,0104)`: when it says Lead III (`Lead III`,
+`lead iii` or `III`) the signal is named `III`, and otherwise `V1`. The
+limit: a Lead III coded `2:3` whose Code Meaning is empty, or says it
+another way (`Ableitung III`), is still named `V1`. The same holds when a
+rule of your own replaces, empties or removes Code Meaning `(0008,0104)`:
+a 2008 Lead III is then named `V1` again, with no row saying so (the
+`basic` profile has no such rule). No other code's name
+depends on its Code Meaning, and nothing from the Code Meaning is written.
+
+**Two signals of one record do not share a lead name.** When two or more
+signals of a record would carry the same name, compared ignoring case,
+each one that got its name from the table above is written as its Code
+Value instead, in the `.hea` file and in `annotations.json` alike. Two
+channels both coded `MDC 2:2` are written `2:2` and `2:2`, not `II` and
+`II`: the file says one code twice, and so does the header. A name that
+did not come from the table (a Code Value written as it stands, a kept
+Channel Label, a `ch<N>` token) is left as it is. The export writes one
+`WARNING` row for such a record, naming the channel numbers (from 1, as
+DICOM numbers them) and the lead name, and no value from the file, so the
+compliance report grades the run `REVIEW_REQUIRED`: a person should look
+at a record whose leads the export could not name.
 
 When present, Waveform Annotation Sequence `(0040,B020)` items --
 cart-generated findings such as rhythm calls -- are exported as
@@ -349,6 +406,13 @@ that group's channel. It is left out of `annotations.json` rather than
 resolved against the surviving group, which would give a plausible lead
 name at a plausible sample position, both belonging to a signal that is
 not in the record.
+
+A mark that names a channel of the kept group which the record has no
+signal for is kept, with no `lead`. That is a file with more Channel
+Definitions than `NumberOfWaveformChannels`: the `.hea` has one signal
+line per sample column, so a mark on a channel past the last column names
+a lead no signal of the record carries. Its sample position is still on
+the record's axis, so the mark stays.
 
 The same filtering happens on the object graph at ingest, so a **DICOM**
 export does not carry a Waveform Annotation Sequence `(0040,B020)` item
