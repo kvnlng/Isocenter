@@ -618,6 +618,84 @@ def test_a_shift_rule_on_such_a_private_key_declines(tmp_path):
     assert grade and "REVIEW_REQUIRED" in grade[0], grade
 
 
+def _private_date_said_un(ds):
+    ds.add_new(0x31090010, "LO", RADWORKS)
+    ds.add_new(0x3109100A, "UN", b"20200115")
+
+
+@pytest.mark.parametrize("action", ["SHIFT", "JITTER"])
+@pytest.mark.parametrize("syntax, extra", [
+    (ImplicitVRLittleEndian, _private_date),
+    (ExplicitVRLittleEndian, _private_date_said_un),
+], ids=["implicit", "explicit-un"])
+def test_a_declined_shift_exports_the_date_the_source_held(
+        tmp_path, syntax, extra, action):
+    """**What the declined shift writes, in both export arms.**
+
+    The 1.0.0rc13 `**Output:**` line for #740 did not say this. With
+    `remove_private_tags: false` and a `SHIFT` or `JITTER` rule on a known
+    creator's private date whose VR the source did not state, `main` before
+    #740 shifted the date pydicom decoded and exported the shifted one
+    (`DA` under Explicit VR) with a `REMEDIATION_SHIFT_DATE` row, under
+    PASS. Now the rule meets `UN` bytes and is declined: both arms carry
+    the source's own date, beside a Study Date that *was* shifted, with one
+    `REMEDIATION_DECLINED` row and no shift row, and the run grades
+    REVIEW_REQUIRED.
+
+    Killing mutation: the `UN` substitution deleted (the date is shifted
+    in both arms, a shift row, PASS).
+    """
+    src = _source(tmp_path / "src", syntax, extra)
+    config = {**KEEP_PRIVATE, "phi_tags": {
+        "3109,100a": {"action": action, "name": "Receive Date"}}}
+    session = _session(tmp_path, src, config=config)
+    try:
+        native = _export(session, tmp_path / "native", False)
+        explicit = _export(session, tmp_path / "j2k", True)
+        grade = _grade(session, tmp_path)
+    finally:
+        session.close()
+
+    # The exported value first: it is the statement the CHANGELOG makes.
+    assert _raw(native, "3109,100a") == (None, b"20200115")
+    assert _raw(explicit, "3109,100a") == ("UN", b"20200115")
+    for path in (native, explicit):
+        assert pydicom.dcmread(str(path)).StudyDate != "20200101", (
+            "the Study Date beside it is shifted")
+    with sqlite3.connect(str(tmp_path / "s.db")) as conn:
+        log = [tuple(r) for r in conn.execute(
+            "SELECT action_type, details FROM audit_log")]
+    assert [r[0] for r in log if "3109,100a" in r[1]] == [
+        "REMEDIATION_DECLINED"], log
+    assert grade == "REVIEW_REQUIRED"
+
+
+@pytest.mark.parametrize("action", ["SHIFT", "JITTER"])
+def test_a_private_date_whose_vr_the_file_states_is_still_shifted(
+        tmp_path, action):
+    """The control, and the way out the CHANGELOG names: the same rule on
+    the same element from an Explicit VR source that says `DA` shifts it,
+    as before, and the run grades PASS."""
+    src = _source(tmp_path / "src", ExplicitVRLittleEndian, _private_date)
+    config = {**KEEP_PRIVATE, "phi_tags": {
+        "3109,100a": {"action": action, "name": "Receive Date"}}}
+    session = _session(tmp_path, src, config=config)
+    try:
+        explicit = _export(session, tmp_path / "j2k", True)
+        grade = _grade(session, tmp_path)
+    finally:
+        session.close()
+
+    vr, value = _raw(explicit, "3109,100a")
+    assert vr == "DA" and len(value) == 8 and value != b"20200115"
+    with sqlite3.connect(str(tmp_path / "s.db")) as conn:
+        log = [tuple(r) for r in conn.execute(
+            "SELECT action_type, details FROM audit_log")]
+    assert [r[0] for r in log if "3109,100a" in r[1]] == [
+        "REMEDIATION_SHIFT_DATE"], log
+    assert grade == "PASS"
+
+
 # --- What the ruling costs at ingest, under every configuration (Q-R1 A) ----
 #
 # The size gate and the byte-order row are ingest's, written before any
