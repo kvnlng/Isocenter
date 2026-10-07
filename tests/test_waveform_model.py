@@ -306,6 +306,83 @@ def test_only_surrounding_spaces_are_insignificant_in_a_code_value(code):
     assert channel.wfdb_description(0) == code
 
 
+# --- MDC 2:3, the one code CID 3001 gave to two leads (#832) ------------
+#
+# PS3.16 2011, CID 3001 "ECG Leads" (version 20080927) prints
+# `MDC 2:3 Lead III` and `MDC 2:3 Lead V1`; the 2013 version moved III to
+# `2:61`. Owner ruling Q1 A: for this key only, the item's own Code Meaning
+# decides, `III` when it says Lead III and `V1` otherwise.
+
+@pytest.mark.parametrize("meaning", ["Lead III", "lead iii", "III",
+                                     "  LEAD   III  "])
+def test_mdc_2_3_is_lead_iii_when_its_meaning_says_so(meaning):
+    channel = WaveformChannel(source_code="2:3", source_scheme="MDC",
+                              source_meaning=meaning)
+    assert channel.wfdb_description(0) == "III"
+
+
+@pytest.mark.parametrize("meaning", [
+    "Lead V1", "",
+    "Derived Lead III",       # a substring match would say III
+    "Lead IIII", "Lead II", "IIIa",
+    "Ableitung III",          # the ruling's limit: a foreign meaning is V1
+    "Lead III (Einthoven)",
+])
+def test_mdc_2_3_is_v1_when_its_meaning_does_not_say_lead_iii(meaning):
+    channel = WaveformChannel(source_code="2:3", source_scheme="MDC",
+                              source_meaning=meaning)
+    assert channel.wfdb_description(0) == "V1"
+
+
+@pytest.mark.parametrize("scheme,code,name", [
+    ("SCPECG", "5.6.3-9-3", "V1"),   # SCP-ECG never printed its V1 twice
+    ("MDC", "2:4", "V2"),
+    ("MDC", "2:61", "III"),
+    ("MDC", "2:1", "I"),
+])
+def test_no_other_code_reads_its_meaning(scheme, code, name):
+    """PS3.3 §8.3: Code Meaning "shall never be used as a key, index or
+    decision value". The exception is `MDC 2:3` alone; a meaning read for
+    any other key names these III."""
+    channel = WaveformChannel(source_code=code, source_scheme=scheme,
+                              source_meaning="Lead III")
+    assert channel.wfdb_description(0) == name
+
+
+def test_a_code_no_table_names_does_not_read_its_meaning():
+    channel = WaveformChannel(source_code="2:3", source_scheme="99LOCAL",
+                              source_meaning="Lead III")
+    assert channel.wfdb_description(0) == "2:3"
+
+
+def test_a_padded_mdc_2_3_reads_its_meaning_too():
+    channel = WaveformChannel(source_code=" 2:3", source_scheme="mdc",
+                              source_meaning="Lead III")
+    assert channel.wfdb_description(0) == "III"
+
+
+def test_the_code_meaning_is_read_from_the_channel_source_item():
+    from isocenter.io_handlers import populate_attrs
+    from isocenter.entities import DicomItem
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(num_samples=8, channels=[
+        ("2:3", "Lead III"), ("2:3", "Lead V1")])
+    item = DicomItem()
+    populate_attrs(ds.WaveformSequence[0], item)
+
+    channels = Waveform.from_dicom_item(item).channels
+    assert [c.source_meaning for c in channels] == ["Lead III", "Lead V1"]
+    assert [c.wfdb_description(i) for i, c in enumerate(channels)] == [
+        "III", "V1"]
+
+
+def test_the_meaning_is_the_last_field_so_positional_callers_are_unmoved():
+    channel = WaveformChannel("II", "2:2", "MDC", 0.005, 1.0, "mV", 0.0)
+    assert (channel.label, channel.source_code, channel.baseline,
+            channel.source_meaning) == ("II", "2:2", 0.0, "")
+
+
 @pytest.mark.parametrize("scheme,code", [
     ("SRT", "G-DB22"),    # CID 3003, Aortic pressure waveform
     ("DCM", "109117"),    # CID 3005, Respiration Waveform

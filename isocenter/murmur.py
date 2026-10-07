@@ -13,7 +13,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from .config_manager import _vr_dummy
-from .exporters.wfdb import _sanitize_description
+from .exporters.wfdb import _signal_descriptions
 # The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
 # iteration -- lives in waveform.py, because the graph-side
 # dangling-reference filter must read the pairs exactly as this bridge
@@ -101,7 +101,8 @@ def _referenced_channel(referenced_channels):
     return _REF_ABSENT, None
 
 
-def _lead_for(waveform, referenced_channels) -> Optional[str]:
+def _lead_for(waveform, referenced_channels,
+              descriptions: Optional[List[str]] = None) -> Optional[str]:
     """Resolve a Referenced Waveform Channels pair to a coded lead name.
 
     The attribute is a list of (multiplex group, channel) pairs, both
@@ -114,25 +115,35 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
     Args:
         waveform (Waveform): The ingested multiplex group.
         referenced_channels: The Referenced Waveform Channels value.
+        descriptions (List[str], optional): The record's signal
+            descriptions, as `exporters.wfdb._signal_descriptions`
+            returned them; computed over the defined channels when None.
 
     Returns:
-        Optional[str]: The lead name, sanitized as the `.hea` signal line
-            is, or None when the reference names no single channel of the
-            ingested group.
+        Optional[str]: The lead name, as the `.hea` signal line of that
+            channel carries it, or None when the reference names no
+            single channel of the ingested group.
     """
-    # Sanitized with the same `_sanitize_description` the `.hea` signal
-    # line gets: `wfdb_description()` returns a coded Channel Source value
-    # outside its CID 3001 table verbatim (the lead-name allowlist guards
-    # only the free-text Channel Label fallback), so a non-conformant
-    # source can still carry an embedded newline, and annotations.json
-    # must not carry a rawer value than the `.hea` file.
+    # The name comes from the list the `.hea` writer reads, never from
+    # `wfdb_description()` here: that is one channel's answer, and a name
+    # two signals share is resolved over the whole record (#832). The list
+    # is sanitized with the `_sanitize_description` the signal line gets
+    # -- a coded Channel Source value outside the CID 3001 table is
+    # written verbatim, so a non-conformant source can still carry an
+    # embedded newline, and annotations.json must not carry a rawer value
+    # than the `.hea` file.
     state, channel_number = _referenced_channel(referenced_channels)
     if state != _REF_KEPT:
         return None
 
+    if descriptions is None:
+        descriptions, _clashes = _signal_descriptions(waveform)
     index = channel_number - 1
-    if 0 <= index < len(waveform.channels):
-        return _sanitize_description(waveform.channels[index].wfdb_description(index))
+    # Bounded by the defined channels, not by the list: the header's list
+    # also covers sample columns past the definitions, and a mark naming
+    # one of those resolves to no lead, as it always has.
+    if 0 <= index < len(waveform.channels) and index < len(descriptions):
+        return descriptions[index]
     return None
 
 
@@ -243,7 +254,8 @@ def _real_note(item) -> str:
 
 
 def build_annotations(instance, waveform, source: str, include_text: bool = False,
-                      dropped_groups: Optional[List[int]] = None) -> Dict[str, Any]:
+                      dropped_groups: Optional[List[int]] = None,
+                      descriptions: Optional[List[str]] = None) -> Dict[str, Any]:
     """Build a Murmur annotations document from an instance's annotations.
 
     Args:
@@ -264,6 +276,10 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             annotation referenced: `len()` is how many marks were lost,
             and the union across the lists is which groups they pointed
             at. The caller writes the warning and the `DATA_LOSS` row.
+        descriptions (List[str], optional): The record's signal
+            descriptions, the list the `.hea` writer was handed, so a
+            finding's `lead` is what that channel's signal line says.
+            Computed over the defined channels when None.
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the
@@ -278,6 +294,9 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
 
     seq = instance.sequences.get(TAG_ANNOTATION_SEQ)
     items = seq.items if seq is not None else []
+
+    if descriptions is None:
+        descriptions, _clashes = _signal_descriptions(waveform)
 
     for item in items:
         referenced = item.attributes.get(TAG_REFERENCED_CHANNELS)
@@ -327,7 +346,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
         if label:
             finding["label"] = label
 
-        lead = _lead_for(waveform, referenced)
+        lead = _lead_for(waveform, referenced, descriptions)
         if lead:
             finding["lead"] = lead
 
