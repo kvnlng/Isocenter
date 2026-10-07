@@ -149,7 +149,8 @@ Check every record's lead names, not only the first. A lead with no
 coded source is written `ch0`, `ch1` and so on, because the Basic Profile
 removes Channel Label `(003A,0203)` (give it `action: KEEP` to keep lead
 names); a code outside the lead context group is written as its code
-value. Either shows up here:
+value; and a record in which two signals would share a lead name shows
+code values for them, with a `WARNING` in the report. Each shows up here:
 
 ```python
 TWELVE_LEADS = {"I", "II", "III", "aVR", "aVL", "aVF",
