@@ -5,7 +5,15 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0rc15] - 2026-10-07
+
+**Exported output changes in this release in WFDB exports only**, as the two entries' `**Output:**` lines name, where the details are. `compare --base v1.0.0rc14` reports one new member of the reference cohort, `synthetic:ecg_lead_codes`, and nothing else; no existing member's output changes:
+- **#832:** in a `.hea`, the description field of a signal line, and in `annotations.json` the `lead` of a finding on that channel, change for three kinds of channel. A lead code with whitespace in front of it is written as the lead's name (`2:1` to `I`). An `MDC 2:3` channel whose Code Meaning says Lead III is written `III` where it was `V1`. A table-named channel whose name another signal of its record shares is written as its Code Value (`II` to `2:2`), with one new `WARNING` row for that record, which grades the run `REVIEW_REQUIRED` where it graded `PASS`.
+- **#963:** in `annotations.json`, a finding loses its `lead` key when its mark names a channel past the record's sample columns. No row is written for it and the grade does not move.
+
+**One entry corrects the 1.0.0rc14 record and changes nothing in this release:** ten of that release's `**Output:**` lines said less than it does (#764, #679, #926, #775, #721, #733, #722, #747, #703, #937). Each is restated as measured against 1.0.0rc13. Where the 1.0.0rc14 section's lead and one of those lines disagree, the line is the measured one.
+
+The nine other entries' `**Output:**` lines say none (#804, #687, #956, #754, #753, #800, #779, #931, #935).
 
 ### Changed
 
