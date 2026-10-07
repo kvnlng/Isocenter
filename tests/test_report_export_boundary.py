@@ -32,11 +32,17 @@ from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter.session import DicomSession
 
-# `_fallback_encoding` returns None for this: not bytes, not a number,
-# not a string. It is the one shape that reaches `_merge`'s "no VR
+# `_fallback_encoding` returns None for this: a multi-valued private
+# value one of whose values holds a backslash, which no text VR writes
+# as both that value and that multiplicity. It reaches `_merge`'s "no VR
 # fits" arm -- the only export-side emitter that derives a PRIVATE
 # scope from a real tag (#153).
-UNENCODABLE = object()
+#
+# It was `object()` until #775. An export begins with a save, and the
+# save now refuses a value the store cannot hold, private tags included,
+# before any file is written; so the loss planted here has to be one the
+# store holds and the exporter cannot write.
+UNENCODABLE = ["A\\B", "C"]
 
 PRIVATE_TAG = "0009,1003"
 
@@ -244,7 +250,7 @@ def test_an_export_time_loss_reaches_the_grade_when_report_follows_export(
     session = _session(tmp_path)
     try:
         for inst in _instances(session):
-            inst.attributes[PRIVATE_TAG] = UNENCODABLE
+            inst.attributes[PRIVATE_TAG] = list(UNENCODABLE)
         session.export(str(tmp_path / "out"), format="dicom",
                        show_progress=False)
         text = _report_text(session, tmp_path, "graded.md")
@@ -266,7 +272,7 @@ def test_the_old_order_now_says_out_loud_what_it_cannot_see(tmp_path):
         # different reason), which is #153's measured setup.
         session.anonymize()
         for inst in _instances(session):
-            inst.attributes[PRIVATE_TAG] = UNENCODABLE
+            inst.attributes[PRIVATE_TAG] = list(UNENCODABLE)
         before = _report_text(session, tmp_path, "before.md")
         session.export(str(tmp_path / "out"), format="dicom",
                        show_progress=False)

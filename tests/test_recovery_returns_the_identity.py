@@ -246,3 +246,121 @@ def test_a_pre_0_9_8_shared_token_is_returned_whole(tmp_path):
         assert result == {A: _held("ACC-1"), D: _held("ACC-1")}
         assert [inst.attributes[ACC] for inst in instances] == ["ACC-1", "X"]
         assert instances[1].attributes["0010,0020"] == PID
+
+
+# -- #733: what the restore writes is each instance's own ------------------
+#
+# The return has been a deep copy since #732 (the test above). What the
+# restore *wrote* was not: every holder of one token, every tokenless
+# instance, and every holder of a pre-0.9.8 shared token outside its first
+# study was handed the same list object for a multi-valued tag. An in-place
+# edit through one instance then showed on the others in the graph, moved
+# only the edited instance's revision, and was saved for that one alone.
+
+NAMES = ["Alias^One", "Alias^Two"]
+
+
+def _locked_with_aliases(session):
+    """`_locked`'s graph with Other Patient Names on every instance and in
+    every token, anonymized by hand: A and C share one token."""
+    patient, instances = _patient(
+        session, [[(A, "ACC-1"), (B, "ACC-X"), (C, "ACC-1")], [(D, "ACC-2")]])
+    for inst in instances:
+        inst.set_attr(ALIASES, list(NAMES))
+    session.lock_identities(PID, tags_to_lock=TAGS + [ALIASES])
+    _anonymize_by_hand(patient, instances)
+    for inst in instances:
+        inst.set_attr(ALIASES, [])
+    return patient, instances
+
+
+def _distinct(instances):
+    """Every pair of instances holds its own list object."""
+    held = [inst.attributes[ALIASES] for inst in instances]
+    return all(held[i] is not held[j]
+               for i in range(len(held)) for j in range(i + 1, len(held)))
+
+
+def test_two_holders_of_one_token_are_restored_their_own_list(tmp_path):
+    """A and C carry one token. Red on main: `is` the same list. Kills
+    M733-1 (the copy deleted)."""
+    with _session(tmp_path) as session:
+        _patient_, instances = _locked_with_aliases(session)
+        rs = session.reversibility_service
+        assert rs.token_of_ours(instances[0]) == rs.token_of_ours(instances[2])
+        session.recover_patient_identity(PSEUDONYM, restore=True)
+        assert [inst.attributes[ALIASES] for inst in instances] == [NAMES] * 4
+        assert instances[0].attributes[ALIASES] is not instances[2].attributes[ALIASES]
+        assert _distinct(instances)
+
+
+def test_a_tokenless_instance_is_restored_its_own_list(tmp_path):
+    """C and D lose their tokens and take group 0010 of the token that
+    speaks for the patient, A's. Red on main: both hold A's list, and each
+    other's. Kills a copy placed in the token arm only."""
+    with _session(tmp_path) as session:
+        _patient_, instances = _locked_with_aliases(session)
+        instances[2].sequences.pop(SEQ)
+        instances[3].sequences.pop(SEQ)
+        session.recover_patient_identity(PSEUDONYM, restore=True)
+        assert [inst.attributes[ALIASES] for inst in instances] == [NAMES] * 4
+        # The tokenless arm did run: it leaves the pass's Accession Number.
+        assert [inst.attributes[ACC] for inst in instances[2:]] == ["X", "X"]
+        assert instances[2].attributes[ALIASES] is not instances[0].attributes[ALIASES]
+        assert instances[3].attributes[ALIASES] is not instances[2].attributes[ALIASES]
+        assert _distinct(instances)
+
+
+def test_a_pre_0_9_8_shared_token_restores_each_study_its_own_list(tmp_path):
+    """The partial arm: study 2 takes only group 0010 of the shared token,
+    through a new dict over the same value objects. Red on main: D's list
+    is A's. Kills a copy placed before `patient_level`, or on the full
+    arm alone."""
+    with _session(tmp_path) as session:
+        patient, instances = _patient(session, [[(A, "ACC-1")], [(D, "ACC-2")]])
+        rs = session.reversibility_service
+        session.key_manager.load_or_generate_key()
+        session._key_for_locking()
+        record = dict(_held("ACC-1"), **{ALIASES: list(NAMES)})
+        token = rs.engine.encrypt(json.dumps(record).encode("utf-8"))
+        for inst in instances:
+            rs.embed_identity_token(inst, token)
+            inst._locked_token = None
+        _anonymize_by_hand(patient, instances)
+
+        session.recover_patient_identity(PSEUDONYM, restore=True)
+        assert [inst.attributes[ALIASES] for inst in instances] == [NAMES] * 2
+        # The partial arm did run on study 2: it keeps the pass's `X`.
+        assert [inst.attributes[ACC] for inst in instances] == ["ACC-1", "X"]
+        assert instances[0].attributes[ALIASES] is not instances[1].attributes[ALIASES]
+
+
+def test_an_edit_in_place_after_a_restore_is_one_instances_and_the_store_agrees(
+        tmp_path):
+    """The behaviour the identity tests stand for. After a restore, A's
+    list is edited in place and A is told so (`mark_modified()`, the
+    documented way to report a write around the entity). The graph shows
+    the edit on A alone, only A is unsaved, and a reopened store holds what
+    the graph held for every instance. Red on main: the graph showed three
+    names on C and on the tokenless D while the store held two."""
+    with _session(tmp_path) as session:
+        _patient_, instances = _locked_with_aliases(session)
+        instances[3].sequences.pop(SEQ)
+        session.recover_patient_identity(PSEUDONYM, restore=True)
+        session.save(sync=True)
+        assert [inst.has_unsaved_changes for inst in instances] == [False] * 4
+
+        instances[0].attributes[ALIASES].append("EDIT-ON-A")
+        instances[0].mark_modified()
+        graph = {inst.sop_instance_uid: list(inst.attributes[ALIASES])
+                 for inst in instances}
+        assert graph == {A: NAMES + ["EDIT-ON-A"], B: NAMES, C: NAMES, D: NAMES}
+        assert [inst.has_unsaved_changes for inst in instances] == [
+            True, False, False, False]
+        session.save(sync=True)
+
+    with DicomSession(str(tmp_path / "s.db")) as reopened:
+        stored = {inst.sop_instance_uid: list(inst.attributes[ALIASES])
+                  for p in reopened.store.patients for st in p.studies
+                  for se in st.series for inst in se.instances}
+    assert stored == graph
