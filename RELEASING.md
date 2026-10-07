@@ -471,7 +471,20 @@ fixes, never features.
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that
      section holds everything since. A patch to an older line leaves
-     `main`'s version alone.
+     `main`'s version alone;
+   - refreshes `tests/shard_timings.json`, which the CI shards are cut
+     from, with what step 6's publish run measured (#935): `gh run
+     download <run id> --pattern 'shard-timings-*' --dir <dir>`, with
+     `<dir>` outside the checkout, then `python -m scripts.shard_timings
+     merge <dir> --out "$PWD/tests/shard_timings.json"`. The merge takes,
+     for each test file, the median of the versions, and refuses a run in
+     which any version lacks a shard (one killed at its timeout uploads
+     nothing): leave the file as it is then, and never refresh it from a
+     local run, whose seconds are another unit. Then run
+     `tests/test_shards_partition_the_suite.py`. If
+     `test_the_heaviest_shard_fits_the_step_with_room` fails, the suite
+     has outgrown its shards: add shards to `tests.yml` (or raise its
+     `Run Tests` cap) in a PR of its own, before the next release.
 
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,

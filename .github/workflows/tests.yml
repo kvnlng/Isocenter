@@ -113,6 +113,15 @@ jobs:
         # commit the suite was 421 files and the 8 added since rc13 had
         # no number.
         #
+        # Kept current since 2026-10-07 (owner ruling Q3 A on #935): each
+        # shard uploads what its files took as the artifact
+        # `shard-timings-<version>-<shard>`, and the release's record-back
+        # (RELEASING.md, "Cutting a release", step 8) merges the publish
+        # run's artifacts into the file with scripts/shard_timings.py.
+        # tests/test_shards_partition_the_suite.py fails when the heaviest
+        # shard's recorded weight passes half the Run Tests step: that is
+        # the day to add shards here, before a release run says so.
+        #
         # The concurrency group above needs no shard in it: it is declared
         # at workflow level, so it scopes the run, and matrix jobs inside
         # one run do not compete for it.
@@ -125,6 +134,8 @@ jobs:
     # landed and #250's three hangs each produced a log naming nothing.
     # test_packaging_contract.py pins the inequality. 45 since the suite
     # became four shards (#707): step sum 38, plus the old 7-minute margin.
+    # Step sum 40 since the timings upload (2026-10-07, #935 Q3): a
+    # 5-minute margin, and the cap stands.
     timeout-minutes: 45
 
     steps:
@@ -246,8 +257,10 @@ jobs:
       # another 20% of growth. Past that, add shards or raise this,
       # and if it is raised, raise the family with it as said above.
       timeout-minutes: 25
+      # `--record-shard-timings` (an absolute path, outside the checkout)
+      # writes what each of this shard's files took, for the upload below.
       run: |
-        pytest -v --shard=${{ matrix.shard }}/8
+        pytest -v --shard=${{ matrix.shard }}/8 --record-shard-timings=${{ runner.temp }}/shard-timings.json
       env:
         # Derived from the version rather than carried in a parallel
         # `include:` block, so adding a version to the matrix cannot
@@ -263,6 +276,37 @@ jobs:
         # instrumentation (test_packaging_contract.py pins both this
         # line and the 240 < 300 inequality).
         ISOCENTER_WORKER_FAULTHANDLER: "1"
+
+    - name: Upload the shard's timings
+      # What tests/shard_timings.json is refreshed from at a release
+      # (RELEASING.md, "Cutting a release", step 8; owner ruling Q3 A on
+      # #935): scripts/shard_timings.py merges one run's artifacts, the
+      # median across the versions for each test file.
+      #
+      # `if: always()` so a shard with a failing test still uploads: its
+      # files took what they took. A shard killed at the step's timeout
+      # wrote no file, and uploads nothing (`warn`, not `error`: the kill
+      # is already the red step, and a second red step here would read as
+      # a second failure). The merge is what refuses a run with a shard
+      # missing.
+      #
+      # The name is unique in a run: publish.yml's two calls of this
+      # workflow share one run and differ in their versions. `overwrite`
+      # is for "Re-run failed jobs", which re-runs a shard into a run that
+      # may already hold its artifact.
+      #
+      # Never a reason for the job to fail: the timings are bookkeeping,
+      # and a release must not go red on an artifact service.
+      if: always()
+      continue-on-error: true
+      timeout-minutes: 2
+      uses: actions/upload-artifact@v7
+      with:
+        name: shard-timings-${{ matrix.python-version }}-${{ matrix.shard }}
+        path: ${{ runner.temp }}/shard-timings.json
+        if-no-files-found: warn
+        overwrite: true
+        retention-days: 30
 
     - name: Record the result for the release matrix
       # `if: always()` so a red version still reports. This is what makes

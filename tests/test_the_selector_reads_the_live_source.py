@@ -197,7 +197,11 @@ def test_the_stem_alone_is_not_a_reader(tmp_path):
     # few, not everything, and not nothing.
     live = test_map.source_readers(REPO, "isocenter/session.py")
     every = test_map.SuiteIndex(REPO).texts()
-    assert 0 < len(live) < 60 < len(every), (len(live), len(every))
+    # Measured at #779: 37 of 423 files (26 beyond the 16 that read every
+    # module by glob), where rule 7's needle gives 352. The spec's bound
+    # was 40, which the next test written that reads a module would
+    # cross; twice the measurement is still a few, and far from the suite.
+    assert 0 < len(live) < 75 < len(every), (len(live), len(every))
     assert "tests/test_the_selector_reads_the_live_source.py" in live
 
 
