@@ -3109,8 +3109,13 @@ class DicomSession:
                   "ID and may be more than one subject; re-ingest their source "
                   "files into a new store to separate them.")
         get_logger().warning(detail)
+        # The store's own path, absolute since #722, never
+        # `self.persistence_file`: the three other notices about a store
+        # from before 1.0 are keyed on `db_path`, and one store spelt two
+        # ways in one audit log reads as two stores (owner ruling on the
+        # review of #947).
         self.store_backend.log_audit(action_type="WARNING",
-                                     entity_uid=self.persistence_file,
+                                     entity_uid=self.store_backend.db_path,
                                      details=detail)
 
     def phi_status_summary(self) -> Dict[str, Counter]:
@@ -4636,19 +4641,85 @@ class DicomSession:
         # any literal on it: the value is always the patient's own ID.
         # Every other replacement is quoted; it is what says which pass
         # wrote it.
+        def blanked_tags():
+            """The tags of `tags_to_lock` a pass emptied or removed.
+
+            Returns:
+                list: Each tag, in `tags_to_lock` order, that is blank or
+                    absent in some value-set whose instances' records say
+                    a pass left it so.
+            """
+            return [tag for tag in tags_to_lock
+                    if any(not str(record.get(tag) or "").strip()
+                           and written_by_a_pass(tag, record.get(tag), members)
+                           for record, members in groups)]
+
+        def carries_a_token_of_ours():
+            """Whether any instance holds an identity token this library
+            wrote, in either layout: whether this lock is a re-lock.
+
+            Returns:
+                bool: True for a token `token_of_ours` returns, and for
+                    one in the layout releases before 1.0 wrote.
+            """
+            for inst in instances:
+                try:
+                    if self.reversibility_service.token_of_ours(inst) is not None:
+                        return True
+                except _TokenOfAnEarlierLayout:
+                    return True
+            return False
+
         for record, members in groups:
             for tag, val in record.items():
                 if not (str(val).strip() and is_replacement(tag, val, members)):
                     continue
                 shown = ("a replacement Patient ID"
                          if tag == "0010,0020" or str(val) == patient_id else repr(val))
+                opening = ("lock_identities: this patient already "
+                           f"carries a replacement in {tag} ({shown}), so there "
+                           "is no original identity left to stash. ")
+                # **A re-lock keeps the message it has had since #492.**
+                # Where the patient already carries a token of ours,
+                # dropping the replaced tags is refused by the loss check
+                # below ("would replace it with nothing"), so no list
+                # works and the true advice is not to re-lock. Asked only
+                # here, on the refusal path: a lock that goes through
+                # pays nothing for it, and `token_of_ours` reads the
+                # item's shape with no key and no decrypt. This refusal
+                # is still raised before any token is opened, so a
+                # patient carrying a token 1.x cannot read *and* a
+                # replacement meets this one first, as before.
+                if carries_a_token_of_ours():
+                    raise RuntimeError(
+                        opening + "Lock identities before anonymize(), and do "
+                        "not re-lock a patient after it; the token this call "
+                        "would have written is unchanged.")
+                # A first lock (#593): the only way to follow "before
+                # anonymize()" after it has run is to drop the tag, so
+                # the advice is the caller's `tags_to_lock` less every
+                # tag holding a replacement in any value-set *and* every
+                # tag the pass emptied or removed, which the blank-tag
+                # refusal below would refuse next. Under the floor that
+                # is one retry where it was three. It names tags and a
+                # placeholder, never a value or the patient. Not a
+                # promise that the advised call succeeds: the rarer
+                # refusals below can still meet it, each with its own
+                # advice.
+                replaced = {t for rec, mem in groups for t, v in rec.items()
+                            if str(v).strip() and is_replacement(t, v, mem)}
+                emptied = set(blanked_tags())
+                dropped = [t for t in dict.fromkeys(tags_to_lock)
+                           if t in replaced or t in emptied]
+                rest = [t for t in tags_to_lock if t not in dropped]
+                advice = (f"To lock this patient now without {', '.join(dropped)}, "
+                          f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no tag that still holds an original, "
+                          "so there is nothing else to lock")
                 raise RuntimeError(
-                    "lock_identities: this patient already "
-                    f"carries a replacement in {tag} ({shown}), so there "
-                    "is no original identity left to stash. Lock "
-                    "identities before anonymize(), and do not re-lock a "
-                    "patient after it; the token this call would have "
-                    "written is unchanged.")
+                    opening + f"Lock identities before anonymize(). {advice}; "
+                    "the token this call would have written is unchanged.")
 
         # A re-lock may not stash less than the token it replaces.
         # Under an EMPTY or REMOVE rule, `anonymize()` leaves `""` or
@@ -4827,10 +4898,7 @@ class DicomSession:
             # kept nothing. The record names the
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
-            blanked = [tag for tag in tags_to_lock
-                       if any(not str(record.get(tag) or "").strip()
-                              and written_by_a_pass(tag, record.get(tag), members)
-                              for record, members in groups)]
+            blanked = blanked_tags()
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
@@ -5566,8 +5634,19 @@ class DicomSession:
                         values = opened[content]
                         if "0008,0020" in values and id(st) not in study_dates:
                             study_dates[id(st)] = (st, values["0008,0020"])
+                    # Each instance its own copy (#733). `values` is one
+                    # dict per distinct token, the one `fallback` for
+                    # every tokenless instance, or a new dict over the
+                    # same value objects on the partial arm; a
+                    # multi-valued tag's value is a `list` once the
+                    # token's JSON is read, and `set_attr` stores the
+                    # object it is given. Shared, an in-place edit on one
+                    # instance showed on its siblings in the graph, moved
+                    # only its own revision, and was saved for it alone.
+                    # Here, where all three arms meet. `deepcopy`: a
+                    # record is JSON, so a list may hold a list.
                     for tag, val in values.items():
-                        inst.set_attr(tag, val)
+                        inst.set_attr(tag, copy.deepcopy(val))
                     count += 1
                 # Log lines, not audit rows: a restore is not a
                 # de-identification step. Counts only, never an ID.
@@ -6661,7 +6740,11 @@ class DicomSession:
                 Also on `dicom`, before anything is written, for a `subset`
                 query that does not run, or a `subset` DataFrame with none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
-                PatientID.
+                PatientID. Also, on both formats, from the save an export
+                begins with, when an instance with unsaved changes holds a
+                SOP Instance UID that is not a `str`: it gives the count, and
+                nothing is saved or written (#721; this was sqlite's
+                `IntegrityError`).
             TypeError: For an option name the selected exporter does not
                 recognise; nothing is written. The two formats do not accept
                 the same options, so a caller forwarding one dict to both

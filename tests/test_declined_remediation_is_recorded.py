@@ -607,3 +607,93 @@ def test_a_raise_on_an_entity_without_status_does_not_crash_the_pass(store):
 
     assert applied == 0
     assert len(store.get_audit_declines()) == 1
+
+
+# --- a REMOVE naming a Python attribute the export never writes (#679) -------
+#
+# The Python-attribute REMOVE arm set whatever attribute a finding named to
+# None. Measured at de5b26d9 and a7f8aeb9: a hand-built `REMOVE_TAG` naming
+# `Patient.studies` left `patient.studies = None` under the row `Cleared
+# Attribute studies`, and `save(sync=True)`, `export()` (`'NoneType' object is
+# not iterable`) and `generate_report()` (`object of type 'NoneType' has no
+# len()`) then raised `TypeError`. The arm now writes only the six fields the
+# exporter stamps (`ENTITY_FIELD_TAGS`; owner ruling Q4 A, 2026-10-06); any
+# other name falls to the bottom `else`, whose row was already the right one.
+
+def _owned_session(tmp_path, monkeypatch):
+    from isocenter import Session
+    from support.ct_small_files import write_ct
+
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    write_ct(tmp_path / "in" / "a.dcm", "PID-679", "6790", name="Alpha^One")
+    session = Session(str(tmp_path / "s.db"))
+    session.ingest(str(tmp_path / "in"))
+    [patient] = session.store.patients
+    [study] = patient.studies
+    [series] = study.series
+    return session, {"Patient": (patient, patient.patient_id),
+                     "Study": (study, study.study_instance_uid),
+                     "Series": (series, series.series_instance_uid)}
+
+
+def _attribute_removal(entity, uid, kind, attr):
+    return PhiFinding(
+        entity_uid=uid, entity_type=kind, field_name=attr, value="x",
+        reason="hand-built", patient_id="PID-679", entity=entity,
+        remediation_proposal=PhiRemediation("REMOVE_TAG", attr))
+
+
+def _remediation_rows(session):
+    import sqlite3
+
+    session.store_backend.flush_audit_queue()
+    with sqlite3.connect(session.persistence_file) as conn:
+        return conn.execute(
+            "SELECT action_type, details FROM audit_log "
+            "WHERE action_type LIKE 'REMEDIATION%'").fetchall()
+
+
+@pytest.mark.parametrize("kind, attr", [
+    ("Patient", "studies"), ("Study", "series"), ("Series", "modality"),
+    ("Series", "instances"), ("Study", "date_shifted"), ("Patient", "_phi_status"),
+])
+def test_a_remove_naming_a_field_the_export_never_writes_declines(
+        tmp_path, monkeypatch, kind, attr):
+    """The attribute is the same object after the pass, nothing is counted
+    as applied, the one row is the decline, whole, and the session can
+    still save, report and export. Kills the arm writing any name the
+    entity carries."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        entity, uid = owners[kind]
+        before = getattr(entity, attr)
+        assert session.anonymize([_attribute_removal(entity, uid, kind, attr)]) == 0
+        assert getattr(entity, attr) is before
+        assert _remediation_rows(session) == [(
+            "REMEDIATION_DECLINED",
+            f"Remediation declined for {uid}: REMOVE_TAG on {attr} matched no "
+            f"applicable arm for {kind}")]
+        session.save(sync=True)
+        session.generate_report(str(tmp_path / "r.md"))
+        session.export(str(tmp_path / "out"), use_compression=False)
+        assert len(list((tmp_path / "out").rglob("*.dcm"))) == 1
+
+
+@pytest.mark.parametrize("kind, attr", [("Patient", "patient_name"),
+                                        ("Study", "study_date")])
+def test_a_remove_naming_a_field_the_export_stamps_still_clears_it(
+        tmp_path, monkeypatch, kind, attr):
+    """Control. The fields the exporter stamps are still cleared, with
+    their `REMEDIATION_REMOVE` row. Kills an allowlist of one name."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        entity, uid = owners[kind]
+        assert getattr(entity, attr) is not None
+        assert session.anonymize([_attribute_removal(entity, uid, kind, attr)]) == 1
+        assert getattr(entity, attr) is None
+        assert _remediation_rows(session) == [(
+            "REMEDIATION_REMOVE",
+            f"Cleared Attribute {attr} on {uid}; removed from 1 instance copy")]
