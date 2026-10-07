@@ -650,13 +650,24 @@ def test_a_declined_shift_exports_the_date_the_source_held(
         "3109,100a": {"action": action, "name": "Receive Date"}}}
     session = _session(tmp_path, src, config=config)
     try:
+        status = _instance(session).phi_status
         native = _export(session, tmp_path / "native", False)
         explicit = _export(session, tmp_path / "j2k", True)
         grade = _grade(session, tmp_path)
     finally:
         session.close()
 
-    # The exported value first: it is the statement the CHANGELOG makes.
+    # The instance is left IDENTIFIED, so neither file is given
+    # `(0028,0303)`: nothing says its dates were modified, though the Study
+    # Date was. One comparison, so a failure shows every half that moved
+    # (before #740: REMEDIATED, and MODIFIED in both arms).
+    temporal = "LongitudinalTemporalInformationModified"
+    assert {"status": status,
+            "native": pydicom.dcmread(str(native)).get(temporal),
+            "j2k": pydicom.dcmread(str(explicit)).get(temporal)} == {
+        "status": PhiStatus.IDENTIFIED, "native": None, "j2k": None}
+
+    # The exported value: it is the statement the CHANGELOG makes.
     assert _raw(native, "3109,100a") == (None, b"20200115")
     assert _raw(explicit, "3109,100a") == ("UN", b"20200115")
     for path in (native, explicit):
