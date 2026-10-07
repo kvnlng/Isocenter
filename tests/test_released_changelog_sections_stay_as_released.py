@@ -38,6 +38,32 @@ The rule this pins, for each `## [X]` heading other than `[Unreleased]`:
   that the check reads one and acts on what it finds: without it, a check that
   skipped everywhere or compared the tree with itself would stay green.
 
+**The second base is `origin/main`** (#956). The tag is the authority, and the
+newest released section is the one a clone most often has no tag for: release
+tags sit on `release/X.Y`, which `main` does not reach, so `git fetch origin
+main` brings the record-back and never its tag. On 2026-10-07 the branch of
+#958 (d7e1cc98) merged the rc13 record-back (5f0c1ca5) with no conflict, and
+git put 37 lines, three `### Fixed` entries, at the end of `[1.0.0rc13]`.
+Run over that merge, the tag check is red where `v1.0.0rc13` is present and
+skips `[1.0.0rc13]`, the one section that matters, where it is not: 45 passed,
+1 skipped. So each released section is also compared, by the same rule, with
+the same section of `refs/remotes/origin/main:CHANGELOG.md`: the record-back
+is what put the released text there, and a branch off `main` adds nothing to
+it. This needs no tag. What it can and cannot see:
+
+* a worktree shares its checkout's refs, so the merge gate sees `origin/main`
+  as the last `git fetch origin main` left it. A stale one that lacks the
+  heading skips that section, by name; fetch before trusting a skip;
+* at `HEAD` == `origin/main` it compares the file with itself and passes,
+  which is right: what is on `main` is the tags' question, asked at the cut;
+* a release branch's own new section (a release commit, a fix after it) is
+  not on `main` until its record-back, and is skipped by name;
+* CI's depth-1 checkout of a tag, a clone whose remote has another name and
+  the sdist (no git) have no such ref: every case skips, naming it.
+
+`test_the_main_check_reads_origin_main` pins that this check asks git for
+that ref and no other, and acts on the answer.
+
 What this does not see: a misplaced entry that rewrites an existing line
 instead of adding one, and any change to `[Unreleased]`.
 
@@ -190,6 +216,135 @@ def test_the_live_check_reads_a_tag(git_reads_this_tree):
     # A never-tagged version is checked against a later tag, not skipped.
     base_tag, failure = problem_for("0.6.1", working)
     assert base_tag is not None and failure is None
+
+
+MAIN = "refs/remotes/origin/main"
+
+
+@lru_cache(maxsize=None)
+def _sections_at_main():
+    """`origin/main`'s sections, or None where that ref does not resolve."""
+    shown = _git("show", f"{MAIN}:{CHANGELOG}")
+    return sections(shown.stdout) if shown.returncode == 0 else None
+
+
+def main_problem_for(version, working, at_main):
+    """(whether `at_main` holds `[version]`, None or the failure message).
+
+    `working` and `at_main` are {version: section}: the CHANGELOG under test
+    and `origin/main`'s.
+    """
+    if version not in at_main:
+        return False, None
+    current, base = working[version], at_main[version]
+    problem = released_section_problem(current, base)
+    if problem is None:
+        return True, None
+    diff = "".join(difflib.unified_diff(
+        base.splitlines(keepends=True), current.splitlines(keepends=True),
+        f"origin/main:{CHANGELOG} [{version}]",
+        f"working tree {CHANGELOG} [{version}]"))
+    return True, (
+        f"[{version}] in {CHANGELOG} is not the text origin/main holds: "
+        f"{problem}. A new entry belongs under [Unreleased]; a merge of "
+        "main that raised no conflict can have put this branch's entries "
+        "under the released heading (RELEASING.md, \"Changes land on "
+        "`main`\", step 3).\n" + diff)
+
+
+@pytest.mark.parametrize("version", _released_versions())
+def test_a_released_section_is_the_text_main_holds(
+        version, git_reads_this_tree):
+    at_main = _sections_at_main()
+    if at_main is None:
+        pytest.skip(f"{MAIN}:{CHANGELOG} cannot be read here (a shallow or "
+                    "tag checkout, a remote of another name, a main "
+                    "without the file), so there is no main to compare "
+                    f"[{version}] with")
+    held, failure = main_problem_for(version, _working_sections(), at_main)
+    if not held:
+        pytest.skip(f"{MAIN}'s {CHANGELOG} has no [{version}] heading: a "
+                    "section main does not hold yet (a release branch's "
+                    "own, a record-back's), or a stale ref "
+                    "(`git fetch origin`)")
+    if failure:
+        pytest.fail(failure)
+
+
+def test_the_main_check_reads_origin_main(git_reads_this_tree, monkeypatch):
+    """The check above asks git for `origin/main`, and acts on the answer.
+
+    A base read from `HEAD` would leave every case here green on a branch
+    whose released sections are `main`'s, the misfiled one included (it
+    differs from `HEAD` as well), so what is pinned is the question put to
+    git. A reader that never resolves would skip every case.
+    """
+    # Asked of git directly, not of `_sections_at_main`, which is under test.
+    if _git("rev-parse", "-q", "--verify", MAIN).returncode != 0:
+        pytest.skip(f"{MAIN} is not present here")
+    if _git("cat-file", "-e", f"{MAIN}:{CHANGELOG}").returncode != 0:
+        pytest.skip(f"{MAIN} has no {CHANGELOG} (another project's main, "
+                    "or one from before the file)")
+
+    asked = []
+    real_git = _git
+
+    def recording_git(*args):
+        asked.append(args)
+        return real_git(*args)
+
+    monkeypatch.setitem(globals(), "_git", recording_git)
+    _sections_at_main.cache_clear()
+    try:
+        at_main = _sections_at_main()
+    finally:
+        _sections_at_main.cache_clear()
+    assert asked == [("show", "refs/remotes/origin/main:CHANGELOG.md")]
+    assert at_main is not None
+
+    working = _working_sections()
+    # An old main (a fork's, from before 1.0.0rc1) still holds the older
+    # headings and is compared on those; one that shares none has nothing
+    # to be compared on, which is a skip and not a failure (review of #970).
+    newest = next(
+        (v for v in working if v in at_main and v != "Unreleased"), None)
+    if newest is None:
+        pytest.skip(f"{MAIN}'s {CHANGELOG} holds none of this file's "
+                    "released headings, so no section can be compared")
+    # The shape of 2026-10-07: git put the branch's entries at the end of
+    # the newest released section, just above the next heading.
+    misfiled = dict(working)
+    misfiled[newest] = at_main[newest] + (
+        "- **A later bunch's entry.** Never released.\n\n")
+    held, failure = main_problem_for(newest, misfiled, at_main)
+    assert held
+    assert failure is not None and "A later bunch's entry" in failure
+    assert main_problem_for(newest, {newest: at_main[newest]},
+                            at_main) == (True, None)
+    # And the parametrized case itself fails on it, not only its helper.
+    monkeypatch.setitem(globals(), "_working_sections", lambda: misfiled)
+    with pytest.raises(pytest.fail.Exception, match="A later bunch's entry"):
+        test_a_released_section_is_the_text_main_holds(newest, None)
+
+    # A section main does not hold has nothing to be compared with.
+    assert main_problem_for("9.9.9", {"9.9.9": "## [9.9.9]\n"},
+                            at_main) == (False, None)
+
+
+def test_every_entry_under_a_released_heading_is_red():
+    """Not green by accident: with nothing left under `[Unreleased]`.
+
+    A check that only asked whether `[Unreleased]` held the branch's
+    entries, or whether the headings were in order, would pass this file.
+    """
+    at_main = sections("## [Unreleased]\n\n" + BASE)
+    all_misfiled = sections(
+        "## [Unreleased]\n\n" + BASE.replace(
+            "### Fixed\n\n",
+            "### Fixed\n\n- **A later bunch's entry.** Never released.\n"))
+    assert all_misfiled["Unreleased"] == at_main["Unreleased"]
+    held, failure = main_problem_for("1.0.0rc9", all_misfiled, at_main)
+    assert held and "a line was added or removed" in failure
 
 
 def _parser_problem(text):
