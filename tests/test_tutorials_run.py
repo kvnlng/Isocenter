@@ -21,7 +21,10 @@ breaks one is red, never skipped):
    admonition or a tab), spelled `~~~` or with four backticks, or left
    unclosed; a `<pre>` block; a fence inside an HTML comment (it would
    run, hidden from the reader); a `--8<--` snippet include; a line in a
-   `>>>` fence that is not an example; and any `doctest:` directive. A
+   `>>>` fence that is not an example; any `doctest:` directive; and a
+   fence holding an `if __name__ == "__main__":` test, whose body does
+   not run here because the runner's `__name__` is `__tutorial__` (#804:
+   the page says the guard in prose instead, as the tutorials do). A
    run page's fences start at column 0 with exactly three backticks, and
    outside any HTML comment. One gap is stated rather than
    closed: a four-space indented code block with no fence is not seen,
@@ -99,6 +102,7 @@ that has no row here is covered once the map is rebuilt. It is also
 listed under `exporters/__init__.py`, which it does import (convention
 6's registry restore), so the import scan demands that row.
 """
+import ast
 import doctest
 import pathlib
 import re
@@ -256,6 +260,13 @@ def _shape_failures(text, where):
       content, code included, that the runner never read.
     - A `doctest:` directive: `+SKIP` is a skip dressed as a pass, and
       the others change what "matches" means page by page.
+    - A python fence holding an `if __name__ == "__main__":` test
+      (#804). The namespace's `__name__` is `__tutorial__`, so the body
+      is skipped and raises nothing: `docs/waveforms.md`'s quick start
+      ran as a no-op in 0.0 s, and one true `>>>` line elsewhere on the
+      page would have made it green with its quick start never run.
+      Found by `ast`, so a comment or a string quoting the guard is not
+      one (`_under_main_guard`).
     An expected output of only `...` needs no rule: doctest reads a `...`
     line straight after `>>>` as a continuation of the source, so the
     example expects nothing and fails on any output.
@@ -301,7 +312,14 @@ def _shape_failures(text, where):
         body = match.group(2)
         first = line_of(match.start(2))
         pieces = parser.parse(body)
-        if not any(isinstance(p, doctest.Example) for p in pieces):
+        examples = [p for p in pieces if isinstance(p, doctest.Example)]
+        if any(_under_main_guard(source) for source in
+               ([e.source for e in examples] if examples else [body])):
+            failures.append(
+                f"{where}:{first}: a fence under the main guard does not "
+                "run here (the runner's `__name__` is not `__main__`), so "
+                "nothing checks it; say the guard in prose")
+        if not examples:
             continue
         offset = 0
         for piece in pieces:
@@ -321,6 +339,30 @@ def _shape_failures(text, where):
             offset = piece.lineno + piece.source.count("\n") \
                 + piece.want.count("\n")
     return failures
+
+
+def _under_main_guard(source):
+    """True when `source` holds an `if __name__ == "__main__":` test.
+
+    Read from the syntax, with `ast`, never from the text: a comment or a
+    string that quotes the guard is not one. Source that does not parse
+    is not judged here; running it reports the error.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                and len(node.test.ops) == 1
+                and isinstance(node.test.ops[0], ast.Eq)):
+            continue
+        sides = [node.test.left, node.test.comparators[0]]
+        if (any(isinstance(s, ast.Name) and s.id == "__name__" for s in sides)
+                and any(isinstance(s, ast.Constant) and s.value == "__main__"
+                        for s in sides)):
+            return True
+    return False
 
 
 def run_page(page, workdir, root=None):
@@ -704,16 +746,46 @@ _CHECKED = "```python\n>>> 1\n1\n```\n"
      "`doctest:` directive"),
     # Red because it fails, not by a rule: see `_shape_failures`.
     ("```python\n>>> 'anything at all'\n...\n```\n\n", "Expected nothing"),
+    # The runner's namespace is `__tutorial__`, so the body never runs
+    # (#804: `docs/waveforms.md`'s quick start ran as a no-op in 0.0 s).
+    ('```python\nif __name__ == "__main__":\n    ' + _BOOM + "\n```\n\n",
+     "under the main guard"),
+    ("```python\nimport os\n\nif '__main__' == __name__:\n    " + _BOOM
+     + "\n```\n\n", "under the main guard"),
+    ('```python\ndef main():\n    pass\n\nif __name__ == "__main__":\n'
+     "    main()\n```\n\n", "under the main guard"),
+    ('```python\n>>> if __name__ == "__main__":\n...     ' + _BOOM
+     + "\n```\n\n", "under the main guard"),
 ], ids=["admonition", "list-item", "tilde", "four-backticks", "unclosed",
         "pre", "comment-exec", "comment-doctest", "snippet",
         "snippet-indented", "code-before-example", "code-after-output", "skip",
-        "other-directive", "ellipsis-only"])
+        "other-directive", "ellipsis-only", "main-guard",
+        "main-guard-reversed", "main-guard-calling-main",
+        "main-guard-in-an-example"])
 def test_code_the_runner_would_not_run_is_red(tmp_path, body, says):
     page = _page(tmp_path, _OK_HEADER + _CHECKED + "\n" + body)
     failures = run_page(page, tmp_path, root=tmp_path)
     assert failures, "passed a page holding code that never ran"
     assert not any("SystemError: THIS RAN" in f for f in failures), failures
     assert any(says in f for f in failures), failures
+
+
+@pytest.mark.parametrize("fence", [
+    '```python\n# In a script: if __name__ == "__main__":\nx = 1\n```\n\n',
+    "```python\nadvice = 'put it under if __name__ == \"__main__\":'\n```\n\n",
+    '```python\n>>> print(\'if __name__ == "__main__":\')\n'
+    'if __name__ == "__main__":\n```\n\n',
+    # A comparison of `__name__` that is not the guard runs here.
+    '```python\nif __name__ != "__main__":\n    ran_here = True\n```\n\n'
+    "```python\n>>> ran_here\nTrue\n```\n\n",
+    '```python\nif __name__ == "__tutorial__":\n    ran_here = True\n```\n\n'
+    "```python\n>>> ran_here\nTrue\n```\n\n",
+], ids=["comment", "string", "printed", "not-equal", "another-name"])
+def test_a_fence_that_only_mentions_the_main_guard_runs(tmp_path, fence):
+    """The rule reads the fence's syntax, never its text: the tutorials
+    name the guard in prose, and a fence may quote it."""
+    page = _page(tmp_path, _OK_HEADER + _CHECKED + "\n" + fence)
+    assert run_page(page, tmp_path, root=tmp_path) == []
 
 
 def test_a_fence_nested_in_a_consumed_fence_is_content(tmp_path):
