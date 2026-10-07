@@ -342,13 +342,24 @@ UNFOLDED = {
     "a number and its text": ({NAME: {"value": 1}}, {NAME: {"value": "1"}}),
     "a bool and its number": ({NAME: {"value": True}}, {NAME: {"value": 1}}),
     "an int and its float": ({NAME: {"value": 1}}, {NAME: {"value": 1.0}}),
+    # A file can say `value: " v "`, and it writes another replacement
+    # than `value: "v"`: equating them would let a stored status pass for
+    # current under a policy that writes a different value (review of
+    # #969, S1; owner ruling Q2 A).
+    "a value's surrounding space": ({NAME: {"value": " v "}},
+                                    {NAME: {"value": "v"}}),
+    "a value's case": ({NAME: {"value": "Anon"}}, {NAME: {"value": "ANON"}}),
+    # Memory only: the loader refuses `Action` as an unknown key.
+    "a rule key's case": ({NAME: {"action": "KEEP"}},
+                          {NAME: {"Action": "KEEP"}}),
 }
 
 
 @pytest.mark.parametrize("pair", sorted(UNFOLDED))
 def test_nothing_is_normalized_in_a_tag_an_action_or_a_value(pair):
     """Kills: the tag lowercased or stripped inside the form; `action`
-    case-folded; a value compared by `==` or by its text."""
+    case-folded; a value compared by `==` or by its text; a string value
+    stripped or case-folded; a rule key case-folded."""
     a, b = UNFOLDED[pair]
     assert _fp(a) != _fp(b)
 
@@ -366,6 +377,10 @@ def test_the_unfolded_spellings_are_hashed_as_written(pinned_version):
         b'"0010,0010":{"value":1}'), NEVER_CHANGE_V1
     assert _canonical({NAME: {"value": "1"}}) == _rules(
         b'"0010,0010":{"value":"1"}'), NEVER_CHANGE_V1
+    assert _canonical({NAME: {"value": " Anon v "}}) == _rules(
+        b'"0010,0010":{"value":" Anon v "}'), NEVER_CHANGE_V1
+    assert _canonical({NAME: {"Action": "KEEP", "VALUE": "v"}}) == _rules(
+        b'"0010,0010":{"Action":"KEEP","VALUE":"v"}'), NEVER_CHANGE_V1
 
 
 def test_a_list_and_a_tuple_are_one_value(pinned_version):

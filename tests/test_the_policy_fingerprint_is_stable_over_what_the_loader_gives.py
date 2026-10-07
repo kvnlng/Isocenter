@@ -161,6 +161,21 @@ def test_key_order_rule_order_tag_case_and_name_do_not_make_another_policy(
     assert other != a
 
 
+def test_a_values_surrounding_space_is_another_policy_from_a_file(tmp_path):
+    """`value: " v "` loads with its spaces and writes them, so it is
+    another policy than `value: "v"` (owner ruling Q2 A on #969). Kills:
+    the loader or the form stripping a string value."""
+    spaced_tags, spaced = _loaded(_write(
+        tmp_path, "spaced.yaml",
+        _head() + f'phi_tags:\n  "{DESC}": {{action: REPLACE, value: " v "}}\n'))
+    bare_tags, bare = _loaded(_write(
+        tmp_path, "bare.yaml",
+        _head() + f'phi_tags:\n  "{DESC}": {{action: REPLACE, value: "v"}}\n'))
+    assert spaced_tags == {DESC: {"action": "REPLACE", "value": " v "}}
+    assert bare_tags == {DESC: {"action": "REPLACE", "value": "v"}}
+    assert spaced != bare
+
+
 def test_basic_and_its_pinned_name_are_one_policy(tmp_path):
     """Kills: the alias resolved to another table, or recorded under the
     bare name."""
