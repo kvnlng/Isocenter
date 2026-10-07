@@ -1186,7 +1186,10 @@ class RemediationService:
         # line-cited `mark_modified()` calls so the arm's condition stays
         # one same-line call, as `_holds_attr_to_remove` is for the arm
         # below it. The raw key, as the arm has always read it: a tag
-        # spelled in upper case falls past, and declines.
+        # spelled in upper case falls past. In the bottom `else` an
+        # owner-stamped one (`0020,000D`) is decided by
+        # `_owner_stamps_removal`, which canonicalises it; any other
+        # declines.
         return tag in entity.attributes and not self._owner_stamps_tag(entity, tag)
 
     @classmethod

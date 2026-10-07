@@ -291,6 +291,73 @@ def test_the_token_stashes_and_restores_the_sources_text(tmp_path):
         assert BRACKETS not in repr(held)
 
 
+@pytest.mark.parametrize("config", [KEEP, "privacy_profile: basic\n"],
+                         ids=["keep", "basic"])
+def test_the_token_of_an_instance_with_no_name_takes_the_patients_text(
+        tmp_path, config):
+    """The other line. The lock reads an instance's own copy and falls back
+    to `Patient.patient_name` -- `ingest_worker`'s `pname` -- only where
+    the copy is absent, so the test above passes with `pname` still
+    `str()`. Here a second file of the same patient lacks `(0010,0010)`:
+    its token holds the patient's text, which on main was the bracket
+    text. Kills `pname` reverted to `str()`."""
+    _write(tmp_path)
+    second = write_ct(tmp_path / "in" / "b.dcm", PID, 937)
+    ds = pydicom.dcmread(second)
+    ds.file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+    del ds.PatientName
+    ds.SOPInstanceUID = ds.SOPInstanceUID + ".2"
+    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    ds.save_as(second)
+    with _session(tmp_path, config) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "isocenter.key"))
+        [patient] = session.store.patients
+        instances = [i for st in patient.studies for se in st.series
+                     for i in se.instances]
+        [bare] = [i for i in instances if NAME not in i.attributes]
+        assert len(instances) == 2, "setup: one file with the name, one without"
+        assert patient.patient_name != "", "setup: the named file spoke first"
+        assert len(session.lock_identities(PID)) == 2
+        held = session.recover_patient_identity(PID, restore=False)
+        assert held[bare.sop_instance_uid][NAME] == TWO
+        assert {record[NAME] for record in held.values()} == {TWO}
+        assert BRACKETS not in repr(held)
+        session.anonymize(session.audit())
+        session.recover_patient_identity(patient.patient_id, restore=True)
+        assert patient.patient_name == TWO
+
+
+# ---------------------------------------------------------------------------
+# Beside #747: a file refused for its Patient ID never has its name held
+# ---------------------------------------------------------------------------
+
+def test_a_file_refused_for_a_two_valued_patient_id_says_no_name(
+        tmp_path, caplog):
+    """A file holding a two-valued Patient ID *and* a two-valued Patient's
+    Name. `pname` is read first, then #747's refusal raises: the file is
+    one failure, nothing of it is held, and neither the `ERROR` row nor a
+    log line carries a name value (the joined text, the bracket text, or
+    either value alone)."""
+    def two_ids(ds):
+        ds[0x00100020] = pydicom.DataElement(
+            0x00100020, "LO", "IDSECRETA\\IDSECRETB", validation_mode=IGNORE)
+
+    path = _write(tmp_path, edit=two_ids)
+    with caplog.at_level("DEBUG"):
+        with _session(tmp_path) as session:
+            assert session.store.patients == []
+            rows = _rows(session, "ERROR")
+            everything = _rows(session, "ERROR", "WARNING", "DATA_LOSS", "INGEST")
+    assert rows == [(
+        "ERROR",
+        f"Ingest failed for {path}: ValueError: Patient ID (0010,0020) holds "
+        "2 values and takes one; the file is linked by it, and none is "
+        "chosen for it.")]
+    said = repr(everything) + caplog.text
+    for value in ("SECRETA", "SECRETC", "IDSECRET"):
+        assert value not in said, said
+
+
 # ---------------------------------------------------------------------------
 # The named residual: a private PN of several values
 # ---------------------------------------------------------------------------

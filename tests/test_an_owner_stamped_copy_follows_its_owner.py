@@ -618,12 +618,19 @@ def test_t_u4_a_full_pass_folds_the_uid_copies(tmp_path):
 # and stamped the instance REMEDIATED, while the export went on stamping the
 # owner's value into the file. Measured at de5b26d9 and a7f8aeb9.
 #
-# **Every test here runs `privacy_profile: none` plus the one REMOVE rule.**
-# Under the floor the same pass leaves the instance IDENTIFIED on main too,
-# for another reason (the floor also raises Patient ID and the two UIDs on the
-# instance, #624 leaves those unhandled, and the tally demotes it), so a floor
-# test of the status passes with the fix deleted. And every test asserts the
-# copy's *value* against the exported value, not only a status.
+# **Every session test here but the last two runs `privacy_profile: none`
+# plus the one REMOVE rule** (the no-session control has no policy). Under the floor the same pass leaves the instance
+# IDENTIFIED on main too, for another reason (the floor also raises Patient ID
+# and the two UIDs on the instance, #624 leaves those unhandled, and the tally
+# demotes it), so a floor test of the status passes with the fix deleted. And
+# every test asserts the copy's *value* against the exported value, not only
+# a status.
+#
+# The last two run under the floor because they need its owner REPLACE:
+# `test_a_remove_on_a_copy_ingested_after_its_owner_wrote_is_left_to_the_owner`
+# and `test_an_instance_remove_beside_an_owner_replace_declines`. In both, the
+# row, the value and the vouch record carry the test; their IDENTIFIED
+# assertion alone would pass with the fix deleted, for the reason above.
 #
 # Owner rulings (2026-10-06): Q1 A, an owner holding no value leaves the copy
 # `''`, as Q-C2 does; Q2 A, an instance REMOVE beside an owner REPLACE on the

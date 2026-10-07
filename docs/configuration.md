@@ -396,8 +396,11 @@ Isocenter holds the element's text as the file wrote it and, where the
 policy keeps the element, exports the same values: two Operators' Names
 stay two, and a Patient's Name the source wrote with two is written with
 two. One case is written differently: a *private* `PN` holding several
-values is written `UT`, the same text, with one `WARNING` row naming the
-tag and both VRs, so the run grades `REVIEW_REQUIRED`
+values, kept with `remove_private_tags: false`. An export in an Explicit
+VR transfer syntax (`use_compression=True`) writes it under `UT`, the same
+text; an Implicit VR export (`use_compression=False`) names no VR and
+carries the same text. Either way the export writes one `WARNING` row
+naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
 ([#937](https://github.com/kvnlng/Isocenter/issues/937)).
 
 **One `UN` value is resolved rather than kept opaque.** If a private
