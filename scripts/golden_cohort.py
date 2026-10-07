@@ -454,6 +454,83 @@ def unstated_private_vr(out: Path):
     write(ds, out / "unstated_private_vr-mismatch.dcm")
 
 
+def ecg_lead_codes(out: Path):
+    """Five ECGs of five patients whose Channel Source codes the WFDB lead
+    names turn on (#832). `-2008-12lead`: twelve leads coded to PS3.16's
+    2008 lead table, where `MDC 2:3` is both Lead III and Lead V1, with a
+    mark on each (channels 3 and 7); the Code Meaning tells them apart.
+    `-2008-limb`: leads I, II and III of that table, a `2:3` with no V1
+    beside it. `-padded`: Code Values with a space in front, behind and on
+    both sides. `-coded-twice`: Lead II on two channels, so both are
+    written as `2:2`, with the `WARNING` row and a mark on channel 2.
+    `-short`: three Channel Definitions over two sample columns, with a
+    mark on channel 2 and one on channel 3, which the record has no signal
+    for and which therefore carries no `lead` (#963). The
+    `ecg` member's codes are reference IDs, which no table names, and
+    pydicom's own ECG is SCP-ECG coded: neither holds a `2:3`, a padded
+    code or a shared name."""
+    import warnings
+
+    from scripts.generate_waveform_test_data import add_annotation, build_ecg_dataset
+    files = (
+        ("2008-12lead", (3, 7), (
+            ("2:1", "Lead I", "I"), ("2:2", "Lead II", "II"),
+            ("2:3", "Lead III", "III"),
+            ("2:62", "aVR, augmented voltage, right", "aVR"),
+            ("2:63", "aVL, augmented voltage, left", "aVL"),
+            ("2:64", "aVF, augmented voltage, foot", "aVF"),
+            ("2:3", "Lead V1", "V1"), ("2:4", "Lead V2", "V2"),
+            ("2:5", "Lead V3", "V3"), ("2:6", "Lead V4", "V4"),
+            ("2:7", "Lead V5", "V5"), ("2:8", "Lead V6", "V6"))),
+        ("2008-limb", (), (
+            ("2:1", "Lead I", "I"), ("2:2", "Lead II", "II"),
+            ("2:3", "Lead III", "III"))),
+        ("padded", (), (
+            (" 2:1", "Lead I", "I"), ("2:2 ", "Lead II", "II"),
+            (" 2:61 ", "Lead III", "III"),
+            ("2:62", "aVR, augmented voltage, right", "aVR"))),
+        ("coded-twice", (2,), (
+            ("2:2", "Lead II", "II"), ("2:2", "Lead II", "II"))),
+        ("short", (2, 3), (
+            ("2:1", "Lead I", "I"), ("2:2", "Lead II", "II"),
+            ("2:61", "Lead III", "III"))))
+    # `-short` alone holds fewer sample columns than Channel Definitions.
+    columns = {"short": 2}
+    for n, (label, marked, channels) in enumerate(files, start=1):
+        # The committed bytes are the authority for good, so the member is
+        # conformant apart from what it is there to show. The fixture
+        # writes one string as both Code Meaning and Channel Label, and
+        # the table's own meanings (29 characters) overflow the label's
+        # SH 16: it is handed the short name, and the meaning is set
+        # after. Built with warnings as errors, so pydicom's length check
+        # would stop the build; only the fixture's own pydicom 4
+        # deprecation notice is let through.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            warnings.simplefilter("ignore", DeprecationWarning)
+            ds = build_ecg_dataset(
+                num_samples=1000, patient_id=f"GOLD-ecg_lead_codes-{n}",
+                channels=[(code, name) for code, _meaning, name in channels])
+            sop = uid("ecg_lead_codes", n, 1, 1)
+            ds.file_meta = _meta(ds.SOPClassUID, sop, ExplicitVRLittleEndian)
+            ds.SOPInstanceUID = sop
+            ds.StudyInstanceUID = uid("ecg_lead_codes", n)
+            ds.SeriesInstanceUID = uid("ecg_lead_codes", n, 1)
+            definitions = ds.WaveformSequence[0].ChannelDefinitionSequence
+            for chdef, (_code, meaning, _name) in zip(definitions, channels):
+                chdef.ChannelSourceSequence[0].CodeMeaning = meaning
+            for channel in marked:
+                add_annotation(ds, 100 * channel, channel=channel)
+            if label in columns:
+                group = ds.WaveformSequence[0]
+                samples = np.frombuffer(group.WaveformData, dtype="<i2")
+                group.NumberOfWaveformChannels = columns[label]
+                group.WaveformData = samples.reshape(
+                    -1, len(channels))[:, :columns[label]].tobytes()
+            fds = FileDataset(None, ds, file_meta=ds.file_meta, preamble=b"\0" * 128)
+            write(fds, out / f"ecg_lead_codes-{label}.dcm", ExplicitVRLittleEndian)
+
+
 def multi_valued_pn(out: Path):
     """Person Names holding several values (#937). Each was ingested, and
     where kept exported, as one value holding the text of a Python list
@@ -489,7 +566,8 @@ MEMBERS = {f.__name__: f for f in (
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
     encapsulated_pdf, unstated_private_vr,
-    multi_valued_keys, lut_unusable_descriptor, multi_valued_pn)}
+    multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
+    ecg_lead_codes)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
