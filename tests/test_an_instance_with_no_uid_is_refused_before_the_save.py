@@ -130,6 +130,40 @@ def test_a_uid_of_another_type_is_refused_in_the_same_words(tmp_path):
         session.close()
 
 
+@pytest.mark.parametrize("compress", [False, True], ids=["native", "j2k"])
+def test_an_export_over_a_uid_of_another_type_writes_no_file_and_no_row(
+        tmp_path, compress):
+    """What the 1.0.0rc14 `**Output:**` line for #721 left out. At
+    v1.0.0rc13, with `sop_instance_uid = 12345` on one of two instances,
+    `export()` returned: it wrote the other instance's file and an `ERROR`
+    row (`Export failed for instance 12345: TypeError: A UID must be
+    created from a string`), and the run graded REVIEW_REQUIRED. Now it
+    raises before anything is written: no folder, no file for either
+    instance, and no row. With the UID put back the same call writes both
+    (the control that this session can export at all)."""
+    import sqlite3
+
+    session, victim, _other = _session(tmp_path)
+    out = str(tmp_path / "out")
+    try:
+        kept = victim.sop_instance_uid
+        victim.sop_instance_uid = 12345
+        with pytest.raises(ValueError) as refused:
+            session.export(out, use_compression=compress)
+        assert str(refused.value) == MESSAGE
+        assert not os.path.exists(out)
+        session.store_backend.flush_audit_queue()
+        with sqlite3.connect(str(tmp_path / "s.db")) as conn:
+            assert conn.execute(
+                "SELECT action_type, details FROM audit_log").fetchall() == []
+        victim.sop_instance_uid = kept
+        assert session.export(out, use_compression=compress).written == 2
+        assert len([f for _r, _d, fs in os.walk(out) for f in fs
+                    if f.endswith(".dcm")]) == 2
+    finally:
+        session.close()
+
+
 def test_close_still_returns_over_such_an_instance(tmp_path):
     """`close()` warns about unsaved instances and does not save them, so
     it has nothing to refuse."""
