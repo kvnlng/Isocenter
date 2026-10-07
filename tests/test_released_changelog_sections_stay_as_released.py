@@ -257,15 +257,16 @@ def test_a_released_section_is_the_text_main_holds(
         version, git_reads_this_tree):
     at_main = _sections_at_main()
     if at_main is None:
-        pytest.skip(f"{MAIN} does not resolve here (a shallow or tag "
-                    "checkout, or a remote of another name), so there is "
-                    f"no main to compare [{version}] with")
+        pytest.skip(f"{MAIN}:{CHANGELOG} cannot be read here (a shallow or "
+                    "tag checkout, a remote of another name, a main "
+                    "without the file), so there is no main to compare "
+                    f"[{version}] with")
     held, failure = main_problem_for(version, _working_sections(), at_main)
     if not held:
         pytest.skip(f"{MAIN}'s {CHANGELOG} has no [{version}] heading: a "
                     "section main does not hold yet (a release branch's "
                     "own, a record-back's), or a stale ref "
-                    "(`git fetch origin main`)")
+                    "(`git fetch origin`)")
     if failure:
         pytest.fail(failure)
 
@@ -281,6 +282,9 @@ def test_the_main_check_reads_origin_main(git_reads_this_tree, monkeypatch):
     # Asked of git directly, not of `_sections_at_main`, which is under test.
     if _git("rev-parse", "-q", "--verify", MAIN).returncode != 0:
         pytest.skip(f"{MAIN} is not present here")
+    if _git("cat-file", "-e", f"{MAIN}:{CHANGELOG}").returncode != 0:
+        pytest.skip(f"{MAIN} has no {CHANGELOG} (another project's main, "
+                    "or one from before the file)")
 
     asked = []
     real_git = _git
@@ -296,10 +300,17 @@ def test_the_main_check_reads_origin_main(git_reads_this_tree, monkeypatch):
     finally:
         _sections_at_main.cache_clear()
     assert asked == [("show", "refs/remotes/origin/main:CHANGELOG.md")]
-    assert at_main is not None and "1.0.0rc1" in at_main
+    assert at_main is not None
 
     working = _working_sections()
-    newest = next(v for v in working if v in at_main and v != "Unreleased")
+    # An old main (a fork's, from before 1.0.0rc1) still holds the older
+    # headings and is compared on those; one that shares none has nothing
+    # to be compared on, which is a skip and not a failure (review of #970).
+    newest = next(
+        (v for v in working if v in at_main and v != "Unreleased"), None)
+    if newest is None:
+        pytest.skip(f"{MAIN}'s {CHANGELOG} holds none of this file's "
+                    "released headings, so no section can be compared")
     # The shape of 2026-10-07: git put the branch's entries at the end of
     # the newest released section, just above the next heading.
     misfiled = dict(working)

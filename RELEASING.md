@@ -122,7 +122,10 @@ minor's work. A PR with neither is the next unreleased line's work.
    hunk by its context and raises no conflict when the context has moved:
    once a record-back ("Cutting a release", step 8) has put a released
    heading above the entries a hunk was anchored on, the branch's entries
-   follow them under that heading. After `git fetch origin main`:
+   follow them under that heading. **`git fetch origin` comes first:**
+   both checks below read `origin/main`, and against a stale one the
+   diff is taken with the wrong file and the test skips the misplaced
+   section instead of failing it. Then:
    - `git diff --unified=0 origin/main -- CHANGELOG.md` shows the branch's
      own entries and nothing else, and every hunk starts above `main`'s
      first released heading: the `a` of each `@@ -a,b +c,d @@` is less
@@ -139,7 +142,8 @@ minor's work. A PR with neither is the next unreleased line's work.
      has the newest tag: release tags sit on `release/X.Y`, and `git
      fetch origin main` does not bring them. On a branch that adds no
      released section, a skip naming `origin/main` means the ref is
-     missing or stale: fetch, and run it again.
+     missing or stale: fetch, and run it again. `pytest -v` prints only
+     `SKIPPED`; `-rs` prints which section and why.
 
    The merge of the 1.0.0rc13 record-back into #958's branch did this on
    2026-10-07: three entries, 37 lines, at the end of `[1.0.0rc13]`, with
@@ -632,8 +636,9 @@ cut this way (#818, #821, #822).
        last commit deals with both.
      - **A pick whose `CHANGELOG.md` hunk applies with no conflict has
        still put its entry in the wrong place,** and is left as it is.
-       The branch has no `[Unreleased]` heading, so git places the hunk
-       by its context, under a released one. Whatever a pick leaves in
+       The branch has no `[Unreleased]` heading, until a pick resolved
+       as the next rule says brings one, so git places the hunk by its
+       context, under a released one. Whatever a pick leaves in
        `CHANGELOG.md`, with a conflict or without, is provisional: the
        last commit writes the file again from `main`'s (below). Three of
        the four picks for 1.0.0rc14 did this (#967, 2026-10-07): before
@@ -645,8 +650,22 @@ cut this way (#818, #821, #822).
        instead: `git checkout <its sha> -- CHANGELOG.md`, `git add
        CHANGELOG.md`, then `git cherry-pick --continue`. The pick stays
        on the branch with its `-x` line, and the last commit writes the
-       file like any other pick's (#956; the picks for rc12, #928, and
-       for rc13, #955, were resolved this way before the rule said so).
+       file like any other pick's (#956, owner ruling 2026-10-07). The
+       one such pick before the rule, #954's at rc13 (#955), was
+       resolved this way; rc12's picks (#928) took `main`'s file too,
+       in picks that also carried code. That puts `main`'s whole file
+       at that commit on the branch, so **the pick is followed by its
+       proof**, pasted into the PR body with the pick's SHA:
+       `git diff --stat <its sha> HEAD -- . ':!isocenter/_version.py' ':!CITATION.cff'`,
+       run right after the pick, prints nothing: the picked tree is
+       `main`'s at that commit, apart from the version files. Where it
+       cannot print nothing, it prints exactly the files of the line's
+       left-out list and branch-only fixes, and any file an earlier
+       pick kept the branch's copy of with `--ours`; the PR body names
+       each, and `CHANGELOG.md` is never among them. The reviewer runs
+       the same command at the pick's commit on the PR branch, before
+       the squash merge removes it, and checks the output against the
+       PR body.
      - **Never resolve `fingerprint/output.json` by hand.** Keep the
        branch's copy (`--ours`) and retake it, as below.
      - Any other conflict, which a left-out commit upstream of a pick can
