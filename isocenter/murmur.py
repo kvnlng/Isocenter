@@ -13,7 +13,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from .config_manager import _vr_dummy
-from .exporters.wfdb import _signal_descriptions
+from .exporters.wfdb import _sanitize_description, _signal_descriptions
 # The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
 # iteration -- lives in waveform.py, because the graph-side
 # dangling-reference filter must read the pairs exactly as this bridge
@@ -142,9 +142,17 @@ def _lead_for(waveform, referenced_channels,
     # Bounded by the defined channels, not by the list: the header's list
     # also covers sample columns past the definitions, and a mark naming
     # one of those resolves to no lead, as it always has.
-    if 0 <= index < len(waveform.channels) and index < len(descriptions):
+    if not 0 <= index < len(waveform.channels):
+        return None
+    if index < len(descriptions):
         return descriptions[index]
-    return None
+    # A defined channel with no signal line: more Channel Definitions than
+    # sample columns. The header has no name for it, so it keeps its own
+    # channel's answer, as before #832 (measured at bb5e6f1f: three
+    # definitions over two columns, a mark on channel 3, `lead` `III`).
+    # Whether such a mark should carry a lead at all is an open question,
+    # not one #832 ruled on.
+    return _sanitize_description(waveform.channels[index].wfdb_description(index))
 
 
 def _sample_positions(item, waveform) -> List[int]:

@@ -308,6 +308,32 @@ def test_the_murmur_bridge_reads_the_list_it_is_handed(tmp_path):
         session.close()
 
 
+def test_a_mark_on_a_defined_channel_with_no_signal_line_keeps_its_lead(tmp_path):
+    """Three definitions over two sample columns: the header writes two
+    signal lines, and the exporter's list holds two names. A mark on
+    channel 3 took the third definition's name before #832 (measured at
+    bb5e6f1f: `['I', 'II', 'III']`), and #832 does not change that."""
+    import pydicom
+
+    channels = [("MDC", "2:1", "Lead I", ""), ("MDC", "2:2", "Lead II", ""),
+                ("MDC", "2:61", "Lead III", "")]
+    ds = _dataset(channels, "P-short")
+    group = ds.WaveformSequence[0]
+    group.NumberOfWaveformChannels = 2
+    group.WaveformData = np.zeros((64, 2), dtype="<i2").tobytes()
+    source = tmp_path / "src"
+    source.mkdir()
+    pydicom.dcmwrite(str(source / "x.dcm"), ds, enforce_file_format=True)
+    session = Session(str(tmp_path / "short.db"))
+    try:
+        session.ingest(str(source))
+        records = session.export(str(tmp_path / "out"), format="wfdb")
+        assert _header_names(records[0], 2) == ["I", "II"]
+        assert _leads(records[0]) == ["I", "II", "III"]
+    finally:
+        session.close()
+
+
 # -- 4. The row -------------------------------------------------------------
 
 def test_a_record_whose_names_clashed_has_one_warning_row(tmp_path, caplog):
