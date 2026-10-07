@@ -348,11 +348,18 @@ def test_a_mixed_patient_is_refused_whichever_study_the_pass_reached(
         inst.set_attr(ACC, "PASS-OUTPUT")
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities(PID)
+        # A first lock (no token on either study), so since #593 the
+        # refusal advises the default `tags_to_lock` less the replaced
+        # tag; until then it ended "Lock identities before anonymize(),
+        # and do not re-lock a patient after it; ...", which a re-lock
+        # still gets.
         assert str(raised.value) == (
             "lock_identities: this patient already carries a replacement in "
             "0008,0050 ('PASS-OUTPUT'), so there is no original identity left "
-            "to stash. Lock identities before anonymize(), and do not re-lock a "
-            "patient after it; the token this call would have written is unchanged.")
+            "to stash. Lock identities before anonymize(). To lock this patient "
+            "now without 0008,0050, call lock_identities(<its Patient ID>, "
+            "tags_to_lock=['0010,0010', '0010,0020', '0010,0030', '0010,0040']); "
+            "the token this call would have written is unchanged.")
         assert all(SEQ not in i.sequences for i in _all(by_study))
         _value_free(str(raised.value))
 

@@ -417,10 +417,12 @@ EXEMPT = {
 
 
 def _owner_arm_tags():
-    """Every `tag == "gggg,eeee"` comparison in `_owner_stamps_copy`, by
-    AST: calling it writes to the instance and re-records its status."""
+    """Every `tag == "gggg,eeee"` comparison in `_stamping_owner`, the one
+    table `_owner_stamps_copy` reads its owner from since #764, by AST:
+    calling `_owner_stamps_copy` writes to the instance and re-records its
+    status."""
     source = textwrap.dedent(inspect.getsource(
-        RemediationService._owner_stamps_copy))
+        RemediationService._stamping_owner))
     tags = set()
     for node in ast.walk(ast.parse(source)):
         if (isinstance(node, ast.Compare)
