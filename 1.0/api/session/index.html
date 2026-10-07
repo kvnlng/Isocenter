@@ -4968,7 +4968,11 @@ that attempted records and wrote none raises instead.</p>
 Also on <code>dicom</code>, before anything is written, for a <code>subset</code>
 query that does not run, or a <code>subset</code> DataFrame with none of
 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
-PatientID.</p>
+PatientID. Also, on both formats, from the save an export
+begins with, when an instance with unsaved changes holds a
+SOP Instance UID that is not a <code>str</code>: it gives the count, and
+nothing is saved or written (#721; this was sqlite's
+<code>IntegrityError</code>).</p>
               </div>
             </td>
           </tr>

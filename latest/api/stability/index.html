@@ -2271,7 +2271,13 @@ two-names-two-behaviours rule between <code>unload</code> and <code>discard</cod
 refuses an unsaved replacement; <code>discard</code> throws it away, with the
 descriptors <code>set_pixel_data()</code> wrote for it — and a <code>set_attr()</code> edit
 to any of those descriptors made since the set). On <code>DicomItem</code>:
-<code>set_attr()</code>. On <code>Instance</code> it also keeps resident pixels reading as a
+<code>set_attr()</code>. It stores the value it is given, except that a numpy
+bool, integer or float (a scalar or a 0-d array), and a <code>list</code> or
+<code>tuple</code> directly holding one, is
+stored as the Python number it equals (<code>np.int64(7)</code> as the <code>int</code> 7), so
+<code>attributes[tag]</code> equals what was set and is not the same object. It
+raises nothing for a value the store cannot hold; the save does
+(Exceptions, below). On <code>Instance</code> it also keeps resident pixels reading as a
 pixel-descriptor edit declares, and raises <code>ValueError</code> for an edit that
 pixels set through <code>set_pixel_data()</code> and not yet saved cannot be read
 under. <code>get_pixel_data()</code> reads an instance's samples under its pixel
@@ -2321,6 +2327,31 @@ otherwise.</p>
 <li><code>ExportError(failures, attempted, folder=None)</code>, a <code>RuntimeError</code>,
   raised last and only when zero of N reached disk, by both formats.</li>
 <li><code>compact()</code>: <code>RuntimeError</code> while a pass is open (below).</li>
+<li><code>save(sync=True)</code>, <code>compact()</code> and <code>export()</code> (both formats begin with
+  a save): <code>TypeError</code> when an instance with unsaved changes holds an
+  attribute value the store cannot hold. An attribute's value is <code>None</code>,
+  a <code>str</code>, <code>bytes</code>, a <code>bool</code>, an <code>int</code>, a <code>float</code>, a pydicom DS or IS
+  value, or a list of those; a numpy bool, integer or float is saved as
+  the Python number it equals. The message names the instance, the tag
+  (with its path inside a sequence) and the type, never the value.
+  Nothing of the save is stored: no row reaches the database, no
+  instance's revision moves, no file is exported, no audit row is
+  written, and the instances stay unsaved, so the same call succeeds
+  once the value is one of those types. A pixel frame of another unsaved
+  instance may already have been appended to the sidecar; the next save
+  reuses it, and <code>compact()</code> reclaims it otherwise. A private tag at the
+  top level of an instance follows the same rule, narrower in one
+  respect: a list under it holds no <code>bytes</code> and no list. <code>save()</code>
+  without <code>sync=True</code> returns before the write, and logs the same
+  message at ERROR.
+  <code>lock_identities(persist=True)</code> raises it after the tokens are
+  embedded in memory, as it does the <code>sqlite3.Error</code> below.</li>
+<li><code>save(sync=True)</code>, <code>compact()</code> and <code>export()</code>: <code>ValueError</code> when an
+  instance with unsaved changes holds a SOP Instance UID that is not a
+  <code>str</code> (<code>None</code>, or a value of another type), giving the count. Raised
+  by the save before it stores or appends anything, so nothing is saved
+  or exported. Under <code>export(check_burned_in=True)</code> the
+  pre-export scan has already run.</li>
 <li><code>redact()</code>: <code>RuntimeError</code> on a <code>:memory:</code> store when the environment
   asks for worker recycling.</li>
 <li><code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code>:

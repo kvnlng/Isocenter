@@ -2989,6 +2989,19 @@ writes the replacement as <code>LO</code> and the emptied element as a zero-leng
 <code>UN</code>. An Explicit VR Big Endian source that says <code>UN</code> draws one <code>WARNING</code>
 row per such element at ingest, since the byte order of <code>UN</code> words is
 unknown. The private creator element itself is always read as <code>LO</code>.</p>
+<p><strong>A Person Name holding several values is kept as the source wrote it.</strong>
+A <code>PN</code> element whose value holds a backslash (<code>Smith^Ann\Jones^Bo</code>) holds
+two values (PS3.5 6.4), whether or not the attribute allows more than one.
+Isocenter holds the element's text as the file wrote it and, where the
+policy keeps the element, exports the same values: two Operators' Names
+stay two, and a Patient's Name the source wrote with two is written with
+two. One case is written differently: a <em>private</em> <code>PN</code> holding several
+values, kept with <code>remove_private_tags: false</code>. An export in an Explicit
+VR transfer syntax (<code>use_compression=True</code>) writes it under <code>UT</code>, the same
+text; an Implicit VR export (<code>use_compression=False</code>) names no VR and
+carries the same text. Either way the export writes one <code>WARNING</code> row
+naming the tag and both VRs, so the run grades <code>REVIEW_REQUIRED</code>
+(<a href="https://github.com/kvnlng/Isocenter/issues/937">#937</a>).</p>
 <p><strong>One <code>UN</code> value is resolved rather than kept opaque.</strong> If a private
 <code>UN</code> value begins with the item tag <code>(FFFE,E000)</code> and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the

@@ -2686,6 +2686,23 @@ not make every method rendered under it tier 1: the frozen ones are
 methods shown, such as <code>Instance.regenerate_uid()</code> and the sequence
 methods, are tier 2, and so are <code>pixel_array</code> and <code>waveform_array</code> in
 <code>Instance</code>'s attribute table.</p>
+<p><strong>What <code>set_attr()</code> stores.</strong> The value it is given, with one exception:
+a numpy bool, integer or float (a scalar or a 0-d array), and a <code>list</code>
+or <code>tuple</code> directly holding one, is stored as the Python number it
+equals, so
+<code>set_attr("0018,1150", np.int64(7))</code> leaves the <code>int</code> 7 in <code>attributes</code>
+and a live export writes what a reopened session writes. An array of one
+or more dimensions is not converted; pass <code>.tolist()</code> or <code>.tobytes()</code>.
+Nor is any other numpy value: a <code>datetime64</code>, a <code>timedelta64</code>, a complex
+number and a masked value stay as given, and the save refuses them.
+A value written straight into <code>attributes</code> is not seen by the entity
+(call <code>mark_modified()</code>), and a numpy number written that way is
+converted when it is saved. The store holds <code>None</code>, <code>str</code>, <code>bytes</code>,
+<code>bool</code>, <code>int</code>, <code>float</code>, pydicom's DS and IS values, and lists of those;
+<code>set_attr()</code> raises nothing for anything else, and the next
+<code>save(sync=True)</code>, <code>export()</code> or <code>compact()</code> raises <code>TypeError</code> naming
+the instance, the tag and the type (<a href="../stability/">API stability</a>,
+Exceptions).</p>
 
 
 <div class="doc doc-object doc-module">
@@ -4316,6 +4333,17 @@ a tag that already has one changes nothing the store must hold.</p>
 <p>The tag is lowercased first, so <code>0008,103E</code> and <code>0008,103e</code> name
 one attribute: ingested keys are always lowercase, and a key in
 another casing would read as absent rather than raise.</p>
+<p>The value is stored as the object given, with one exception: a
+numpy bool, integer or float, and a <code>list</code> or <code>tuple</code> directly holding
+one, is stored as the Python number it equals (<code>np.int64(7)</code> as the
+<code>int</code> 7; a list as a new list), so a live export writes what a
+reopened session writes. An array of one or more dimensions is not
+converted: pass its numbers as a list, or its bytes.</p>
+<p>Nothing is refused here. The store holds <code>None</code>, <code>str</code>, <code>bytes</code>,
+<code>bool</code>, <code>int</code>, <code>float</code>, pydicom's DS and IS values, and lists of
+those; for any other value the next <code>save(sync=True)</code>, <code>export()</code>
+or <code>compact()</code> raises <code>TypeError</code> naming the instance, the tag and
+the type.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
