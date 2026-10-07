@@ -519,10 +519,16 @@ class WaveformChannel:
             # The scheme is compared as `_is_known_coding_scheme` compares
             # it, case-insensitively, since carts write `sct` for `SCT`;
             # the two must not disagree about which scheme a code is in.
-            # The Code Value is compared exactly: it is case-sensitive, and
-            # every key is digits and punctuation. A `99...` scheme matches
-            # no key, so a local code is never named.
-            key = (_normalized_scheme(self.source_scheme), self.source_code)
+            # The Code Value is compared case-sensitively (every key is
+            # digits and punctuation) and without its surrounding spaces:
+            # it is SH, "a character string that may be padded with leading
+            # and/or trailing spaces" (PS3.5 §6.2), and pydicom strips only
+            # the trailing one on read, so ` 2:1` reaches here (#832). Only
+            # the comparison is stripped: a code the table does not name is
+            # returned as held. A `99...` scheme matches no key, so a local
+            # code is never named.
+            key = (_normalized_scheme(self.source_scheme),
+                   str(self.source_code).strip())
             return _CID_3001_LEAD_NAMES.get(key, self.source_code)
         if self.label and _is_known_lead_name(self.label):
             return self.label.strip()

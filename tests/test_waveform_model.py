@@ -278,10 +278,31 @@ def test_a_cid_3001_row_outside_the_named_set_stays_verbatim(scheme, code, meani
 @pytest.mark.parametrize("scheme,code", [
     ("MDC", "MDC_ECG_LEAD_II"),      # the reference ID, not a Code Value
     ("SCPECG", "5.6.3-9-999"),       # no such row
-    ("MDC", "2:1 "),                 # not the row's Code Value either
 ])
 def test_an_unknown_code_in_a_known_scheme_stays_verbatim(scheme, code):
     channel = WaveformChannel(label="", source_code=code, source_scheme=scheme)
+    assert channel.wfdb_description(0) == code
+
+
+@pytest.mark.parametrize("scheme,code,name", [
+    ("MDC", " 2:1", "I"),             # what pydicom hands over: it strips
+    ("MDC", "2:1 ", "I"),             # only the trailing space on read
+    ("SCPECG", " 5.6.3-9-61 ", "III"),
+])
+def test_a_padded_code_value_is_the_code(scheme, code, name):
+    """Code Value is SH, "a character string that may be padded with
+    leading and/or trailing spaces" (PS3.5 §6.2), so ` 2:1` is `2:1`
+    (#832). Before the fix it was written `2:1`, a bare code where `I` was
+    meant."""
+    channel = WaveformChannel(label="", source_code=code, source_scheme=scheme)
+    assert channel.wfdb_description(0) == name
+
+
+@pytest.mark.parametrize("code", ["2:1x", "2: 1", "2 :1"])
+def test_only_surrounding_spaces_are_insignificant_in_a_code_value(code):
+    """The control for the test above: a strip that also removed interior
+    characters, or a prefix match, would name these `I`."""
+    channel = WaveformChannel(label="", source_code=code, source_scheme="MDC")
     assert channel.wfdb_description(0) == code
 
 
