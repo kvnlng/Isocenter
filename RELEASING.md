@@ -129,8 +129,9 @@ minor's work. A PR with neither is the next unreleased line's work.
      than the line number that
      `git show origin/main:CHANGELOG.md | grep -n -m1 '^## \[[0-9]'`
      prints. A hunk at or below that line is an entry under a released
-     heading. Move it up into `[Unreleased]` by hand, in the merge commit
-     or the next one.
+     heading, unless it rewrites a line of a released section in place,
+     on purpose (the test allows that, #927). Move a misplaced entry up
+     into `[Unreleased]` by hand, in the merge commit or the next one.
    - `tests/test_released_changelog_sections_stay_as_released.py` passes.
      `pytest --changed` selects it for any change to `CHANGELOG.md`, so
      the runs above include it. It compares each released section with
