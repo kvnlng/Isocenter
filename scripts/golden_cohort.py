@@ -345,6 +345,48 @@ def graphic_annotation(out: Path):
     write(ds, out / "graphic_annotation-1.dcm")
 
 
+def multi_valued_keys(out: Path):
+    """Four CTs, each with one linkage key holding two values: Patient ID,
+    SOP Instance UID, Study Instance UID, Series Instance UID (#747). Every
+    file is refused at ingest with an `ERROR` row naming the element and
+    the count, so this member exports nothing and its rows are the whole
+    recording. No other member holds a multi-valued key; and the row this
+    one replaced quoted a `TypeError` whose words differ between 3.12 and
+    3.14t."""
+    for n, (keyword, label) in enumerate((
+            ("PatientID", "patient-id"), ("SOPInstanceUID", "sop-uid"),
+            ("StudyInstanceUID", "study-uid"),
+            ("SeriesInstanceUID", "series-uid")), start=1):
+        ds = ct("multi_valued_keys", study=n)
+        first = getattr(ds, keyword)
+        second = ("GOLD-multi_valued_keys-B" if keyword == "PatientID"
+                  else uid("multi_valued_keys", "second", keyword))
+        setattr(ds, keyword, [first, second])
+        write(ds, out / f"multi_valued_keys-{label}.dcm")
+
+
+def lut_unusable_descriptor(out: Path):
+    """Three CTs whose Modality LUT has a LUT Descriptor pydicom cannot
+    read a first value from (#703): empty in an Implicit VR and in an
+    Explicit VR source, and holding one value in an Explicit VR source.
+    The implicit file was refused at ingest and the explicit ones lost
+    their LUT Data at export; all three now export it as `OW` with one
+    `WARNING` clause. `lut_ambiguous` carries a three-value descriptor and
+    never reached either door's fallback."""
+    for inst, (label, descriptor, syntax) in enumerate((
+            ("empty-implicit", None, ImplicitVRLittleEndian),
+            ("empty-explicit", None, ExplicitVRLittleEndian),
+            ("one-value-explicit", [4], ExplicitVRLittleEndian)), start=1):
+        ds = ct("lut_unusable_descriptor", inst=inst, syntax=syntax)
+        item = Dataset()
+        item.add_new(0x00283002, "US", descriptor)
+        item.add_new(0x00283003, "LO", "GOLD LUT")
+        item.add_new(0x00283004, "LO", "HU")
+        item.add_new(0x00283006, "OW", np.array([0, 1000, 40000, 65535], dtype="<u2").tobytes())
+        ds.ModalityLUTSequence = Sequence([item])
+        write(ds, out / f"lut_unusable_descriptor-{label}.dcm")
+
+
 def encapsulated_pdf(out: Path):
     """An Encapsulated PDF: a 1000-byte document with Encapsulated Document
     Length 1000, and no pixels (#757). `basic@2026c` writes its two-byte
@@ -446,7 +488,8 @@ MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
-    encapsulated_pdf, unstated_private_vr, multi_valued_pn)}
+    encapsulated_pdf, unstated_private_vr,
+    multi_valued_keys, lut_unusable_descriptor, multi_valued_pn)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

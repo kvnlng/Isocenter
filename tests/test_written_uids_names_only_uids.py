@@ -20,8 +20,9 @@ the summary gains a second entry (`""` under the fix; the output path,
 Patient ID and all, with the arm restored).
 
 `""`, not `None`: a `None` UID fails earlier, in the export's leading
-`save(sync=True)`, with `sqlite3.IntegrityError` (#721), and never reaches
-the write door.
+`save(sync=True)`, with the save's own `ValueError` naming how many
+instances hold no UID (#721; until then, sqlite's `IntegrityError`), and
+never reaches the write door.
 
 **Why this file imports what it does.** `isocenter.session` and
 `isocenter.builders` are named, so their probe rows are charged. It does
