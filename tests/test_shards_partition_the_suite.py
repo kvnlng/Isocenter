@@ -194,3 +194,307 @@ def test_the_gate_workflow_runs_every_shard_it_divides_into():
     summary = next(s for s in job["steps"]
                    if "GITHUB_STEP_SUMMARY" in s.get("run", ""))["run"]
     assert f"shard ${{{{ matrix.shard }}}}/{count}" in summary, summary
+
+
+def _suite_step(job):
+    return next(s for s in job["steps"] if s.get("id") == "suite")
+
+
+def test_the_test_step_runs_for_every_matrix_entry():
+    """A matrix that lists every shard still skips one when the step that
+    runs the tests is conditional on the entry: `if: matrix.shard != 8` on
+    `Run Tests` leaves the list reading 1..8, the job green, and an eighth
+    of the suite unrun (review of #964: that mutant passed every workflow
+    pin). So nothing that decides whether the tests run, or whether their
+    failure counts, may read the matrix.
+
+    Kills: an `if:` naming the matrix on the step or on the job;
+    `continue-on-error` on either, which reports a red shard green."""
+    job, _count = _gate_workflow()
+    step = _suite_step(job)
+    for where, holder in (("the Run Tests step", step), ("the test job", job)):
+        condition = str(holder.get("if", ""))
+        assert "matrix" not in condition, (
+            f"{where} of tests.yml runs only `if: {condition}`: a matrix "
+            "entry it skips is a shard no job runs, behind a green check")
+        assert not holder.get("continue-on-error"), (
+            f"{where} of tests.yml sets continue-on-error: a shard that "
+            "fails would be reported as passing")
+    # No `if:` at all today. One that does not read the matrix (a
+    # repository guard, say) is not this pin's business, but the plain
+    # shape is asserted too so that adding one is a decision somebody
+    # reads this for.
+    assert "if" not in step, step.get("if")
+    # The same skip can be written in the shell, where no key shows it:
+    # `[ "${{ matrix.shard }}" = 8 ] || pytest ...` passed every pin above
+    # (review of #969, S2), and so would `pytest ... || true`. So the
+    # script is the one command, whole, and nothing else.
+    _job, count = _gate_workflow()
+    assert step["run"].strip() == (
+        f"pytest -v --shard=${{{{ matrix.shard }}}}/{count} "
+        "--record-shard-timings=${{ runner.temp }}/shard-timings.json"), (
+        "the Run Tests step of tests.yml runs something other than the "
+        f"one pytest command: {step['run']!r}. A shell condition, a "
+        "second command or `|| true` there can skip a shard or hide its "
+        "failure behind a green step; change this pin with the command, "
+        "on purpose.")
+    assert "shell" not in step
+
+
+def _heaviest_shard_seconds(files, timings, count):
+    """The recorded weight of the heaviest of `count` shards, weighing an
+    untimed file as `shards.assign` does (the median of the timed ones)."""
+    import statistics
+    known = [timings[f] for f in files if f in timings]
+    default = statistics.median(known) if known else 1.0
+    return max(sum(float(timings.get(f, default)) for f in shard)
+               for shard in shards.assign(files, timings, count))
+
+
+def test_the_heaviest_shard_is_weighed_as_the_assignment_weighs_it():
+    """Kills: the mean shard taken for the heaviest; an untimed file
+    weighed at nothing."""
+    timings = {"tests/test_a.py": 300.0, "tests/test_b.py": 100.0,
+               "tests/test_c.py": 100.0}
+    files = list(timings) + ["tests/test_new.py"]      # weighs the median, 100
+    # a | b, c, new: 300 against 300. Then one more untimed file.
+    assert _heaviest_shard_seconds(files, timings, 2) == 300.0
+    assert _heaviest_shard_seconds(files + ["tests/test_newer.py"],
+                                   timings, 2) == 400.0
+    assert _heaviest_shard_seconds(files, timings, 1) == 600.0
+
+
+#: The share of the `Run Tests` step a shard's recorded weight may take.
+#: Half, because one runner was measured 1.75 times slower than another
+#: at one commit (#935): 1.75 x 50% is 87% of the step.
+_HEAVIEST_SHARD_SHARE = 0.5
+
+
+def test_the_heaviest_shard_fits_the_step_with_room():
+    """The suite grows, and four shards reached the 25-minute step with
+    every test passing before anything said so (#935). This says so here,
+    at the refresh of tests/shard_timings.json (RELEASING.md, "Cutting a
+    release", step 8), instead of in a release run: when it is red, add
+    shards to tests.yml or raise the step's cap and the family of timeouts
+    with it, as that file's comments say.
+
+    **What it rests on, and nothing checks:** the timings are runner
+    seconds. A file recorded locally is about 2.3 times lighter per test
+    file and passes this with the suite twice the size. And a test file
+    with no timing weighs the median, so files added since the last
+    refresh are under-counted.
+
+    Kills: the shard count lowered or the cap lowered past what the suite
+    needs; the share raised."""
+    job, count = _gate_workflow()
+    cap = _suite_step(job)["timeout-minutes"] * 60
+    files = shards.suite_files(REPO)
+    timings = shards.load_timings(REPO)
+    # The file is the one being asked about: most of the suite is in it.
+    assert len([f for f in files if f in timings]) > len(files) / 2
+    heaviest = _heaviest_shard_seconds(files, timings, count)
+    assert heaviest <= _HEAVIEST_SHARD_SHARE * cap, (
+        f"the heaviest of tests.yml's {count} shards weighs {heaviest:.0f} s "
+        f"by tests/shard_timings.json, over {_HEAVIEST_SHARD_SHARE:.0%} of "
+        f"the {cap} s Run Tests step. A runner 1.75 times slower than the "
+        "one recorded would run it at "
+        f"{1.75 * heaviest / cap:.0%} of the cap. Add shards (the matrix "
+        "list, the run line and the summary line move together) or raise "
+        "the cap with the job cap and faulthandler_timeout.")
+    # And the pin can speak: the same suite on one shard does not fit.
+    assert _heaviest_shard_seconds(files, timings, 1) > cap
+
+
+# --- refreshing tests/shard_timings.json from a release run (#935, Q3 A) --
+#
+# Every shard of tests.yml records its files' seconds and uploads them as
+# the artifact `shard-timings-<version>-<shard>`. scripts/shard_timings.py
+# merges one run's artifacts into the file the shards are cut from
+# (RELEASING.md, "Cutting a release", step 8). Pure functions over literal
+# dicts here: no run is read.
+
+def _shard_timings():
+    # By path and appended, as the selector's tests import test_map: a
+    # scripts/<name>.py must not shadow a stdlib module in this process.
+    scripts = str(REPO / "scripts")
+    if scripts not in sys.path:
+        sys.path.append(scripts)
+    import shard_timings
+    return shard_timings
+
+
+A, B, C = "tests/test_a.py", "tests/test_b.py", "tests/test_c.py"
+
+
+def _run(per_version):
+    """{(version, shard): {file: seconds}} from {version: [shard dicts]}."""
+    return {(version, index): dict(files)
+            for version, parts in per_version.items()
+            for index, files in enumerate(parts, start=1)}
+
+
+def test_a_merge_takes_the_median_across_versions():
+    """Kills: the mean or the maximum for the median (one slow runner
+    would then set a file's weight); the versions summed; a file's
+    seconds read from the first version only."""
+    merge = _shard_timings().merge
+    three = _run({"3.12": [{A: 1.0}, {B: 10.0}],
+                  "3.13": [{A: 2.0}, {B: 30.0}],
+                  "3.14t": [{A: 30.0}, {B: 20.0}]})
+    assert merge(three, 2) == {A: 2.0, B: 20.0}
+    # An even number of versions: the mean of the middle two, as the
+    # file #935 seeded was made (four versions).
+    four = {**three, **_run({"3.14": [{A: 4.0}, {B: 40.0}]})}
+    assert merge(four, 2) == {A: 3.0, B: 25.0}
+    # A version need not put a file in the shard another does: the
+    # partition is the same for all, but the merge does not rest on it.
+    moved = _run({"3.12": [{A: 1.0, B: 5.0}, {}], "3.13": [{A: 3.0}, {B: 7.0}]})
+    assert merge(moved, 2) == {A: 2.0, B: 6.0}
+    # A file one version reported no test of (its module skips at import
+    # there) takes the median of the versions that ran it. That is not a
+    # missing shard: every shard of every version is here.
+    partly = _run({"3.12": [{A: 1.0, B: 9.0}], "3.13": [{A: 3.0}],
+                   "3.14t": [{A: 5.0, B: 11.0}]})
+    assert merge(partly, 1) == {A: 3.0, B: 10.0}
+    # Sorted and rounded as the recorder writes, so a refresh is a diff
+    # of numbers.
+    out = merge(_run({"3.12": [{B: 1.004, A: 2.0}]}), 1)
+    assert list(out) == [A, B] and out[B] == 1.0
+
+
+@pytest.mark.parametrize("what, recordings, count, said", [
+    ("a shard killed in one version",
+     {("3.12", 1): {A: 1.0}, ("3.12", 2): {B: 1.0}, ("3.14t", 1): {A: 1.0}},
+     2, "3.14t lacks shard 2"),
+    ("the last shard missing from every version",
+     {("3.12", 1): {A: 1.0}, ("3.14t", 1): {A: 1.0}}, 2, "lacks shard 2"),
+    ("a shard the workflow does not have",
+     {("3.12", 1): {A: 1.0}, ("3.12", 2): {B: 1.0}, ("3.12", 3): {C: 1.0}},
+     2, "shard 3"),
+    ("a file in two shards of one version",
+     {("3.12", 1): {A: 1.0}, ("3.12", 2): {A: 1.0}}, 2, "tests/test_a.py"),
+    ("nothing", {}, 2, "no recording"),
+])
+def test_a_merge_refuses_a_version_with_a_shard_missing(what, recordings,
+                                                        count, said):
+    """A killed shard uploads nothing, and a file merged from the versions
+    that finished would weigh that shard's files at the median: the
+    balance the refresh exists for, quietly gone. Kills: a partial set
+    merged; the shard count inferred from what arrived."""
+    with pytest.raises(ValueError) as refused:
+        _shard_timings().merge(recordings, count)
+    assert said in str(refused.value), (what, str(refused.value))
+
+
+def test_a_runs_artifacts_are_read_by_their_names(tmp_path):
+    """`gh run download` puts each artifact in a folder of its name.
+    Kills: the version cut at its first dot or its `t` dropped; a folder
+    that is not a recording read as one; an artifact with no file in it
+    passed over."""
+    tool = _shard_timings()
+    for name, body in (("shard-timings-3.12-1", {A: 1.0}),
+                       ("shard-timings-3.14t-1", {A: 3.0}),
+                       ("shard-timings-3.14t-10", {B: 2.0})):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / tool.ARTIFACT_FILE).write_text(json.dumps(body))
+    (tmp_path / "dist").mkdir()                     # publish.yml's own artifact
+    (tmp_path / "dist" / "x.whl").write_text("")
+    assert tool.read_run(tmp_path) == {
+        ("3.12", 1): {A: 1.0}, ("3.14t", 1): {A: 3.0}, ("3.14t", 10): {B: 2.0}}
+    (tmp_path / "shard-timings-3.13-1").mkdir()
+    with pytest.raises(ValueError) as refused:
+        tool.read_run(tmp_path)
+    assert "shard-timings-3.13-1" in str(refused.value)
+
+
+def test_every_shard_uploads_the_recording_the_merge_reads():
+    """The workflow's half, which no run on a PR exercises: the file the
+    test step records is the file uploaded, under a name the reader
+    parses back into this job's version and shard. Kills: the upload
+    reading another path than the recording's; a name without the version
+    (two versions' shards would overwrite each other) or without the
+    shard; an upload skipped when a test fails; an upload that can fail
+    the job."""
+    tool = _shard_timings()
+    job, _count = _gate_workflow()
+    recorded = "${{ runner.temp }}/" + tool.ARTIFACT_FILE
+    assert f"--record-shard-timings={recorded}" in _suite_step(job)["run"]
+    uploads = [s for s in job["steps"]
+               if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert len(uploads) == 1, uploads
+    upload = uploads[0]
+    assert upload["with"]["path"] == recorded
+    name = upload["with"]["name"]
+    assert name == ("shard-timings-${{ matrix.python-version }}"
+                    "-${{ matrix.shard }}")
+    # As the reader will meet it, for the version with the most in it.
+    concrete = name.replace("${{ matrix.python-version }}", "3.14t").replace(
+        "${{ matrix.shard }}", "7")
+    assert tool._ARTIFACT.fullmatch(concrete).groups() == ("3.14t", "7")
+    assert upload.get("if") == "always()"
+    assert upload.get("continue-on-error") is True
+    # After the tests, or there is nothing to upload.
+    steps = job["steps"]
+    assert steps.index(upload) > steps.index(_suite_step(job))
+
+
+def test_the_merge_command_writes_the_file_the_shards_are_cut_from(tmp_path):
+    """The command RELEASING.md step 8 gives, end to end, on a scratch run
+    of two versions and the workflow's own shard count. Kills: the count
+    not read from tests.yml; the file written in another shape than the
+    recorder's; a refusal that still writes."""
+    tool = _shard_timings()
+    _job, count = _gate_workflow()
+    assert tool.workflow_shard_count(REPO) == count
+    run = tmp_path / "run"
+    for version, scale in (("3.12", 1.0), ("3.14t", 3.0)):
+        for index in range(1, count + 1):
+            folder = run / f"shard-timings-{version}-{index}"
+            folder.mkdir(parents=True)
+            (folder / tool.ARTIFACT_FILE).write_text(json.dumps(
+                {f"tests/test_{index}.py": scale * index}))
+    out = tmp_path / "timings.json"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
+    done = subprocess.run(
+        [sys.executable, "-m", "scripts.shard_timings", "merge", str(run),
+         "--out", str(out)],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    expected = {f"tests/test_{i}.py": 2.0 * i for i in range(1, count + 1)}
+    assert json.loads(out.read_text()) == expected
+    # Byte for byte what `--record-shard-timings` writes for those numbers.
+    recorder = shards.TimingRecorder()
+    for name, seconds in expected.items():
+        recorder.add(name, seconds)
+    recorder.write(tmp_path / "recorded.json")
+    assert out.read_bytes() == (tmp_path / "recorded.json").read_bytes()
+    assert f"2 versions, {count} shards" in done.stdout
+
+    # One shard short: refused, and the file is left as it was.
+    shutil.rmtree(run / f"shard-timings-3.14t-{count}")
+    before = out.read_bytes()
+    done = subprocess.run(
+        [sys.executable, "-m", "scripts.shard_timings", "merge", str(run),
+         "--out", str(out)],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode != 0
+    assert f"3.14t lacks shard {count}" in done.stderr
+    assert "Traceback" not in done.stderr
+    assert out.read_bytes() == before
+
+    # A download that failed leaves no folder at all (review of #969, S5):
+    # a sentence, not `FileNotFoundError`'s traceback, and nothing written.
+    # And a run with no timings artifacts (a release line that does not
+    # upload them yet) leaves a folder with nothing to read.
+    (tmp_path / "empty").mkdir()
+    for directory, said in ((tmp_path / "absent", "is not a folder"),
+                            (tmp_path / "empty", "no recording to merge")):
+        fresh = tmp_path / f"{directory.name}.json"
+        done = subprocess.run(
+            [sys.executable, "-m", "scripts.shard_timings", "merge",
+             str(directory), "--out", str(fresh)],
+            cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
+        assert done.returncode != 0
+        assert said in done.stderr, done.stderr
+        assert "Traceback" not in done.stderr
+        assert not fresh.exists()
