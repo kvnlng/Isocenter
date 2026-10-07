@@ -544,7 +544,16 @@ cherry-pick and the release record by an ordinary copy commit (step 8).
 `tests/test_version_contract.py::test_the_changelog_opens_with_unreleased_or_the_declared_release`
 catches the common shape: a top heading naming a version `_version.py`
 does not. It cannot catch a merge that also carried `_version.py` to the
-same number.
+same number. `test_this_checkout_is_not_a_release_merged_forward`, beside
+it, asks git about that one (#931): of a tree that opens its changelog
+with its own version, whether `vX.Y.Z` is in its history where the clone
+has the tag, and whether `_version.py` was last set on its own
+first-parent line. That catches a merge commit, and a squash of a tagged
+release. It does not catch a squash of a release commit not yet tagged, a
+merge whose resolution of `_version.py` matches neither side, or anything
+in a clone with no tags and no history. It rests on a release branch
+being a line: a release commit taken into `release/X.Y` by a merge commit
+(step 3 prescribes a squash) turns it red on that branch.
 
 ## Later releases on an existing line
 
