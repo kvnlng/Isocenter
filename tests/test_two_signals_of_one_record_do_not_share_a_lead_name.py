@@ -34,9 +34,9 @@ import numpy as np
 import pytest
 import wfdb
 
+from isocenter import Session
 from isocenter.exporters.wfdb import format_header
 from isocenter.murmur import build_annotations
-from isocenter.session import DicomSession
 from isocenter.waveform import Waveform, WaveformChannel
 
 WARNED = ("WARNING", "ERROR", "DATA_LOSS")
@@ -207,7 +207,7 @@ def _exported(tmp_path, channels, name, definitions=None):
     pydicom.dcmwrite(str(source / "x.dcm"),
                      _dataset(channels, f"P-{name}", definitions),
                      enforce_file_format=True)
-    session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
+    session = Session(str(tmp_path / f"{name}.db"))
     session.ingest(str(source))
     records = session.export(str(tmp_path / f"out_{name}"), format="wfdb")
     assert len(records) == 1, records
@@ -289,24 +289,23 @@ def test_the_annotations_agree_with_a_header_longer_than_the_definitions(
         session.close()
 
 
-def test_the_murmur_bridge_reads_the_list_it_is_handed():
+def test_the_murmur_bridge_reads_the_list_it_is_handed(tmp_path):
     """The exporter computes the names once, over the sample columns, and
     hands both writers that list; the bridge must not recompute its own."""
-    from isocenter.entities import DicomItem, Instance
-    from isocenter.io_handlers import populate_attrs
+    session, _hea = _exported(tmp_path, LEAD_II_TWICE, "direct")
+    try:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        waveform = Waveform.from_dicom_item(
+            instance.sequences["5400,0100"].items[0])
 
-    ds = _dataset(LEAD_II_TWICE, "P-direct")
-    instance = Instance(str(ds.SOPInstanceUID), str(ds.SOPClassUID), 1)
-    populate_attrs(ds, instance)
-    item = DicomItem()
-    populate_attrs(ds.WaveformSequence[0], item)
-    waveform = Waveform.from_dicom_item(item)
-
-    own = build_annotations(instance, waveform, "isocenter/test")
-    assert [f.get("lead") for f in own["findings"]] == ["2:2", "2:2"]
-    handed = build_annotations(instance, waveform, "isocenter/test",
-                               descriptions=["first", "second"])
-    assert [f.get("lead") for f in handed["findings"]] == ["first", "second"]
+        own = build_annotations(instance, waveform, "isocenter/test")
+        assert [f.get("lead") for f in own["findings"]] == ["2:2", "2:2"]
+        handed = build_annotations(instance, waveform, "isocenter/test",
+                                   descriptions=["first", "second"])
+        assert [f.get("lead") for f in handed["findings"]] == [
+            "first", "second"]
+    finally:
+        session.close()
 
 
 # -- 4. The row -------------------------------------------------------------
