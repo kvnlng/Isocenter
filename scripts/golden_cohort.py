@@ -517,12 +517,42 @@ def ecg_lead_codes(out: Path):
             write(fds, out / f"ecg_lead_codes-{label}.dcm", ExplicitVRLittleEndian)
 
 
+def multi_valued_pn(out: Path):
+    """Person Names holding several values (#937). Each was ingested, and
+    where kept exported, as one value holding the text of a Python list
+    (`[A^B, C^D]`). Patient's Name (VM 1) and Operators' Name (VM 1-n),
+    which `basic` replaces whole; Evaluator Name `(0014,2006)`, a PN no
+    row of Table E.1-1 names, at the top level and inside Referenced
+    Image Sequence, so a kept one is on the fingerprint under both
+    configurations; and a private PN of two values beside one of one
+    value, stated `PN` by this Explicit VR file, for B.dicom-j2k's wire
+    VR. No other input holds a PN of more than one value."""
+    def pn(dataset, tag, text):
+        # Past pydicom's VM check: a two-valued Patient's Name is the point.
+        dataset[tag] = pydicom.DataElement(
+            tag, "PN", text, validation_mode=pydicom.config.IGNORE)
+
+    ds = ct("multi_valued_pn")
+    pn(ds, 0x00100010, "GOLDEN^ONE\\GOLDEN^TWO")
+    pn(ds, 0x00081070, "OPERATOR^ONE\\OPERATOR^TWO")
+    pn(ds, 0x00142006, "EVALUATOR^ONE\\EVALUATOR^TWO")
+    ref = Dataset()
+    ref.ReferencedSOPClassUID = CT
+    ref.ReferencedSOPInstanceUID = uid("longitudinal", 1, 1, 1)
+    pn(ref, 0x00142006, "NESTED^ONE\\NESTED^TWO")
+    ds.ReferencedImageSequence = Sequence([ref])
+    ds.add_new(0x00710010, "LO", "GOLDEN PN")
+    pn(ds, 0x00711001, "PRIVATE^ONE\\PRIVATE^TWO")
+    pn(ds, 0x00711002, "PRIVATE^ONLY")
+    write(ds, out / "multi_valued_pn-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
     encapsulated_pdf, unstated_private_vr,
-    multi_valued_keys, lut_unusable_descriptor,
+    multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
     ecg_lead_codes)}
 
 
