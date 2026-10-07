@@ -5,7 +5,13 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0rc13] - 2026-10-07
+
+**Exported output changes in this release**, each named by its entry's `**Output:**` line, where the details are. `compare --base v1.0.0rc12` reports two new members of the reference cohort, one for each, and nothing else; no existing member's output changes:
+- **#740 (#944):** a private data element whose VR the source did not state (an Implicit VR source, or an Explicit VR source that says `UN`) is held as the source's bytes and written `UN` by an Explicit VR export, where it was written under the VR pydicom's private dictionary names for its creator. The value bytes are unchanged, and an Implicit VR export is byte-identical. A file whose such element did not fit the dictionary's VR was refused at ingest and is now ingested and exported. Under every configuration, such a value over 65534 bytes is dropped at ingest with a PRIVATE `DATA_LOSS` row, so a run that graded `PASS` under the default sweep grades `REVIEW_REQUIRED`, and an Explicit VR Big Endian source that says `UN` for such an element draws one `WARNING` row per element, `PASS` to `REVIEW_REQUIRED`. With `remove_private_tags: false`, a value over the limit that was exported is not exported, a valued `REPLACE` on such a key is written `LO` and an `EMPTY` as a zero-length `UN`, and `(0028,0303)` no longer reads a date in such an element. The new member is `synthetic:unstated_private_vr`.
+- **#757 (#944):** Encapsulated Document Length `(0042,0015)`, when present, is written as the length of the Encapsulated Document `(0042,0011)` the file carries, padding excluded, where it kept the source's length: `2` under `basic@2026c`, whose dummy is two bytes. A conformant source length is kept, and it is not written when the file carries no document. The new member is `synthetic:encapsulated_pdf`.
+
+#921 and #736 (#944) each add an INFO note at export and change no exported byte.
 
 ### Fixed
 
