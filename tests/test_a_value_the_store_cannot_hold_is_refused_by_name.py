@@ -180,6 +180,38 @@ def test_the_doors_that_begin_with_a_save_raise_it_before_any_file_is_exported(
         assert not os.path.exists(out)
 
 
+@pytest.mark.parametrize("compress", [False, True], ids=["native", "j2k"])
+def test_an_export_over_such_a_private_value_writes_no_file_and_no_row(
+        tmp_path, compress):
+    """What the 1.0.0rc14 `**Output:**` line for #775 left out. At
+    v1.0.0rc13, `set_attr` of a `set` on a private tag and then `export()`
+    returned: the file was written without the tag, under one PRIVATE
+    `DATA_LOSS` row, and the run graded REVIEW_REQUIRED; the store held
+    `'{1, 2}'`, and a reopened session exported that text as `LO`. Now the
+    export raises before any file is written and writes no row, and the
+    reopened store holds no such tag: its export writes the file without
+    `(0011,1001)` and without a row."""
+    session, inst, _inner = _open(tmp_path)
+    db = str(tmp_path / "s.db")
+    out = str(tmp_path / "out")
+    with session:
+        inst.set_attr(PRIVATE, {1, 2})
+        with pytest.raises(TypeError) as refused:
+            session.export(out, use_compression=compress)
+        assert str(refused.value) == _message(UID, "set", PRIVATE, private=True)
+        assert not os.path.exists(out)
+    assert _rows(db) == []
+    with DicomSession(db) as reopened:
+        assert reopened.export(out, use_compression=compress).written == 1
+    (path,) = [os.path.join(r, f) for r, _d, fs in os.walk(out)
+               for f in fs if f.endswith(".dcm")]
+    ds = pydicom.dcmread(path)
+    assert ds.get_item((0x0011, 0x1001)) is None
+    # The helper does read an element this file holds.
+    assert ds.get_item((0x0008, 0x0018)) is not None
+    assert _rows(db) == []
+
+
 PRIVATE_REFUSED = [
     pytest.param(lambda: date(2020, 1, 2), "date", id="date"),
     pytest.param(lambda: {1, 2}, "set", id="set"),

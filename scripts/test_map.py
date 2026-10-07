@@ -437,6 +437,51 @@ def glob_readers(repo, path, files=None):
             or any(fnmatch.fnmatchcase(name, p) for p in patterns)}
 
 
+# The spellings a test reads source text through. `.__file__` with its
+# dot: `module.__file__` is a path to read, a bare `__file__` is the test
+# file's own, which nearly every test file holds.
+_READS_SOURCE = re.compile(r"getsource|getsourcelines|ast\.parse\(|\.__file__")
+
+
+def source_readers(repo, path, files=None):
+    """Test files that read this one module's source text (#779).
+
+    A function the map covers selects the tests that ran it. A test that
+    reads the module as text ran none of it:
+    `test_pixel_geometry.py::test_module_imports_nothing_heavy` parses
+    `pg.__file__` for imports, and an `import numpy` added inside
+    `pixel_geometry._contradiction` fails it and selected it only through
+    the widening for a stale map, which a rebuilt map does not have.
+
+    A test file is a reader of `isocenter/<...>/<stem>.py` when its text
+    holds the file name (`<stem>.py`), or holds a source-reading spelling
+    (`getsource`, `getsourcelines`, `ast.parse(`, `.__file__`) and `<stem>`
+    as a whole word. Found by what the file does, as `glob_readers` is,
+    so the next such test is found the day it is written. Whole files; it
+    only ever adds.
+
+    The stem alone is not enough (owner ruling on #779, Q7 A): `session`
+    is a word most test files hold, and rule 7's needle over a function
+    edit would be the suite for six modules. The word and the spelling
+    are not tied to each other, so this over-selects: a file that parses
+    one module and mentions another reads both by this test.
+
+    Not seen: a reader that reaches the source through a helper in
+    another file, or through `importlib`, `pkgutil` or `inspect.getfile`
+    with none of the spellings above.
+
+    `files`: the selection's `SuiteIndex` (#914).
+    """
+    if not _is_module(path):
+        return set()
+    name, stem = Path(path).name, Path(path).stem
+    word = re.compile(rf"\b{re.escape(stem)}\b")
+    files = files or SuiteIndex(repo)
+    return {rel for rel, source in files.texts().items()
+            if name in source
+            or (_READS_SOURCE.search(source) and word.search(source))}
+
+
 _WIDE_SCOPE = re.compile(
     r"""scope\s*=\s*["'](?:module|class|package|session)["']""")
 
@@ -458,11 +503,13 @@ def has_wide_fixture(repo, test_file, files=None):
 
 
 def select(mapping, changes, other, targets, repo, dispatching=None,
-           unspoken=frozenset(), readers=None, wide=None, no_map=None):
+           unspoken=frozenset(), readers=None, wide=None, no_map=None,
+           by_name=None):
     """`unspoken`: test files the map cannot speak for (`cannot_speak_for`).
 
-    `readers(path)` and `wide(test_file)` default to `glob_readers` and
-    `has_wide_fixture` over `repo`; `no_map` is why `load` refused a map.
+    `readers(path)`, `by_name(path)` and `wide(test_file)` default to
+    `glob_readers`, `source_readers` and `has_wide_fixture` over `repo`;
+    `no_map` is why `load` refused a map.
     """
     sel = Selection()
     if mapping is None:
@@ -481,6 +528,9 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
     if readers is None:
         def readers(path):
             return glob_readers(repo, path, suite)
+    if by_name is None:
+        def by_name(path):
+            return source_readers(repo, path, suite)
     if wide is None:
         def wide(test_file):
             return has_wide_fixture(repo, test_file, suite)
@@ -607,6 +657,16 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             sel.reasons.append(
                 f"{path}: {len(found)} test files read every "
                 f"*{Path(path).suffix} by glob or walk -> added")
+        # And a test that reads this one module as text ran none of the
+        # function that changed, so no record selects it (#779). Asked for
+        # every changed module, a function edit included: rule 7's needle
+        # is asked only of paths that are not modules.
+        named = (by_name(path) if _is_module(path) else set()) - sel.files
+        if named:
+            sel.files |= named
+            sel.reasons.append(
+                f"{path}: {len(named)} test files read its source by name "
+                "-> added")
 
     held = {n.split("::")[0] for n in sel.nodeids} - sel.files
     whole = {f for f in held if wide(f)}

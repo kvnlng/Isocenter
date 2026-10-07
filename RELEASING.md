@@ -87,6 +87,15 @@ minor's work. A PR with neither is the next unreleased line's work.
      #744). Where the walk goes and what the literal is for are not
      read, so this over-selects; it never narrows. A tree read with
      none of those calls, or kept by no suffix, is not seen.
+   - a changed `isocenter/**/*.py` also selects the test files that read
+     that one module's source: a `tests/test_*.py` whose text holds the
+     module's file name (`wfdb.py`), or that holds `getsource`,
+     `getsourcelines`, `ast.parse(` or `.__file__` and the module's name
+     as a whole word (#779). This applies to a function the map covers
+     too, which otherwise selects only the tests that ran it. The word
+     and the spelling may sit anywhere in the file, so this over-selects;
+     a reader that reaches the source through a helper in another file,
+     or through `importlib`, `pkgutil` or `inspect.getfile`, is not seen.
    - a selected test in a file with a module-, class-, package- or
      session-scoped fixture brings its whole file.
 
@@ -116,6 +125,39 @@ minor's work. A PR with neither is the next unreleased line's work.
 
    **The full suite is not a merge requirement.** It runs before a merge
    only when the rules above select it.
+
+   **Whenever `main` is taken into the branch, by rebase or by merge, check
+   where the branch's `CHANGELOG.md` entries landed** (#956). Git places a
+   hunk by its context and raises no conflict when the context has moved:
+   once a record-back ("Cutting a release", step 8) has put a released
+   heading above the entries a hunk was anchored on, the branch's entries
+   follow them under that heading. **`git fetch origin` comes first:**
+   both checks below read `origin/main`, and against a stale one the
+   diff is taken with the wrong file and the test skips the misplaced
+   section instead of failing it. Then:
+   - `git diff --unified=0 origin/main -- CHANGELOG.md` shows the branch's
+     own entries and nothing else, and every hunk starts above `main`'s
+     first released heading: the `a` of each `@@ -a,b +c,d @@` is less
+     than the line number that
+     `git show origin/main:CHANGELOG.md | grep -n -m1 '^## \[[0-9]'`
+     prints. A hunk at or below that line is an entry under a released
+     heading, unless it rewrites a line of a released section in place,
+     on purpose (the test allows that, #927). Move a misplaced entry up
+     into `[Unreleased]` by hand, in the merge commit or the next one.
+   - `tests/test_released_changelog_sections_stay_as_released.py` passes.
+     `pytest --changed` selects it for any change to `CHANGELOG.md`, so
+     the runs above include it. It compares each released section with
+     `origin/main`'s as well as with its tag's, because a clone seldom
+     has the newest tag: release tags sit on `release/X.Y`, and `git
+     fetch origin main` does not bring them. On a branch that adds no
+     released section, a skip naming `origin/main` means the ref is
+     missing or stale: fetch, and run it again. `pytest -v` prints only
+     `SKIPPED`; `-rs` prints which section and why.
+
+   The merge of the 1.0.0rc13 record-back into #958's branch did this on
+   2026-10-07: three entries, 37 lines, at the end of `[1.0.0rc13]`, with
+   no conflict. The developer moved them by hand. The rc10 and rc11
+   record-backs did it before (#927).
 
    **A change that alters exported output updates the output fingerprint
    in the same PR.** `fingerprint/output.json` records what the golden
@@ -457,12 +499,44 @@ fixes, never features.
      find its own new entries under the released heading with no
      conflict; `tests/test_released_changelog_sections_stay_as_released.py`
      fails a released section whose lines are not those of the newest
-     tag that holds it, other than a line rewritten in place;
+     tag that holds it, or of `origin/main`, other than a line rewritten
+     in place ("Changes land on `main`", step 3, has the check to run
+     after such a merge);
    - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that
      section holds everything since. A patch to an older line leaves
      `main`'s version alone.
+
+   **Then the shard timings, in a PR of their own, never in the
+   record-back** (#935). `tests/shard_timings.json` is what the CI shards
+   are cut from, and step 6's publish run measured every test file on a
+   runner. Refresh it only when both of these hold; otherwise leave the
+   file alone and say which did not hold in the record-back PR's body:
+   - **X.Y is the newest release line.** The merge replaces the file, so
+     a run of an older line would take the number away from every test
+     file `main` has and that line lacks.
+   - **The run uploaded the timings.** `gh run download <run id>
+     --pattern 'shard-timings-*' --dir <dir>`, with `<dir>` a new folder
+     outside the checkout. A release cut from a branch that does not yet
+     hold `tests.yml`'s upload step (every 1.0 candidate up to rc14) has
+     no such artifact, and there is nothing to refresh. (`merge` over a
+     folder that is missing or holds no recording refuses in a sentence
+     and writes nothing.)
+
+   With both, on a work branch off `main`: `python -m
+   scripts.shard_timings merge <dir> --out "$PWD/tests/shard_timings.json"`.
+   It takes, for each test file, the median of the versions. It refuses,
+   and writes nothing, when any version lacks a shard (one killed at its
+   timeout uploads nothing): leave the file alone then too. Never refresh
+   it from a local run, whose seconds are another unit. Commit the file
+   alone and run `tests/test_shards_partition_the_suite.py`:
+   - green: open the PR with that one commit;
+   - `test_the_heaviest_shard_fits_the_step_with_room` red: the suite has
+     outgrown its shards. The same PR adds shards to `tests.yml` (the
+     matrix list, the run line and the summary line move together) or
+     raises its `Run Tests` cap with the job cap, so that it is green
+     before it merges, and it merges before the next release is cut.
 
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
@@ -535,7 +609,16 @@ cherry-pick and the release record by an ordinary copy commit (step 8).
 `tests/test_version_contract.py::test_the_changelog_opens_with_unreleased_or_the_declared_release`
 catches the common shape: a top heading naming a version `_version.py`
 does not. It cannot catch a merge that also carried `_version.py` to the
-same number.
+same number. `test_this_checkout_is_not_a_release_merged_forward`, beside
+it, asks git about that one (#931): of a tree that opens its changelog
+with its own version, whether `vX.Y.Z` is in its history where the clone
+has the tag, and whether `_version.py` was last set on its own
+first-parent line. That catches a merge commit, and a squash of a tagged
+release. It does not catch a squash of a release commit not yet tagged, a
+merge whose resolution of `_version.py` matches neither side, or anything
+in a clone with no tags and no history. It rests on a release branch
+being a line: a release commit taken into `release/X.Y` by a merge commit
+(step 3 prescribes a squash) turns it red on that branch.
 
 ## Later releases on an existing line
 
@@ -599,6 +682,38 @@ cut this way (#818, #821, #822).
        record-back changed (`RELEASING.md` at rc2), is resolved with `git checkout --ours <file>` (ours is the
        branch), `git add <file>`, then `git cherry-pick --continue`. The
        last commit deals with both.
+     - **A pick whose `CHANGELOG.md` hunk applies with no conflict has
+       still put its entry in the wrong place,** and is left as it is.
+       The branch has no `[Unreleased]` heading, until a pick resolved
+       as the next rule says brings one, so git places the hunk by its
+       context, under a released one. Whatever a pick leaves in
+       `CHANGELOG.md`, with a conflict or without, is provisional: the
+       last commit writes the file again from `main`'s (below). Three of
+       the four picks for 1.0.0rc14 did this (#967, 2026-10-07): before
+       the last commit the file differed from `main`'s by 7 insertions
+       and 56 deletions, and nothing had conflicted.
+     - **A pick whose whole diff is `CHANGELOG.md`** and that conflicts
+       would come out empty under `--ours`, and an empty pick reads as a
+       forward-port (above). Resolve it to `main`'s file at that commit
+       instead: `git checkout <its sha> -- CHANGELOG.md`, `git add
+       CHANGELOG.md`, then `git cherry-pick --continue`. The pick stays
+       on the branch with its `-x` line, and the last commit writes the
+       file like any other pick's (#956, owner ruling 2026-10-07). The
+       one such pick before the rule, #954's at rc13 (#955), was
+       resolved this way; rc12's picks (#928) took `main`'s file too,
+       in picks that also carried code. That puts `main`'s whole file
+       at that commit on the branch, so **the pick is followed by its
+       proof**, pasted into the PR body with the pick's SHA:
+       `git diff --stat <its sha> HEAD -- . ':!isocenter/_version.py' ':!CITATION.cff'`,
+       run right after the pick, prints nothing: the picked tree is
+       `main`'s at that commit, apart from the version files. Where it
+       cannot print nothing, it prints exactly the files of the line's
+       left-out list and branch-only fixes, and any file an earlier
+       pick kept the branch's copy of with `--ours`; the PR body names
+       each, and `CHANGELOG.md` is never among them. The reviewer runs
+       the same command at the pick's commit on the PR branch, before
+       the squash merge removes it, and checks the output against the
+       PR body.
      - **Never resolve `fingerprint/output.json` by hand.** Keep the
        branch's copy (`--ours`) and retake it, as below.
      - Any other conflict, which a left-out commit upstream of a pick can

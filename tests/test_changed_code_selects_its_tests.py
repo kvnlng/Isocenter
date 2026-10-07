@@ -189,9 +189,12 @@ EXPORT_BATCH = ("isocenter/io_handlers.py", "DicomExporter.export_batch")
 C = test_map.Change
 
 def _select(changes=(), other=(), mapping=MAP, **kw):
-    # The glob and wide-fixture detectors read the real tests/; each has
-    # its own tests below, so the rule tests here see neither.
+    # The glob, source-reader and wide-fixture detectors read the real
+    # tests/; each has its own tests (the source readers' are in
+    # test_the_selector_reads_the_live_source.py), so the rule tests here
+    # see none of them.
     kw.setdefault("readers", lambda path: set())
+    kw.setdefault("by_name", lambda path: set())
     kw.setdefault("wide", lambda test_file: False)
     return test_map.select(mapping, set(changes), list(other), TARGETS,
                            kw.pop("repo", REPO),
@@ -498,8 +501,12 @@ def _git_tree(path):
                           cwd=path, capture_output=True).returncode == 0
 
 
-def _resolves(path, ref):
-    return subprocess.run(["git", "rev-parse", "--verify", "--quiet", ref],
+def _shares_history(path, ref):
+    """Whether `select`'s default path can use `ref`: HEAD and `ref` have
+    a merge base. Not whether `ref` exists (#800): a clone can hold an
+    `origin/main` that shares no commit with HEAD, and `select` passes it
+    over exactly as it passes over a ref that is not there."""
+    return subprocess.run(["git", "merge-base", "HEAD", ref],
                           cwd=path, capture_output=True).returncode == 0
 
 
@@ -512,7 +519,7 @@ def test_select_prints_its_reasons_and_what_it_is_for():
     # asking for a base, as it should. That refusal is not this test's
     # subject: with no main to find, name HEAD as the base so the output
     # is still read. Where main exists, the default path is the one run.
-    base = ([] if any(_resolves(REPO, r) for r in ("origin/main", "main"))
+    base = ([] if any(_shares_history(REPO, r) for r in ("origin/main", "main"))
             else ["--base", "HEAD"])
     out = subprocess.run(
         [sys.executable, "-m", "scripts.test_map", "select", *base],
@@ -520,6 +527,165 @@ def test_select_prints_its_reasons_and_what_it_is_for():
     assert out.returncode == 0, out.stderr
     assert "the pre-merge check (RELEASING.md step 3)" in out.stdout
     assert "the full suite runs when a release is cut" in out.stdout
+
+
+# --- `select`'s default base, in scratch repositories (#800) --------------
+#
+# The test above is the only one that reaches `merge_base(repo, None)`, and
+# only where a main exists. Swapping the two candidates, or turning the
+# fall-through into a raise together with a reworded refusal, left the 70
+# tests of this file green (C5's spec, §4.1). Nothing here reads this
+# checkout's refs.
+
+class _Scratch:
+    """A git repository under `tmp_path` that no developer configuration
+    reaches. Its first branch is `trunk`, so no `main` exists until a test
+    makes one, and `origin/main` is a ref written by hand: no remote."""
+
+    def __init__(self, path):
+        self.path = path
+        path.mkdir(parents=True)
+        self.git("init", "-q", "-b", "trunk")
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-c", "user.name=scratch",
+             "-c", "user.email=scratch@example.invalid",
+             "-c", "commit.gpgsign=false", *args],
+            cwd=self.path, check=True, capture_output=True,
+            text=True).stdout.strip()
+
+    def commit(self, name):
+        (self.path / name).write_text(name, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", name)
+        return self.git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def scratch(tmp_path, monkeypatch):
+    # A test run from a git hook inherits these, and every git below --
+    # the fixture's and `test_map._git`'s -- would then talk to the
+    # repository the hook is running in.
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    made = []
+
+    def make():
+        made.append(_Scratch(tmp_path / f"scratch-{len(made)}"))
+        return made[-1]
+    return make
+
+
+def _refusal(repo, upstream=None):
+    with pytest.raises(SystemExit) as stop:
+        test_map.merge_base(repo.path, upstream)
+    return str(stop.value.code)
+
+
+def _is_the_refusal(text):
+    # Its two load-bearing phrases, not the sentence: what is missing, and
+    # the argument that supplies it.
+    return ("the branch this work will merge into" in text
+            and "--changed-base=release/X.Y" in text)
+
+
+def test_the_default_base_is_origin_main_then_main(scratch):
+    """Kills: the two candidates swapped (a stale local `main` would then
+    decide what a branch is diffed against); `main` dropped from the
+    list."""
+    repo = scratch()
+    behind = repo.commit("a")
+    ahead = repo.commit("b")
+    repo.git("update-ref", "refs/remotes/origin/main", behind)
+    repo.git("branch", "main", ahead)
+    repo.commit("work")
+    # The two candidates give different answers, so which was asked shows.
+    assert behind != ahead
+    assert repo.git("merge-base", "HEAD", "main") == ahead
+    assert test_map.merge_base(repo.path) == behind
+
+    local_only = scratch()
+    base = local_only.commit("a")
+    local_only.git("branch", "main", base)
+    work = local_only.commit("work")
+    assert work != base
+    assert test_map.merge_base(local_only.path) == base
+
+
+def test_a_main_with_no_common_ancestor_is_passed_over(scratch):
+    """An `origin/main` that exists and shares no commit with HEAD (a
+    hand-made shallow graft) is passed over for `main`, as a ref that is
+    not there is. Kills: the fall-through turned into a raise."""
+    repo = scratch()
+    base = repo.commit("a")
+    repo.git("branch", "main", base)
+    repo.git("checkout", "-q", "--orphan", "island")
+    island = repo.commit("island")
+    repo.git("update-ref", "refs/remotes/origin/main", island)
+    repo.git("checkout", "-q", "trunk")
+    repo.commit("work")
+    assert island != base
+    assert repo.git("rev-parse", "origin/main") == island
+    assert not _shares_history(repo.path, "origin/main")
+    assert test_map.merge_base(repo.path) == base
+
+
+@pytest.mark.parametrize("shape", ["neither ref", "no common ancestor"])
+def test_with_no_base_to_find_select_says_what_to_pass(scratch, shape):
+    """The release rehearsal's checkout has neither ref; an island branch
+    has both and shares history with neither. Each is refused by an exit
+    that names the argument to pass. Kills: the refusal turned into
+    git's `CalledProcessError`; the message losing either phrase."""
+    repo = scratch()
+    base = repo.commit("a")
+    if shape == "no common ancestor":
+        repo.git("branch", "main", base)
+        repo.git("update-ref", "refs/remotes/origin/main", base)
+        repo.git("checkout", "-q", "--orphan", "alone")
+        alone = repo.commit("alone")
+        assert alone != base
+        # The refs are there: it is the history that is missing.
+        assert repo.git("rev-parse", "main") == base
+        assert repo.git("rev-parse", "origin/main") == base
+    for ref in ("origin/main", "main"):
+        assert not _shares_history(repo.path, ref)
+    assert _is_the_refusal(_refusal(repo))
+
+
+def test_a_named_base_is_never_replaced_by_main(scratch):
+    """`--changed-base=release/9.9` that does not resolve is refused, with
+    a `main` right there to fall back to. Kills: the named base tried
+    first and the default list after it."""
+    repo = scratch()
+    base = repo.commit("a")
+    repo.git("branch", "main", base)
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+    release = repo.commit("released")
+    repo.git("branch", "release/1.0", release)
+    repo.commit("fix")
+    assert test_map.merge_base(repo.path) == base
+    assert _is_the_refusal(_refusal(repo, "release/9.9"))
+    assert release != base
+    assert test_map.merge_base(repo.path, "release/1.0") == release
+
+
+def test_the_guard_asks_for_a_merge_base_not_for_the_ref(scratch):
+    """`test_select_prints_its_reasons_and_what_it_is_for` takes the
+    default path only where it can succeed. Kills: the guard asking
+    `git rev-parse --verify`, under which a clone holding an unrelated
+    `origin/main` takes the default path and fails on a correct refusal."""
+    repo = scratch()
+    base = repo.commit("a")
+    repo.git("branch", "main", base)
+    assert _shares_history(repo.path, "main")
+    assert not _shares_history(repo.path, "origin/main")   # no such ref
+    repo.git("update-ref", "refs/remotes/origin/main", base)
+    repo.git("checkout", "-q", "--orphan", "alone")
+    repo.commit("alone")
+    assert repo.git("rev-parse", "--verify", "--quiet", "origin/main") == base
+    assert not _shares_history(repo.path, "origin/main")
+    assert not _shares_history(repo.path, "main")
 
 
 def test_a_selected_test_that_is_gone_sends_its_modules_to_their_rows():
@@ -683,10 +849,14 @@ def test_a_compact_edit_selects_the_compaction_tests_only(small_real_map):
         {}, proj)
     assert not sel.full, sel.reasons
     # The tests that read every `*.py` by glob come along with any
-    # package edit (#734 review); what rule 1 chose is the rest.
-    readers = test_map.glob_readers(proj, "isocenter/session.py")
-    assert readers <= sel.files
-    assert _files(sel) - readers == {"tests/test_compaction.py"}
+    # package edit (#734 review), and so do the ones that read this
+    # module's source by name (#779); what rule 1 chose is the rest.
+    by_glob = test_map.glob_readers(proj, "isocenter/session.py")
+    by_name = test_map.source_readers(proj, "isocenter/session.py")
+    assert by_glob and by_name - by_glob
+    assert "tests/test_compaction.py" not in by_glob | by_name
+    assert by_glob | by_name <= sel.files
+    assert _files(sel) - by_glob - by_name == {"tests/test_compaction.py"}
 
 
 @pytest.mark.parametrize("path, qualname", [
