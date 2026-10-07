@@ -225,6 +225,20 @@ def test_the_test_step_runs_for_every_matrix_entry():
     # shape is asserted too so that adding one is a decision somebody
     # reads this for.
     assert "if" not in step, step.get("if")
+    # The same skip can be written in the shell, where no key shows it:
+    # `[ "${{ matrix.shard }}" = 8 ] || pytest ...` passed every pin above
+    # (review of #969, S2), and so would `pytest ... || true`. So the
+    # script is the one command, whole, and nothing else.
+    _job, count = _gate_workflow()
+    assert step["run"].strip() == (
+        f"pytest -v --shard=${{{{ matrix.shard }}}}/{count} "
+        "--record-shard-timings=${{ runner.temp }}/shard-timings.json"), (
+        "the Run Tests step of tests.yml runs something other than the "
+        f"one pytest command: {step['run']!r}. A shell condition, a "
+        "second command or `|| true` there can skip a shard or hide its "
+        "failure behind a green step; change this pin with the command, "
+        "on purpose.")
+    assert "shell" not in step
 
 
 def _heaviest_shard_seconds(files, timings, count):
@@ -467,3 +481,20 @@ def test_the_merge_command_writes_the_file_the_shards_are_cut_from(tmp_path):
     assert f"3.14t lacks shard {count}" in done.stderr
     assert "Traceback" not in done.stderr
     assert out.read_bytes() == before
+
+    # A download that failed leaves no folder at all (review of #969, S5):
+    # a sentence, not `FileNotFoundError`'s traceback, and nothing written.
+    # And a run with no timings artifacts (a release line that does not
+    # upload them yet) leaves a folder with nothing to read.
+    (tmp_path / "empty").mkdir()
+    for directory, said in ((tmp_path / "absent", "is not a folder"),
+                            (tmp_path / "empty", "no recording to merge")):
+        fresh = tmp_path / f"{directory.name}.json"
+        done = subprocess.run(
+            [sys.executable, "-m", "scripts.shard_timings", "merge",
+             str(directory), "--out", str(fresh)],
+            cwd=REPO, env=env, capture_output=True, text=True, timeout=120)
+        assert done.returncode != 0
+        assert said in done.stderr, done.stderr
+        assert "Traceback" not in done.stderr
+        assert not fresh.exists()

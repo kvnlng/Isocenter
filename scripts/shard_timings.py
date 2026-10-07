@@ -5,7 +5,8 @@ shard runs is a function of tests/shard_timings.json: one number of
 seconds per file (tests/support/shards.py). Every shard of tests.yml
 records what its files took (`--record-shard-timings`) and uploads that
 as the artifact `shard-timings-<version>-<shard>`. This merges one run's
-artifacts into the file, at the release's record-back (RELEASING.md,
+artifacts into the file, after the release's record-back and in a PR of
+its own, from the newest release line's publish run only (RELEASING.md,
 "Cutting a release", step 8):
 
     gh run download <run id> --pattern 'shard-timings-*' --dir <dir>
@@ -108,8 +109,14 @@ def read_run(directory):
             run (the built distributions) and is not read.
 
     Raises:
-        ValueError: When a shard's artifact folder holds no recording.
+        ValueError: When `directory` is not a folder (a download that
+            failed leaves none), or a shard's artifact folder holds no
+            recording.
     """
+    if not Path(directory).is_dir():
+        raise ValueError(
+            f"{directory} is not a folder: `gh run download` wrote nothing "
+            "there, so there is no run to merge")
     recordings = {}
     for folder in sorted(Path(directory).iterdir()):
         named = _ARTIFACT.fullmatch(folder.name)

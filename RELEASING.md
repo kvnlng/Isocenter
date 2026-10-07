@@ -471,20 +471,37 @@ fixes, never features.
      X.Y is the newest release line. Between releases, `main` declares the
      newest version released from it, and `[Unreleased]` above that
      section holds everything since. A patch to an older line leaves
-     `main`'s version alone;
-   - refreshes `tests/shard_timings.json`, which the CI shards are cut
-     from, with what step 6's publish run measured (#935): `gh run
-     download <run id> --pattern 'shard-timings-*' --dir <dir>`, with
-     `<dir>` outside the checkout, then `python -m scripts.shard_timings
-     merge <dir> --out "$PWD/tests/shard_timings.json"`. The merge takes,
-     for each test file, the median of the versions, and refuses a run in
-     which any version lacks a shard (one killed at its timeout uploads
-     nothing): leave the file as it is then, and never refresh it from a
-     local run, whose seconds are another unit. Then run
-     `tests/test_shards_partition_the_suite.py`. If
-     `test_the_heaviest_shard_fits_the_step_with_room` fails, the suite
-     has outgrown its shards: add shards to `tests.yml` (or raise its
-     `Run Tests` cap) in a PR of its own, before the next release.
+     `main`'s version alone.
+
+   **Then the shard timings, in a PR of their own, never in the
+   record-back** (#935). `tests/shard_timings.json` is what the CI shards
+   are cut from, and step 6's publish run measured every test file on a
+   runner. Refresh it only when both of these hold; otherwise leave the
+   file alone and say which did not hold in the record-back PR's body:
+   - **X.Y is the newest release line.** The merge replaces the file, so
+     a run of an older line would take the number away from every test
+     file `main` has and that line lacks.
+   - **The run uploaded the timings.** `gh run download <run id>
+     --pattern 'shard-timings-*' --dir <dir>`, with `<dir>` a new folder
+     outside the checkout. A release cut from a branch that does not yet
+     hold `tests.yml`'s upload step (every 1.0 candidate up to rc14) has
+     no such artifact, and there is nothing to refresh. (`merge` over a
+     folder that is missing or holds no recording refuses in a sentence
+     and writes nothing.)
+
+   With both, on a work branch off `main`: `python -m
+   scripts.shard_timings merge <dir> --out "$PWD/tests/shard_timings.json"`.
+   It takes, for each test file, the median of the versions. It refuses,
+   and writes nothing, when any version lacks a shard (one killed at its
+   timeout uploads nothing): leave the file alone then too. Never refresh
+   it from a local run, whose seconds are another unit. Commit the file
+   alone and run `tests/test_shards_partition_the_suite.py`:
+   - green: open the PR with that one commit;
+   - `test_the_heaviest_shard_fits_the_step_with_room` red: the suite has
+     outgrown its shards. The same PR adds shards to `tests.yml` (the
+     matrix list, the run line and the summary line move together) or
+     raises its `Run Tests` cap with the job cap, so that it is green
+     before it merges, and it merges before the next release is cut.
 
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
