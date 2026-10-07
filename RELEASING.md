@@ -87,6 +87,15 @@ minor's work. A PR with neither is the next unreleased line's work.
      #744). Where the walk goes and what the literal is for are not
      read, so this over-selects; it never narrows. A tree read with
      none of those calls, or kept by no suffix, is not seen.
+   - a changed `isocenter/**/*.py` also selects the test files that read
+     that one module's source: a `tests/test_*.py` whose text holds the
+     module's file name (`wfdb.py`), or that holds `getsource`,
+     `getsourcelines`, `ast.parse(` or `.__file__` and the module's name
+     as a whole word (#779). This applies to a function the map covers
+     too, which otherwise selects only the tests that ran it. The word
+     and the spelling may sit anywhere in the file, so this over-selects;
+     a reader that reaches the source through a helper in another file,
+     or through `importlib`, `pkgutil` or `inspect.getfile`, is not seen.
    - a selected test in a file with a module-, class-, package- or
      session-scoped fixture brings its whole file.
 
@@ -499,6 +508,36 @@ fixes, never features.
      section holds everything since. A patch to an older line leaves
      `main`'s version alone.
 
+   **Then the shard timings, in a PR of their own, never in the
+   record-back** (#935). `tests/shard_timings.json` is what the CI shards
+   are cut from, and step 6's publish run measured every test file on a
+   runner. Refresh it only when both of these hold; otherwise leave the
+   file alone and say which did not hold in the record-back PR's body:
+   - **X.Y is the newest release line.** The merge replaces the file, so
+     a run of an older line would take the number away from every test
+     file `main` has and that line lacks.
+   - **The run uploaded the timings.** `gh run download <run id>
+     --pattern 'shard-timings-*' --dir <dir>`, with `<dir>` a new folder
+     outside the checkout. A release cut from a branch that does not yet
+     hold `tests.yml`'s upload step (every 1.0 candidate up to rc14) has
+     no such artifact, and there is nothing to refresh. (`merge` over a
+     folder that is missing or holds no recording refuses in a sentence
+     and writes nothing.)
+
+   With both, on a work branch off `main`: `python -m
+   scripts.shard_timings merge <dir> --out "$PWD/tests/shard_timings.json"`.
+   It takes, for each test file, the median of the versions. It refuses,
+   and writes nothing, when any version lacks a shard (one killed at its
+   timeout uploads nothing): leave the file alone then too. Never refresh
+   it from a local run, whose seconds are another unit. Commit the file
+   alone and run `tests/test_shards_partition_the_suite.py`:
+   - green: open the PR with that one commit;
+   - `test_the_heaviest_shard_fits_the_step_with_room` red: the suite has
+     outgrown its shards. The same PR adds shards to `tests.yml` (the
+     matrix list, the run line and the summary line move together) or
+     raises its `Run Tests` cap with the job cap, so that it is green
+     before it merges, and it merges before the next release is cut.
+
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
 and dispatch again (deleting and re-pushing a `v*` tag needs the admin
@@ -570,7 +609,16 @@ cherry-pick and the release record by an ordinary copy commit (step 8).
 `tests/test_version_contract.py::test_the_changelog_opens_with_unreleased_or_the_declared_release`
 catches the common shape: a top heading naming a version `_version.py`
 does not. It cannot catch a merge that also carried `_version.py` to the
-same number.
+same number. `test_this_checkout_is_not_a_release_merged_forward`, beside
+it, asks git about that one (#931): of a tree that opens its changelog
+with its own version, whether `vX.Y.Z` is in its history where the clone
+has the tag, and whether `_version.py` was last set on its own
+first-parent line. That catches a merge commit, and a squash of a tagged
+release. It does not catch a squash of a release commit not yet tagged, a
+merge whose resolution of `_version.py` matches neither side, or anything
+in a clone with no tags and no history. It rests on a release branch
+being a line: a release commit taken into `release/X.Y` by a merge commit
+(step 3 prescribes a squash) turns it red on that branch.
 
 ## Later releases on an existing line
 
