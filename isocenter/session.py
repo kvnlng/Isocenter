@@ -6744,7 +6744,11 @@ class DicomSession:
                 begins with, when an instance with unsaved changes holds a
                 SOP Instance UID that is not a `str`: it gives the count, and
                 nothing is saved or written (#721; this was sqlite's
-                `IntegrityError`).
+                `IntegrityError`). The same when a patient, study or
+                series holds a Patient ID, Study Instance UID or Series
+                Instance UID that is not a `str`, with a count per level
+                (#949; `None` was sqlite's `IntegrityError`, and for any
+                other type the save returned and the store lost the rows).
             TypeError: For an option name the selected exporter does not
                 recognise; nothing is written. The two formats do not accept
                 the same options, so a caller forwarding one dict to both

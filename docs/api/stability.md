@@ -390,7 +390,16 @@ otherwise.
   `str` (`None`, or a value of another type), giving the count. Raised
   by the save before it stores or appends anything, so nothing is saved
   or exported. Under `export(check_burned_in=True)` the
-  pre-export scan has already run.
+  pre-export scan has already run. The same three calls raise
+  `ValueError`, at the same point and with the same guarantees, when a
+  patient, study or series in the session holds a key that is not a
+  `str`: `patient.patient_id`, `study.study_instance_uid` or
+  `series.series_instance_uid`. The message gives the count at each of
+  the three levels and no value. An empty `str` is not refused by either
+  check. `anonymize()` never clears one of those three keys: a
+  `REMOVE_TAG` finding naming one is declined with a
+  `REMEDIATION_DECLINED` audit row, and `load_config()` refuses the rule
+  (#949).
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.
 - `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`:

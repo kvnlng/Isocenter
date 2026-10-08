@@ -738,3 +738,91 @@ def test_a_declined_stray_remove_after_a_full_pass_exports_no_marker(
         declined = [row for row in _remediation_rows(session)
                     if row[0] == "REMEDIATION_DECLINED"]
         assert len(declined) == (1 if hand_built else 0)
+
+
+# --- #949: a REMOVE naming a key the store holds the row by -----------------
+#
+# `patient_id`, `study_instance_uid` and `series_instance_uid` are in
+# `ENTITY_FIELD_TAGS` (the exporter stamps all three), so the arm cleared them
+# as it clears `patient_name`. Measured on main at fd359eb3: `anonymize([f])`
+# returned 1 under the row `Cleared Attribute patient_id on ...; removed from
+# 1 instance copy`, the key was None, and `save(sync=True)`, `export()` and
+# `compact()` then raised `sqlite3.IntegrityError: NOT NULL constraint failed:
+# patients.patient_id` (`studies.study_instance_uid`,
+# `series.series_instance_uid`). The loader refuses all three as rules; only a
+# hand-built finding reaches the arm. It now declines (owner ruling Q2 A,
+# 2026-10-08), with the row the bottom `else` already wrote for any other
+# name it does not act on.
+
+KEYS = [("Patient", "patient_id"), ("Study", "study_instance_uid"),
+        ("Series", "series_instance_uid")]
+
+
+@pytest.mark.parametrize("kind, attr", KEYS)
+def test_a_remove_naming_a_key_the_store_holds_the_row_by_declines(
+        tmp_path, monkeypatch, kind, attr):
+    """The key is the same object after the pass, nothing is counted as
+    applied, the one row is the decline, whole, the instance's own copy of
+    the tag is still there, and the session can still save, compact,
+    report and export. One row of the parameters per key: dropping a key
+    from the clause turns its row red."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        entity, uid = owners[kind]
+        before = getattr(entity, attr)
+        assert isinstance(before, str) and before
+        tag = RemediationService.ENTITY_FIELD_TAGS[attr]
+        [instance] = RemediationService._instances_beneath(entity)
+        copy_before = instance.attributes[tag]
+        assert session.anonymize([_attribute_removal(entity, uid, kind, attr)]) == 0
+        assert getattr(entity, attr) is before
+        assert instance.attributes[tag] == copy_before
+        assert _remediation_rows(session) == [(
+            "REMEDIATION_DECLINED",
+            f"Remediation declined for {uid}: REMOVE_TAG on {attr} matched no "
+            f"applicable arm for {kind}")]
+        session.save(sync=True)
+        session.compact()
+        session.generate_report(str(tmp_path / "r.md"))
+        assert "**REVIEW_REQUIRED**" in (tmp_path / "r.md").read_text(encoding="utf-8")
+        session.export(str(tmp_path / "out"), use_compression=False)
+        assert len(list((tmp_path / "out").rglob("*.dcm"))) == 1
+
+
+@pytest.mark.parametrize("kind, attr", KEYS)
+def test_a_remove_naming_a_key_already_cleared_is_not_satisfied(
+        tmp_path, monkeypatch, kind, attr):
+    """A key a caller set to None, with no copy of its tag left beneath it,
+    is the state `_owner_field_gone` reads as "nothing left to remove" for
+    a name or a date. For a key it is not an end state: the session cannot
+    save (the save's own refusal says so), so the removal declines rather
+    than be counted as satisfied. Kills the clause placed in
+    `_holds_attr_to_remove` alone."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    try:
+        entity, uid = owners[kind]
+        tag = RemediationService.ENTITY_FIELD_TAGS[attr]
+        for instance in RemediationService._instances_beneath(entity):
+            del instance.attributes[tag]
+        setattr(entity, attr, None)
+        assert session.anonymize([_attribute_removal(entity, uid, kind, attr)]) == 0
+        assert _remediation_rows(session) == [(
+            "REMEDIATION_DECLINED",
+            f"Remediation declined for {uid}: REMOVE_TAG on {attr} matched no "
+            f"applicable arm for {kind}")]
+    finally:
+        session.close()
+
+
+def test_a_remove_spelling_a_key_as_an_upper_case_tag_on_its_owner_declines(
+        tmp_path, monkeypatch):
+    """Control, green on main: `0010,0020` as the target on a `Patient`
+    names no Python attribute, falls past the arm and declines."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        patient, uid = owners["Patient"]
+        assert session.anonymize(
+            [_attribute_removal(patient, uid, "Patient", "0010,0020")]) == 0
+        assert patient.patient_id == "PID-679"
+        assert [row[0] for row in _remediation_rows(session)] == [
+            "REMEDIATION_DECLINED"]

@@ -314,14 +314,17 @@ def test_clearing_a_patient_attribute_after_a_reload_still_needs_a_save():
     """Pins `entity.mark_modified()` at remediation.py line 456.
 
     That is the `REMOVE_TAG` Python-attribute arm, which sets the
-    attribute to None.
+    attribute to None. On `patient_name`: until #949 this removed
+    `patient_id`, which the arm now declines, because the store holds the
+    patient's row by it.
     """
     patient = _as_reloaded(Patient(patient_name="DOE^JOHN", patient_id="PAT-7"))
 
     RemediationService().apply_remediation(
-        [_finding(patient, "REMOVE_TAG", "patient_id", original="PAT-7")])
+        [_finding(patient, "REMOVE_TAG", "patient_name", original="DOE^JOHN")])
 
-    assert patient.patient_id is None
+    assert patient.patient_name is None
+    assert patient.patient_id == "PAT-7"
     assert patient.has_unsaved_changes, (
         "the entity reports no unsaved changes after its PHI was "
         "stripped, so the next save skips it and the value stays in "
