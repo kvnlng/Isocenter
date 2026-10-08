@@ -158,3 +158,203 @@ def test_two_tags_sharing_a_display_name_are_both_remediated(make_session):
     assert "0008,1010" not in instance.attributes, (
         "the second tag deduped against the first because they share a "
         "display name")
+
+
+# ---------------------------------------------------------------------------
+# A REPLACE already there is satisfied, not written again (#952)
+# ---------------------------------------------------------------------------
+#
+# Measured on main at fd359eb3: the same instance findings handed to
+# `anonymize()` twice under the floor changed nothing in the graph the second
+# time, yet the second call returned 17, wrote 17 `REMEDIATION_REPLACE` rows
+# again, and the report then counted 36 replacements for 19. Every `REPLACE`
+# wrote again: `_replace_on_item` never asked whether the element already held
+# the value. Owner ruling Q-D1-4 A (2026-10-08): a `REPLACE` on an instance's
+# own element that already holds the value, vouched by the instance's
+# remediation record, is satisfied -- no row, not counted. The record is the
+# gate, so a source value that happens to equal the rule's value is still
+# written once, and recorded. The Patient, Study and Series arms are unchanged.
+
+@pytest.fixture
+def _threads(monkeypatch):
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+
+
+def _ct_session(tmp_path):
+    """CT_small ingested under the floor, audited: the open session, the
+    report and the one instance."""
+    from support.ct_small_files import write_ct
+
+    write_ct(tmp_path / "in" / "a.dcm", "PID-952", "9520", name="Alpha^One")
+    session = Session(str(tmp_path / "s.db"))
+    session.ingest(str(tmp_path / "in"))
+    report = session.audit()
+    [instance] = [i for p in session.store.patients for st in p.studies
+                  for se in st.series for i in se.instances]
+    return session, report, instance
+
+
+def _remediation_rows(session):
+    import sqlite3
+
+    session.store_backend.flush_audit_queue()
+    with sqlite3.connect(session.persistence_file) as conn:
+        return conn.execute(
+            "SELECT action_type, details FROM audit_log "
+            "WHERE action_type LIKE 'REMEDIATION%' ORDER BY rowid").fetchall()
+
+
+def _graph(session):
+    """Every value the graph holds, as reprs."""
+    from isocenter.entities import iter_item_tree
+
+    out = {}
+    for patient in session.store.patients:
+        out["patient"] = (repr(patient.patient_id), repr(patient.patient_name))
+        for study in patient.studies:
+            out["study", study.study_instance_uid] = (
+                repr(study.study_date), study.date_shifted)
+            for series in study.series:
+                for instance in series.instances:
+                    for item, path in iter_item_tree(instance):
+                        for tag, value in item.attributes.items():
+                            out[path, tag] = repr(value)
+                        for tag, sequence in item.sequences.items():
+                            out[path, tag, "items"] = len(sequence.items)
+    return out
+
+
+def _instance_findings(report):
+    return [f for f in report.findings if f.entity_type == "Instance"]
+
+
+def _section_two_count(session, tmp_path, action):
+    """The count the report's section 2 gives `action`."""
+    import re
+
+    path = tmp_path / "report.md"
+    session.generate_report(str(path))
+    [count] = re.findall(rf"\|\s*{action}\s*\|\s*(\d+)\s*\|",
+                         path.read_text(encoding="utf-8"))
+    return int(count)
+
+
+def test_the_same_instance_findings_handed_twice_apply_nothing_the_second_time(
+        tmp_path, _threads):
+    """Red on main: the second call returned 17 and wrote 17 rows. Now it
+    returns 0, the audit trail gains no `REMEDIATION_*` row, the graph is
+    value for value what the first pass left, and the report's section 2
+    counts each replacement once. The SOP Instance UID's keyed replacement
+    is one of the repeats: the instance stays on the UID the first pass
+    gave it, with one row. Kills: the repeat written again; the SOP arm
+    left repeating."""
+    session, report, instance = _ct_session(tmp_path)
+    with session:
+        mine = _instance_findings(report)
+        replaces = [f for f in mine
+                    if f.remediation_proposal.action_type == "REPLACE_TAG"
+                    and not f.entity_path]
+        assert len(replaces) > 10, "setup: the floor raises instance REPLACEs"
+        first = session.anonymize(mine)
+        assert first > len(replaces) // 2
+        rows = _remediation_rows(session)
+        graph = _graph(session)
+        sop = instance.sop_instance_uid
+        replaced = _section_two_count(session, tmp_path, "REMEDIATION_REPLACE")
+        assert replaced == [a for a, _ in rows].count("REMEDIATION_REPLACE")
+
+        assert session.anonymize(mine) == 0
+
+        assert _remediation_rows(session) == rows
+        assert _graph(session) == graph
+        assert instance.sop_instance_uid == sop
+        assert len([d for a, d in rows if "(Tag 0008,0018)" in d]) == 1
+        assert _section_two_count(
+            session, tmp_path, "REMEDIATION_REPLACE") == replaced
+
+
+def _replace(report, instance, tag, value):
+    """A hand-built top-level `REPLACE_TAG` finding on `instance`, made
+    from one of the audit's own (this file imports no finding class)."""
+    import dataclasses
+
+    template = next(f for f in report.findings
+                    if f.entity_type == "Instance" and not f.entity_path)
+    return dataclasses.replace(
+        template, entity_uid=instance.sop_instance_uid,
+        field_name="hand-built", value=instance.attributes[tag],
+        reason="hand-built", tag=tag, entity=instance,
+        remediation_proposal=dataclasses.replace(
+            template.remediation_proposal, action_type="REPLACE_TAG",
+            target_attr=tag, new_value=value,
+            original_value=instance.attributes[tag], metadata={}))
+
+
+def test_a_source_value_equal_to_the_rules_value_is_still_written_once(
+        tmp_path, _threads):
+    """Control: the instance's remediation record is the gate, not
+    equality. A REPLACE whose value the element already holds *as the
+    source wrote it* has no record behind it, so it is written, counted
+    and logged once -- the row and the record are what say the value is a
+    replacement, which `lock_identities()` reads. Handed again, it is
+    satisfied. Kills: the write skipped on equality alone."""
+    session, _report, instance = _ct_session(tmp_path)
+    with session:
+        held = instance.attributes["0008,0070"]
+        assert held == "GE MEDICAL SYSTEMS"
+        assert not instance.remediation_vouches_for("0008,0070", held)
+        finding = _replace(_report, instance,"0008,0070", held)
+
+        assert session.anonymize([finding]) == 1
+        rows = _remediation_rows(session)
+        assert [a for a, _ in rows] == ["REMEDIATION_REPLACE"]
+        assert instance.remediation_vouches_for("0008,0070", held)
+
+        assert session.anonymize([finding]) == 0
+        assert _remediation_rows(session) == rows
+        assert instance.attributes["0008,0070"] == held
+
+
+def test_an_element_edited_between_the_passes_is_written_again(tmp_path, _threads):
+    """Control: the element must hold the value now. Edited to another
+    value after the first pass, the same finding writes again, with its
+    row. (The record vouches for what the element holds, so the hand
+    edit alone un-vouches it; the control below is the one that turns on
+    the equality with the proposal's value.) Kills: a pass remembered as
+    done whatever the element holds since."""
+    session, _report, instance = _ct_session(tmp_path)
+    with session:
+        finding = _replace(_report, instance,"0008,0070", "ANONYMIZED")
+        assert session.anonymize([finding]) == 1
+        instance.set_attr("0008,0070", "SET BACK BY HAND")
+
+        assert session.anonymize([finding]) == 1
+
+        assert instance.attributes["0008,0070"] == "ANONYMIZED"
+        assert [a for a, _ in _remediation_rows(session)] == [
+            "REMEDIATION_REPLACE"] * 2
+
+
+def test_a_replace_with_another_value_than_the_one_recorded_is_written(
+        tmp_path, _threads):
+    """Control: the element must hold *the value this proposal writes*.
+    After a first REPLACE the element holds `ANONYMIZED` and the record
+    vouches for it; a second finding asking for `REDACTED` is not met by
+    that, and is written, with its row. Kills: any vouched value read as
+    this proposal's end state (the equality dropped: the record vouches
+    for what the element holds, whatever the proposal asks)."""
+    session, _report, instance = _ct_session(tmp_path)
+    with session:
+        assert session.anonymize(
+            [_replace(_report, instance,"0008,0070", "ANONYMIZED")]) == 1
+        assert instance.remediation_vouches_for("0008,0070", "ANONYMIZED")
+
+        assert session.anonymize(
+            [_replace(_report, instance,"0008,0070", "REDACTED")]) == 1
+
+        assert instance.attributes["0008,0070"] == "REDACTED"
+        assert [a for a, _ in _remediation_rows(session)] == [
+            "REMEDIATION_REPLACE"] * 2

@@ -616,9 +616,10 @@ def test_a_raise_on_an_entity_without_status_does_not_crash_the_pass(store):
 # `Patient.studies` left `patient.studies = None` under the row `Cleared
 # Attribute studies`, and `save(sync=True)`, `export()` (`'NoneType' object is
 # not iterable`) and `generate_report()` (`object of type 'NoneType' has no
-# len()`) then raised `TypeError`. The arm now writes only the six fields the
-# exporter stamps (`ENTITY_FIELD_TAGS`; owner ruling Q4 A, 2026-10-06); any
-# other name falls to the bottom `else`, whose row was already the right one.
+# len()`) then raised `TypeError`. The arm now writes only the fields the
+# exporter stamps (`ENTITY_FIELD_TAGS`; owner ruling Q4 A, 2026-10-06: six
+# then, five since #953 stopped stamping Study Time); any other name falls to
+# the bottom `else`, whose row was already the right one.
 
 def _owned_session(tmp_path, monkeypatch):
     from isocenter import Session
@@ -680,6 +681,28 @@ def test_a_remove_naming_a_field_the_export_never_writes_declines(
         session.generate_report(str(tmp_path / "r.md"))
         session.export(str(tmp_path / "out"), use_compression=False)
         assert len(list((tmp_path / "out").rglob("*.dcm"))) == 1
+
+
+def test_a_remove_naming_study_time_declines_since_the_export_stopped_stamping_it(
+        tmp_path, monkeypatch):
+    """#953: Study Time is no longer stamped from the Study (owner ruling
+    Q-D1-3 A), so `study_time` left `ENTITY_FIELD_TAGS`, whose rule is "the
+    fields the exporter stamps", and a hand-built REMOVE naming it declines
+    like any other unstamped field: the time a caller set stays, nothing is
+    counted, one row, whole. Until #953 the arm cleared it (`Cleared
+    Attribute study_time`, counted as applied). Kills `study_time` left in
+    the table."""
+    session, owners = _owned_session(tmp_path, monkeypatch)
+    with session:
+        study, uid = owners["Study"]
+        study.study_time = "101500"
+        assert session.anonymize(
+            [_attribute_removal(study, uid, "Study", "study_time")]) == 0
+        assert study.study_time == "101500"
+        assert _remediation_rows(session) == [(
+            "REMEDIATION_DECLINED",
+            f"Remediation declined for {uid}: REMOVE_TAG on study_time matched "
+            f"no applicable arm for Study")]
 
 
 @pytest.mark.parametrize("kind, attr", [("Patient", "patient_name"),

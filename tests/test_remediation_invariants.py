@@ -9,9 +9,12 @@ Each test here corresponds to a specific surviving mutant, named in its
 docstring, so a future reader can tell what it is defending against
 rather than guessing from the assertion.
 """
+import dataclasses
+
 import pytest
 
-from isocenter.entities import DicomItem, Instance, Patient, PhiStatus, Study
+from isocenter.entities import (DicomItem, Instance, Patient, PhiStatus,
+                                Series, Study)
 from isocenter.privacy import PhiFinding, PhiRemediation
 from isocenter.remediation import RemediationService
 
@@ -185,8 +188,32 @@ def test_clearing_a_patient_attribute_leaves_it_needing_a_save():
 
 
 # --------------------------------------------------------------------
-# The five `mark_modified()` calls, one test each (#173, #132)
+# The four `mark_modified()` calls, one test each (#173, #132, #961)
 # --------------------------------------------------------------------
+#
+# Five until #961, which found that three of them were pinned by nothing:
+# with the call replaced by `pass`, this file and every other test in
+# `remediation.py`'s probe row stayed green (measured on 3.12 and 3.14t,
+# each alone and all three together). The reason is #767: assigning a
+# tracked field of a Patient, Study or Series is itself an edit
+# (`entities._assign_tracked_field` marks the entity when the value
+# changes), so the explicit call after a `setattr` matters only where the
+# value written does not change, or the field is not tracked. What #961
+# did with each:
+#
+# * the REPLACE Python-attribute arm's call stays, pinned on the one path
+#   that needs it, a stored field the entity does not track
+#   (`test_replacing_a_field_the_entity_does_not_track_still_needs_a_save`);
+# * the SHIFT arm's call stays, pinned on a Study that already holds the
+#   shifted date and carries no record of it
+#   (`test_a_shift_onto_a_date_already_there_still_saves_its_record`);
+# * the REMOVE Python-attribute arm's call is deleted: #679 restricts that
+#   arm to the fields the exporter stamps, every one of them tracked, and
+#   `test_every_field_the_remove_arm_may_clear_is_a_tracked_field` pins
+#   that they stay tracked.
+#
+# The two item arms `del` from a plain dict, which bumps no revision, and
+# were always pinned.
 #
 # On a *first* remediation each of these calls is redundant:
 # `record_phi_status(REMEDIATED)` on the shared success path also
@@ -202,8 +229,10 @@ def test_clearing_a_patient_attribute_leaves_it_needing_a_save():
 # stripped from memory, the entity reports nothing to save, the next
 # save skips it, and the identifier stays in the database (#173).
 #
-# Each test below drives exactly one of the five arms and names it, so a
-# deletion anywhere in the cluster turns exactly one test red.
+# Each of the four tests that cites a line drives exactly one arm on the
+# path its call bears, so a deletion anywhere in the cluster turns exactly
+# one test red. The tests beside them that drive a tracked field through
+# the same arms pin `_assign_tracked_field`, and say so.
 
 
 def _as_reloaded(entity):
@@ -225,10 +254,13 @@ def _as_reloaded(entity):
 
 
 def test_replacing_a_second_patient_attribute_after_a_reload_still_needs_a_save():
-    """Pins `entity.mark_modified()` at remediation.py line 299.
+    """The `REPLACE_TAG` Python-attribute arm -- the one a `Patient`
+    takes, having no `set_attr` -- on a tracked field whose value changes.
 
-    That is the `REPLACE_TAG` Python-attribute arm -- the one a
-    `Patient` takes, having no `set_attr`.
+    This claimed to pin the arm's `mark_modified()` until #961. It does
+    not: `patient_name` is a tracked field, so the assignment marks the
+    patient itself (`entities._assign_tracked_field`, #767), and the test
+    is green with the call deleted. What it pins is that assignment.
     """
     patient = _as_reloaded(Patient(patient_name="DOE^JOHN", patient_id="PAT-7"))
 
@@ -243,13 +275,89 @@ def test_replacing_a_second_patient_attribute_after_a_reload_still_needs_a_save(
         "the database")
 
 
-def test_shifting_a_study_date_after_a_reload_still_needs_a_save():
+def test_replacing_a_field_the_entity_does_not_track_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 299.
+
+    That is the `REPLACE_TAG` Python-attribute arm, on the one path its
+    call bears: a stored field outside the entity's `_TRACKED_FIELDS`.
+    `Study.date_shifted` is one (a `studies` column, written by
+    remediation beside its own `mark_modified()`), so assigning it marks
+    nothing, and without the call the flag is `True` in memory while the
+    next save skips the study's row.
+
+    The path is hand-built only: no scan raises a REPLACE on
+    `date_shifted`. The arm allows it because `_replace_attr_refused` is
+    generic over every entity field; whether REPLACE should take #679's
+    allowlist, as REMOVE did, is an open question, and if it does this
+    test's subject goes with it. Until then the call is load-bearing here.
+    """
+    study = _as_reloaded(Study("S1", "20230101"))
+    assert study.date_shifted is False
+
+    RemediationService().apply_remediation(
+        [_finding(study, "REPLACE_TAG", "date_shifted",
+                  new_value=True, original=False)])
+
+    assert study.date_shifted is True
+    assert study.has_unsaved_changes, (
+        "the flag was written in memory but the study still looks saved, "
+        "so the next save skips its row and the store keeps the old flag")
+
+
+def _shift(study, original):
+    return _finding(study, "SHIFT_DATE", "study_date", original=original,
+                    metadata={"patient_id": "PAT-7"})
+
+
+def test_a_shift_onto_a_date_already_there_still_saves_its_record():
     """Pins `entity.mark_modified()` at remediation.py line 376.
 
-    That is the `SHIFT_DATE` `setattr` arm, and it is not a corner: the
+    That is the `SHIFT_DATE` `setattr` arm, which every flagged study
+    date goes through (a `Study` has no `set_attr`), on the path its call
+    bears: the Study already holds the shifted date and carries no record
+    of the shift. The date does not change, so the assignment marks
+    nothing; the arm also writes `_shifted_study_date` and `date_shifted`,
+    neither a tracked field ("which only remediation writes, beside its
+    own `mark_modified()`", `entities.py`). Without the call both are set
+    in memory and never written, and the next load reads the shifted date
+    as an original, which the scan raises again.
+
+    The shifted date is computed, not written as a literal: the offset is
+    keyed. A first pass over a second `Study` under the same secret and
+    patient gives it.
+    """
+    service = RemediationService(project_secret=FIXED_A)
+    first = Study("S2", "20230101")
+    service.apply_remediation([_shift(first, "20230101")])
+    shifted = first.study_date
+    record = first._shifted_study_date
+    assert record and first.date_shifted, "setup: the first pass shifted"
+
+    study = _as_reloaded(Study("S1", shifted))
+    assert study._shifted_study_date is None and study.date_shifted is False
+
+    assert service.apply_remediation([_shift(study, "20230101")]) == 1
+
+    assert study.study_date == shifted, "setup: the date did not change"
+    assert study._shifted_study_date == record
+    assert study.date_shifted is True
+    assert study.has_unsaved_changes, (
+        "the shift record and the flag were set in memory but the study "
+        "still looks saved, so the next save skips its row and the next "
+        "load reads the shifted date as an original")
+
+
+def test_shifting_a_study_date_after_a_reload_still_needs_a_save():
+    """The `SHIFT_DATE` `setattr` arm on a date that changes.
+
+    This claimed to pin the arm's `mark_modified()` until #961. It does
+    not: `study_date` is a tracked field, so the assignment of a new date
+    marks the study itself (#767), and the test is green with the call
+    deleted. `test_a_shift_onto_a_date_already_there_still_saves_its_record`
+    pins the call. This is not a corner all the same: the
     inspector's study scan raises `SHIFT_DATE` against `study_date` on a
     `Study`, which has no `set_attr`, so every flagged study date goes
-    through this line.
+    through this arm.
 
     The setup arrives at REMEDIATED for *something else* rather than by
     shifting the same date twice: the study scan returns early once
@@ -310,19 +418,59 @@ def test_removing_a_private_sequence_after_a_reload_still_needs_a_save():
         "the database")
 
 
-def test_clearing_a_patient_attribute_after_a_reload_still_needs_a_save():
-    """Pins `entity.mark_modified()` at remediation.py line 456.
+def _owner_holding(field):
+    """A Patient, Study or Series holding a value in `field`, one of the
+    fields the `REMOVE_TAG` Python-attribute arm may clear."""
+    if field in ("patient_name", "patient_id"):
+        return Patient(patient_name="DOE^JOHN", patient_id="PAT-7")
+    if field in ("study_date", "study_instance_uid"):
+        return Study("1.2.3", "20230101")
+    return Series("1.2.3.4", "CT", 1)
 
-    That is the `REMOVE_TAG` Python-attribute arm, which sets the
-    attribute to None.
+
+def _class_declaring(field):
+    """The one entity class whose dataclass fields include `field`."""
+    [cls] = [cls for cls in (Patient, Study, Series)
+             if field in {f.name for f in dataclasses.fields(cls)}]
+    return cls
+
+
+def test_every_field_the_remove_arm_may_clear_is_a_tracked_field():
+    """Stands where the pin of the `REMOVE_TAG` Python-attribute arm's
+    `mark_modified()` stood. #961 deleted that call: the arm is
+    `setattr(entity, attr, None)`, #679 restricts it to
+    `ENTITY_FIELD_TAGS`, and assigning a tracked field marks the entity
+    itself (#767), so the call bore no path. That is true only while
+    every field in the table is tracked by the class that declares it.
+    Untrack one, or add an untracked field to the table, and this is red
+    before a cleared field goes unsaved.
     """
-    patient = _as_reloaded(Patient(patient_name="DOE^JOHN", patient_id="PAT-7"))
+    fields = set(RemediationService.ENTITY_FIELD_TAGS)
+    assert fields == {"patient_name", "patient_id", "study_date",
+                      "study_instance_uid", "series_instance_uid"}
+    for field in sorted(fields):
+        cls = _class_declaring(field)
+        assert field in cls._TRACKED_FIELDS, (
+            f"{cls.__name__}.{field} can be cleared by a REMOVE but an "
+            "assignment to it does not mark the entity, so the cleared "
+            "field would not be saved")
 
-    RemediationService().apply_remediation(
-        [_finding(patient, "REMOVE_TAG", "patient_id", original="PAT-7")])
 
-    assert patient.patient_id is None
-    assert patient.has_unsaved_changes, (
+@pytest.mark.parametrize("field", sorted(RemediationService.ENTITY_FIELD_TAGS))
+def test_clearing_an_owner_field_after_a_reload_still_needs_a_save(field):
+    """The `REMOVE_TAG` Python-attribute arm, which sets the attribute to
+    None, over every field it may clear. Behaviour, and no line: what
+    marks the entity is `entities._assign_tracked_field`, since #961
+    deleted the arm's own `mark_modified()`.
+    """
+    owner = _as_reloaded(_owner_holding(field))
+    assert getattr(owner, field) is not None
+
+    assert RemediationService().apply_remediation(
+        [_finding(owner, "REMOVE_TAG", field)]) == 1
+
+    assert getattr(owner, field) is None
+    assert owner.has_unsaved_changes, (
         "the entity reports no unsaved changes after its PHI was "
         "stripped, so the next save skips it and the value stays in "
         "the database")
