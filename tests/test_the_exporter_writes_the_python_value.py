@@ -888,6 +888,41 @@ def test_a_source_value_beside_a_callers_decimal_is_still_itself():
     assert losses == [] and notes == []
 
 
+def _under_a_recorded_vr(value, vr):
+    """`_merge` of one private value whose VR the source recorded."""
+    ds, losses, revrs = Dataset(), [], []
+    DicomExporter._merge(ds, {PRIVATE: value}, losses, vrs={PRIVATE: vr},
+                         revrs=revrs)
+    elem = ds.get(_numbers(PRIVATE))
+    written = None if elem is None else (str(elem.VR), _typed(
+        [str(v) for v in elem.value] if isinstance(elem.value, MultiValue)
+        else str(elem.value)))
+    return written, losses, [(r.recorded, r.written) for r in revrs]
+
+
+@pytest.mark.parametrize("live, twin, written, revr", [
+    # Names: the gate in front of a recorded VR (`_value_fits_vr`, which
+    # since #951 reads a backslash under PN as the delimiter) refuses a
+    # tuple outright. It is asked about the list, so the recorded PN is
+    # kept live as it is after a reopen.
+    (lambda: ("A^B", "C^D"), lambda: ["A^B", "C^D"], ("PN", ["A^B", "C^D"]), []),
+    (lambda: ("A^B\\C^D",), lambda: ["A^B\\C^D"], ("PN", "A^B\\C^D"), []),
+    # A number under a recorded PN is that gate's to refuse, before the
+    # text gate is reached: written as text under LO with the re-VR
+    # sentence, live and as its twin alike. Not #939's row: that is for a
+    # standard element.
+    (lambda: np.int64(7), lambda: 7, ("LO", "7"), [("PN", "LO")]),
+    (lambda: ("A^B", np.int64(7)), lambda: ["A^B", 7],
+     ("LO", ["A^B", "7"]), [("PN", "LO")]),
+], ids=["names", "one-backslash-member", "number", "name-and-number"])
+def test_a_recorded_private_person_name_is_one_answer_live_and_as_its_twin(
+        live, twin, written, revr):
+    """Where #951's Person Name arm meets the tuple and the number."""
+    expected = (written[0], _typed(written[1]))
+    assert _under_a_recorded_vr(live(), "PN") == (expected, [], revr)
+    assert _under_a_recorded_vr(twin(), "PN") == (expected, [], revr)
+
+
 def test_a_large_plain_list_is_not_rebuilt():
     big = list(range(65536))
     assert _export_value(big) is big
