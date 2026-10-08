@@ -174,7 +174,12 @@ minor's work. A PR with neither is the next unreleased line's work.
    - **Confirm** on 3.14t:
      `python -m scripts.output_fingerprint check --jobs 4; echo "exit=$?"`
      must report **no difference** (exit 0). The two interpreters are two
-     observations of one recording, never two recordings.
+     observations of one recording, never two recordings. A row that
+     differs between them because it quotes an exception this library
+     did not raise (CPython rewords its own messages between versions) is
+     given a sentence of this library's own at the raise, as #747's was;
+     the fingerprint is never retaken on 3.14t to make the two agree
+     (#942).
    - **Name it.** Commit the file, and name every group the check's
      report lists in the change's `CHANGELOG.md` entry, in a line
      beginning `**Output:**` that says what changed and why. A difference
