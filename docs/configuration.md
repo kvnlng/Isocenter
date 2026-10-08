@@ -395,9 +395,13 @@ two values (PS3.5 6.4), whether or not the attribute allows more than one.
 Isocenter holds the element's text as the file wrote it and, where the
 policy keeps the element, exports the same values: two Operators' Names
 stay two, and a Patient's Name the source wrote with two is written with
-two. One case is written differently: a *private* `PN` holding several
-values, kept with `remove_private_tags: false`. An export in an Explicit
-VR transfer syntax (`use_compression=True`) writes it under `UT`, the same
+two. A *private* `PN` holding several values, kept with
+`remove_private_tags: false`, is written the same way: `PN`, with the
+source's values, and no audit row
+([#951](https://github.com/kvnlng/Isocenter/issues/951)). One case is
+still written differently: a private `PN` holding a value of more than 64
+characters, which `PN` cannot carry. An export in an Explicit VR transfer
+syntax (`use_compression=True`) writes that element under `UT`, the same
 text; an Implicit VR export (`use_compression=False`) names no VR and
 carries the same text. Either way the export writes one `WARNING` row
 naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
@@ -570,12 +574,23 @@ The markers rest on the same status the report's grade reads, so any edit after 
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
     * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides. The fingerprint includes the configuration schema version, so a release that raises that version's minor moves the hex in every file it writes, under an unchanged configuration.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
-* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
-    * `REMOVED` when every date is empty or the dummy `19000101`.
-    * `MODIFIED` when the rest are shifts this store wrote.
-    * Nothing when any date is as it was ingested; the source's value, if any, then stays.
+* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `REMOVED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
+    * `MODIFIED` when at least one date is a shift this store wrote, whatever the others are. It replaces the source's value, a source `UNMODIFIED` included. It says that a date in the file was modified, not that every date was: a date beside it may be as it was ingested.
+    * `REMOVED` when no date is shifted and every date is empty or the dummy `19000101`.
+    * Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays.
     * TM is not read: a time of day beside a shifted date does not place the patient in time.
     * `UNMODIFIED` is never written, because a date kept on purpose cannot be told from one no rule named.
+
+    Worked on a CT whose source holds Study Date, Series Date, Acquisition Date, Content Date, Instance Creation Date and an empty Birth Date:
+
+    | Policy | Study Date | The other dates | `(0028,0303)` |
+    |---|---|---|---|
+    | the floor | shifted | empty or `19000101` | `MODIFIED` |
+    | `basic@2026c` | empty | empty or `19000101` | `REMOVED` |
+    | `privacy_profile: none` | shifted (the default for Study Date with no rule) | as ingested | `MODIFIED` |
+    | `none` plus `0008,0020: KEEP` | as ingested | as ingested | nothing; a source's value stays |
+    | the floor plus `0008,0021: KEEP` | shifted | Series Date as ingested, the rest empty or `19000101` | `MODIFIED` |
+    | `basic@2026c` plus `0008,0021: KEEP` | empty | Series Date as ingested, the rest empty or `19000101` | nothing; a source's value stays |
 * **De-identification Method Code Sequence `(0012,0064)`**: no code is written (see the departures above). A source's items pass through.
 
 **Your rules decide.** Table E.1-1 has no row for any of the three elements. A rule you write on one, of any action, `KEEP` included, means the export does not stamp that element: `KEEP` over a source `NO` exports `NO`. The other two are still stamped.

@@ -239,7 +239,7 @@ def test_a_nested_remediation_on_an_instance_already_remediated_is_saved(
     finding earns is the status it already carries and short-circuits.
     Without its own `mark_modified()` the instance reports nothing to
     save, and the replacement written into its sequence never reaches the
-    store: exactly the shape the five `mark_modified()` pins in
+    store: exactly the shape the `mark_modified()` pins in
     `tests/test_remediation_invariants.py` defend one level up.
     """
     inst = _instance_with_items("1.2.3.1.0", {STEP: NESTED_PHI})
