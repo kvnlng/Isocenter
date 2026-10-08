@@ -762,6 +762,11 @@ def _typed(value):
     (lambda: (Decimal("1.5"), np.int64(2)), [1.5, 2]),
     (lambda: [Decimal("1.5"), np.float32(1.5)], [1.5, 1.5]),
     (lambda: [1, 2.5, "A", True, None], [1, 2.5, "A", True, None]),
+    # Every plain type and one numpy member: a list is plain only when
+    # all of its members are, not when it holds one of each.
+    (lambda: [1, 2.5, "A", True, None, np.int64(7)], [1, 2.5, "A", True, None, 7]),
+    (lambda: [1, 2.5, "A", True, None, Decimal("1.5")],
+     [1, 2.5, "A", True, None, 1.5]),
 ], ids=lambda value: None)
 def test_the_value_the_writer_is_handed(make, written):
     """`_export_value`, by type as well as by value."""
