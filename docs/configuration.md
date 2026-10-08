@@ -403,6 +403,18 @@ carries the same text. Either way the export writes one `WARNING` row
 naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
 ([#937](https://github.com/kvnlng/Isocenter/issues/937)).
 
+**Two values in an element a series is described by.** Manufacturer,
+Manufacturer's Model Name, Device Serial Number, Modality and Series
+Number each take one value. A file that holds two in one of them
+(`ACME\Imaging`) is ingested: `Series.modality` and the three `Equipment`
+fields hold the file's text, backslash included, and `Series.series_number`
+is 0. A machine rule is compared with that text, as with any one value.
+The file's own element is exported
+with the values the source wrote, where the policy keeps it, and no row is
+written. The series folder is named from one Modality and one number, so
+it reads `OT` for two Modalities and `0` for two Series Numbers
+([#985](https://github.com/kvnlng/Isocenter/issues/985)).
+
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
