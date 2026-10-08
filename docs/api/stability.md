@@ -271,6 +271,16 @@ instance_number, file_path, source_path` (`pixel_array` and
 `AttributeError`. `Equipment`: `manufacturer, model_name,
 device_serial_number`.
 
+Assigning `Instance.sop_instance_uid` a value it does not already hold
+also sets `attributes["0008,0018"]` to it and marks the instance edited,
+once. So the export writes that instance under the assigned UID: in the
+file's name, in `(0008,0018)` and in Media Storage SOP Instance UID. An
+instance assigned `''` is not written: it is one of
+`ExportSummary.failures`, keyed `UNKNOWN`, with one `ERROR` audit row,
+as an instance built with no UID is. Assigning the value already held
+changes nothing, so an element written straight into `attributes` is not
+brought back by it (#936).
+
 `Series.series_number` and `Series.modality` are the source's Series
 Number and Modality as ingested, and `Instance.instance_number` the
 file's Instance Number. None of the three is what an export writes: the

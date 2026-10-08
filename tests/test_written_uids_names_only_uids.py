@@ -12,6 +12,14 @@ file is left. The path arm was dead; had it run, it would have put
 `Subject_<Patient ID>/...` into a repr that is printed and logged (D10).
 It is deleted.
 
+"No door writes a UID-less instance" was measured on a hand-built instance,
+and until #936 it held for that one only: an *ingested* instance whose
+`sop_instance_uid` a caller then emptied kept its source UID in
+`0008,0018`, so the writer had a UID to copy and wrote the dotfile `.dcm`,
+with `""` in `written_uids`. Since #936 the element follows the field and
+the sentence holds for every instance
+(`test_the_sop_uid_element_follows_the_field.py`).
+
 **The deleted arm, on its own, is an equivalent mutant.** It is dead code,
 so no test can kill it, and this file does not claim to. What it pins is
 the door that keeps it dead: with `enforce_file_format=False` the

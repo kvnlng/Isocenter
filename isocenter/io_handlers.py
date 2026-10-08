@@ -11956,7 +11956,11 @@ class DicomExporter:
             # Media Storage SOP Instance UID, and `save_as(...,
             # enforce_file_format=True)` refuses an empty one, so a UID-less
             # instance fails and is in `failures`, keyed UNKNOWN like its
-            # ERROR row. Never fall back to `output_path` here: it is
+            # ERROR row. That is every UID-less instance since #936: before
+            # it, an ingested instance whose field a caller emptied kept
+            # its source UID in `0008,0018`, the writer copied that into
+            # the file meta, and `""` was in this list beside a file named
+            # `.dcm`. Never fall back to `output_path` here: it is
             # `Subject_<Patient ID>/...`, and this repr is printed and
             # logged. **The trap:** turning `enforce_file_format` off lets
             # a UID-less instance be written (as the dotfile `.dcm`), and
