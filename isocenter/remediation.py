@@ -1169,11 +1169,18 @@ class RemediationService:
         `entity`.
 
         False where the item does not hold `tag` in `attributes`, and for
-        an instance's top-level copy of a tag the export stamps from its
-        owner (`_owner_stamps_tag`): removing that copy would not remove
-        the element from the file (#764). Both fall past the arm; the
-        bottom `else` asks `_owner_stamps_copy` about a stamped copy
-        before it reads absence as done.
+        an instance's top-level copy of a tag the export stamps a value
+        over from its owner (`_owner_stamps_a_value`): removing that copy
+        would not remove the element from the file (#764). Both fall past
+        the arm; the bottom `else` asks `_owner_stamps_copy` about a
+        stamped copy before it reads absence as done.
+
+        True for a stamped copy whose owner holds no value (#948): the
+        export writes the element empty whatever the copy holds, so the
+        removal is true of the file, and the arm removes the copy with its
+        row. Left `''` instead (#958, 1.0.0rc14 and rc15), the copy was
+        raised again by every audit, because the scan raises a REMOVE on
+        anything present.
 
         Args:
             entity: The `DicomItem` the removal targets.
@@ -1190,7 +1197,7 @@ class RemediationService:
         # owner-stamped one (`0020,000D`) is decided by
         # `_owner_stamps_removal`, which canonicalises it; any other
         # declines.
-        return tag in entity.attributes and not self._owner_stamps_tag(entity, tag)
+        return tag in entity.attributes and not self._owner_stamps_a_value(entity, tag)
 
     @classmethod
     def _holds_attr_to_remove(cls, entity, attr) -> bool:
@@ -1787,9 +1794,16 @@ class RemediationService:
         the strength of a value, so it never returns `""`: a copy holding
         the owner's value is a file carrying it. Its end state is the
         owner holding *no* value. Then the export writes the element
-        empty, the copy is left `''` (or absent), and a `_CopyLeftEmpty`
-        is returned whether or not the owner was handed in: an owner
-        whose removal ran has not declined. An owner still holding a
+        empty, and a `_CopyLeftEmpty` is returned whether or not the
+        owner was handed in: an owner whose removal ran has not declined.
+        The copy is absent by then on every scanned path, because the
+        `REMOVE_TAG` arm removes a present copy under such an owner
+        before this is asked (`_holds_tag_to_remove`, #948). Read from
+        the code, not measured: one hand-built path still reaches here
+        with the copy present, a finding that spells an owned UID in
+        upper case (`0020,000D`, which the arm's raw-key test falls
+        past) under an owner whose UID was emptied by hand; that copy is
+        left `''`, as #958 left every one. An owner still holding a
         value gives the two answers below, the decline in a sentence of
         its own.
 
@@ -1915,9 +1929,10 @@ class RemediationService:
         handed = bool({(id(owner), field), (None, field)} & self._owners_handed)
         if removal and value == "":
             # The owner holds no value, so the export writes the element
-            # empty, and the copy is `''` (synced above) or absent:
-            # nothing is left in the graph or the file, which is the end
-            # state REMOVE asks for. Whether or not the owner was handed
+            # empty, and the copy is absent (the arm removes a present
+            # one, #948) or, for an owned UID spelled in upper case, `''`
+            # (synced above): nothing is left in the graph or the file,
+            # which is the end state REMOVE asks for. Whether or not the owner was handed
             # in: an owner whose own removal ran, or was already there,
             # has not declined, and a row here would grade a report
             # handed twice REVIEW_REQUIRED over a clean graph (#567).
@@ -1965,8 +1980,8 @@ class RemediationService:
         value it stamps.
 
         The one table of "the tags an owner stamps" on this path:
-        `_owner_stamps_copy` reads the value, `_owner_stamps_tag` only
-        whether there is one.
+        `_owner_stamps_copy` reads the value, `_owner_stamps_a_value`
+        only whether there is one.
 
         Args:
             entity: The entity a finding targets.
@@ -2007,21 +2022,24 @@ class RemediationService:
             return series, series.series_instance_uid
         return None
 
-    def _owner_stamps_tag(self, entity, tag) -> bool:
-        """Whether `tag` on `entity` is an instance's top-level copy of a
-        tag the export stamps from its owner.
+    def _owner_stamps_a_value(self, entity, tag) -> bool:
+        """Whether the export stamps a value from its owner over `tag` on
+        `entity`, an instance's top-level copy.
 
         Args:
             entity: The entity a finding targets.
             tag (str): The tag, in any case.
 
         Returns:
-            bool: True when `_stamping_owner` names an owner for it; False
-                with no session, for a nested item, and for any other tag.
+            bool: True when `_stamping_owner` names an owner for it and
+                that owner holds a value. False when the owner holds None
+                or `''` (the export then writes the element empty), with
+                no session, for a nested item, and for any other tag.
         """
         from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
 
-        return self._stamping_owner(entity, _canonical_tag(tag)) is not None
+        stamp = self._stamping_owner(entity, _canonical_tag(tag))
+        return stamp is not None and stamp[1] not in (None, "")
 
     def _owner_stamps_removal(self, entity, finding: PhiFinding) -> Optional[str]:
         """`_owner_stamps_copy` for a `REMOVE_TAG` that reached no arm.
