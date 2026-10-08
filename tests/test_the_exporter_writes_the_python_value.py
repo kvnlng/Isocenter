@@ -590,6 +590,8 @@ def test_each_text_vr_refuses_each_kind_of_number_by_its_type(vr, tag, make, kin
     pytest.param(LO_TAG, lambda: ["A", "B"], ("LO", b"A\\B "), id="LO-list"),
     pytest.param(LO_TAG, lambda: b"AB", ("LO", b"AB"), id="LO-bytes"),
     pytest.param(LO_TAG, lambda: np.str_("x"), ("LO", b"x "), id="LO-numpy-str"),
+    pytest.param(LO_TAG, lambda: np.bytes_(b"AB"), ("LO", b"AB"),
+                 id="LO-numpy-bytes"),
     pytest.param(LO_TAG, lambda: MultiValue(str, ["A", "B"]), ("LO", b"A\\B "),
                  id="LO-MultiValue"),
     pytest.param(LO_TAG, lambda: None, ("LO", b""), id="LO-None"),
@@ -829,6 +831,34 @@ def test_a_decimal_past_a_floats_range_is_the_float_python_makes_of_it():
         assert raw(tag) is None
         ((_scope, loss),) = losses
         assert loss == f"Tag {tag} not exported (data loss): ValueError: {words}"
+
+
+def test_a_whole_decimal_of_sixteen_digits_is_written_exactly_and_noted():
+    """pydicom wrote it `1234567890123456.0`, 18 characters. As the float
+    it takes #723's exact arm: the integer spelling, an INFO note, no
+    row."""
+    ds, losses, corrections, warnings = Dataset(), [], [], []
+    DicomExporter._merge(ds, {DS_TAG: Decimal("1234567890123456")}, losses,
+                         corrections=corrections, warnings=warnings)
+    assert losses == [] and warnings == []
+    assert corrections == [
+        f"Tag {DS_TAG} (DS): a float longer than DS's 16 characters was "
+        f"written in its integer spelling, the same number: "
+        f"1234567890123456.0 as '1234567890123456'."]
+    raw, _losses, _notes = _merged({DS_TAG: Decimal("1234567890123456")})
+    assert raw(DS_TAG) == ("DS", b"1234567890123456")
+
+
+def test_a_source_value_beside_a_callers_decimal_is_still_itself():
+    """One list, two kinds: the caller's `Decimal` becomes a float and the
+    source's `DSdecimal` beside it keeps its text."""
+    source = DSdecimal("2.50")
+    converted = _export_value([Decimal("1.5"), source])
+    assert _typed(converted[:1]) == _typed([1.5])
+    assert converted[1] is source and source.original_string == "2.50"
+    raw, losses, notes = _merged({DS_TAG: [Decimal("1.5"), source]})
+    assert raw(DS_TAG) == ("DS", b"1.5\\2.50")
+    assert losses == [] and notes == []
 
 
 def test_a_large_plain_list_is_not_rebuilt():
