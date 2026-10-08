@@ -9911,8 +9911,12 @@ def export_file_name(instance) -> str:
     both call it (through `export_output_path`), and nothing else formats
     the name.
 
-    **The rule.** A UID that is a `str` is refused when either holds:
+    **The rule.** A UID is refused when any of these holds, asked in this
+    order:
 
+    - It is not a `str` (`bytes`, a list, `None`, a number). The name is
+      the UID's text, and the text of a `bytes` is its repr.
+    - It is empty: the name would be `.dcm`.
     - `ConfigLoader.clean_filename` would change it. That function strips
       surrounding whitespace, turns a space into `_`, and removes every
       character but word characters, `-` and `.`; so a path separator
@@ -9929,9 +9933,13 @@ def export_file_name(instance) -> str:
     which. A conformant UID (digits and dots, PS3.5 section 9.1) is never
     refused and its name is the UID and `.dcm`, byte for byte.
 
-    Not judged here, and named as before: an empty UID, which the write
-    refuses (it has no Media Storage SOP Instance UID to give the file),
-    and a UID that is not a `str`, which the save refuses.
+    Two other refusals stand in front of or behind this one, and neither
+    is a reason to leave a case out of it. `session.export()`'s leading
+    save refuses a UID that is not a `str` (#721), but only for an
+    instance it has to write, and `write_tree()` has no save. The write
+    refuses an empty Media Storage SOP Instance UID for a hand-built
+    instance (#613), but an ingested instance assigned `""` was written
+    as `.dcm` (measured on 1.0.0rc15).
 
     Args:
         instance (Instance): The instance to name.
@@ -9952,24 +9960,43 @@ def export_file_name(instance) -> str:
     # inside the folder. The leading-dot clause is not there for
     # traversal: it keeps a delivered file from being one a listing does
     # not show.
+    #
+    # The type is judged before the text, because what is joined to the
+    # folder is `f"{uid}.dcm"` and the text of a `bytes` or a list is its
+    # repr: `b'../../x'.dcm` holds the separators the text clauses look
+    # for, in a value they were never shown. A file states `(0008,0018)`
+    # as `OB` and ingest holds `bytes`; `write_tree()` has no save in
+    # front of it to refuse that (#721 is `session.export()`'s).
+    # `isinstance`, not `type(uid) is str`: ingest holds a UI value as
+    # `pydicom.uid.UID`, a `str` subclass.
     uid = instance.sop_instance_uid
-    if isinstance(uid, str):
+    repaired_by_a_pass = ""
+    if not isinstance(uid, str):
+        # The type's name, never the value.
+        reason = f"is held as {type(uid).__name__}, not as text"
+    elif uid == "":
+        reason = "is empty"
+    else:
         if uid != ConfigLoader.clean_filename(uid):
             reason = ("holds a character other than a letter, a digit, "
                       "'_', '-' or '.'")
         elif uid.startswith("."):
             reason = "begins with '.'"
         else:
-            reason = None
-        if reason is not None:
-            raise FileNameRefused(
-                f"SOP Instance UID (0008,0018) cannot name a file: it "
-                f"{reason}. The export names each file by that UID, so no "
-                f"file was written for this instance, in the export folder "
-                f"or anywhere else. A pass that replaces (0008,0018), as "
-                f"audit() and anonymize() do under the default "
-                f"configuration, gives the instance a UID that can.")
-    return f"{uid}.dcm"
+            return f"{uid}.dcm"
+        # Said only where a pass is the ordinary repair. An empty UID is
+        # not a source file's (ingest refuses a file without one), and a
+        # UID that is not a `str` comes from a file whose `ingest()`
+        # raised (#721): neither is a state to send through a pass.
+        repaired_by_a_pass = (
+            " A pass that replaces (0008,0018), as audit() and anonymize() "
+            "do under the default configuration, gives the instance a UID "
+            "that can.")
+    raise FileNameRefused(
+        f"SOP Instance UID (0008,0018) cannot name a file: it {reason}. "
+        f"The export names each file by that UID, so no file was written "
+        f"for this instance, in the export folder or anywhere else."
+        f"{repaired_by_a_pass}")
 
 
 def export_output_path(directory, instance):
@@ -12030,15 +12057,16 @@ class DicomExporter:
         # requested instances exist.
         failures = DicomExporter._report_export_failures(results, store_backend)
         summary = ExportSummary(
-            # An `ok` outcome always carries its UID: the write puts it into
-            # Media Storage SOP Instance UID, and `save_as(...,
-            # enforce_file_format=True)` refuses an empty one, so a UID-less
-            # instance fails and is in `failures`, keyed UNKNOWN like its
-            # ERROR row. Never fall back to `output_path` here: it is
+            # An `ok` outcome always carries its UID: `export_file_name`
+            # refuses an instance whose UID is empty or not a `str`
+            # before anything is written (GHSA-2rc2-r9r5-x7hm), so a
+            # UID-less instance fails and is in `failures`, keyed UNKNOWN
+            # like its ERROR row. Behind that, the write puts the UID into
+            # Media Storage SOP Instance UID and `save_as(...,
+            # enforce_file_format=True)` refuses an empty one (#613).
+            # Never fall back to `output_path` here: it is
             # `Subject_<Patient ID>/...`, and this repr is printed and
-            # logged. **The trap:** turning `enforce_file_format` off lets
-            # a UID-less instance be written (as the dotfile `.dcm`), and
-            # this field would then hold `""`.
+            # logged.
             written_uids=[r.sop_instance_uid
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],

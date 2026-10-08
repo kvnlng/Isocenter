@@ -478,7 +478,10 @@ TARGETS = {
                                   # off at the one DICOM write (#613, M613-1). The UID-less
                                   # instance is then written as `.dcm` and reported, and
                                   # `written_uids` gains `""`. Measured by a source edit on the
-                                  # branch of #613.
+                                  # branch of #613. Since GHSA-2rc2-r9r5-x7hm the file-name
+                                  # rule refuses that instance first, so the kill is the
+                                  # test's second parameter, which patches the rule away
+                                  # (re-measured on that branch).
                                   "tests/test_written_uids_names_only_uids.py",
                                   "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                                   "tests/test_a_multi_valued_linkage_key_is_refused_by_name.py",
