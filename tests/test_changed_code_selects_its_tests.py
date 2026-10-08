@@ -720,6 +720,104 @@ def test_a_build_whose_suite_failed_exits_with_the_suites_status(
     assert (tmp_path / test_map.MAP_FILE).exists()
 
 
+@pytest.mark.parametrize("suite_status", [0, 1])
+def test_a_build_whose_combine_left_a_data_file_writes_no_map(
+        tmp_path, monkeypatch, capsys, suite_status):
+    """#975: `coverage combine` exits 0 over a data file it cannot read.
+
+    At the 1.0.0rc14 cut it said `Combined 992 files, skipped 24157, 1
+    file errored`, exited 0, and `build` wrote a map lacking whatever
+    that worker ran: a map that under-selects, with nothing in it or in
+    `pytest --changed` to say so. The file it could not read is the one
+    it leaves behind, so `build` refuses on that: no map is written, a
+    map already there is left as it was, and the exit is non-zero even
+    when the suite was green. The suite's own status is printed, and is
+    what a red suite still exits with: this run is also the release's
+    3.14t integration run, and its result stands.
+    """
+    left = ".coverage.host.pid7.Xunread"
+
+    class Done:
+        def __init__(self, returncode, stdout=""):
+            self.returncode, self.stdout = returncode, stdout
+
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            return Done(0, "tests/test_x.py::test_a\n")
+        if "combine" in cmd:
+            data = Path(kwargs["env"]["COVERAGE_FILE"])
+            assert data.name == ".coverage"
+            (data.parent / left).write_bytes(b"not a database")
+            return Done(0)
+        return Done(suite_status if "run" in cmd else 0)
+
+    def never(*args, **kwargs):
+        raise AssertionError("a map was read out of data combine did not "
+                             "finish reading")
+
+    monkeypatch.setattr(test_map.subprocess, "run", run)
+    monkeypatch.setattr(test_map, "from_coverage", never)
+    previous = tmp_path / test_map.MAP_FILE
+    previous.write_text("the map of the release before")
+
+    with pytest.raises(SystemExit) as stopped:
+        test_map.main(["build", "--sha", "abc", "--out", str(tmp_path)])
+
+    assert stopped.value.code == (suite_status or test_map.EXIT_NO_MAP)
+    assert stopped.value.code != 0
+    assert previous.read_text() == "the map of the release before"
+    said = capsys.readouterr().out
+    assert left in said
+    assert f"the suite exited {suite_status}" in said
+    assert "no map" in said
+
+
+def _coverage_child_env(data_file):
+    """A child that runs coverage must not inherit conftest's COVERAGE_FILE."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
+    env["COVERAGE_FILE"] = str(data_file)
+    return env
+
+
+@pytest.mark.parametrize("damage", ["truncated", "not sqlite", "none"])
+def test_combine_names_the_data_file_it_could_not_read(tmp_path, damage):
+    """The premise of the refusal above, against coverage itself (#975).
+
+    Two processes each write a data file; one file is then damaged the
+    way a loaded machine left one at the rc14 cut (`database disk image
+    is malformed`). `coverage combine` still exits 0, and the damaged
+    file is the one it does not delete. If a coverage release starts
+    deleting it, or exiting non-zero, this is red and `build`'s check is
+    what to look at.
+    """
+    try:
+        import coverage  # noqa: F401
+    except ImportError:
+        pytest.skip("coverage is in the dev extra")
+    (tmp_path / "one.py").write_text("x = 1\n")
+    (tmp_path / "two.py").write_text("y = 2\n")
+    rc = tmp_path / "rc"
+    rc.write_text("[run]\nparallel = True\n")
+    env = _coverage_child_env(tmp_path / ".coverage")
+    for script in ("one.py", "two.py"):
+        subprocess.run([sys.executable, "-m", "coverage", "run",
+                        f"--rcfile={rc}", script],
+                       cwd=tmp_path, env=env, check=True, timeout=120)
+    files = sorted(tmp_path.glob(".coverage.*"))
+    assert len(files) == 2, files
+    victim = files[0]
+    whole = victim.read_bytes()
+    if damage == "truncated":
+        victim.write_bytes(whole[:len(whole) // 2])
+    elif damage == "not sqlite":
+        victim.write_bytes(b"\x00" * 4096)
+
+    unread = test_map.combine(rc, env, tmp_path)
+
+    assert unread == ([] if damage == "none" else [victim.name])
+    assert (tmp_path / ".coverage").exists()
+
+
 def test_a_map_whose_commit_is_not_here_is_no_map(tmp_path):
     (tmp_path / test_map.MAP_FILE).write_text(
         '{"sha": "0000000000000000000000000000000000000000", "python": "x", '

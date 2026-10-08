@@ -297,6 +297,30 @@ fixes, never features.
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
 
+   **Start no other heavy run while the map build runs** (#975): not
+   the 3.12 shards, not a fingerprint `check`, not another agent's gate.
+   Each test's coverage is written by its own processes as small sqlite
+   files, tens of thousands of them, and on a machine at load 80 the
+   1.0.0rc14 build ended with one of them unreadable (`Couldn't use data
+   file '…': database disk image is malformed … 1 file errored`).
+   `coverage combine` exits 0 over such a file, and until #975 the build
+   wrote a map without that process's data and exited 0 too.
+
+   **If the build ends `no map written`**, it has refused to do that: it
+   names the data files `coverage combine` left unread, writes nothing,
+   leaves any `.test-map.json` already there as it was, and exits with
+   the suite's status, or with 9 when the suite passed. Then:
+   - **the suite's result stands.** The line `the suite exited N` and the
+     last test line above it are the 3.14t integration result, recorded
+     as usual with the `exit=` the build gave: `the suite exited 0` with
+     `exit=9` is a green integration run and no map. It is not a failure
+     or a hang under the rerun rule above, and the suite is not run
+     again for it;
+   - **the map is not part of the release.** Keep the previous one (an
+     older map selects more, never less), or build it again outside the
+     release path, on a quiet machine, by the same command;
+   - say which in the release-commit PR.
+
    **If the map build hangs**, step 1's 3.14t run is plain `pytest`,
    without coverage, split into shards (owner ruling on #796,
    2026-09-24): `PYTHON_GIL=0 python -m pytest -v --shard=I/N; echo
