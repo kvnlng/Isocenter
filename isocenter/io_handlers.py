@@ -10144,12 +10144,13 @@ def export_stamp_attributes(patient, study, series):
 
     What the export writes over the instance's own attributes, as
     `export_folder_names` is where it writes them; `session.export()` and
-    `DicomExporter.write_tree()` both use it. Study Time is stamped only
-    when the study has one. Equipment (Manufacturer, Model Name, Device
-    Serial Number), Series Number and Modality are never stamped: they
-    are written from the instance, which is what `anonymize()` edits
-    (#570, #869). A hand-built graph gets them onto the instances from
-    `SeriesBuilder`.
+    `DicomExporter.write_tree()` both use it. Equipment (Manufacturer,
+    Model Name, Device Serial Number), Series Number, Modality and Study
+    Time are never stamped: they are written from the instance, which is
+    what `anonymize()` edits (#570, #869, #953). A hand-built graph gets
+    equipment, Series Number and Modality onto the instances from
+    `SeriesBuilder`, and sets `(0008,0030)` on its instances when it
+    wants a Study Time; `Study.study_time` reaches no file.
 
     Args:
         patient (Patient): The patient root.
@@ -10162,10 +10163,15 @@ def export_stamp_attributes(patient, study, series):
     """
     # Three things this deliberately does not stamp; do not add any:
     #
-    # * No Study Time unless the study has one. The worker writes a
-    #   zero-length Study Time when nothing supplied one (Type 2
-    #   "unknown"); a literal is a fabricated clinical time, and a `""`
-    #   here would overwrite the instance's real value.
+    # * No Study Time, from `Study.study_time` or as a literal (#953).
+    #   Each file carries its own instance's `0008,0030`, the element
+    #   `anonymize()` applies a configuration's rule to. Stamped from the
+    #   Study, a time a caller had set was written over an element the
+    #   policy had emptied, removed or replaced, under a PASS and
+    #   `(0012,0062) YES`; and since `study_time` is not stored, a
+    #   reopened export of the same store wrote something else. The
+    #   worker writes a zero-length Study Time when the instance has none
+    #   (Type 2 "unknown"); a literal is a fabricated clinical time.
     # * No equipment. It comes from the instance, which is what
     #   `anonymize()` edits; `Series.equipment` keeps the source serial on
     #   purpose, because `redact()` matches rules on it, so stamping from
@@ -10191,8 +10197,6 @@ def export_stamp_attributes(patient, study, series):
         # holds a `date`, a string or None.
         "0008,0020": format_study_date(study.study_date),
     }
-    if getattr(study, 'study_time', None):
-        study_attributes["0008,0030"] = study.study_time
 
     # No Series Number and no Modality (#869): each file carries its own
     # instance's `0020,0011` and `0008,0060`, the elements `anonymize()`

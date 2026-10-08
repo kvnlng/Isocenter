@@ -1599,14 +1599,13 @@ class RemediationService:
         "patient_name": "0010,0010",
         "patient_id": "0010,0020",
         "study_date": "0008,0020",
-        # Unreachable by any shipped scan: `Study.study_time` is never
-        # populated by ingest, and no inspector raises a finding on it.
-        # Kept deliberately, because the exporter stamps it from the
-        # entity (`export_stamp_attributes`) and the rule of this table is
-        # "the fields the exporter stamps", not "the fields a scan
-        # reaches today" -- a hand-built finding on it gets the same
-        # treatment.
-        "study_time": "0008,0030",
+        # No `study_time` since #953: the exporter no longer stamps Study
+        # Time from the Study, and the rule of this table is "the fields
+        # the exporter stamps". Each file carries its own instance's
+        # `0008,0030`. This table, `_stamping_owner`'s arms and
+        # `export_stamp_attributes` name the same five tags, which
+        # `test_the_stamped_tags_the_owner_arms_and_the_removable_fields_are_one_list`
+        # pins.
         # The owners' own UIDs: the exporter stamps both from the
         # entity, and the keyed UID replacement moves the entity, so its
         # instances' top-level copies take the same value in the same
@@ -1996,9 +1995,8 @@ class RemediationService:
                 instance of the graph (a nested item never is), or `tag`
                 is not one the export stamps from an owner.
         """
-        # Not `ENTITY_FIELD_TAGS`: that also holds Study Time
-        # `0008,0030`, which has no arm here (ingest never populates
-        # `Study.study_time`).
+        # The same five tags as `ENTITY_FIELD_TAGS`, spelled as arms
+        # because each owner's value is rendered its own way.
         from .entities import exported_patient_id  # pylint: disable=import-outside-toplevel
 
         owners = (self._copy_owners or {}).get(id(entity))
