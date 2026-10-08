@@ -409,11 +409,11 @@ def test_an_edit_of_series_number_does_not_stale_the_instances(tmp_path):
 # ---------------------------------------------------------------------------
 
 #: Tags the export stamps from an owner that have no `_owner_stamps_copy`
-#: arm, each with the reason that is safe.
-EXEMPT = {
-    "0008,0030": "Study.study_time is never populated by ingest, and no "
-                 "inspector raises a finding on it; ENTITY_FIELD_TAGS holds it",
-}
+#: arm, each with the reason that is safe. None since #953: Study Time
+#: `0008,0030` was the one entry ("never populated by ingest"), and a caller
+#: who populated it got the Study's time written over an element the policy
+#: had emptied, removed or replaced. It is no longer stamped.
+EXEMPT = {}
 
 
 def _owner_arm_tags():
@@ -452,6 +452,103 @@ def test_every_stamped_tag_has_an_owner_arm_or_a_reason():
     assert stamped - arms - set(EXEMPT) == set()
     assert "0020,0011" not in stamped
     assert "0008,0060" not in stamped
+    assert "0008,0030" not in stamped
+
+
+def test_the_stamped_tags_the_owner_arms_and_the_removable_fields_are_one_list():
+    """Three tables say which tags an owner stamps, and they agree (#953):
+    what `export_stamp_attributes` writes, the arms of `_stamping_owner`,
+    and `ENTITY_FIELD_TAGS` (the fields a hand-built REMOVE may clear, and
+    the fields an owner's write reaches its instances' copies of). Until
+    #953 the last also held Study Time, with a comment in each of the
+    other two saying why they did not. Kills `study_time` left in, or put
+    back into, any one of them."""
+    patient = Patient("PAT", "Doe^Jane")
+    study = Study("1.2.3", datetime.date(2003, 3, 6), study_time="120000")
+    series = Series("1.2.3.4", "CT", 7)
+    stamped = set()
+    for attributes in export_stamp_attributes(patient, study, series):
+        stamped |= set(attributes)
+
+    assert stamped == _owner_arm_tags() == set(
+        RemediationService.ENTITY_FIELD_TAGS.values())
+    assert stamped == {"0010,0010", "0010,0020", "0008,0020",
+                       "0020,000d", "0020,000e"}
+
+
+# ---------------------------------------------------------------------------
+# Study Time (#953): the last stamp that put back what a rule had written
+# ---------------------------------------------------------------------------
+
+SOURCE_TIME = "072730"      # CT_small's own (0008,0030)
+STUDYS_TIME = "101500"      # set on the Study by the caller; in no file
+
+STUDY_TIME_POLICIES = {
+    # name: (configuration text, the file's (0008,0030) after the pass)
+    "floor": ("phi_tags: {}\n", ""),
+    "basic": ("privacy_profile: basic@2026c\n", ""),
+    "none-remove": ("privacy_profile: none\nphi_tags:\n"
+                    "  '0008,0030': {action: REMOVE, name: Time}\n", ""),
+    "none-replace": ("privacy_profile: none\nphi_tags:\n"
+                     "  '0008,0030': {action: REPLACE, value: '000000', name: Time}\n",
+                     "000000"),
+    "none-no-rule": ("privacy_profile: none\n", SOURCE_TIME),
+}
+
+
+def _study_time_run(tmp_path, config_text):
+    """CT_small ingested, `study.study_time` set **before** `audit()`, the
+    whole report handed in, exported live and again after a save and a
+    reopen. Returns the two files' Study Time elements, the live file's
+    Patient Identity Removed, and the grade read from the report file."""
+    source = _write_source(tmp_path / "input")
+    config = tmp_path / "c.yaml"
+    config.write_text(config_text, encoding="utf-8")
+    db = str(tmp_path / "s.db")
+    with Session(db) as session:
+        session.load_config(str(config))
+        session.ingest(str(source))
+        [study] = session.store.patients[0].studies
+        study.study_time = STUDYS_TIME
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "live"), use_compression=False,
+                       show_progress=False)
+        session.generate_report(str(tmp_path / "r.md"))
+        session.save(sync=True)
+    with Session(db) as reopened:
+        reopened.load_config(str(config))
+        reopened.export(str(tmp_path / "reopened"), use_compression=False,
+                        show_progress=False)
+    [live] = _dicoms(tmp_path / "live")
+    [again] = _dicoms(tmp_path / "reopened")
+    live, again = pydicom.dcmread(str(live)), pydicom.dcmread(str(again))
+    report = (tmp_path / "r.md").read_text(encoding="utf-8")
+    grade = [g for g in ("PASS", "REVIEW_REQUIRED", "FAIL") if f"**{g}**" in report]
+    return (str(live.StudyTime), str(again.StudyTime),
+            live.get("PatientIdentityRemoved"), grade)
+
+
+@pytest.mark.parametrize("policy", sorted(STUDY_TIME_POLICIES))
+def test_a_time_set_on_the_study_is_not_written_over_what_the_policy_left(
+        tmp_path, policy):
+    """#953, through the ordinary pipeline with no hand-built finding: one
+    assignment to the public field `study.study_time` on an ingested study,
+    then `audit()`, `anonymize()` and `export()`. The file carries its own
+    instance's Study Time after the rules: emptied under the floor and
+    `basic`, written empty for a REMOVE (Type 2), `000000` for a REPLACE,
+    and the source's `072730` with no rule. Until #953 every one of the
+    five carried the Study's `101500` under PASS and `(0012,0062) YES`,
+    the row saying the rule had been applied. `study_time` is not stored
+    (`studies` has no column), so the reopened export never carried it:
+    the second assertion is that two exports of one store agree. Kills:
+    the two stamp lines restored."""
+    config_text, written = STUDY_TIME_POLICIES[policy]
+    live, reopened, identity_removed, grade = _study_time_run(tmp_path, config_text)
+
+    assert live == written
+    assert reopened == live
+    assert STUDYS_TIME not in (live, reopened)
+    assert (identity_removed, grade) == ("YES", ["PASS"])
 
 
 # ---------------------------------------------------------------------------
