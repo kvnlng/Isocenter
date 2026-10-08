@@ -50,7 +50,7 @@ The index runs in SQLite's WAL mode and the sidecar's locks are `flock`, so the 
 
 - **Standard tags** (even groups), and every binary value small enough to keep, are stored as one JSON document per instance and read back whole. Reopening a session loads the cohort's metadata in one pass, not one file at a time.
 - **Private tags** (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.
-- **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more.
+- **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more. That includes the frame of a file `ingest()` refused after reading its pixels or waveform samples (`Linkage Failed`): the frame stays in the sidecar until `compact()`, which removes it, and any blob row naming it, in a store that holds at least one instance.
 
 Binary values other than pixel and waveform data are kept only up to 65534 bytes, or 393216 bytes for the pixel lookup tables (LUT Data and the palette data); larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
 

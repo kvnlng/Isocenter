@@ -2467,7 +2467,10 @@ class DicomSession:
         A file that cannot be ingested does not raise. It is counted in the
         returned summary and gets an `ERROR` audit row naming the path and
         the reason, which bars a `PASS` grade. Check the return value: a
-        run that rejected files completes normally.
+        run that rejected files completes normally. A file refused after
+        its pixels or waveform samples were read (`Linkage Failed`) may
+        leave them in the sidecar as dead space until `compact()`, which
+        reclaims them in a store that holds at least one instance (#943).
 
         **Hidden files.** A file found walking `directory` whose name
         starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
