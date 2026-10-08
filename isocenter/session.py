@@ -767,18 +767,28 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
             instance's own top-level attributes.
 
     Returns:
-        Optional[str]: `"REMOVED"` when every date is gone (or there is none);
-            `"MODIFIED"` when at least one is shifted by this store and the
-            rest are gone; None when any date is as found, and a source's value
-            stays. `UNMODIFIED` is never returned.
+        Optional[str]: `"MODIFIED"` when at least one date is shifted by this
+            store, whatever the rest are (#978); `"REMOVED"` when every date
+            is gone (or there is none); None when nothing is shifted and a
+            date is as found, and a source's value then stays. `UNMODIFIED`
+            is never returned.
     """
+    # A shift this store wrote is always marked (owner ruling on #978).
+    # Until then a date as found withheld the marker, so a policy that
+    # shifts some dates and names no rule for others -- `none`, which
+    # shifts Study Date alone -- exported a shifted date under no
+    # `(0028,0303)`, and a source's own `UNMODIFIED` stayed beside it,
+    # which was a false statement about the file. `MODIFIED` beside a date
+    # as found says a date was modified, not that all were.
+    #
     # TM is not read: a time of day kept beside a shifted date does not
     # carry the patient's longitudinal position. `UNMODIFIED` is never
     # written: "as found" cannot tell "kept on purpose" from "unknown". An
     # element the worker then drops (a write-time loss, a foreign icon)
-    # was still read here, which can only withhold the marker, never
-    # write a false one.
-    shifted = False
+    # was still read here. As found, it can only withhold `REMOVED`.
+    # Shifted, it still says `MODIFIED` of a file that no longer carries
+    # it, as it did before #978 when the rest were gone.
+    shifted = found = False
     for item, path in iter_item_tree(instance):
         attributes = item.attributes
         if not path:
@@ -795,10 +805,11 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
             else:
                 vouched = item.date_shift_vouches_for(tag, value)
             state = _date_state(value, vr, vouched)
-            if state == "found":
-                return None
             shifted = shifted or state == "shifted"
-    return "MODIFIED" if shifted else "REMOVED"
+            found = found or state == "found"
+    if shifted:
+        return "MODIFIED"
+    return None if found else "REMOVED"
 
 
 def _is_private_tag(tag: str) -> bool:

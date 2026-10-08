@@ -1228,11 +1228,13 @@ def test_the_owners_removal_in_a_later_pass_exports_no_marker_until_a_reaudit(
     reads IDENTIFIED, the file carries neither `(0012,0062)` nor
     `(0012,0063)` and the run grades REVIEW_REQUIRED; at v1.0.0rc13 it
     carried both at once and graded PASS. After `anonymize(audit())` both
-    are back, and PASS. `(0028,0303)` is in neither: the file keeps Series
-    Date and the other dates as the source held them, and the marker is
-    written only when no date in the file is as found (under the name rule
-    Study Date is shifted all the same). The absent third is the control
-    that the helper does not read every tag as present."""
+    are back, and PASS. `(0028,0303)`: the file keeps Series Date and the
+    other dates as the source held them. Under the name rule Study Date
+    is shifted all the same, and since #978 a shift this store wrote is
+    always marked, so the third is `MODIFIED` there (it was absent until
+    #978, which is what the 1.0.0rc15 record says). Under the date rule
+    nothing is shifted and dates are as found, so it is absent: the
+    control that the helper does not read every tag as present."""
     rules, tag, _owner, _field, _source = REMOVED[which]
     session, report, _patient, _study, inst = _remove_session(tmp_path, "7653", rules)
     with session:
@@ -1248,5 +1250,7 @@ def test_the_owners_removal_in_a_later_pass_exports_no_marker_until_a_reaudit(
         session.anonymize(session.audit())
         present, files = _markers_in_both_exports(session, tmp_path, "after")
         assert [_exported(ds, tag) for ds in files] == [""] * 2
-        assert present == [[True, True, False]] * 2
+        assert present == [[True, True, which == "name"]] * 2
+        if which == "name":
+            assert [str(ds[0x0028, 0x0303].value) for ds in files] == ["MODIFIED"] * 2
         assert _grade_of(session, tmp_path) == ["PASS"]
