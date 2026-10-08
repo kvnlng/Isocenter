@@ -28,9 +28,12 @@ bytes), never `str(ds.PatientName)`: pydicom prints a `MultiValue` of two
 names as `[SECRETA^B, SECRETC^D]`, which is byte for byte the text the
 defect wrote, so a string comparison passes on both trees.
 
-The one named residual (Q6 A): a *private* PN holding several values is
-written `UT` under an Explicit VR export, with the existing re-VR
-`WARNING` row. Pinned here so a later change to it is seen.
+Q6 A named one residual: a *private* PN holding several values was written
+`UT` under an Explicit VR export, with the re-VR `WARNING` row. #951
+(owner ruling Q-D1-2 A, 2026-10-08) closes it: under a recorded `PN` the
+joined text is written `PN` with the source's VM and no row. The last
+section pins that, the value over 64 characters that still falls back,
+and the `LO` control.
 """
 import os
 import sqlite3
@@ -359,11 +362,17 @@ def test_a_file_refused_for_a_two_valued_patient_id_says_no_name(
 
 
 # ---------------------------------------------------------------------------
-# The named residual: a private PN of several values
+# A private PN of several values: Q6 A's residual, closed by #951
 # ---------------------------------------------------------------------------
 
+#: One Person Name value of 70 characters, over PN's 64.
+LONG = "P" * 66 + "^Abc"
+TWO_PRIVATE = "PrivA^X\\PrivB^Y"
+THREE_PRIVATE = "PrivA^X\\PrivB^Y\\PrivC^Z"
+NO_RULES = "privacy_profile: none\nremove_private_tags: false\n"
+
 RE_VR_ROW = (
-    "Private element (0071,1001) recorded PN, written UT. Each value is "
+    "Private element (0071,{element}) recorded {vr}, written UT. Each value is "
     "written under a VR that holds it, unchanged: the VR recorded at ingest "
     "no longer does -- typically after a REPLACE -- or a value over 64 "
     "characters cannot stay multi-valued, and the values are joined with "
@@ -376,31 +385,173 @@ def _private_names(ds):
     for tag in [tag for tag in ds.keys() if tag.group % 2]:
         del ds[tag]
     ds.add_new(0x00710010, "LO", "C3 PN")
-    _pn(ds, 0x00711001, "PrivA^X\\PrivB^Y")
+    _pn(ds, 0x00711001, TWO_PRIVATE)
     _pn(ds, 0x00711002, "PrivOne^Only")
+    _pn(ds, 0x00711005, THREE_PRIVATE)
 
 
-def test_a_private_person_name_of_two_values_is_written_ut_with_its_row(tmp_path):
-    """Q6 A's residual. The source states `PN` (Explicit VR): since #740 a
-    private element whose VR the file does not state never reaches the PN
-    arm. `_merge`'s private arm does not put a backslash-bearing `str`
-    under a multi-valued VR, so the two values are written `UT`, the
-    source's bytes, with the re-VR row; the one-valued PN beside it stays
-    `PN`. On main the wire said `PN` over the bracket bytes, with no row.
-    Explicit VR export only: an Implicit VR file names no VR."""
+def _a_long_private_name(ds):
+    _private_names(ds)
+    _pn(ds, 0x00711004, LONG)
+
+
+def _the_private_names_on_the_wire(ds):
+    """Raw, never `str(ds[...].value)`: pydicom prints a `MultiValue` in
+    brackets whatever the wire VR."""
+    assert not ds.file_meta.TransferSyntaxUID.is_implicit_VR
+    return {tag & 0xFFFF: _raw(ds, tag)
+            for tag in (0x00711001, 0x00711002, 0x00711005)}
+
+
+AS_THE_SOURCE_WROTE = {
+    0x1001: ("PN", b"PrivA^X\\PrivB^Y "),
+    0x1002: ("PN", b"PrivOne^Only"),
+    0x1005: ("PN", b"PrivA^X\\PrivB^Y\\PrivC^Z "),
+}
+
+
+def test_a_private_person_name_of_several_values_is_written_pn_with_no_row(tmp_path):
+    """#951 (Q-D1-2 A), which closes Q6 A's residual. The source states
+    `PN` (Explicit VR): since #740 a private element whose VR the file does
+    not state never reaches the PN arm. Under a recorded `PN` the
+    backslash-joined text is PN's own multi-valued value (`_pn_text` holds
+    every such name that way), so it is written `PN`, the source's bytes,
+    with the source's VM, two and three; no row, PASS. Until #951 the two
+    were written `UT` as one value, with a re-VR `WARNING` row that graded
+    the run REVIEW_REQUIRED. Explicit VR export only: an Implicit VR file
+    names no VR."""
     _write(tmp_path, name="Single^Name", edit=_private_names)
-    with _session(tmp_path, "privacy_profile: none\n"
-                            "remove_private_tags: false\n") as session:
+    with _session(tmp_path, NO_RULES) as session:
         _, instance = _instance(session)
-        assert instance.attributes["0071,1001"] == "PrivA^X\\PrivB^Y"
+        assert instance.attributes["0071,1001"] == TWO_PRIVATE
+        assert instance.attribute_vrs["0071,1001"] == "PN"
         session.export(str(tmp_path / "out"), use_compression=True,
                        show_progress=False)
         ds = _exported(tmp_path / "out")
-        assert not ds.file_meta.TransferSyntaxUID.is_implicit_VR
-        assert _raw(ds, 0x00711001) == ("UT", b"PrivA^X\\PrivB^Y ")
-        assert _raw(ds, 0x00711002) == ("PN", b"PrivOne^Only")
+        assert _the_private_names_on_the_wire(ds) == AS_THE_SOURCE_WROTE
+        assert [str(v) for v in ds[0x00711001].value] == ["PrivA^X", "PrivB^Y"]
+        assert ds[0x00711001].VM == 2 and ds[0x00711005].VM == 3
+        assert _rows(session, "WARNING", "ERROR", "DATA_LOSS") == []
+        assert _grade(session, tmp_path) == "PASS"
+
+
+def test_a_private_person_name_over_64_characters_is_still_written_ut_with_its_row(
+        tmp_path):
+    """Each value must still fit `PN` by itself. One value of 70
+    characters keeps the fallback and its row, which names that element
+    alone, whole; the several-valued names beside it are `PN`. Kills a fix
+    that passes any `str` under a recorded `PN`."""
+    _write(tmp_path, name="Single^Name", edit=_a_long_private_name)
+    with _session(tmp_path, NO_RULES) as session:
+        session.export(str(tmp_path / "out"), use_compression=True,
+                       show_progress=False)
+        ds = _exported(tmp_path / "out")
+        assert _the_private_names_on_the_wire(ds) == AS_THE_SOURCE_WROTE
+        assert _raw(ds, 0x00711004) == ("UT", LONG.encode())
         [(kind, details)] = _rows(session, "WARNING", "ERROR", "DATA_LOSS")
         assert kind == "WARNING"
-        assert details == RE_VR_ROW
-        # The row costs the run its PASS; on main there was no row.
+        assert details == RE_VR_ROW.format(element="1004", vr="PN")
         assert _grade(session, tmp_path) == "REVIEW_REQUIRED"
+
+
+def test_a_backslash_in_a_str_under_a_recorded_lo_is_still_written_ut(tmp_path):
+    """Control: PN only. A source's several `LO` values are held as a list
+    and written `LO`; a `str` holding a backslash under a recorded `LO` can
+    only have come from a `set_attr` or a REPLACE, and is still written
+    `UT` as one value, with its row. Kills a fix keyed on "a text VR"
+    instead of `PN`."""
+    def _lo(ds):
+        _private_names(ds)
+        ds.add_new(0x00711003, "LO", ["LoA", "LoB"])
+
+    _write(tmp_path, name="Single^Name", edit=_lo)
+    with _session(tmp_path, NO_RULES) as session:
+        _, instance = _instance(session)
+        assert instance.attributes["0071,1003"] == ["LoA", "LoB"]
+        session.export(str(tmp_path / "list"), use_compression=True,
+                       show_progress=False)
+        assert _raw(_exported(tmp_path / "list"), 0x00711003) == ("LO", b"LoA\\LoB ")
+        assert _rows(session, "WARNING", "ERROR", "DATA_LOSS") == []
+        instance.set_attr("0071,1003", "LoA\\LoB")
+        session.export(str(tmp_path / "text"), use_compression=True,
+                       show_progress=False)
+        assert _raw(_exported(tmp_path / "text"), 0x00711003) == ("UT", b"LoA\\LoB ")
+        [(kind, details)] = _rows(session, "WARNING", "ERROR", "DATA_LOSS")
+        assert (kind, details) == ("WARNING", RE_VR_ROW.format(element="1003", vr="LO"))
+
+
+def test_a_reingest_of_the_export_records_pn_again(tmp_path):
+    """The export's own element is `PN`, so a store built from it records
+    `PN`, holds the source's text, and exports the same element. Until #951
+    the re-ingest recorded `UT` for good, and the second-generation export
+    wrote `UT` with no row to say the source's VR was gone. The control
+    that this is the fix and not any Explicit VR `PN`: the first export's
+    wire VR is asserted `PN` here before the re-ingest reads it."""
+    _write(tmp_path, name="Single^Name", edit=_private_names)
+    with _session(tmp_path, NO_RULES) as session:
+        session.export(str(tmp_path / "out"), use_compression=True,
+                       show_progress=False)
+    first = _exported(tmp_path / "out")
+    assert _the_private_names_on_the_wire(first) == AS_THE_SOURCE_WROTE
+    config = tmp_path / "c.yaml"
+    with Session(str(tmp_path / "again.db")) as again:
+        again.load_config(str(config))
+        again.ingest(str(tmp_path / "out"))
+        _, instance = _instance(again)
+        assert instance.attribute_vrs["0071,1001"] == "PN"
+        assert instance.attributes["0071,1001"] == TWO_PRIVATE
+        assert instance.attributes["0071,1005"] == THREE_PRIVATE
+        again.export(str(tmp_path / "out2"), use_compression=True,
+                     show_progress=False)
+        assert _the_private_names_on_the_wire(
+            _exported(tmp_path / "out2")) == AS_THE_SOURCE_WROTE
+        assert _rows(again, "WARNING", "ERROR", "DATA_LOSS") == []
+
+
+def test_a_reopened_store_writes_the_private_names_as_pn(tmp_path):
+    """The recorded VR and the text survive a save and a reopen."""
+    _write(tmp_path, name="Single^Name", edit=_private_names)
+    with _session(tmp_path, NO_RULES) as session:
+        session.save(sync=True)
+    with Session(str(tmp_path / "s.db")) as reopened:
+        reopened.load_config(str(tmp_path / "c.yaml"))
+        reopened.export(str(tmp_path / "out"), use_compression=True,
+                        show_progress=False)
+        assert _the_private_names_on_the_wire(
+            _exported(tmp_path / "out")) == AS_THE_SOURCE_WROTE
+        assert _rows(reopened, "WARNING", "ERROR", "DATA_LOSS") == []
+
+
+def test_an_implicit_vr_export_of_the_private_names_is_the_sources_bytes(tmp_path):
+    """An Implicit VR file names no VR, so the element's bytes were the
+    source's before #951 and are now; what changes there is that no row
+    is written."""
+    _write(tmp_path, name="Single^Name", edit=_private_names)
+    with _session(tmp_path, NO_RULES) as session:
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False)
+        ds = _exported(tmp_path / "out")
+        assert ds.file_meta.TransferSyntaxUID.is_implicit_VR
+        assert bytes(ds.get_item(0x00711001).value) == b"PrivA^X\\PrivB^Y "
+        assert bytes(ds.get_item(0x00711005).value) == b"PrivA^X\\PrivB^Y\\PrivC^Z "
+        assert _rows(session, "WARNING", "ERROR", "DATA_LOSS") == []
+
+
+@pytest.mark.parametrize("value, vr, fits", [
+    ("A^B\\C^D", "PN", True),
+    ("A^B\\C^D\\E^F", "PN", True),
+    ("A^B\\", "PN", True),
+    ("", "PN", True),
+    ("P" * 70 + "\\S", "PN", False),
+    ("S\\" + "P" * 70, "PN", False),
+    ("A\\B", "LO", False),
+    ("A\\B", "SH", False),
+    ("A\\B", "CS", False),
+    ("A\\B", "UT", True),
+], ids=repr)
+def test_a_backslash_fits_a_recorded_pn_and_no_other_multi_valued_vr(value, vr, fits):
+    """`_value_fits_vr`, the gate in front of a recorded private VR. Under
+    `PN` a backslash delimits values and each must fit; under every other
+    VR of multiplicity 1-n a backslash-bearing `str` does not fit, as
+    before; `UT` (multiplicity 1) holds it as text, as before."""
+    assert io_handlers._value_fits_vr(value, vr) is fits
