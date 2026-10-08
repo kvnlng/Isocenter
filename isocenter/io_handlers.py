@@ -104,7 +104,7 @@ from pydicom.values import convert_numbers
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
-                       iter_item_tree, PhiStatus)
+                       iter_item_tree, PhiStatus, _python_value)
 from .uids import generated_uid
 from .reversibility import ReversibilityService
 from .logger import (describe_exception, describe_exception_without_paths,
@@ -11087,6 +11087,129 @@ def _standard_un_decoded(elem, encoding):
         return None
 
 
+#: The member types of a list `_export_value` has nothing to do for.
+_PLAIN_TYPES = frozenset({int, float, str, bool, type(None)})
+
+
+def _float_of(member):
+    """A finite `Decimal` as the `float` it equals; anything else itself."""
+    if type(member) is Decimal and member.is_finite():
+        return float(member)
+    return member
+
+
+def _export_value(value):
+    """`value` as the Python value it equals, for the writer.
+
+    A numpy bool, integer or float becomes its Python twin
+    (`entities._python_value`: a scalar, a 0-d array, or one held directly
+    by a `list` or `tuple`), a `tuple` becomes the `list` it equals, and a
+    finite `Decimal`, alone or directly in a list, becomes the `float` it
+    equals. Everything else is returned **as the same object**: a source's
+    `DSfloat`, `IS` and `DSdecimal` (so `original_string` survives),
+    `MultiValue`, bytes, a list of plain Python values, and the numpy
+    values #926 says are not numbers. Never raises.
+
+    Args:
+        value: An attribute value, as the graph holds it.
+
+    Returns:
+        The value to write: the twin, a new list, or `value` itself.
+    """
+    # #938, #979, #940. `set_attr` and the store each give the graph one
+    # representation; a value written around the entity
+    # (`attributes[tag] = value`), or held by a hand-built graph, met
+    # neither, and `_merge`'s readers each asked it a different type
+    # question (`isinstance(v, (int, float))`, `float`, `numbers.Real`,
+    # `numbers.Integral`, and pydicom's own). So one store exported two
+    # ways, live and reopened. This is the one answer, in front of all of
+    # them.
+    #
+    # - **`_python_value` is the only converter of a numpy value.** Its
+    #   kind test, masked test and twin-type test are not restated here.
+    # - **`type(...) is`, never `isinstance`.** pydicom's `DSdecimal` is a
+    #   `Decimal` subclass carrying `original_string`: `isinstance` would
+    #   make a source DS a bare float and re-spell it. A `MultiValue` is
+    #   not a `list` and is never scanned, which is what a live ingest
+    #   holds for every multi-valued element.
+    # - **It never raises**, because `_merge` calls it outside the
+    #   per-element `try`, where a raise costs the file and not the
+    #   element. `float(Decimal("sNaN"))` raises, hence `is_finite()`; a
+    #   non-finite `Decimal` stays one and takes the answer it always had.
+    # - **One level deep**, as `_python_value` is: `[[np.int64(1)]]` is
+    #   dropped with a row live and as its twin alike.
+    # - **The tuple stays a tuple in the graph** (#926 pins `set_attr`
+    #   storing the object given); the store already writes it as a list,
+    #   and this is the exporter agreeing with the store.
+    # - **The first test is only a fast path**, and no test can see it
+    #   go: without it the answer is the same and slower. A reopened
+    #   store hands back a plain list for a multi-valued element, 65,536
+    #   ints for a `US` LUT Data, and the two scans below cost about 6 ms
+    #   on that list where one C-level pass over its types costs 0.5 ms
+    #   (measured in the PR for #938). `type(value) is list`, because a
+    #   tuple must still be converted; an allowlist, so a type nobody
+    #   thought of takes the slow path, never the wrong one.
+    if type(value) is list and set(map(type, value)) <= _PLAIN_TYPES:
+        return value
+    value = _python_value(value)
+    if type(value) is tuple:
+        value = list(value)
+    if type(value) is Decimal:
+        return _float_of(value)
+    if type(value) is list and any(type(member) is Decimal for member in value):
+        return [_float_of(member) for member in value]
+    return value
+
+
+#: The standard VRs whose value is text and whose writer pydicom runs at
+#: `dcmwrite`: its text VRs less IS and DS, which take numbers and have
+#: arms of their own in `_merge`.
+_TEXT_VRS = frozenset({"AE", "AS", "CS", "DA", "DT", "TM", "LO", "LT", "PN",
+                       "SH", "ST", "UC", "UI", "UR", "UT"})
+
+
+def _refuse_a_number_as_text(vr, value):
+    """Raise when `value`, about to be written under text VR `vr`, holds a number.
+
+    Each atom (the value, or each member of a `list` or `MultiValue`) that
+    is a `str`, `bytes` or `bytearray` passes. A number, a numpy scalar or
+    a numpy array raises. Anything else passes, as it always has: `None`,
+    pydicom's `PersonName`, a `date` in a DA.
+
+    Args:
+        vr (str): One of `_TEXT_VRS`.
+        value: The value, after `_export_value`.
+
+    Raises:
+        TypeError: Naming the atom's type and the VR, never the value.
+            Raised inside `_merge`'s per-element `try`, so it becomes that
+            element's `DATA_LOSS` row.
+    """
+    # #939, owner ruling Q1 A. pydicom accepts `7` under LO at `add_new`
+    # and raises in `filewriter.write_text` when the dataset is written,
+    # past `_merge`'s per-element `try`: one `set_attr("0008,1090", 7)`
+    # failed the whole file. PN and UI raised at `add_new` already and
+    # lost one element; the other thirteen now do what those two did, and
+    # all fifteen say this sentence.
+    #
+    # - **The type only.** Not `_value_fits_vr`: its caps and format
+    #   checks would drop source values that export today (an LO past 64
+    #   characters, a DA that names no date).
+    # - **`str` is tested first**: `np.str_` is a `str` and an
+    #   `np.generic` at once, and it is text.
+    # - **Dropped, not written as `str(value)`**: `'7'` is no date, time
+    #   or UID, and `'True'` is nobody's Code String.
+    # - **No value in the message.** The row is read by people the value
+    #   may not be for; the tag, the type and the VR locate it.
+    atoms = value if isinstance(value, (list, MultiValue)) else (value,)
+    for atom in atoms:
+        if isinstance(atom, (str, bytes, bytearray)):
+            continue
+        if isinstance(atom, (numbers.Number, np.generic, np.ndarray)):
+            raise TypeError(f"a {type(atom).__name__} is not text, and {vr} "
+                            f"holds text")
+
+
 #: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
 _DS_MAX = 16
 
@@ -12054,6 +12177,13 @@ class DicomExporter:
             if g == 0x0000:
                 continue
 
+            # The value as the Python value it equals, once, in front of
+            # every reader below (#938). It rebinds the local and never
+            # writes `attrs`: under threads that is the live graph, and
+            # the edit would be one no revision recorded. The identity
+            # arms above `continue` before this; they take `str` and
+            # bytes only.
+            v = _export_value(v)
             vr, encoded, re_vr = None, None, None
             try:
                 vr = dictionary_VR(Tag(g, e))
@@ -12125,6 +12255,14 @@ class DicomExporter:
                 # re-encoded silently instead of reported.
                 if vr is not None:
                     vr = _numeric_arm(vr, v)
+                # A number under a standard text VR is this element's
+                # DATA_LOSS row (#939); pydicom would take it here and
+                # fail the whole file at `dcmwrite`. On the standard arm
+                # only (`encoded` is None): a private tag's number is
+                # written as text by the fallback encoder, and a recorded
+                # private VR was already asked by `_value_fits_vr`.
+                if vr in _TEXT_VRS and encoded is None:
+                    _refuse_a_number_as_text(vr, v)
                 # A caller's float in a standard DS, spelled to fit its 16
                 # characters (#723). Here, inside the loss arm's `try`, so
                 # a non-finite float is this element's DATA_LOSS row; and
