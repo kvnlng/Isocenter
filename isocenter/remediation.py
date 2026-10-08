@@ -451,16 +451,16 @@ class RemediationService:
                     action_type = "REMEDIATION_REMOVE"
             # 2. A Python attribute (`Patient`/`Study`/`Series` field).
             elif self._holds_attr_to_remove(entity, proposal.target_attr):
+                # No `mark_modified()` here (#961): every field this arm may
+                # clear is a tracked one, so the assignment marks the entity.
                 setattr(entity, proposal.target_attr, None)
-                if hasattr(entity, "mark_modified"):
-                    entity.mark_modified()
                 details = f"Cleared Attribute {proposal.target_attr} on {finding.entity_uid}"
                 action_type = "REMEDIATION_REMOVE"
 
         if action_type:
             # A Patient, Study or Series field was written, so the same
             # value goes onto each instance's own copy of the tag. Here
-            # and not in the arms above: the arms end in the five
+            # and not in the arms above: the arms end in the four
             # line-cited `mark_modified()` calls, and this block sits
             # below all of them. Before the REMEDIATED stamp below, which
             # is only about `entity`; the instances keep their own status.
@@ -1063,7 +1063,7 @@ class RemediationService:
         # of what the target holds now, so without this check a date
         # deleted, blanked or edited between `audit()` and `anonymize()`
         # would be re-created or overwritten. The warning is logged here
-        # rather than in the arm, so the arm adds no line above the five
+        # rather than in the arm, so the arm adds no line above the four
         # line-cited `mark_modified()` calls.
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
 
@@ -1241,7 +1241,7 @@ class RemediationService:
         Returns:
             bool: True when the arm should delete the element.
         """
-        # Pure, with no `audit_buffer`, and defined below the five
+        # Pure, with no `audit_buffer`, and defined below the four
         # line-cited `mark_modified()` calls so the arm's condition stays
         # one same-line call, as `_holds_attr_to_remove` is for the arm
         # below it. The raw key, as the arm has always read it: a tag
@@ -1273,7 +1273,7 @@ class RemediationService:
         # `hasattr` alone is True of a slots field holding None, so a
         # removal of a field already cleared would write a row and count as
         # applied for work nothing did. Pure, with no `audit_buffer`, as
-        # `_replace_attr_refused` is, and defined below the five line-cited
+        # `_replace_attr_refused` is, and defined below the four line-cited
         # `mark_modified()` calls so the arm's condition stays a same-line
         # call.
         #
@@ -1645,7 +1645,7 @@ class RemediationService:
     #:
     #: A class attribute this far down the class rather than a module
     #: constant at the top, on purpose: a line added above the success
-    #: block of `_apply_single_remediation` moves the five line-cited
+    #: block of `_apply_single_remediation` moves the four line-cited
     #: `mark_modified()` calls.
     ENTITY_FIELD_TAGS = {
         "patient_name": "0010,0010",
@@ -1700,7 +1700,7 @@ class RemediationService:
     #: UID. Read-only: it is a class attribute, so an in-place write would
     #: reach every service in the process; the setter replaces it. Here
     #: rather than in `__init__` for `ENTITY_FIELD_TAGS`' reason above:
-    #: nothing is added above the five line-cited `mark_modified()` calls
+    #: nothing is added above the four line-cited `mark_modified()` calls
     #: -- which is also why `MappingProxyType` is imported here and not
     #: with the module's imports.
     #: No reset in `apply_remediation` for the same reason, and none is
@@ -2162,7 +2162,7 @@ class RemediationService:
             findings: The pass's findings.
         """
         # Here and not at the top of `apply_remediation`, which would move
-        # the five line-cited `mark_modified()` calls.
+        # the four line-cited `mark_modified()` calls.
         self._scan_tally = tally
         self._pass_start_ids = self._MappingProxyType({
             id(f.entity): f.entity.patient_id for f in findings
@@ -2663,7 +2663,7 @@ def _remediation_key(finding: PhiFinding) -> tuple:
 _TALLY_MASK = (1 << 64) - 1
 
 
-# Imported here, not at the top: a line added above this module's five
+# Imported here, not at the top: a line added above this module's four
 # `mark_modified()` calls moves them, and each is cited by line number.
 import hashlib  # pylint: disable=wrong-import-position,wrong-import-order
 import json  # pylint: disable=wrong-import-position,wrong-import-order
