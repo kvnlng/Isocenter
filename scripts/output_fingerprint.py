@@ -146,7 +146,10 @@ SCHEMA = 1
 #: its hash, so a hashed long value no longer carries the version.
 #: 3 (#819): a hashed text value's trailing padding is stripped before
 #: N2, so the version's length parity no longer flips its pad byte.
-RECORDER = 3
+#: 4 (#945): an element pydicom cannot convert is recorded as its wire
+#: VR, `unconverted`, and the digest and length of its encoded value,
+#: where it was `unreadable:` and pydicom's exception class and message.
+RECORDER = 4
 
 #: A public test secret, not a secret: `bytes(range(32))`. The suite's
 #: `tests/support/project_secret.py` FIXED_A is the same constant, and a
@@ -301,9 +304,19 @@ def _record_elements(ds, implicit: bool, prefix: str, out: dict) -> None:
         raw_value = getattr(raw, "value", None)
         try:
             elem = ds[tag]
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
+            # pydicom cannot convert it, and what it raised is no part of
+            # the record (RECORDER 4, #945): the class and the message
+            # are pydicom's, so a release that renamed or reworded either
+            # moved the cell with the exported bytes unchanged, and where
+            # the message did not quote the value (#703's TypeError beside
+            # a short LUT Descriptor) two different values recorded one
+            # cell. The value as encoded is what was written: its digest
+            # and length, as for any binary value, under the VR on the
+            # wire (None in an implicit file, where there is none).
             label = f"{written_vr}/implicit" if implicit else str(written_vr)
-            out[key] = f"{label} unreadable: {type(exc).__name__}: {exc}"
+            data = _raw_bytes(raw_value)
+            out[key] = f"{label} unconverted {_h(data)} len={len(data)}"
             continue
         vr = elem.VR if implicit or not written_vr else written_vr
         label = f"{vr}/implicit" if implicit else vr
