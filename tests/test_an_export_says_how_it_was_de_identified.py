@@ -23,7 +23,10 @@ test here pins:
   which `basic@2026c` documents departures.
 - **Q3 (a):** `(0028,0303)` from the file's own dates: `REMOVED` when every
   DA and DT in it is gone or a dummy, `MODIFIED` when the rest are shifts
-  this store wrote, and nothing when any date is as found.
+  this store wrote, and nothing when any date is as found. **Amended by
+  #978 (owner ruling Q-D1-6 C, 2026-10-08):** `MODIFIED` whenever any date
+  is a shift this store wrote, whatever the rest are; a date as found
+  withholds only `REMOVED`.
 - **Q4:** `(0012,0063)` gains one value, `isocenter/<version>; <label>;
   v1:<8 hex>`, after any the source carried, unless the last already is it.
   An external profile's label is `external profile`, never its path.
@@ -644,27 +647,86 @@ def test_the_study_date_read_is_the_one_the_file_carries(tmp_path):
     assert _markers(ds)["temporal"] is None
 
 
+KEEP_SERIES_DATE = {"phi_tags": {"0008,0021": {"action": "KEEP"}}}
+KEEP_STUDY_DATE = {"phi_tags": {"0008,0020": {"action": "KEEP"}}}
+
+
+def _says(value, then=None):
+    """A source that says `(0028,0303) value`, then `then(ds)`."""
+    def edit(ds):
+        ds.LongitudinalTemporalInformationModified = value
+        if then is not None:
+            then(ds)
+    return edit
+
+
 @pytest.mark.parametrize("profile, extra, edit, prior, expected", [
+    # Nothing as found: unchanged by #978.
     ("floor", {}, None, False, "MODIFIED"),
     ("basic", {}, None, False, "REMOVED"),
-    ("floor", {"phi_tags": {"0008,0021": {"action": "KEEP"}}}, None, False, None),
-    ("floor", {"phi_tags": {"0008,0021": {"action": "KEEP"}}}, None, True, "MODIFIED"),
-    ("floor", {}, _nested_unruled_date, False, None),
-    ("floor", {"remove_private_tags": False}, _private_date, False, None),
-    ("floor", {}, _unruled_datetime, False, None),
-], ids=["floor_shifts", "basic_removes", "a_kept_series_date",
-        "a_kept_date_under_a_source_modified", "a_nested_date_as_found",
-        "a_private_date_as_found", "a_datetime_as_found"])
+    ("basic", {}, _says("UNMODIFIED"), False, "REMOVED"),
+    # A date this store shifted beside a date as found: `MODIFIED` since
+    # #978 (each was None, the source's value kept, until then).
+    ("floor", KEEP_SERIES_DATE, None, False, "MODIFIED"),
+    ("floor", KEEP_SERIES_DATE, None, True, "MODIFIED"),
+    ("floor", KEEP_SERIES_DATE, _says("UNMODIFIED"), False, "MODIFIED"),
+    ("floor", {}, _nested_unruled_date, False, "MODIFIED"),
+    ("floor", {"remove_private_tags": False}, _private_date, False, "MODIFIED"),
+    ("floor", {}, _unruled_datetime, False, "MODIFIED"),
+    ("none", {}, None, False, "MODIFIED"),
+    ("none", {}, _says("UNMODIFIED"), False, "MODIFIED"),
+    # A date as found and nothing shifted: nothing is written and the
+    # source's value stays, unchanged by #978. `basic` empties Study Date,
+    # so the one date as found is the only thing that withholds `REMOVED`.
+    ("basic", KEEP_SERIES_DATE, None, False, None),
+    ("basic", KEEP_SERIES_DATE, _says("UNMODIFIED"), False, "UNMODIFIED"),
+    ("basic", KEEP_SERIES_DATE, None, True, "MODIFIED"),
+    ("basic", {}, _nested_unruled_date, False, None),
+    ("basic", {"remove_private_tags": False}, _private_date, False, None),
+    ("basic", {}, _unruled_datetime, False, None),
+    ("none", KEEP_STUDY_DATE, None, False, None),
+    ("none", KEEP_STUDY_DATE, _says("UNMODIFIED"), False, "UNMODIFIED"),
+], ids=["floor_shifts", "basic_removes", "basic_removes_over_a_source_unmodified",
+        "a_shift_beside_a_kept_series_date",
+        "a_shift_beside_a_kept_date_under_a_source_modified",
+        "a_shift_beside_a_kept_date_replaces_a_source_unmodified",
+        "a_shift_beside_a_nested_date_as_found",
+        "a_shift_beside_a_private_date_as_found",
+        "a_shift_beside_a_datetime_as_found",
+        "none_shifts_study_date_alone",
+        "none_replaces_a_source_unmodified",
+        "no_shift_a_kept_series_date",
+        "no_shift_a_source_unmodified_stays",
+        "no_shift_a_source_modified_stays",
+        "no_shift_a_nested_date_as_found",
+        "no_shift_a_private_date_as_found",
+        "no_shift_a_datetime_as_found",
+        "none_with_study_date_kept",
+        "none_with_study_date_kept_keeps_a_source_unmodified"])
 def test_the_temporal_marker_follows_the_files_dates(
         tmp_path, profile, extra, edit, prior, expected):
-    """M10 (Q3 arm a). CT_small's six DA elements under the floor: Study
-    Date shifted, Instance Creation, Series and Content Date the dummy,
-    Acquisition Date and Birth Date empty -- `MODIFIED`. Under `basic`
-    the Study Date is emptied too -- `REMOVED`. A date left as found, at
-    the top level, nested, or private with its VR recorded, writes
-    nothing, and a source's `MODIFIED` stays. Kills: the walk skipping
-    nested items or private tags; the dummy read as found; `UNMODIFIED`
-    written; the source value overwritten when nothing is determined."""
+    """M10 (Q3 arm a), as #978 rules it (owner ruling Q-D1-6 C: a shift
+    this store wrote is always marked). CT_small's six DA elements under
+    the floor: Study Date shifted, Instance Creation, Series and Content
+    Date the dummy, Acquisition Date and Birth Date empty -- `MODIFIED`.
+    Under `basic` the Study Date is emptied too -- `REMOVED`.
+
+    **A shifted date beside a date as found is `MODIFIED`**, whatever the
+    source said: `privacy_profile: none` shifts Study Date alone and
+    leaves four dates as found, and a source's own `UNMODIFIED` does not
+    survive beside the shift. Until #978 each of those wrote nothing and
+    kept the source's value.
+
+    **With no shift, a date as found still writes nothing**, at the top
+    level, nested, private with its VR recorded, or a DT, and the
+    source's value stays, `UNMODIFIED` included (a date kept on purpose
+    cannot be told from one no rule named, so `UNMODIFIED` is never
+    written, and never taken away on no evidence).
+
+    Kills: the walk skipping nested items or private tags; the dummy read
+    as found; `UNMODIFIED` written; the source value overwritten when
+    nothing is determined; `MODIFIED` withheld by a date as found; a date
+    as found read as a shift."""
     source = _source(tmp_path / "in", prior=prior, edit=edit)
     ds = _pipeline(tmp_path, profile, source=source, **extra)
     assert _markers(ds)["removed"] == "YES", "setup: the pass was whole"

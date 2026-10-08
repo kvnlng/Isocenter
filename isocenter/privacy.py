@@ -1691,12 +1691,10 @@ class PhiInspector:
                 return True
             return (value == patient.patient_id
                     and _holds_owned_replacement(self.phi_tags, tag, value))
-        # No StudyTime (0008,0030) arm, though `ENTITY_FIELD_TAGS` carries
-        # one. The skip needs a value *known* to be a replacement, and a
-        # time has no such test: no `date_shifted` flag, no `ANON_`
-        # prefix, and no shipped scan remediates `Study.study_time`. An
-        # arm could only skip on agreement, and agreement with an original
-        # is PHI -- the case this function exists to refuse.
+        # No Study Time (0008,0030) arm: it is not an owner-stamped copy.
+        # Since #953 the export writes each instance's own Study Time, so
+        # the copy is the file's value and its own finding is the one
+        # that acts on it.
         return False
 
     def _scan_owned_uid(self, entity, tag: str, attr: str, entity_type: str,

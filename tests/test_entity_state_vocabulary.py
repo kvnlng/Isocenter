@@ -179,12 +179,13 @@ def test_recording_a_new_phi_status_leaves_the_entity_needing_a_save(name):
     docstring makes that check demand this file be added to `TARGETS`.)
 
     What it does is convert an ASSUMED coupling into a checked one.
-    Five `entity.mark_modified()` calls in `remediation.py` survive
+    Five `entity.mark_modified()` calls in `remediation.py` (four since
+    #961, which deleted the one no path bore) survive
     deletion *on a first remediation*, and the reason they survive is
     that `record_phi_status()` on the same paths also advances
     `_revision` -- so the bump is redundant there, not missing. That
     reasoning is documented in CLAUDE.md and nothing tested it. If the
-    coupling ever silently went away, those five calls would become
+    coupling ever silently went away, those calls would become
     load-bearing on every path and every one of them would still
     survive deletion in isolation, with nothing anywhere noticing. Now
     something does.
