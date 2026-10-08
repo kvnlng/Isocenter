@@ -469,6 +469,67 @@ fixes, never features.
    only, so a second rehearsal of the same version cannot upload; its
    build gates and test matrix still run. A date correction (step 3,
    "Both dates are UTC") is not rehearsed again.
+
+   **A job that went red in `Install tesseract`, before any test ran, is
+   not a test result** (#984). That step downloads the package up to
+   four times, each attempt bounded, with a pause between them, for
+   about seven minutes in all (`tests.yml` has the figures; until
+   2026-10-08 it was one unbounded attempt under a 3-minute cap, which
+   stalled in six jobs of the rc15 rehearsal and three of its publish
+   run). So a red there, by timeout or after the fourth attempt, means
+   the package mirror was out of that runner's reach for seven minutes:
+   - it says nothing about the code, and it is not the one failure
+     step 1's rerun rule allows a run, which is about tests;
+   - `gh run rerun <run id> --failed` once, in this step or in step 6.
+     Nothing was uploaded: a red `test-floor` job blocks the upload, and
+     the rerun runs the upload job when the floor is green;
+   - if the rerun is red in the same step, stop rerunning and wait for
+     the mirror; a third attempt at once asks it the same question;
+   - record each such attempt, with the run's id and the jobs, in the
+     release-commit PR or the record-back PR (step 8).
+
+   A job red in any other step, or in `Run Tests`, is not this case.
+
+   **Count the skips** in the rehearsal, and again in step 6's run: the
+   last line of each shard's `Run Tests` step, added up over the eight
+   shards of a version. Since #966 the runners fetch every tag and
+   `origin/main`, and what skips is a short, fixed list. On 3.12, 3.13
+   and 3.14 (3.14t skips one fewer, as marked):
+   - 12 parametrized combinations that do not exist, skipped everywhere:
+     the rules `set_phi_tag` cannot spell, in
+     `test_a_rule_that_cannot_be_honoured_is_refused.py` (6),
+     `test_a_rule_cannot_remove_a_study_or_series_uid.py` (4),
+     `test_repeating_group_rules.py` (1) and
+     `test_uids_are_replaced_by_the_project_secret.py` (1);
+   - 4 that need `coverage`, which is in the `dev` extra and which
+     `tests.yml` deliberately does not install
+     (`tests/test_skip_contract.py` says why): three in
+     `test_changed_code_selects_its_tests.py` and
+     `test_coverage_keeps_worker_data_under_chdir.py`'s one;
+   - 2 by platform: `test_the_store_location_advice.py`'s macOS test, and
+     `test_redaction_names_its_strategy.py`'s free-threaded test, which
+     runs on 3.14t (so 1 there);
+   - 1 until a final release from v1.0.0 on carries
+     `tests/test_config_behaviour_is_versioned.py`:
+     `test_no_row_the_previous_final_release_shipped_has_moved` (step 1);
+   - the section being released, in
+     `tests/test_released_changelog_sections_stay_as_released.py`: 2 in
+     a rehearsal (no tag holds `[X.Y.Z]` yet, and neither does
+     `origin/main`), 1 in step 6's run from the tag (`origin/main` still
+     does not, until step 8), none in a dispatch from `main`.
+
+   That is **21 in a rehearsal, 20 in the publish run and 19 in a
+   dispatch from `main`**, and one fewer each on 3.14t. **Any other
+   number is a finding**: find the test (`pytest -rs` prints the reason;
+   a runner's `-v` log prints only `SKIPPED`), and either it is a test
+   that has stopped running, or this list is out of date and the same
+   PR corrects it. Before #966 a release run skipped 57 to 101 tests
+   and was green: every comparison with a tag or with `origin/main`
+   skipped in a checkout that had neither. A local run's count differs
+   (`coverage` is installed, the platform is another), and so does its
+   collection: a Linux runner collects one test more than macOS on
+   arm64, `test_pixel_dtype_roundtrip.py`'s `float128` case, a type
+   numpy has only there.
 5. **Tag** the release commit, or the last fix merged after it (step 3)
    (an admin step). First make step 3's date check ("Both dates are
    UTC"): tag only if step 6, dispatched at once, will upload on the
@@ -486,7 +547,8 @@ fixes, never features.
    wheel and `isocenter/_version.py` all name the same version. It then
    checks the wheel carries its own resources, runs the 3.12 and 3.14t
    floor (which blocks the upload) and 3.13 and 3.14 (which only report),
-   and uploads by Trusted Publishing.
+   and uploads by Trusted Publishing. Step 4's rule for a job red in
+   `Install tesseract`, and its skip count, apply to this run too.
 7. **Create the GitHub Release** for `vX.Y.Z`, with the `[X.Y.Z]` changelog
    section as its notes. This does not publish anything. Zenodo archives it
    and mints the version DOI.
