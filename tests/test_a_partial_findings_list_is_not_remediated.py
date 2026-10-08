@@ -284,11 +284,20 @@ def test_two_complementary_partial_passes_end_remediated(tmp_path):
 def test_handing_the_same_partial_list_again_stays_identified(tmp_path):
     """A count reached by repetition is not the raised set.
 
-    Only the instance's top-level `REPLACE_TAG` findings, which apply
-    again cleanly on every pass, so no decline demotes the instance and
-    the tally is the only thing that can. Handed as many times as it
-    takes for the passes together to have applied at least as many
-    remediations as the audit raised against the instance.
+    Only the instance's top-level `REPLACE_TAG` findings, which never
+    decline, so no decline demotes the instance and the tally is the only
+    thing that can. Handed as many times as it takes for the passes
+    together to have handled at least as many keys as the audit raised
+    against the instance.
+
+    Since #952 only the first pass applies them: on every later pass each
+    element already holds its replacement, with the instance's record to
+    say so, and the finding is satisfied -- not written, not counted, no
+    row. Until then each pass wrote all of them again (this test asserted
+    `len(replaces)` on every pass). A satisfied key is a handled key, as
+    an applied one is, so the tally question is the same as it was, and
+    the instance still reads IDENTIFIED: the rows are asserted too, since
+    a repeat that wrote rows would count twice in the report.
 
     Kills: a running count of handled keys in place of the merged set.
     """
@@ -310,11 +319,20 @@ def test_handing_the_same_partial_list_again_stays_identified(tmp_path):
                                            "0020,000d", "0020,000e")}.values())
         assert 0 < len(replaces) < len(raised), (len(replaces), len(raised))
 
-        for _ in range(-(-len(raised) // len(replaces))):
-            assert session.anonymize(findings=replaces) == len(replaces)
+        passes = -(-len(raised) // len(replaces))
+        assert passes > 1, "setup: the list is handed more than once"
+        applied = [session.anonymize(findings=replaces) for _ in range(passes)]
+        assert applied == [len(replaces)] + [0] * (passes - 1)
 
         assert session.store_backend.get_audit_declines() == []
         assert instance.phi_status is PhiStatus.IDENTIFIED
+        session.store_backend.flush_audit_queue()
+        import sqlite3
+        with sqlite3.connect(session.persistence_file) as conn:
+            [(written,)] = conn.execute(
+                "SELECT COUNT(*) FROM audit_log "
+                "WHERE action_type = 'REMEDIATION_REPLACE'").fetchall()
+        assert written == len(replaces)
     finally:
         session.close()
 

@@ -620,6 +620,11 @@ class RemediationService:
           satisfied; at any other it declines, so a kept report cannot
           move a redacted instance back onto the unredacted export's UID.
           A `REPLACE` with a value writes the element alone.
+        - **An instance's own element that already holds the value, with
+          its remediation record to vouch for it, is satisfied**
+          (`_replacement_already_there`, #952): the same findings handed
+          twice write, count and log once. The SOP Instance UID at its
+          replacement is one such element.
 
         A value write (not a sequence clear) is preceded by
         `_record_what_is_left`. Writes no audit row itself.
@@ -732,8 +737,8 @@ class RemediationService:
         if sop_move and entity.sop_instance_uid not in (proposal.original_value,
                                                         proposal.new_value):
             # The instance left the UID the scan saw for one other than
-            # this finding's replacement (at that replacement already, the
-            # write repeats itself as any REPLACE does). A kept report
+            # this finding's replacement (at that replacement already, it
+            # is satisfied below, as any REPLACE already there is). A kept report
             # still reaches a redacted instance -- `_instances_by_uid`
             # files it under its source on purpose -- and moving it to the
             # source's replacement would give the redacted pixels the UID
@@ -750,6 +755,14 @@ class RemediationService:
                 f"Remediation declined for {self._log_subject(finding)}: "
                 f"{reason}")
             return None, reason
+        if self._replacement_already_there(entity, tag, value):
+            # The end state, with the record to say a remediation left it:
+            # satisfied, as an owner-stamped copy already holding its
+            # owner's vouched value is. Written again it changed nothing
+            # in the graph and still wrote its row, counted as applied and
+            # dirtied a saved instance: the same findings handed twice
+            # made the report count 36 replacements for 19 (#952).
+            return None, None
         self._record_what_is_left(entity, proposal.target_attr, value)
         if sop_move:
             # An Instance's own SOP Instance UID under the keyed UID
@@ -763,6 +776,45 @@ class RemediationService:
             entity.set_attr(proposal.target_attr, value)
         return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
                 f"-> {proposal.new_value}"), None
+
+    @staticmethod
+    def _replacement_already_there(entity, tag: str, value) -> bool:
+        """Whether a `REPLACE_TAG` about to write `value` at `tag` would
+        write what a remediation already left there.
+
+        Args:
+            entity: The `DicomItem` the proposal targets.
+            tag (str): The canonical tag.
+            value: The value the write would leave, after the binary-empty
+                spelling is chosen.
+
+        Returns:
+            bool: True when `entity` is an `Instance` that holds exactly
+                `value` at `tag` and its remediation record vouches for
+                it (`remediation_vouches_for`). False for a nested item,
+                which keeps no record, so a nested `REPLACE` still writes
+                again; and for a value the element holds with no record,
+                a source value that happens to equal the rule's, which is
+                written once so that the record exists.
+        """
+        # The record is the gate, not equality: `lock_identities()` reads
+        # the record to tell a replacement from an original, so a value
+        # equal to the rule's that no remediation wrote still has to be
+        # written, recorded and logged once. And the record vouches for
+        # what the element holds, whatever this proposal asks, so the
+        # equality is asked too: an element a remediation left at one
+        # value is not the end state of a proposal that writes another.
+        vouches = getattr(entity, "remediation_vouches_for", None)
+        attributes = getattr(entity, "attributes", None)
+        if vouches is None or not isinstance(attributes, dict) or tag not in attributes:
+            return False
+        held = attributes[tag]
+        # Text and bytes only, which is every value a REPLACE writes. The
+        # test is defensive and no test turns on it: `set_attr` can leave
+        # an n-d array at a tag, and `array == "ANONYMIZED"` is an array,
+        # whose truth raises.
+        return (isinstance(held, (str, bytes)) and held == value
+                and vouches(tag, held))
 
     @staticmethod
     def _log_subject(finding: PhiFinding) -> str:
