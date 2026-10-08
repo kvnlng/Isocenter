@@ -1609,16 +1609,25 @@ def test_a_failing_apt_update_still_does_not_stop_the_install(tmp_path):
     assert calls[-1] == "tesseract --version", calls
 
 
-def test_every_tesseract_download_is_bounded_and_dpkg_is_never_killed(tmp_path):
+def test_what_reads_the_network_is_bounded_by_root_and_what_runs_dpkg_is_not(
+        tmp_path):
     """The bound is what makes the loop a retry; where it sits matters.
 
     The 2026-10-07 installs did not fail, they stalled: without a bound
     on each attempt the first one runs until the step's cap and no second
-    attempt is made. So everything that reads the network runs under
-    `timeout`. The install that unpacks does not: it reads the cache
-    only (`--no-download`), so it cannot stall on a mirror, and a
-    `timeout` that fired inside dpkg would leave the package database
-    half-configured for the next attempt.
+    attempt is made. Four things are held, each by its own assertion:
+
+    - every `apt-get` call that reads the network runs under `timeout`;
+    - every `timeout` is run by `sudo` (`sudo timeout … apt-get`, never
+      `timeout … sudo apt-get`): `--kill-after` sends SIGKILL, which
+      sudo cannot pass on, so killing sudo would leave apt-get running
+      with the dpkg lock held (review of #1005, finding 1);
+    - an `install` under `timeout` only downloads (`--download-only`):
+      one that also unpacked would put dpkg under the bound, and a bound
+      that fired there would leave the package database half-configured
+      for the next attempt (finding 2);
+    - the one install that unpacks reads the cache only (`--no-download`)
+      and is under no `timeout`.
     """
     _allowed, calls = _attempts_allowed(tmp_path / "worst")
     _status, good = _run_the_install_step(tmp_path / "good", 0)
@@ -1633,6 +1642,18 @@ def test_every_tesseract_download_is_bounded_and_dpkg_is_never_killed(tmp_path):
                 f"`{call}` reads the network and does not run under "
                 f"`timeout`: a stalled mirror holds it until the step's "
                 f"cap, and nothing is retried (#984): {run}")
+        for entry in bounded:
+            assert " sudo " not in f"{entry} " and f"sudo {entry}" in run, (
+                f"`{entry}` is not run by sudo, or runs sudo itself: the "
+                f"order is `sudo timeout … apt-get`, so that the SIGKILL "
+                f"of `--kill-after` reaches apt-get and not a sudo that "
+                f"cannot pass it on: {run}")
+            if " install " in f"{entry} ":
+                assert "--download-only" in entry.split(), (
+                    f"`{entry}` installs under `timeout` without "
+                    f"`--download-only`: dpkg would run under the bound, "
+                    f"and a bound that fired inside it leaves the package "
+                    f"database half-configured: {run}")
 
     unpacking = [call for call in good
                  if call.startswith("apt-get ") and "--no-download" in call]

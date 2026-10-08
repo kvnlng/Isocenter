@@ -476,19 +476,36 @@ fixes, never features.
    about seven minutes in all (`tests.yml` has the figures; until
    2026-10-08 it was one unbounded attempt under a 3-minute cap, which
    stalled in six jobs of the rc15 rehearsal and three of its publish
-   run). So a red there, by timeout or after the fourth attempt, means
-   the package mirror was out of that runner's reach for seven minutes:
-   - it says nothing about the code, and it is not the one failure
-     step 1's rerun rule allows a run, which is about tests;
-   - `gh run rerun <run id> --failed` once, in this step or in step 6.
-     Nothing was uploaded: a red `test-floor` job blocks the upload, and
-     the rerun runs the upload job when the floor is green;
-   - if the rerun is red in the same step, stop rerunning and wait for
-     the mirror; a third attempt at once asks it the same question;
-   - record each such attempt, with the run's id and the jobs, in the
-     release-commit PR or the record-back PR (step 8).
+   run). It says nothing about the code, and it is not the one failure
+   step 1's rerun rule allows a run, which is about tests. **Read the
+   step's log first: how long it took says which of two things it was.**
+   - **About seven minutes, with attempts cut off at their bound** (the
+     step's `download attempt N of 4 failed or ran out of time`
+     warnings 90 s or so apart, or the step's own timeout): the package
+     mirror was out of that runner's reach. `gh run rerun <run id>
+     --failed` once. If the rerun is red the same way, stop rerunning
+     and wait for the mirror; a third attempt at once asks it the same
+     question.
+   - **Under a minute, the four attempts failing as soon as they
+     start** (three 15-second pauses, about 45 s): that is not a mirror
+     out of reach. apt was refused something: a package that is not
+     there, a source line that is broken, a 404. Read apt's error in
+     the log before any rerun; waiting will not change it, and it may
+     need a fix to `tests.yml`.
 
-   A job red in any other step, or in `Run Tests`, is not this case.
+   **What the rerun does depends on which job was red.** The upload
+   needs `build` and `test-floor`, not `test-supported`:
+   - a `test-floor` job red (3.12, 3.14t): nothing was uploaded, and
+     the rerun runs the upload job once the floor is green;
+   - only `test-supported` jobs red (3.13, 3.14): the upload was not
+     held back. In step 6 the version is already on PyPI, as a rehearsal's
+     is on TestPyPI, and the rerun only completes the compatibility
+     table. Most of rc15's nine were these: four of six at the
+     rehearsal, two of three at the publish.
+
+   Record each such attempt, with the run's id and the jobs, in the
+   release-commit PR or the record-back PR (step 8). A job red in any
+   other step, or in `Run Tests`, is not this case.
 
    **Count the skips** in the rehearsal, and again in step 6's run: the
    last line of each shard's `Run Tests` step, added up over the eight
@@ -1126,7 +1143,11 @@ An admin does these steps in one sitting, without pausing between them.
 5. **Publish**: `gh workflow run publish.yml --ref vX.Y.Z -f
    target=pypi`, and watch it to the upload. **A red `test-floor` job is
    rerun once** (`gh run rerun <run id> --failed`; owner ruling on #867,
-   2026-09-30). If it is still red, the fix goes forward in the same
+   2026-09-30). **A job red in `Install tesseract`, before any test
+   ran, does not spend that rerun** (owner ruling on #984, 2026-10-08):
+   it is not a test result, it is rerun under the rule of "Cutting a
+   release", step 4, and this one rerun stays for a test failure. If the
+   floor is still red after its one rerun, the fix goes forward in the same
    sitting. It takes "The private fix" steps 2 to 6 (the tests, the runs
    and the review), though nothing about it is private any more, then
    these steps again from step 1, so that the UTC date check runs
