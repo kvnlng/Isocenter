@@ -1363,6 +1363,18 @@ def _value_fits_vr(value, vr: str) -> bool:
             return False
         if vr not in _TEXT_VR_MAX and vr not in _TEXT_VR_UNCAPPED:
             return False
+        if vr == 'PN' and '\\' in value:
+            # A recorded `PN` holding a backslash is the source's own
+            # several Person Names: `_pn_text` holds every multi-valued PN
+            # as one backslash-joined `str` (#937), never as a list, so
+            # here the backslash is the value delimiter and the refusal
+            # below would send a source value nothing replaced to `UT`,
+            # with a WARNING row, and a re-ingest of that export would
+            # record `UT` for good (#951). Each value must still fit by
+            # itself. `PN` only: every other 1-n text VR holds a source's
+            # several values as a list, so a backslash in a `str` under
+            # one of those came from a `set_attr` or a REPLACE.
+            return all(_value_fits_vr(part, vr) for part in value.split('\\'))
         if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
             return False
         cap = _TEXT_VR_MAX.get(vr)
@@ -2366,10 +2378,11 @@ def _pn_text(value) -> str:
     # carries the source's values with the source's VM -- two Operators'
     # Names (VM 1-n) stay two, and a Patient's Name the source wrote with
     # two (VM 1, non-conformant) is written as the source wrote it, as a
-    # multi-valued LO is. The one place this costs: a *private* PN of
-    # several values is written `UT` with the re-VR WARNING row, because
-    # `_merge`'s private arm does not put a backslash-bearing `str` under
-    # a multi-valued VR (owner ruling Q6 A).
+    # multi-valued LO is. A *private* PN of several values is written
+    # `PN` too, under an Explicit VR export: `_value_fits_vr` reads a
+    # backslash under a recorded `PN` as the delimiter this function
+    # joined with (#951; until then it was written `UT` with the re-VR
+    # WARNING row, owner ruling Q6 A's residual).
     #
     # Person Names only. A linkage key holding several values is never
     # joined: `_refuse_a_multi_valued_key` refuses the file (#747), and a
