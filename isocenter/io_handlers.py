@@ -11092,9 +11092,18 @@ _PLAIN_TYPES = frozenset({int, float, str, bool, type(None)})
 
 
 def _float_of(member):
-    """A finite `Decimal` as the `float` it equals; anything else itself."""
+    """A `Decimal` a float can hold as that `float`; anything else itself."""
+    # Two tests, and each has a value only it catches. `is_finite()` first,
+    # because `float(Decimal("sNaN"))` raises and this runs outside the
+    # per-element `try`. Then the float's own: `Decimal("1e400")` is finite
+    # and `float()` of it is `inf`, with no error, and no float equals it.
+    # Converted, it would be written `LO inf` under a private tag with no
+    # row, where the `Decimal` is dropped with one; so it stays a `Decimal`
+    # and nothing new is written silently (owner ruling on #938).
     if type(member) is Decimal and member.is_finite():
-        return float(member)
+        as_float = float(member)
+        if isfinite(as_float):
+            return as_float
     return member
 
 
@@ -11104,8 +11113,9 @@ def _export_value(value):
     A numpy bool, integer or float becomes its Python twin
     (`entities._python_value`: a scalar, a 0-d array, or one held directly
     by a `list` or `tuple`), a `tuple` becomes the `list` it equals, and a
-    finite `Decimal`, alone or directly in a list, becomes the `float` it
-    equals. Everything else is returned **as the same object**: a source's
+    `Decimal` a float can hold, alone or directly in a list, becomes that
+    `float` (a non-finite one, and one past a float's range, stays a
+    `Decimal`). Everything else is returned **as the same object**: a source's
     `DSfloat`, `IS` and `DSdecimal` (so `original_string` survives),
     `MultiValue`, bytes, a list of plain Python values, and the numpy
     values #926 says are not numbers. Never raises.
@@ -11134,8 +11144,9 @@ def _export_value(value):
     #   holds for every multi-valued element.
     # - **It never raises**, because `_merge` calls it outside the
     #   per-element `try`, where a raise costs the file and not the
-    #   element. `float(Decimal("sNaN"))` raises, hence `is_finite()`; a
-    #   non-finite `Decimal` stays one and takes the answer it always had.
+    #   element. `float(Decimal("sNaN"))` raises, hence `is_finite()` in
+    #   `_float_of`; a `Decimal` left unconverted takes the answer it
+    #   always had.
     # - **One level deep**, as `_python_value` is: `[[np.int64(1)]]` is
     #   dropped with a row live and as its twin alike.
     # - **The tuple stays a tuple in the graph** (#926 pins `set_attr`

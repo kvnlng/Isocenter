@@ -821,21 +821,43 @@ def test_the_conversion_never_raises(value):
         DicomExporter._merge(Dataset(), {tag: value}, [])
 
 
-def test_a_decimal_past_a_floats_range_is_the_float_python_makes_of_it():
+@pytest.mark.parametrize("make", [
+    lambda: Decimal(10) ** 400, lambda: -(Decimal(10) ** 400),
+    lambda: Decimal("1e400"), lambda: Decimal("1.8e308"),
+], ids=["10**400", "-10**400", "1e400", "1.8e308"])
+def test_a_decimal_past_a_floats_range_stays_the_decimal(make):
     """`Decimal(10) ** 400` is finite and `float()` of it is `inf`, with
-    no error. The conversion is `float()`, so that is what the writer is
-    handed, and an IS or a DS then loses the element with the row any
-    non-finite float gets. Pinned as measured, not as a design choice:
-    the ruling's words are "the float it equals", and no float equals
-    this one."""
-    huge = Decimal(10) ** 400
-    assert _typed(_export_value(huge)) == (float, float("inf"))
-    for tag, words in ((IS_TAG, "inf has no Integer String spelling"),
-                       (DS_TAG, "inf has no Decimal String spelling")):
-        raw, losses, notes = _merged({tag: huge})
-        assert raw(tag) is None
-        ((_scope, loss),) = losses
-        assert loss == f"Tag {tag} not exported (data loss): ValueError: {words}"
+    no error: no float equals it, so it is not converted (owner ruling on
+    #938, 2026-10-08) and takes the answer it had before. Alone and in a
+    list, where the member beside it is still converted."""
+    huge = make()
+    assert _export_value(huge) is huge
+    beside = _export_value([huge, Decimal("1.5")])
+    assert beside[0] is huge and _typed(beside[1]) == (float, 1.5)
+
+
+def test_a_decimal_past_a_floats_range_exports_as_it_did(tmp_path):
+    """Nothing new is written silently. Under a private tag it is dropped
+    with a PRIVATE row and the run is REVIEW_REQUIRED, where the float
+    `inf` would be written `LO inf` with no row. In an IS and a DS it is
+    written `inf`, as it was before `_export_value` existed; that is
+    pydicom's own spelling of the `Decimal`, not a conversion made here."""
+    huge = Decimal("1e400")
+    private = _run(tmp_path / "private", _around(PRIVATE, huge))
+    assert private["written"] == 1, private["written"]
+    assert _element(private, PRIVATE) is None
+    ((action, scope, details),) = private["rows"]
+    assert (action, scope) == ("DATA_LOSS", "PRIVATE")
+    assert details.endswith(f"Tag {PRIVATE} not exported (data loss): "
+                            f"ValueError: no VR fits a Decimal value"), details
+    assert private["grade"] == _REVIEW
+    for tag, vr in ((IS_TAG, "IS"), (DS_TAG, "DS")):
+        result = _run(tmp_path / vr, _around(tag, huge))
+        assert result["written"] == 1, result["written"]
+        # Read raw: pydicom raises converting an IS that says `inf`.
+        raw = result["ds"].get_item(_numbers(tag))
+        assert (str(raw.VR), bytes(raw.value)) == (vr, b"inf "), raw
+        assert result["rows"] == [] and result["grade"] == _PASS
 
 
 def test_a_whole_decimal_of_sixteen_digits_is_written_exactly_and_noted():
