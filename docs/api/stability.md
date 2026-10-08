@@ -400,6 +400,26 @@ otherwise.
   `REMOVE_TAG` finding naming one is declined with a
   `REMEDIATION_DECLINED` audit row, and `load_config()` refuses the rule
   (#949).
+- `audit()`, `redact()`, `lock_identities()` and `lock_identities_batch()`,
+  after a `save()` without `sync=True` whose write failed: each drains
+  the queue on entry and then runs that save again itself, on the calling
+  thread, before it does anything else. If the save now succeeds, nothing
+  is raised and nothing is said. If it fails again, the call raises what
+  the save raises: the `TypeError` or `ValueError` above, an `OSError`,
+  or the sidecar lock's `RuntimeError`. The next such call runs it again,
+  until a save succeeds. `save()` itself still returns before the write
+  and raises nothing for it, and `close()` does not raise for it.
+  `save(sync=True)`, `export()` and `compact()` save the session
+  themselves, as before. `redact()` with no rules loaded returns 0 before
+  it drains. `anonymize()` and `recover_patient_identity()` wait for the
+  queue where they did and do not run a failed save.
+  A session that ends, by `close()` or when the process exits with the
+  session still referenced and never closed, with a failed background
+  save that no later save has healed
+  writes one `ERROR` audit row keyed `SESSION` (`A background save()
+  failed and no later save succeeded before the session ended, ...`), so
+  a later session's report on that store grades `REVIEW_REQUIRED`
+  (#941).
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.
 - `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`:

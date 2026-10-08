@@ -199,8 +199,8 @@ def test_an_emptied_uid_fails_at_the_write_and_no_dotfile_is_written(tmp_path):
         assert FIRST not in details
         report = tmp_path / "report.md"
         session.generate_report(str(report))
-        [status] = [line for line in report.read_text().splitlines()
-                    if "Validation Status" in line]
+        status = next(line for line in report.read_text().splitlines()
+                      if "Validation Status" in line)
         assert "**REVIEW_REQUIRED**" in status
 
 

@@ -1839,18 +1839,44 @@ class DicomSession:
         """
         Persist the current session state to the store.
 
+        Without `sync=True` the save is queued and this returns before it
+        is written, so a failure is not raised here. It is logged at
+        ERROR, and then heard at the next call that drains the queue:
+        `audit()`, `redact()`, `lock_identities()` and
+        `lock_identities_batch()` run the failed save again themselves and
+        raise what it raises (a failure that has passed heals there
+        silently). `save(sync=True)`, `export()` and `compact()` save the
+        session themselves and raise the same way. A session closed, or a
+        process that exits, with a failed background save that no later
+        save healed writes one `ERROR` audit row keyed `SESSION`, so a
+        later session's report on the store grades `REVIEW_REQUIRED`
+        (#941).
+
         Args:
             sync (bool): If True, block until the save is complete. A
-                synchronous save first drains the persistence manager, as
-                `audit()` and `redact()` do, and never returns early: a
-                background save that does not finish blocks it.
+                synchronous save first waits for the persistence manager's
+                queue, and never returns early: a background save that
+                does not finish blocks it.
         """
         if sync and hasattr(self, 'store_backend'):
             get_logger().info("Saving session (Synchronous)...")
+            # `_wait()`, not `flush()` (#941): `flush()` would first run a
+            # background save that failed, with the patients *that* save
+            # was handed, and raise what it raises. This call is about to
+            # save the session as it stands now and raise what that
+            # raises, which is the same exception while nothing has
+            # changed and the right one when something has: a caller who
+            # answered a refused save by dropping a patient from
+            # `store.patients` would otherwise be refused for a patient
+            # the session no longer holds, by the one call that can clear
+            # the failure. On return this save has written everything
+            # that one would have, so the manager forgets it.
             if hasattr(self, 'persistence_manager'):
-                self.persistence_manager.flush()
+                self.persistence_manager._wait()
             self.store_backend.save_all(
                 self.store.patients, prune_absent_patients=True)
+            if hasattr(self, 'persistence_manager'):
+                self.persistence_manager._forget_failed_save()
         elif hasattr(self, 'persistence_manager'):
             # The session owns the whole store, so rows for patients it no
             # longer holds are stale -- including the pre-anonymisation row
@@ -2955,6 +2981,12 @@ class DicomSession:
                 before anything is scanned or a project secret is created.
                 Also on a store holding dates shifted under a project
                 secret it no longer has.
+            Exception: When a background `save()` failed and still fails:
+                the entry drain runs that save again and raises what it
+                raises (the store's named `TypeError` or `ValueError`, an
+                `OSError`, the sidecar gate's `RuntimeError`), before
+                anything is scanned. A failure that has passed is saved
+                there and nothing is raised (#941).
         """
 
         # A scan ENDS by advancing `_revision` on every entity it
@@ -3014,9 +3046,12 @@ class DicomSession:
         # a merge refused across date-offset schemes leaves neither a
         # policy no audit resolved (which the lock reads) nor a new secret
         # in the store. After the entry drain above, which
-        # the merge's own `drain` repeats only when there is a pair.
+        # the merge's own `drain` repeats only when there is a pair. That
+        # repeat is `_wait`, the wait alone: the entry drain is where a
+        # failed background save is run again and raised (#941), and a
+        # drain in the middle of the work is not.
         self.store._merge_patients_sharing_an_id(
-            drain=(self.persistence_manager.flush
+            drain=(self.persistence_manager._wait
                    if hasattr(self, 'persistence_manager') else None))
         self._audited_phi_tags = tags_to_use
 
@@ -4283,6 +4318,11 @@ class DicomSession:
                 row speaks for the write, not the store, which keeps
                 whatever an earlier write put there. Given a list or a
                 report, the batch form's `sqlite3.Error` applies.
+            Exception: When a background `save()` failed and still fails:
+                the lock's drain runs that save again and raises what it
+                raises, before any token is embedded. A failure that has
+                passed is saved there and nothing is raised (#941). The
+                batch form does the same.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -5160,6 +5200,10 @@ class DicomSession:
                 before any patient is planned.
             ValueError: The key file is empty or is not a Fernet key, as
                 for `lock_identities()`.
+            Exception: When a background `save()` failed and still fails:
+                the lock's drain runs that save again and raises what it
+                raises, before any token is embedded, as for
+                `lock_identities()` (#941).
             sqlite3.Error: A store write failed while tokens were being
                 persisted (`persist=True` writes per patient,
                 `auto_persist_chunk_size` per chunk), after one `ERROR`
@@ -5525,8 +5569,11 @@ class DicomSession:
                 # be walking them. After the refusal, so a refused
                 # restore leaves the queue as it found it. The merge's own
                 # drain cannot stand in -- it runs only on a collision,
-                # after these writes.
-                self.persistence_manager.flush()
+                # after these writes. `_wait`, the wait alone, here and at
+                # that merge: a restore is not one of the calls that run
+                # a failed background save again and raise it (#941), and
+                # the merge's drain comes after every instance is written.
+                self.persistence_manager._wait()
 
                 def patient_level(values):
                     """The group 0010 entries of a token's values.
@@ -5776,7 +5823,7 @@ class DicomSession:
                 # `anonymize()` merges them, or refused if they were
                 # de-identified under different date-offset schemes.
                 self.store._merge_patients_sharing_an_id(
-                    drain=self.persistence_manager.flush)
+                    drain=self.persistence_manager._wait)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
 
@@ -5871,7 +5918,11 @@ class DicomSession:
                 of the redaction, nothing persisted, so a corrected
                 configuration retries it.
             Exception: Whatever the redaction backend raised, after logging
-                it.
+                it. Also, before the pass starts, what a background
+                `save()` that failed raises when the entry drain runs it
+                again and it still fails; one that has passed is saved
+                there and nothing is raised (#941). A call with no rules
+                loaded returns 0 before that drain.
             RuntimeError: If the pass cannot start within 180 s because a
                 `compact()` is still saving or rewriting the sidecar.
                 Raised before any worker is dispatched and before any UID
@@ -6667,9 +6718,13 @@ class DicomSession:
         # `apply_remediation`, which would move the five line-pinned
         # `mark_modified()` calls. The drain
         # runs only when there is something to merge: `audit()` drains on
-        # entry and this path, handed its findings, does not.
+        # entry and this path, handed its findings, does not. `_wait`,
+        # the wait alone, and never `flush()`: `flush()` runs a failed
+        # background save again and raises it (#941), and a raise here
+        # would leave the pass applied in memory with its merge undone
+        # and its rows unflushed.
         self.store._merge_patients_sharing_an_id(
-            drain=self.persistence_manager.flush)
+            drain=self.persistence_manager._wait)
 
         if count:
             # A nonzero count is the session claiming remediations were
