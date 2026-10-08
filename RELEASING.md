@@ -488,9 +488,10 @@ fixes, never features.
      question.
    - **Under a minute, the four attempts failing as soon as they
      start** (three 15-second pauses, about 45 s): that is not a mirror
-     out of reach. apt was refused something: a package that is not
-     there, a source line that is broken, a 404. Read apt's error in
-     the log before any rerun; waiting will not change it, and it may
+     out of reach. apt was answered and refused: a package that is not
+     there, a source line that is broken, a 404, or a mirror answering
+     503. Read apt's error in the log before any rerun; waiting may not
+     change it (a 503 passes, a missing package does not), and it may
      need a fix to `tests.yml`.
 
    **What the rerun does depends on which job was red.** The upload
