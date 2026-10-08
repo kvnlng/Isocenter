@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **docs: two limits are written down where a user would meet them (#772, #756, owner rulings 2026-10-08).** Neither changes behaviour; each was measured on `main` at fd359eb3 on 3.12 before it was written.
+  - **#772, in `docs/migration.md`, "UIDs in stores and exports from before 1.0":** a 0.9.x export of a redacted instance, re-ingested into its own store after 1.0's `anonymize()` has replaced that store's UIDs, is admitted as a new instance. Measured with an instance shaped as 0.9.x redaction left it (a random `1.2.826.0.1.3680043.8.498.…` UID, its source UID recorded once): after `anonymize()` it holds its `2.25.` replacement; ingesting a file that carries the random UID leaves two instances and writes no `WARNING` row, because the store knows the instance by its replacement and by its source UID only. Ingesting the source file again is declined, with the `WARNING` row that names the instance holding it. Documented as a limit under the ruling that nothing written before 1.0 is accommodated; the page says to re-ingest source files.
+  - **#756, in `docs/configuration.md`, "What `basic@2026c` contains":** a presentation state whose Bitmap Display Shutter names an overlay group keeps its Shutter Overlay Group `(0018,1623)` while `60xx,xxxx` removes the group. Measured on a synthetic Grayscale Softcopy Presentation State (pydicom's `CT_small.dcm` relabelled, `BITMAP` shutter, one overlay plane in group 6000; no real GSPS was used): under the floor the export holds `(0018,1623)` = `0x6000` and no element of group 6000; with `"60xx,xxxx": {action: KEEP}` it holds all seven overlay elements. The page says the PS3.15 table is the authority on what the profile removes, that Isocenter neither keeps the group for the shutter's sake nor removes the shutter, and that `KEEP` on the group is how to keep such an object valid.
+  - **Output:** none. Two pages change.
+
+### Fixed
+
+- **`scripts.test_map build` writes no map when `coverage combine` could not read a data file, and says so (#975).** At the 1.0.0rc14 cut the 3.14t map build, which is also that release's 3.14t full run, ended green (`7633 passed, 15 skipped`), and its combine step printed `Couldn't use data file '….pid24365.XTX6AdUx': database disk image is malformed` and `Combined 992 files, skipped 24157, 1 file errored`, on a machine at load 80. `coverage combine` exits 0 for that, so `build`'s `check=True` saw nothing: it wrote `.test-map.json` without that process's data and exited 0. Such a map selects too little for whatever the process ran, and neither it nor `pytest --changed` says so.
+  - **Measured on coverage 7.16.0 (3.12) and 7.16.1 (3.14t):** over a data file cut to half its length, or filled with zeros, `combine` exits 0, prints the warning and `1 file errored`, and **leaves that file where it was**, while every file it read is deleted. An empty file is read as no data and deleted.
+  - **Now `build` looks for what combine left.** `test_map.combine()` runs the command and returns the parallel data files still beside the combined one. If there are any, `build` prints `the suite exited N; no map written: coverage combine could not read K data file(s) (…)`, writes nothing, leaves a `.test-map.json` already in the output folder as it was, and exits with the suite's status, or with 9 (`EXIT_NO_MAP`, outside pytest's 0 to 5) when the suite passed. The directory is read, not coverage's wording, which can change; coverage's own warning still reaches the terminal.
+  - **Not covered:** a data file a worker never wrote, or wrote empty, leaves nothing behind and is not seen.
+  - **RELEASING, "Cutting a release", step 1,** says what the release does then: the suite's result stands as the 3.14t integration result (`the suite exited 0` with `exit=9` is a green run and no map; it is not the rerun rule's failure), the previous map is kept or the map is built again outside the release path, and no other heavy run is started while the map build runs.
+  - `tests/test_changed_code_selects_its_tests.py`: `build` through its command line with the combine step leaving a file, for a green and a red suite (no map, the earlier map's text unchanged, the exit, the message); and `combine()` against the installed coverage over a truncated file, a zero-filled one and none, which is what goes red if a coverage release stops leaving the file. That last test needs `coverage`, which CI's `.[tests,ocr]` does not install, so its three cases skip on the runners.
+  - **Output:** none. A release tool changes; no file under `isocenter/` does.
+- **Correction to the 1.0.0rc15 record: #832's `**Output:**` line omits trailing whitespace (#982).** That line, and the section's lead after it, say a lead code "with whitespace in front of it" is written as the lead's name, "and no other" kind of channel changes beyond the three it lists. The entry's own body says "in front or behind", and the release does that. **No behaviour changes here**: this states what 1.0.0rc15 already does, and by the owner's ruling on the rc14 lines the released section stays as its tag has it. Found by the review of the rc15 release commit (PR #981).
+  - **Measured,** `v1.0.0rc14`'s package against `main` at fd359eb3 (the 1.0.0rc15 package), on 3.12.14 with pydicom 3.0.2: pydicom's `waveform_ecg.dcm` with channel 1's Channel Source set to scheme `MDC` and each Code Value below, written, read back, then `ingest()` and `export(format="wfdb")`, and the description field of the first signal line read from the `.hea`.
+
+    | Code Value written | read back by pydicom | 1.0.0rc14 | 1.0.0rc15 |
+    |---|---|---|---|
+    | `'2:1'` | `'2:1'` | `I` | `I` |
+    | `' 2:1'` (space in front) | `' 2:1'` | `2:1` | `I` |
+    | `'2:1\t'` (tab behind) | `'2:1\t'` | `2:1` | `I` |
+    | `'\t2:1'` (tab in front) | `'\t2:1'` | `2:1` | `I` |
+    | `'2:1\n'` (line break behind) | `'2:1\n'` | `2:1` | `I` |
+    | `'2:1\xa0'` (no-break space behind) | `'2:1\xa0'` | `2:1` | `I` |
+    | `' 2:1\t'` (both) | `' 2:1\t'` | `2:1` | `I` |
+    | `'2:1 '` (space behind) | `'2:1'` | `I` | `I` |
+
+  - **Output, restated:** in a WFDB `.hea`, the description field of a signal line, and in `annotations.json` the `lead` of a finding on that channel, a lead code with whitespace **in front of it or behind it** is written as the lead's name where it was the bare code (`2:1` to `I`). Whitespace is what `str.strip()` removes. The one case that did not change is a trailing space character, which pydicom strips when it reads an `SH` value, so 1.0.0rc14 already named it. The line's other two kinds of channel are as it says. The `.hea` is what was measured here; the file had no annotation on that channel, and `lead` is written from the same list of names (#832). The fingerprint is as 1.0.0rc15 recorded it: `synthetic:ecg_lead_codes`'s `-padded` file holds leading and trailing spaces and no other trailing whitespace, so no recorded value shows the trailing case, and none is added here.
+
 ## [1.0.0rc15] - 2026-10-07
 
 **Exported output changes in this release in WFDB exports only**, as the two entries' `**Output:**` lines name, where the details are. `compare --base v1.0.0rc14` reports one new member of the reference cohort, `synthetic:ecg_lead_codes`, and nothing else; no existing member's output changes:
