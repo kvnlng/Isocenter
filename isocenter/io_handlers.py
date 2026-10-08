@@ -6376,6 +6376,12 @@ class ExportContext:
     #: Pixel Data (review of #873). Both context builders set it. None,
     #: for a context built by hand, falls back to the written value.
     source_modality: Optional[str] = None
+    #: Why this instance is not to be written, when the door that built
+    #: the context refused to name its file (`export_output_path`); then
+    #: `output_path` is `""`. The worker raises it before anything else,
+    #: so the refusal is reported as every failed write is. Both context
+    #: builders set it. None, the default, is an instance to write.
+    refusal: Optional[BaseException] = None
 
     def __post_init__(self):
         # The worker asks again: a dataclass can be edited after this runs.
@@ -6440,7 +6446,8 @@ class ExportSummary:
     Attributes:
         written_uids (List[str]): The SOP Instance UID of each instance
             that reached disk, and nothing else. An instance with no UID
-            is not written and is in `failures`.
+            is not written and is in `failures`; so is one whose UID
+            cannot name a file (`export_file_name`), under that UID.
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
             instance that did not reach disk, each with an audit row.
         written (int): Files that reached disk, counted over distinct
@@ -7829,6 +7836,14 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     uid = getattr(ctx.instance, "sop_instance_uid", None)
 
     try:
+        # Refused where the context was built (`export_output_path`), and
+        # raised here so that the instance fails the way every other
+        # does: one `ExportOutcome`, one `ERROR` row, one entry in
+        # `failures`, counted in "of N planned". First, before anything
+        # reads `ctx.output_path`, which is `""` for it.
+        if ctx.refusal is not None:
+            raise ctx.refusal
+
         # Whether the pixels are encoded, asked once and of the one
         # predicate every other reader of `compression` asks; asking it
         # any other way lets an unknown value skip both the raw write and
@@ -9877,6 +9892,112 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
+class FileNameRefused(ValueError):
+    """An instance's SOP Instance UID cannot name its exported file.
+
+    Raised by `export_file_name`. Its text names the element and the
+    rule, and never the UID or a path: the row that carries it names the
+    instance already, and a second copy inside the reason would read as
+    the path of a file that was written.
+    """
+
+
+def export_file_name(instance) -> str:
+    """The name of an instance's exported file, `<SOP Instance UID>.dcm`,
+    or a refusal when that UID cannot name a file.
+
+    The single source of the file name, as `export_folder_names` is of
+    the folders: `session.export()`'s plan and `DicomExporter.write_tree`
+    both call it (through `export_output_path`), and nothing else formats
+    the name.
+
+    **The rule.** A UID that is a `str` is refused when either holds:
+
+    - `ConfigLoader.clean_filename` would change it. That function strips
+      surrounding whitespace, turns a space into `_`, and removes every
+      character but word characters, `-` and `.`; so a path separator
+      (`/`, `\\`), a NUL, a newline or any other control character, a
+      space, and any of `:*?"<>|` are each refused. A word character is
+      Unicode's (`\\w` under `(?u)`): a letter or digit of any script and
+      `_`.
+    - It begins with `.`, which covers `.` and `..` and any name a
+      directory listing hides.
+
+    Nothing is sanitised: the UID is also what the file carries in
+    `(0008,0018)` and what `ExportSummary.written_uids` reports, and a
+    name that differed from it would be a second answer to which file is
+    which. A conformant UID (digits and dots, PS3.5 section 9.1) is never
+    refused and its name is the UID and `.dcm`, byte for byte.
+
+    Not judged here, and named as before: an empty UID, which the write
+    refuses (it has no Media Storage SOP Instance UID to give the file),
+    and a UID that is not a `str`, which the save refuses.
+
+    Args:
+        instance (Instance): The instance to name.
+
+    Returns:
+        str: The file name.
+
+    Raises:
+        FileNameRefused: When the UID cannot name a file.
+    """
+    # Refused, not cleaned, by the owner's ruling (GHSA-2rc2-r9r5-x7hm).
+    # Until then both doors joined the UID to the series folder as it
+    # stood, while every folder name went through `clean_filename`: a
+    # source file whose UID was `../../../../../escaped` was written five
+    # directories up, over whatever was there, and reported as written.
+    #
+    # The suffix is fixed, so `..` alone could only ever name `...dcm`,
+    # inside the folder. The leading-dot clause is not there for
+    # traversal: it keeps a delivered file from being one a listing does
+    # not show.
+    uid = instance.sop_instance_uid
+    if isinstance(uid, str):
+        if uid != ConfigLoader.clean_filename(uid):
+            reason = ("holds a character other than a letter, a digit, "
+                      "'_', '-' or '.'")
+        elif uid.startswith("."):
+            reason = "begins with '.'"
+        else:
+            reason = None
+        if reason is not None:
+            raise FileNameRefused(
+                f"SOP Instance UID (0008,0018) cannot name a file: it "
+                f"{reason}. The export names each file by that UID, so no "
+                f"file was written for this instance, in the export folder "
+                f"or anywhere else. A pass that replaces (0008,0018), as "
+                f"audit() and anonymize() do under the default "
+                f"configuration, gives the instance a UID that can.")
+    return f"{uid}.dcm"
+
+
+def export_output_path(directory, instance):
+    """Where an instance's file goes in its series folder, or why it has
+    nowhere to go.
+
+    What a door that builds an `ExportContext` calls: the path for
+    `output_path` and the refusal for `refusal`, in one answer, so a door
+    cannot take the name and miss the refusal.
+
+    Args:
+        directory (str): The instance's series folder.
+        instance (Instance): The instance to place.
+
+    Returns:
+        tuple: `(path, None)`, or `("", refusal)` with the
+            `FileNameRefused` that `export_file_name` raised.
+    """
+    # `""`, not the folder and not None: the parent asks
+    # `os.path.exists(task.output_path)` of every planned task
+    # (`_report_recoverable_identities`, `_report_export_collisions`),
+    # and only the empty path answers False without raising.
+    try:
+        return os.path.join(directory, export_file_name(instance)), None
+    except FileNameRefused as refusal:
+        return "", refusal
+
+
 def _is_str(value):
     """The element rule every id selection takes by default."""
     return isinstance(value, str)
@@ -11445,10 +11566,16 @@ class DicomExporter:
                     # `0001.dcm` could be overwritten by a second instance
                     # claiming the same number. Do not introduce a
                     # "friendlier" name here without making it unique.
-                    fname = f"{inst.sop_instance_uid}.dcm"
-
-                    full_out_path = os.path.join(
-                        out_dir, subj_name, study_folder, series_folder, fname)
+                    #
+                    # Through the one helper both doors call, never
+                    # formatted here: a UID that cannot name a file is
+                    # refused there, and its context is still queued, so
+                    # the instance fails as any other does and `write_tree`
+                    # raises for it after writing the rest
+                    # (GHSA-2rc2-r9r5-x7hm).
+                    full_out_path, refusal = export_output_path(
+                        os.path.join(out_dir, subj_name, study_folder,
+                                     series_folder), inst)
 
                     # Resident pixels (a remediated or detached instance)
                     # travel on the context: the worker may have no other
@@ -11488,6 +11615,7 @@ class DicomExporter:
                         pixel_alg=sc_alg,
                         drop_foreign_icons=drop_foreign_icons,
                         source_modality=se.modality,
+                        refusal=refusal,
                     )
                     contexts.append(ctx)
         return contexts

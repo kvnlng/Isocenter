@@ -326,6 +326,32 @@ def test_one_sanitizer_for_folder_names():
         "ConfigLoader.clean_filename; both sanitize folder names")
 
 
+def test_the_exported_file_name_is_built_in_one_place():
+    """Two doors each formatted `<SOP Instance UID>.dcm` themselves, and
+    neither checked it (GHSA-2rc2-r9r5-x7hm). `io_handlers.export_file_name`
+    is the one place the name is built, and the one place it is refused;
+    a third door that formats its own is red here before anyone asks
+    whether it checks. Read as text: any f-string in the package that ends
+    a `{...uid...}` field with `.dcm`.
+    """
+    import re
+
+    package_dir = os.path.dirname(isocenter.__file__)
+    spelled = {}
+    for root, _, files in os.walk(package_dir):
+        for name in sorted(files):
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, encoding="utf-8") as fh:
+                hits = re.findall(
+                    r"""f["'][^"'\n]*\{[^}\n]*uid[^}\n]*\}\.dcm""", fh.read())
+            if hits:
+                spelled[os.path.relpath(path, package_dir)] = hits
+    assert list(spelled) == ["io_handlers.py"], spelled
+    assert len(spelled["io_handlers.py"]) == 1, spelled
+
+
 def test_clean_filename_does_not_treat_a_falsy_value_like_0_as_missing():
     """`ConfigLoader.clean_filename` must not treat a falsy-but-real value
     like the integer `0` as missing.
