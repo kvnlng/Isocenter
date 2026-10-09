@@ -1080,7 +1080,8 @@ def test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was():
 def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route):
     """Through `export()`, live, by both doors. After a save and a reopen
     the store holds `[24, 4195]` and the file carries two tags: the
-    store's own spelling of a tuple, not changed here, and filed."""
+    store's own spelling of a tuple, measured in the PR for #938 and not
+    changed here."""
     edit = (_around if route == "around" else _through_set_attr)(
         AT_TAG, (0x0018, 0x1063))
     result = _run(tmp_path / "live", edit)
