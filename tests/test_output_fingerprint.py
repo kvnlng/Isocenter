@@ -137,6 +137,105 @@ def test_an_implicit_file_says_its_vr_is_the_readers(tmp_path):
     assert rec["meta"]["0002,0010"].startswith("UI ")
 
 
+# -- an element pydicom cannot convert (#945) -----------------------------
+
+def _unconvertible_ul(tmp_path, name, value, implicit):
+    """A file whose `(0018,6018)`, a UL, holds `value`: six bytes where
+    pydicom wants a multiple of four, so `ds[tag]` raises its
+    BytesLengthException. Written as OB and relabelled on the wire,
+    because pydicom will not write a UL it cannot encode."""
+    ds = _dataset(syntax=ImplicitVRLittleEndian if implicit
+                  else ExplicitVRLittleEndian)
+    ds.add_new(0x00186018, "OB", value)
+    path = _write(ds, tmp_path / name, implicit=implicit)
+    if not implicit:
+        data = path.read_bytes()
+        as_ob = (b"\x18\x00\x18\x60OB\x00\x00"
+                 + len(value).to_bytes(4, "little") + value)
+        assert data.count(as_ob) == 1
+        # OB: two reserved bytes and a 4-byte length; UL: a 2-byte length.
+        path.write_bytes(data.replace(
+            as_ob, b"\x18\x00\x18\x60UL"
+            + len(value).to_bytes(2, "little") + value))
+    return path
+
+
+@pytest.mark.parametrize("implicit, label", [(False, "UL"),
+                                             (True, "None/implicit")])
+def test_an_element_pydicom_cannot_convert_is_recorded_by_its_bytes(
+        tmp_path, implicit, label):
+    """RECORDER 4 (#945): the VR on the wire, and the value's digest and
+    length as a binary value is recorded -- not pydicom's exception.
+
+    Until then the cell was `<vr> unreadable: <ExceptionClass>: <text>`:
+    a pin on pydicom's class name and message, so a pydicom release that
+    renamed or reworded either would show as an output difference at
+    `check` with the exported bytes unchanged.
+    """
+    value = b"12.5 \x00"
+    path = _unconvertible_ul(tmp_path, "a.dcm", value, implicit)
+    with pytest.raises(Exception) as raised:    # the premise
+        pydicom.dcmread(path)[0x00186018]       # pylint: disable=expression-not-assigned
+
+    cell = fp.record_dicom(path)["elements"]["0018,6018"]
+
+    assert cell == f"{label} unconverted {fp._h(value)} len=6"
+    assert type(raised.value).__name__ not in cell
+    assert "pydicom" not in cell
+
+
+def _lut_beside_a_one_value_descriptor(tmp_path, name, data):
+    """#703's shape: pydicom raises TypeError resolving `US or OW` LUT
+    Data beside a LUT Descriptor of one value, and the exception's text
+    says nothing of the bytes."""
+    ds = _dataset(syntax=ImplicitVRLittleEndian)
+    item = Dataset()
+    item.add_new(0x00283002, "US", [4])
+    item.add_new(0x00283006, "OW", data)
+    ds.add_new(0x00283000, "SQ", Sequence([item]))
+    return _write(ds, tmp_path / name, implicit=True)
+
+
+def test_two_values_pydicom_cannot_convert_are_two_records(tmp_path):
+    """The other half of #945: a change in bytes pydicom cannot convert
+    is a change in output, and must be seen.
+
+    Under RECORDER 3 both files below recorded `None/implicit unreadable:
+    TypeError: 'int' object is not subscriptable`, so a real difference
+    at that element compared equal. Nine cells of the committed
+    recording held that string or its `'NoneType'` twin.
+    """
+    key = "0028,3000[0]>0028,3006"
+    first = b"\x01\x00\x02\x00\x03\x00\x04\x00"
+    second = b"\x09\x00\x02\x00\x03\x00\x04\x00"
+    a = fp.record_dicom(_lut_beside_a_one_value_descriptor(
+        tmp_path, "a.dcm", first))["elements"][key]
+    b = fp.record_dicom(_lut_beside_a_one_value_descriptor(
+        tmp_path, "b.dcm", second))["elements"][key]
+
+    assert a == f"None/implicit unconverted {fp._h(first)} len=8"
+    assert b == f"None/implicit unconverted {fp._h(second)} len=8"
+
+    report = fp.compare(_fingerprint({"m": _member({"f.dcm": _file(**{"0028_3006": a})})}),
+                        _fingerprint({"m": _member({"f.dcm": _file(**{"0028_3006": b})})}))
+    assert [g.kind for g in report.groups] == ["changed"], report.text()
+
+
+def test_an_unconverted_cell_is_grouped_under_its_wire_vr():
+    """`compare` keys a group on a cell's first word. `unconverted` is
+    the second, so the group reads `UL`, or `None` for an implicit file,
+    as the same element's group did under RECORDER 3."""
+    assert fp._group_vr("UL unconverted sha256:0123456789abcdef len=6") == "UL"
+    assert fp._group_vr(
+        "None/implicit unconverted sha256:0123456789abcdef len=6") == "None"
+
+
+def test_the_recorder_version_moved_with_the_unconverted_rendering():
+    """A changed rendering is a changed measuring stick: `compare` then
+    reports the differences it causes under Cohort (#945)."""
+    assert fp.RECORDER == 4
+
+
 def test_a_change_inside_a_sequence_is_seen_at_its_path(tmp_path):
     def nested(name):
         ds = _dataset()
