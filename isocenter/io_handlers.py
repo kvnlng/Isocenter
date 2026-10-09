@@ -7845,9 +7845,6 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             instance could not be written.
     """
     losses: List[Tuple[str, str]] = []
-    # The instance's rows for tags an owner stamps, and where they were.
-    spared: List[Tuple[str, str]] = []
-    spared_at = 0
     corrections: List[str] = []
     warnings: List[str] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
@@ -7904,15 +7901,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # sentence per instance after the merges. The three stamp
         # merges below are standard tags and pass none.
         revrs: List[_ReVr] = []
-        spared_at = len(losses)
+        own_from = len(losses)
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs, corrections=corrections,
                              warnings=warnings)
         # Before the items are merged, so that an item's own row for the
         # same tag is not deduped against one about to be taken away.
-        spared = DicomExporter._take_copies_a_stamp_replaces(
-            losses, spared_at, ctx.patient_attributes, ctx.study_attributes,
+        DicomExporter._take_copies_a_stamp_replaces(
+            losses, own_from, ctx.patient_attributes, ctx.study_attributes,
             ctx.series_attributes)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
                                        revrs=revrs, corrections=corrections,
@@ -8733,12 +8730,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it.
         # The parent's `ERROR` row, `_report_export_failures`', has the
         # same shape.
-        #
-        # No file, so no stamp answers for the instance's own copies:
-        # their rows go back where they were (`_take_copies_a_stamp_replaces`).
-        losses[spared_at:spared_at] = [row for row in spared
-                                       if row not in losses]
-        named = f"instance {uid}" if uid else _NO_SOP_UID
+        named =f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
@@ -12462,7 +12454,8 @@ class DicomExporter:
 
     @staticmethod
     def _take_copies_a_stamp_replaces(losses, start, *stamps):
-        """Take out the instance's loss rows for tags an owner stamps.
+        """Take out the text gate's rows for the instance's own copies of
+        tags an owner stamps.
 
         Args:
             losses (list): The worker's `(scope, detail)` rows, edited in
@@ -12470,34 +12463,34 @@ class DicomExporter:
                 merge, so `losses[start:]` is that merge's rows.
             start (int): Where that merge began appending.
             *stamps (dict): The owner mappings `_merge_stamp` will write.
-
-        Returns:
-            list: The rows taken out, for the worker to put back if the
-                file is not written.
         """
-        # Second delta review of #1009, N2. An instance's copy of Patient
-        # ID that `_merge` cannot write (`7`, since the text gate) got
-        # `Tag 0010,0020 not exported (data loss)` beside a file holding
-        # (0010,0020) with the Patient's value. The row was false: the
-        # copy is never what the file carries, the stamp is. PN and UI
-        # copies had said it all along (they raise at `add_new`); the
-        # gate extended it to LO and DA.
+        # Second delta review of #1009, N2; owner ruling of 2026-10-09 on
+        # #1028. An instance's copy of Patient ID or Study Date holding a
+        # number got `Tag 0010,0020 not exported (data loss)` once the
+        # text gate refused it (#939), beside a file holding the tag with
+        # its owner's value. Before the gate pydicom took the number at
+        # `add_new`, the stamp replaced it, and there was no row: the copy
+        # is never what the file carries.
         #
-        # - **A written file holds every stamp**: one that cannot be
-        #   written raises out of `_merge_stamp` and fails the file. So
-        #   the rows are spared whenever a file is written, and the
-        #   worker puts them back when none is, beside the ERROR row.
+        # - **Only the rows the gate added.** A copy under PN or UI was
+        #   refused by pydicom at `add_new` before the gate and had a row
+        #   in every release; so had `bytes` that do not decode. Those
+        #   rows stay, as untrue as they were, and are #1029's. The gate's
+        #   own are told by its sentence under a VR other than PN and UI.
+        # - **Never put back.** With no file written there was no such
+        #   row before the gate either.
         # - **Taken out before the sequences are merged.** A nested
         #   item's Patient ID is no owner's to stamp, its row has the
-        #   same text, and `_merge` dedupes by text: left in until the
-        #   stamps were written, the instance's row would have swallowed
-        #   the item's and then been dropped.
+        #   same text, and `_merge` dedupes by text: taken out any later,
+        #   the instance's row would have swallowed the item's first.
         # - **Matched on the row's own prefix**, the one `_merge` writes.
         stamped = tuple(f"Tag {tag} not exported" for attrs in stamps
                         for tag in attrs)
-        taken = [row for row in losses[start:] if row[1].startswith(stamped)]
-        losses[start:] = [row for row in losses[start:] if row not in taken]
-        return taken
+        gates = tuple(f"is not text, and {vr} holds text"
+                      for vr in sorted(_TEXT_VRS - {"PN", "UI"}))
+        losses[start:] = [row for row in losses[start:]
+                          if not (row[1].startswith(stamped)
+                                  and row[1].endswith(gates))]
 
     @staticmethod
     def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",

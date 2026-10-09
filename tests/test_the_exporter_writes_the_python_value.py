@@ -1236,16 +1236,39 @@ _STAMPED = [("0010,0010", "PN", b"CompressedSamples^CT1 "),
             ("0020,000e", "UI", b"1.3.6.1.4.1.5962.1.3.1.1.20040119072730.12322\x00")]
 
 
+def _rows_before_the_gate(make_kind):
+    """The rows an unwritable value in all five copies had before the
+    text gate, by tag: a number under PN and UI (pydicom refuses it at
+    `add_new`), `bytes` that do not decode under DA and UI. Never under
+    LO, and a number never under DA: pydicom took those, and the stamp
+    replaced them. The sentence for a number is the gate's own since
+    #939."""
+    if make_kind == "bytes":
+        return sorted(f"Tag {tag} not exported (data loss): UnicodeDecodeError"
+                      for tag, vr, _value in _STAMPED if vr in ("DA", "UI"))
+    return sorted(f"Tag {tag} not exported (data loss): TypeError: a "
+                  f"{make_kind} is not text, and {vr} holds text"
+                  for tag, vr, _value in _STAMPED if vr in ("PN", "UI"))
+
+
+_COPIES = [pytest.param(lambda: 7, "int", id="int"),
+           pytest.param(lambda: 1.5, "float", id="float"),
+           pytest.param(lambda: np.int64(7), "int", id="numpy-int"),
+           pytest.param(lambda: [7, 8], "int", id="list"),
+           pytest.param(lambda: b"\xff", "bytes", id="bytes")]
+
+
 @pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
-@pytest.mark.parametrize("make", [lambda: 7, lambda: b"\xff"], ids=["int", "bytes"])
-def test_an_unwritable_instance_copy_of_a_stamped_tag_is_no_loss(
-        tmp_path, make, reopen):
-    """Second delta review of #1009, N2. The instance's own copy of a tag
-    its owner stamps is never what the file carries: the stamp is. A copy
-    `_merge` cannot write was reported `Tag 0010,0020 not exported (data
-    loss)` beside a file holding the tag, with the owner's value: for PN
-    and UI all along, and for LO and DA once the text gate refused a
-    number (#939). No row; the file is what it was."""
+@pytest.mark.parametrize("make, kind", _COPIES)
+def test_an_instance_copy_of_a_stamped_tag_has_the_rows_it_had_before_the_gate(
+        tmp_path, make, kind, reopen):
+    """Second delta review of #1009, N2; owner ruling of 2026-10-09 on
+    #1028. The file carries the owner's stamp, never the instance's copy.
+    The text gate (#939) gave a number in the copy of Patient ID or Study
+    Date a `not exported (data loss)` row beside a file holding the tag;
+    those rows are gone. The rows every release wrote for a copy pydicom
+    itself refuses (PN, UI, undecodable `bytes`) stay, and are #1029's:
+    30 of these 50 copies have a row, the other 20 have none."""
     def edit(inst, _item, _session):
         for tag, _vr, _value in _STAMPED:
             inst.attributes[tag] = make()
@@ -1255,7 +1278,38 @@ def test_an_unwritable_instance_copy_of_a_stamped_tag_is_no_loss(
     assert result["written"] == 1, result["written"]
     for tag, vr, value in _STAMPED:
         assert _element(result, tag) == (vr, value)
-    assert result["rows"] == [] and result["grade"] == _PASS
+    assert all(action == "DATA_LOSS" and scope == "STANDARD"
+               for action, scope, _details in result["rows"])
+    expected = _rows_before_the_gate(kind)
+    got = sorted(details for _action, _scope, details in result["rows"])
+    assert len(got) == len(expected), got
+    assert all(row.startswith(start) for row, start in zip(got, expected)), got
+    assert result["grade"] == _PASS
+
+
+@pytest.mark.parametrize("make, kind", _COPIES)
+def test_write_tree_logs_the_same_rows_for_an_instance_copy(
+        tmp_path, monkeypatch, caplog, make, kind):
+    """The other door, which logs a loss where `export()` writes a row."""
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    patient = _hand_built("PAT", "Doe^Jane")
+    (inst,) = patient.studies[0].series[0].instances
+    for tag, _vr, _value in _STAMPED:
+        inst.attributes[tag] = make()
+    with caplog.at_level("WARNING", logger="isocenter"):
+        DicomExporter.write_tree(patient, str(tmp_path / "tree"),
+                                 show_progress=False)
+    (path,) = (tmp_path / "tree").rglob("*.dcm")
+    written = pydicom.dcmread(str(path))
+    assert (written.PatientID, str(written.PatientName), written.StudyDate,
+            written.StudyInstanceUID, written.SeriesInstanceUID) == (
+        "PAT", "Doe^Jane", "20230102", "1.2.826.0.2.999", "1.2.826.0.3.999")
+    logged = sorted(message[message.index("Tag "):]
+                    for message in caplog.messages if "not exported" in message)
+    expected = _rows_before_the_gate(kind)
+    assert len(logged) == len(expected), logged
+    assert all(row.startswith(start)
+               for row, start in zip(logged, expected)), logged
 
 
 def test_only_the_instances_own_stamped_copies_are_spared_the_row(tmp_path):
@@ -1279,9 +1333,9 @@ def test_only_the_instances_own_stamped_copies_are_spared_the_row(tmp_path):
 
 
 def test_a_file_that_fails_keeps_the_row_for_the_instances_copy(tmp_path):
-    """No file, so no stamp answers for the copy: when the Patient's name
-    cannot be written either, the instance's `DATA_LOSS` row stands
-    beside the `ERROR` row, as it did."""
+    """When the Patient's name cannot be written either, the file fails
+    and the instance's `DATA_LOSS` row for its own copy stands beside
+    the `ERROR` row, as it did: a PN row is not one the gate added."""
     folder = tmp_path / "both"
     folder.mkdir()
     (folder / "in").mkdir()
