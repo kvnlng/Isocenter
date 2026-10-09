@@ -1079,6 +1079,17 @@ class _Group(enum.IntEnum):
     # pydicom has always written as two group-0000 tags.
     pytest.param(lambda: (1.0, 7), b"\x00\x00\x01\x00\x00\x00\x07\x00",
                  id="pair-with-a-float"),
+    # Second delta review of #1009, N3: four more tuples that name no tag
+    # and are the list they equal (#1026). Each was dropped under a row
+    # before #938; each list wrote exactly this.
+    pytest.param(lambda: (0x0018,), b"\x00\x00\x18\x00", id="1-tuple"),
+    pytest.param(lambda: ("0018", "1063", "1064"),
+                 b"\x00\x00\x18\x00\x00\x00\x63\x10\x00\x00\x64\x10",
+                 id="3-tuple-of-hex-strings"),
+    pytest.param(lambda: (Decimal("24"), Decimal("4195")),
+                 b"\x00\x00\x18\x00\x00\x00\x63\x10", id="pair-of-Decimals"),
+    pytest.param(lambda: (np.float32(1.0), np.float32(7.0)),
+                 b"\x00\x00\x01\x00\x00\x00\x07\x00", id="pair-of-numpy-floats"),
 ])
 def test_under_at_a_two_tuple_is_one_tag(make, written):
     """`(0x0018, 0x1063)` is pydicom's ordinary spelling of one tag, and
@@ -1088,6 +1099,37 @@ def test_under_at_a_two_tuple_is_one_tag(make, written):
     raw, losses, notes = _merged({AT_TAG: make()})
     assert raw(AT_TAG) == ("AT", written)
     assert losses == [] and notes == []
+
+
+@pytest.mark.parametrize("make", [lambda: (None, None), lambda: [None, None]],
+                         ids=["tuple", "list"])
+def test_a_pair_of_none_under_at_fails_the_write_as_its_list_does(make):
+    """Second delta review of #1009, N3: the one tuple under `AT` whose
+    list is worse than what the tuple did. `(None, None)` was one element
+    dropped under a row; as the list it equals it passes `_merge` with no
+    row and pydicom's writer raises on it, which fails the file, as
+    `[None, None]` always did (#1026)."""
+    ds, losses = Dataset(), []
+    DicomExporter._merge(ds, {AT_TAG: make()}, losses)
+    assert losses == []
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    with pytest.raises(TypeError):
+        pydicom.dcmwrite(io.BytesIO(), ds, enforce_file_format=False)
+
+
+def test_a_two_tuple_of_basetags_under_at_is_dropped_as_it_was():
+    """A `BaseTag` is an `int`, so a tuple of exactly two is taken for one
+    tag and pydicom refuses it (`OverflowError`): one element dropped
+    under a row, before #938 and after it, while its list is two tags.
+    Unchanged, and noted on #1026."""
+    pair = (pydicom.tag.BaseTag(0x00181063), pydicom.tag.BaseTag(0x00181064))
+    raw, losses, _notes = _merged({AT_TAG: pair})
+    assert raw(AT_TAG) is None
+    ((scope, detail),) = losses
+    assert scope == "STANDARD" and "OverflowError" in detail
+    raw, losses, _notes = _merged({AT_TAG: list(pair)})
+    assert raw(AT_TAG) == ("AT", _ONE + _OTHER) and losses == []
 
 
 def test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was():
@@ -1121,7 +1163,10 @@ def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route):
     ("0008,1090", lambda: np.array([b"A", b"B"]), ("LO", b"A\\B ")),
     ("0008,1090", lambda: [np.array(["A", "B"])], ("LO", b"A\\B ")),
     ("0008,0012", lambda: np.array(["20200101"]), ("DA", b"20200101")),
-], ids=["cs-U", "lo-U", "lo-object", "lo-S", "lo-in-a-list", "da-U"])
+    # Second delta review, N1: the `bytes` half of "str and bytes".
+    ("0008,1090", lambda: np.array([b"A", b"B"], dtype=object), ("LO", b"A\\B ")),
+], ids=["cs-U", "lo-U", "lo-object", "lo-S", "lo-in-a-list", "da-U",
+        "lo-object-of-bytes"])
 def test_a_numpy_array_of_text_under_a_text_vr_is_written_as_it_was(
         tag, make, written):
     """Delta review of #1009, finding 5. The gate refused every
@@ -1145,6 +1190,180 @@ def test_a_numpy_array_holding_a_number_under_a_text_vr_is_still_refused(make):
     ((scope, detail),) = losses
     assert scope == "STANDARD"
     assert detail.endswith("TypeError: a ndarray is not text, and LO holds text")
+
+
+_EMPTIES = [
+    pytest.param(lambda: np.array([]), id="float-array"),
+    pytest.param(lambda: np.array([], dtype=int), id="int-array"),
+    pytest.param(lambda: np.array([], dtype=str), id="str-array"),
+    pytest.param(lambda: np.array([], dtype=object), id="object-array"),
+    pytest.param(list, id="list"),
+    pytest.param(tuple, id="tuple"),
+]
+
+
+@pytest.mark.parametrize("make", _EMPTIES)
+@pytest.mark.parametrize("tag, vr", [("0008,1090", "LO"), ("0008,0008", "CS")])
+def test_an_empty_array_under_a_text_vr_is_a_zero_length_element(tag, vr, make):
+    """Second delta review of #1009, N4. An empty array holds no number,
+    whatever its dtype (`np.array([])` is float64), so it is not the
+    gate's: it is the zero-length element the empty list is, as before
+    the gate."""
+    raw, losses, notes = _merged({tag: make()})
+    assert raw(tag) == (vr, b"")
+    assert losses == [] and notes == []
+
+
+@pytest.mark.parametrize("make", _EMPTIES[:4])
+@pytest.mark.parametrize("tag", ["0008,0090", "0008,0062", "0008,0012"],
+                         ids=["PN", "UI", "DA"])
+def test_an_empty_array_under_pn_ui_or_da_is_lost_as_it_was(tag, make):
+    """Under PN, UI and DA pydicom refuses an empty array itself, and did
+    before the gate: one element lost, in pydicom's words, not the
+    gate's."""
+    raw, losses, _notes = _merged({tag: make()})
+    assert raw(tag) is None
+    ((scope, detail),) = losses
+    assert scope == "STANDARD" and "is not text" not in detail
+
+
+# -- The instance's copy of a tag its owner stamps ----------------------------
+
+_STAMPED = [("0010,0010", "PN", b"CompressedSamples^CT1 "),
+            ("0010,0020", "LO", b"1CT1"),
+            ("0008,0020", "DA", b"20040119"),
+            ("0020,000d", "UI", b"1.3.6.1.4.1.5962.1.2.1.20040119072730.12322\x00"),
+            ("0020,000e", "UI", b"1.3.6.1.4.1.5962.1.3.1.1.20040119072730.12322\x00")]
+
+
+def _rows_before_the_gate(make_kind):
+    """The rows an unwritable value in all five copies had before the
+    text gate, by tag: a number under PN and UI (pydicom refuses it at
+    `add_new`), `bytes` that do not decode under DA and UI. Never under
+    LO, and a number never under DA: pydicom took those, and the stamp
+    replaced them. The sentence for a number is the gate's own since
+    #939."""
+    if make_kind == "bytes":
+        return sorted(f"Tag {tag} not exported (data loss): UnicodeDecodeError"
+                      for tag, vr, _value in _STAMPED if vr in ("DA", "UI"))
+    return sorted(f"Tag {tag} not exported (data loss): TypeError: a "
+                  f"{make_kind} is not text, and {vr} holds text"
+                  for tag, vr, _value in _STAMPED if vr in ("PN", "UI"))
+
+
+_COPIES = [pytest.param(lambda: 7, "int", id="int"),
+           pytest.param(lambda: 1.5, "float", id="float"),
+           pytest.param(lambda: np.int64(7), "int", id="numpy-int"),
+           pytest.param(lambda: [7, 8], "int", id="list"),
+           pytest.param(lambda: b"\xff", "bytes", id="bytes")]
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+@pytest.mark.parametrize("make, kind", _COPIES)
+def test_an_instance_copy_of_a_stamped_tag_has_the_rows_it_had_before_the_gate(
+        tmp_path, make, kind, reopen):
+    """Second delta review of #1009, N2; owner ruling of 2026-10-09 on
+    #1028. The file carries the owner's stamp, never the instance's copy.
+    The text gate (#939) gave a number in the copy of Patient ID or Study
+    Date a `not exported (data loss)` row beside a file holding the tag;
+    those rows are gone. The rows every release wrote for a copy pydicom
+    itself refuses (PN, UI, undecodable `bytes`) stay, and are #1029's:
+    30 of these 50 copies have a row, the other 20 have none."""
+    def edit(inst, _item, _session):
+        for tag, _vr, _value in _STAMPED:
+            inst.attributes[tag] = make()
+        inst.mark_modified()
+
+    result = _run(tmp_path / "out", edit, reopen=reopen)
+    assert result["written"] == 1, result["written"]
+    for tag, vr, value in _STAMPED:
+        assert _element(result, tag) == (vr, value)
+    assert all(action == "DATA_LOSS" and scope == "STANDARD"
+               for action, scope, _details in result["rows"])
+    expected = _rows_before_the_gate(kind)
+    got = sorted(details for _action, _scope, details in result["rows"])
+    assert len(got) == len(expected), got
+    assert all(row.startswith(start) for row, start in zip(got, expected)), got
+    assert result["grade"] == _PASS
+
+
+@pytest.mark.parametrize("make, kind", _COPIES)
+def test_write_tree_logs_the_same_rows_for_an_instance_copy(
+        tmp_path, monkeypatch, caplog, make, kind):
+    """The other door, which logs a loss where `export()` writes a row."""
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    patient = _hand_built("PAT", "Doe^Jane")
+    (inst,) = patient.studies[0].series[0].instances
+    for tag, _vr, _value in _STAMPED:
+        inst.attributes[tag] = make()
+    with caplog.at_level("WARNING", logger="isocenter"):
+        DicomExporter.write_tree(patient, str(tmp_path / "tree"),
+                                 show_progress=False)
+    (path,) = (tmp_path / "tree").rglob("*.dcm")
+    written = pydicom.dcmread(str(path))
+    assert (written.PatientID, str(written.PatientName), written.StudyDate,
+            written.StudyInstanceUID, written.SeriesInstanceUID) == (
+        "PAT", "Doe^Jane", "20230102", "1.2.826.0.2.999", "1.2.826.0.3.999")
+    logged = sorted(message[message.index("Tag "):]
+                    for message in caplog.messages if "not exported" in message)
+    expected = _rows_before_the_gate(kind)
+    assert len(logged) == len(expected), logged
+    assert all(row.startswith(start)
+               for row, start in zip(logged, expected)), logged
+
+
+def test_only_the_instances_own_stamped_copies_are_spared_the_row(tmp_path):
+    """The same number in a nested item's Patient ID, and in a top-level
+    tag no owner stamps, is a loss and says so."""
+    def edit(inst, item, _session):
+        inst.attributes["0010,0020"] = 7
+        item.attributes["0010,0020"] = 7
+        inst.attributes[LO_TAG] = 7
+        inst.mark_modified()
+
+    result = _run(tmp_path / "out", edit)
+    assert result["written"] == 1, result["written"]
+    assert _element(result, "0010,0020") == ("LO", b"1CT1")
+    assert _element(result, "0010,0020", nested=True) is None
+    assert _element(result, LO_TAG) is None
+    assert sorted(details.split(" not exported")[0]
+                  for _action, _scope, details in result["rows"]) == [
+        "Tag 0008,1090", "Tag 0010,0020"]
+    assert all(action == "DATA_LOSS" for action, _s, _d in result["rows"])
+
+
+def test_a_file_that_fails_keeps_the_row_for_the_instances_copy(tmp_path):
+    """When the Patient's name cannot be written either, the file fails
+    and the instance's `DATA_LOSS` row for its own copy stands beside
+    the `ERROR` row, as it did: a PN row is not one the gate added."""
+    folder = tmp_path / "both"
+    folder.mkdir()
+    (folder / "in").mkdir()
+    shutil.copy(get_testdata_file("CT_small.dcm"), str(folder / "in" / "a.dcm"))
+    db, out = str(folder / "s.db"), folder / "out"
+    session = DicomSession(db)
+    try:
+        session.ingest(str(folder / "in"))
+        inst, patient = _instance(session), _owner(session, "patient")
+        name, copy = patient.patient_name, inst.attributes["0010,0010"]
+        inst.attributes["0010,0010"] = 7
+        patient.patient_name = 7
+        with pytest.raises(ExportError):
+            session.export(str(out), use_compression=True, show_progress=False)
+        # So the session can close on values the store holds.
+        inst.attributes["0010,0010"], patient.patient_name = copy, name
+    finally:
+        session.close()
+    with sqlite3.connect(db) as conn:
+        rows = [(action, details or "") for action, details in conn.execute(
+            "SELECT action_type, details FROM audit_log WHERE action_type "
+            "IN ('ERROR', 'DATA_LOSS') ORDER BY rowid")]
+    losses = [details for action, details in rows if action == "DATA_LOSS"]
+    assert len(losses) == 1 and len(rows) == 2, rows
+    assert losses[0].startswith(
+        "Tag 0010,0010 not exported (data loss): TypeError: a int is not "
+        "text, and PN holds text")
+    assert "The file itself was not written" in losses[0]
 
 
 # -- A file's own binary number under a text tag is a plain number ------------
