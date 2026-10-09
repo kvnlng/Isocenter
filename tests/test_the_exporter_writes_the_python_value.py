@@ -28,7 +28,9 @@ twin, through `set_attr`, and after a save and a reopen. Every cell is
 pinned to literal bytes first, because two exports that are equally wrong
 are equal. Elements are read as written (`get_item`), never parsed.
 """
+import collections
 import datetime
+import fractions
 import hashlib
 import io
 import os
@@ -47,8 +49,19 @@ from pydicom.uid import UID, ExplicitVRLittleEndian
 from pydicom.valuerep import DSdecimal, DSfloat, IS
 
 from isocenter.entities import DicomItem
+from isocenter import io_handlers
 from isocenter.io_handlers import DicomExporter, ExportError, _export_value
 from isocenter.session import DicomSession
+
+_Pair = collections.namedtuple("_Pair", "first second")
+
+
+class _TupleSubclass(tuple):
+    pass
+
+
+class _ListSubclass(list):
+    pass
 
 IS_TAG, DS_TAG, US_SS_TAG, FD_TAG = "0018,1150", "0028,1050", "0028,0106", "0018,9087"
 LO_TAG, PRIVATE = "0008,1090", "0011,1001"
@@ -97,9 +110,10 @@ class _Result(dict):
                 f"grade={self.get('grade')} rows={self.get('rows')}>")
 
 
-def _run(folder, edit, *, reopen=False):
+def _run(folder, edit, *, reopen=False, source=None):
     """One fresh store: ingest CT_small, `edit(instance, item, session)`,
-    export compressed (so the file names its VRs).
+    export compressed (so the file names its VRs). `source(dataset)`,
+    when given, edits the input file before it is ingested.
 
     `item` is an empty item nested in `SEQ`, saved before the edit. With
     `reopen`, the store is saved and reopened between the edit and the
@@ -110,6 +124,10 @@ def _run(folder, edit, *, reopen=False):
     folder.mkdir(parents=True)
     (folder / "in").mkdir()
     shutil.copy(get_testdata_file("CT_small.dcm"), str(folder / "in" / "a.dcm"))
+    if source is not None:
+        given = pydicom.dcmread(str(folder / "in" / "a.dcm"))
+        source(given)
+        given.save_as(str(folder / "in" / "a.dcm"))
     db = str(folder / "s.db")
     out = folder / "out"
     result = _Result()
@@ -459,11 +477,14 @@ def test_a_decimal_set_through_set_attr_is_still_refused_at_the_save(tmp_path):
     (lambda: Decimal("Infinity"), "Decimal"),
     (lambda: [Decimal("1.5"), Decimal("-Infinity")], "list"),
 ], ids=["sNaN", "NaN", "Infinity", "list-with-Infinity"])
-def test_a_decimal_that_is_no_number_costs_its_element_not_the_file(
+def test_a_decimal_that_is_no_number_under_a_private_tag_costs_its_element(
         tmp_path, make, kind):
     """`float(Decimal("sNaN"))` raises, and the conversion runs outside
     the per-element `try`. A non-finite `Decimal` is left a `Decimal`,
-    and under a private tag that is one PRIVATE loss row."""
+    and under a private tag that is one PRIVATE loss row. Under a private
+    tag only: `Decimal("sNaN")` under FD still fails the whole file, as it
+    did before this change (pydicom packs it at `dcmwrite`; #986's
+    class)."""
     result = _run(tmp_path / "live", _around(PRIVATE, make()))
     assert result["written"] == 1, result["written"]
     assert _element(result, PRIVATE) is None
@@ -571,8 +592,13 @@ def test_the_issues_own_call_exports_the_file_without_the_model_name(tmp_path):
     (lambda: Decimal("NaN"), "Decimal"),
     (lambda: ["A", np.int64(7)], "int"),
     (lambda: MultiValue(float, [7.5]), "float"),
+    (lambda: True, "bool"),
+    (lambda: ["A", False], "bool"),
+    (lambda: fractions.Fraction(1, 2), "Fraction"),
+    (lambda: _ListSubclass(["A", 7]), "int"),
 ], ids=["ndarray", "datetime64", "masked", "complex64", "complex",
-        "Decimal-NaN", "list-ending-in-int64", "MultiValue-of-float"])
+        "Decimal-NaN", "list-ending-in-int64", "MultiValue-of-float",
+        "bool", "list-ending-in-bool", "Fraction", "list-subclass"])
 def test_each_text_vr_refuses_each_kind_of_number_by_its_type(vr, tag, make, kind):
     """The gate, VR by VR, on `_merge` alone: a number of any kind, a
     numpy value #926 leaves unconverted and a non-finite `Decimal` are
@@ -717,25 +743,6 @@ def test_merge_leaves_the_mapping_it_reads_as_it_was():
     assert len(losses) == 1 and ds[_numbers(IS_TAG)].value == 7
 
 
-def test_a_numpy_value_on_an_owner_is_the_stamp_its_twin_is(tmp_path):
-    """The three owner stamps go through the same `_merge`. A numpy number
-    assigned to a `Patient`'s name is the Python number's loss row, word
-    for word."""
-    def assign(value):
-        def edit(_inst, _item, session):
-            (patient,) = session.store.patients
-            patient.patient_name = value
-        return edit
-
-    live = _run(tmp_path / "live", assign(np.int64(7)))
-    twin = _run(tmp_path / "twin", assign(7))
-    assert live["written"] == 1, live["written"]
-    ((action, scope, details),) = live["rows"]
-    assert (action, scope) == ("DATA_LOSS", "STANDARD")
-    assert details.endswith(_not_text("int", "PN", "0010,0010")[1]), details
-    assert _same(twin) == _same(live)
-
-
 def _typed(value):
     """`value` with the type of every atom, so `7 == 7.0 == True` and
     `(1, 2) != [1, 2]` cannot pass for one another."""
@@ -791,6 +798,13 @@ _UNTOUCHED = [
     np.ma.masked, np.ma.array(7, mask=True), np.ma.array([1, 2], mask=[0, 1]),
     np.str_("x"), np.bytes_(b"x"), 1j, object(), {"a": 1}, {1, 2},
     float("nan"), float("inf"), 10 ** 400,
+    # A subclass of `tuple` or `list` is not the container the store
+    # reads it as, and is left alone as #926's converter leaves it
+    # (`type(...) in (list, tuple)`): it exports as it did. `isinstance`
+    # in any of the three tests would change that.
+    _Pair(1, 2), _Pair(np.int64(1), 2), _TupleSubclass((1, 2)),
+    _ListSubclass([Decimal("1.5")]), _ListSubclass([np.int64(1)]),
+    _ListSubclass([1, 2]),
 ]
 
 
@@ -933,3 +947,252 @@ def test_a_large_plain_list_is_not_rebuilt():
     converted = _export_value(big)
     assert converted is not big and type(converted[-1]) is int
     assert type(big[-1]) is np.int64
+
+
+def test_a_reopened_stores_multi_valued_ds_and_is_take_the_fast_path():
+    """A reopened store hands back every multi-valued DS and IS as a list
+    of `DSfloat` or `IS`. Neither is ever converted, so both exact types
+    are plain: without them each such list paid the type pass and both
+    scans, about 6 ms per 65,536 members. Removing them changes no output,
+    which is why the set is read here as well as the result."""
+    assert {DSfloat, IS} <= io_handlers._PLAIN_TYPES
+    assert Decimal not in io_handlers._PLAIN_TYPES
+    assert DSdecimal not in io_handlers._PLAIN_TYPES
+    for big in ([DSfloat("1.50")] * 65536, [IS("7")] * 65536,
+                [DSfloat("1.50"), 2, IS("7"), "A", None]):
+        assert _export_value(big) is big
+    # A caller's `Decimal` beside them is still found.
+    mixed = [DSfloat("1.50"), IS("7"), Decimal("2.5")]
+    converted = _export_value(mixed)
+    assert converted[0] is mixed[0] and converted[1] is mixed[1]
+    assert _typed(converted[2]) == (float, 2.5)
+
+
+# -- A value pydicom built from a file is never refused as a number ----------
+
+_FROM_A_FILE = [
+    pytest.param(lambda: DSfloat("072730.5"), b"072730.5", id="DSfloat"),
+    pytest.param(lambda: IS("20040119"), b"20040119", id="IS"),
+    pytest.param(lambda: DSdecimal("072730.50"), b"072730.50 ", id="DSdecimal"),
+    pytest.param(lambda: MultiValue(DSfloat, ["1.5", "2.5"]), b"1.5\\2.5 ",
+                 id="MultiValue-of-DSfloat"),
+    pytest.param(lambda: [IS("1"), IS("2")], b"1\\2 ", id="list-of-IS"),
+    pytest.param(lambda: [DSfloat("1.5"), "A"], b"1.5\\A ", id="DSfloat-and-text"),
+]
+
+
+@pytest.mark.parametrize("vr", ["DA", "DT", "TM"])
+@pytest.mark.parametrize("make, written", _FROM_A_FILE)
+def test_a_files_own_number_under_a_date_or_time_tag_is_written_as_the_file_wrote_it(
+        vr, make, written):
+    """A file that wrote Acquisition Time under `DS` hands ingest a
+    `DSfloat`: a number to `numbers.Number`, and the file's own text to
+    pydicom's DA, DT and TM writers, which write `original_string`. The
+    gate refuses a caller's Python or numpy number by its exact type, so
+    a value pydicom built is not its to refuse (review of #1009: at
+    eb11c289 these eighteen were lost with `a DSfloat is not text`)."""
+    raw, losses, notes = _merged({TEXT_TAGS[vr]: make()})
+    assert raw(TEXT_TAGS[vr]) == (vr, written)
+    assert losses == [] and notes == []
+
+
+@pytest.mark.parametrize("value", [
+    DSfloat("1.5"), IS("7"), DSdecimal("1.50"), MultiValue(DSfloat, ["1.5"]), [IS("1"), "A"], "A", b"A", None,
+    datetime.date(2020, 1, 2), [[1]], [(1, 2)],
+], ids=lambda value: type(value).__name__)
+@pytest.mark.parametrize("vr", sorted(TEXT_TAGS))
+def test_the_gate_lets_by_everything_that_is_not_a_callers_number(vr, value):
+    """Under every text VR, not only the three whose writer takes it:
+    under LO, SH, CS and the rest a file's own `IS` fails the whole file
+    at `dcmwrite`, as it did before the gate existed, and the gate does
+    not turn that into a lost element. Two levels down is not looked at
+    either (`[[1]]`): the conversion and the gate are one level deep."""
+    assert io_handlers._refuse_a_number_as_text(vr, value) is None
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_source_file_with_a_time_written_as_a_decimal_string_exports_it(
+        tmp_path, reopen):
+    """End to end, no caller's value anywhere: CT_small with Acquisition
+    Time `(0008,0032)` written under the explicit VR `DS` and Content Date
+    `(0008,0023)` under `IS`, ingested and exported untouched."""
+    def source(given):
+        given[0x00080032] = pydicom.DataElement(0x00080032, "DS", "072730.5")
+        given[0x00080023] = pydicom.DataElement(0x00080023, "IS", "20040119")
+
+    result = _run(tmp_path / "out", lambda inst, item, session: None,
+                  reopen=reopen, source=source)
+    assert result["written"] == 1, result["written"]
+    assert _element(result, "0008,0032") == ("TM", b"072730.5")
+    assert _element(result, "0008,0023") == ("DA", b"20040119")
+    assert result["rows"] == [] and result["grade"] == _PASS
+
+
+# -- One tag under AT stays one tag -------------------------------------------
+
+AT_TAG = "0028,0009"
+_ONE = b"\x18\x00\x63\x10"
+_OTHER = b"\x18\x00\x64\x10"
+
+
+@pytest.mark.parametrize("make, written", [
+    pytest.param(lambda: (0x0018, 0x1063), _ONE, id="2-tuple"),
+    pytest.param(lambda: (np.uint16(0x0018), np.uint16(0x1063)), _ONE,
+                 id="2-tuple-of-numpy"),
+    pytest.param(lambda: pydicom.tag.BaseTag(0x00181063), _ONE, id="BaseTag"),
+    pytest.param(lambda: 0x00181063, _ONE, id="int"),
+    pytest.param(lambda: np.uint32(0x00181063), _ONE, id="numpy-int"),
+    pytest.param(lambda: [(0x0018, 0x1063), (0x0018, 0x1064)], _ONE + _OTHER,
+                 id="list-of-2-tuples"),
+    pytest.param(lambda: ((0x0018, 0x1063), (0x0018, 0x1064)), _ONE + _OTHER,
+                 id="tuple-of-2-tuples"),
+    pytest.param(lambda: [pydicom.tag.BaseTag(0x00181063),
+                          pydicom.tag.BaseTag(0x00181064)], _ONE + _OTHER,
+                 id="list-of-BaseTag"),
+    # A list of two ints is two tags, `(0000,0018)` and `(0000,1063)`: it
+    # always was, and it is what a reopened store holds for the 2-tuple.
+    pytest.param(lambda: [0x0018, 0x1063],
+                 b"\x00\x00\x18\x00\x00\x00\x63\x10", id="list-of-two-ints"),
+])
+def test_under_at_a_two_tuple_is_one_tag(make, written):
+    """`(0x0018, 0x1063)` is pydicom's ordinary spelling of one tag, and
+    under `AT` it stays the tuple it is (owner ruling on #1009, finding 2):
+    as the list it equals it would be the two tags `(0000,0018)` and
+    `(0000,1063)`, with no row. Everything else under AT is as elsewhere."""
+    raw, losses, notes = _merged({AT_TAG: make()})
+    assert raw(AT_TAG) == ("AT", written)
+    assert losses == [] and notes == []
+
+
+def test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was():
+    """Recorded `AT`, the gate in front of a recorded VR still refuses the
+    tuple, as on `main`: text under `LO`, with the re-VR sentence."""
+    assert _under_a_recorded_vr((0x0018, 0x1063), "AT") == (
+        ("LO", _typed(["24", "4195"])), [], [("AT", "LO")])
+
+
+@pytest.mark.parametrize("route", ["around", "set_attr"])
+def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route):
+    """Through `export()`, live, by both doors. After a save and a reopen
+    the store holds `[24, 4195]` and the file carries two tags: the
+    store's own spelling of a tuple, not changed here, and filed."""
+    edit = (_around if route == "around" else _through_set_attr)(
+        AT_TAG, (0x0018, 0x1063))
+    result = _run(tmp_path / "live", edit)
+    assert result["written"] == 1, result["written"]
+    assert _element(result, AT_TAG) == ("AT", _ONE)
+    assert result["rows"] == [] and result["grade"] == _PASS
+
+
+# -- An owner's stamp that cannot be written fails the file -------------------
+
+def _owner(session, kind):
+    (patient,) = session.store.patients
+    study = patient.studies[0]
+    return {"patient": patient, "study": study, "series": study.series[0]}[kind]
+
+
+def _export_with_an_owner_field(folder, kind, field, value, after_a_pass):
+    """Ingest CT_small, optionally `anonymize(audit())`, assign
+    `owner.field = value`, export. Returns what `export()` raised (or
+    None), every exported file's bytes, the source's and the pass's
+    values of the field, and the ERROR / DATA_LOSS rows."""
+    folder.mkdir(parents=True)
+    (folder / "in").mkdir()
+    shutil.copy(get_testdata_file("CT_small.dcm"), str(folder / "in" / "a.dcm"))
+    db, out = str(folder / "s.db"), folder / "out"
+    raised = None
+    session = DicomSession(db)
+    try:
+        session.ingest(str(folder / "in"))
+        before = [getattr(_owner(session, kind), field)]
+        if after_a_pass:
+            session.anonymize(session.audit())
+            before.append(getattr(_owner(session, kind), field))
+        owner = _owner(session, kind)
+        setattr(owner, field, value)
+        try:
+            session.export(str(out), use_compression=True, show_progress=False)
+        except Exception as exc:  # the UIDs raise before any worker runs
+            raised = exc
+        # So the session can close on a value the store holds.
+        setattr(owner, field, before[-1])
+    finally:
+        session.close()
+    with sqlite3.connect(db) as conn:
+        rows = [(action, details or "") for action, details in conn.execute(
+            "SELECT action_type, details FROM audit_log WHERE action_type "
+            "IN ('ERROR', 'DATA_LOSS') ORDER BY rowid")]
+    files = [path.read_bytes() for path in out.rglob("*") if path.is_file()]
+    return raised, files, before, rows
+
+
+@pytest.mark.parametrize("after_a_pass", [False, True],
+                         ids=["no-pass", "after-audit-and-anonymize"])
+@pytest.mark.parametrize("kind, field, tag", [
+    ("patient", "patient_name", "0010,0010"),
+    ("patient", "patient_id", "0010,0020"),
+    ("study", "study_instance_uid", "0020,000d"),
+    ("series", "series_instance_uid", "0020,000e"),
+])
+@pytest.mark.parametrize("make", [lambda: 7, lambda: np.int64(7)],
+                         ids=["int", "numpy-int"])
+def test_an_owners_value_that_cannot_be_stamped_fails_the_file(
+        tmp_path, kind, field, tag, make, after_a_pass):
+    """Owner ruling on #1009, finding 3. The exporter stamps each of
+    these over the instance's own copy. When the stamp cannot be written
+    the copy underneath it must not go out in its place: at eb11c289
+    `patient.patient_id = 7` wrote the file with the source's Patient ID
+    under a row saying the tag was not exported, and a Patient's Name did
+    the same on `main`. The file fails; nothing is on disk; no row says
+    "not exported" for a tag whose value was written."""
+    raised, files, before, rows = _export_with_an_owner_field(
+        tmp_path / "out", kind, field, make(), after_a_pass)
+    assert raised is not None
+    assert files == []
+    assert not [details for action, details in rows
+                if action == "DATA_LOSS" and tag in details], rows
+    if kind == "patient":
+        assert isinstance(raised, ExportError), raised
+        (failure,) = [details for action, details in rows if action == "ERROR"]
+        assert tag in failure, failure
+        for value in before:
+            assert str(value) not in failure, failure
+
+
+def test_a_stamp_lost_together_with_the_instances_copy_is_still_one_row():
+    """The refusal is for a stamp whose loss would leave the instance's
+    own copy in the file. A value neither can write (here a Patient's
+    Name pydicom refuses at both levels) leaves no copy behind, and stays
+    the one lost element it was."""
+    ds, losses = Dataset(), []
+    DicomExporter._merge(ds, {"0010,0010": 7}, losses)
+    assert "PatientName" not in ds and len(losses) == 1
+    DicomExporter._merge_stamp(ds, {"0010,0010": 7}, losses)
+    assert "PatientName" not in ds and len(losses) == 1
+
+    # The instance's copy written, the stamp refused: that is the failure.
+    ds, losses = Dataset(), []
+    DicomExporter._merge(ds, {"0010,0010": "SOURCE^NAME", "0010,0020": "ID"}, losses)
+    with pytest.raises(ValueError) as refused:
+        DicomExporter._merge_stamp(ds, {"0010,0010": 7, "0010,0020": "NEW"}, losses)
+    assert "0010,0010" in str(refused.value)
+    assert "SOURCE" not in str(refused.value)
+    # And a stamp that can be written is written.
+    ds, losses = Dataset(), []
+    DicomExporter._merge(ds, {"0010,0020": "ID"}, losses)
+    DicomExporter._merge_stamp(ds, {"0010,0020": "NEW"}, losses)
+    assert ds.PatientID == "NEW" and losses == []
+
+
+def test_a_study_date_that_names_no_date_is_stamped_as_its_text(tmp_path):
+    """Study Date is the one stamp a number can be written under: the
+    stamp is `format_study_date()`'s text, so `study.study_date = 7`
+    writes `7`, as it did before. The stamp is written; the source's date
+    is not in the file. Not a date, and not this change's to refuse."""
+    raised, files, before, rows = _export_with_an_owner_field(
+        tmp_path / "out", "study", "study_date", 7, False)
+    assert raised is None and len(files) == 1
+    written = pydicom.dcmread(io.BytesIO(files[0]))
+    assert bytes(written.get_item(0x00080020).value) == b"7 "
+    assert rows == []
