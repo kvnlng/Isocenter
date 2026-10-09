@@ -118152,6 +118152,549 @@
     "big_lut-1.dcm": "sha256:4c094a2b0aee44ebb4073f6b7ac725ddaddcc5eac1ae4ea55e4127081602850b"
    }
   },
+  "synthetic:binary_number_vr_on_a_text_tag": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,0070 not exported (data loss): TypeError: a float is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,0070 not exported (data loss): TypeError: a float is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,0070 not exported (data loss): TypeError: a float is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,1090 not exported (data loss): TypeError: a int is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,1090 not exported (data loss): TypeError: a int is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,1090 not exported (data loss): TypeError: a int is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0018,5100 not exported (data loss): TypeError: a int is not text, and CS holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0018,5100 not exported (data loss): TypeError: a int is not text, and CS holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0018,5100 not exported (data loss): TypeError: a int is not text, and CS holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {
+        "Subject_ANON_f6a6487cd8eff0cf9feba2ca/Study_2022-05-21__78264/Series_1_CT__12336/2.25.245663608316596711538623146762197213775.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.245663608316596711538623146762197213775'",
+          "0008,0020": "DA/implicit '20220521'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_f6a6487cd8eff0cf9feba2ca'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.239672344381858069294569193969375978264'",
+          "0020,000e": "UI/implicit '2.25.103103684041159964995787641874915312336'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.329998868281848744480983656352821636839'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.245663608316596711538623146762197213775'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_f6a6487cd8eff0cf9feba2ca/Study_2022-05-21__78264/Series_1_CT__12336/2.25.245663608316596711538623146762197213775.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.245663608316596711538623146762197213775'",
+          "0008,0020": "DA '20220521'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_f6a6487cd8eff0cf9feba2ca'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.239672344381858069294569193969375978264'",
+          "0020,000e": "UI '2.25.103103684041159964995787641874915312336'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.329998868281848744480983656352821636839'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.245663608316596711538623146762197213775'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_f6a6487cd8eff0cf9feba2ca/Study_2022-05-21__78264/Series_1_CT__12336/2.25.245663608316596711538623146762197213775.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.245663608316596711538623146762197213775'",
+          "0008,0020": "DA/implicit '20220521'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_f6a6487cd8eff0cf9feba2ca'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.239672344381858069294569193969375978264'",
+          "0020,000e": "UI/implicit '2.25.103103684041159964995787641874915312336'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.329998868281848744480983656352821636839'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.245663608316596711538623146762197213775'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,0070 not exported (data loss): TypeError: a float is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,0070 not exported (data loss): TypeError: a float is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,1090 not exported (data loss): TypeError: a int is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0008,1090 not exported (data loss): TypeError: a int is not text, and LO holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0018,5100 not exported (data loss): TypeError: a int is not text, and CS holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "DATA_LOSS",
+        "2.25.245663608316596711538623146762197213775",
+        "Tag 0018,5100 not exported (data loss): TypeError: a int is not text, and CS holds text",
+        "STANDARD",
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_f6a6487cd8eff0cf9feba2ca/Study_2022-05-21__78264/Series_1_CT__12336/2.25.245663608316596711538623146762197213775.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.245663608316596711538623146762197213775'",
+          "0008,0020": "DA/implicit '20220521'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_f6a6487cd8eff0cf9feba2ca'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.239672344381858069294569193969375978264'",
+          "0020,000e": "UI/implicit '2.25.103103684041159964995787641874915312336'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.329998868281848744480983656352821636839'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.245663608316596711538623146762197213775'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_f6a6487cd8eff0cf9feba2ca/Study_2022-05-21__78264/Series_1_CT__12336/2.25.245663608316596711538623146762197213775.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.245663608316596711538623146762197213775'",
+          "0008,0020": "DA '20220521'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_f6a6487cd8eff0cf9feba2ca'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.239672344381858069294569193969375978264'",
+          "0020,000e": "UI '2.25.103103684041159964995787641874915312336'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.329998868281848744480983656352821636839'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.245663608316596711538623146762197213775'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "binary_number_vr_on_a_text_tag-1.dcm": "sha256:31008d53eb4006093d334b144fa755d262f8b076ae84c8cccf6194e68621d1e2"
+   }
+  },
   "synthetic:curve_overlay": {
    "configs": {
     "A": {
@@ -133542,12 +134085,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "646952b94d9f176322d3f1cb10e5ac205587bf23",
-  "isocenter_version": "1.0.0rc15",
+  "git_sha": "7c1df7543e88813f74e7cd7269aaa79b1ff16e97",
+  "isocenter_version": "1.0.0rc16",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 1075
+  "seconds": 613
  },
  "schema": 1,
  "toolchain": {
