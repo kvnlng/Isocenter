@@ -1548,22 +1548,58 @@ class Instance(DicomItem):
             self.file_path = None
 
     def __setattr__(self, name, value):
-        """Assigns a field; changing `sop_instance_uid` marks the instance
-        modified.
+        """Assigns a field; changing `sop_instance_uid` also sets the
+        `0008,0018` element and marks the instance modified.
 
         A changed `sop_instance_uid` is an edit, as an owner's tracked field
         is (`_assign_tracked_field`), so a PHI status recorded before it
-        goes stale. Every other field is assigned as a plain slot.
+        goes stale; and the element follows the field, so the export writes
+        the file under the assigned UID, in its name, in `(0008,0018)` and
+        in Media Storage SOP Instance UID. Assigning the value already held
+        changes nothing, the element included: an element written around
+        the entity (`attributes["0008,0018"] = ...`) is not brought back by
+        it. `SOURCE_SOP_UID_ATTR` is not written. Every other field is
+        assigned as a plain slot.
 
         Args:
             name (str): The field name.
             value (Any): The value to assign.
         """
-        # The export names the file by the UID and writes it as
-        # `0008,0018`, so a UID set back after the pass is a value no scan
+        # The export names the file by the UID and writes `0008,0018` from
+        # `attributes`, so a UID set back after the pass is a value no scan
         # read. The pixel and loader bookkeeping moves the revision where it
         # means to; the check here is one string comparison on those paths.
         if name == "sop_instance_uid":
+            # **The element follows the field (#936).** The export fills the
+            # dataset from `attributes`, and pydicom's writer then sets Media
+            # Storage SOP Instance UID from the dataset's own `0008,0018`.
+            # Left behind, the element made `inst.sop_instance_uid =
+            # '1.2.3.4'` export `1.2.3.4.dcm` carrying the earlier UID
+            # inside, and `= ''` the dotfile `.dcm`. An emptied UID is now
+            # refused at export by the file-name rule
+            # (`io_handlers.export_file_name`, GHSA-2rc2-r9r5-x7hm), keyed
+            # UNKNOWN; with the element following, nothing behind that
+            # rule still holds the earlier UID.
+            #
+            # **The element first, then the field, then the revision**
+            # (`_assign_tracked_field` says why a value precedes its
+            # revision; the element is content too). A direct write, not
+            # `set_attr`: one assignment moves the revision once.
+            #
+            # Only a change, and only once the slot holds a value: the
+            # dataclass `__init__` assigns into an unset slot before
+            # `attributes` exists, and `__post_init__` writes the element
+            # then. Pickle and deepcopy never come here. Do not add "only
+            # when the element equals the old field": that would leave a
+            # caller who assigned twice, or after a write around the
+            # entity, with the two apart again.
+            try:
+                old = object.__getattribute__(self, name)
+                attributes = object.__getattribute__(self, "attributes")
+            except AttributeError:
+                attributes = None
+            if attributes is not None and old != value:
+                attributes["0008,0018"] = value
             _assign_tracked_field(self, name, value)
         else:
             object.__setattr__(self, name, value)

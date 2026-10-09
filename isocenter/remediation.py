@@ -1283,10 +1283,17 @@ class RemediationService:
         # `Patient.studies` left the patient with no list, and the next
         # `save()`, `export()` and `generate_report()` raised `TypeError`.
         # Such a name falls to the bottom `else` and its `matched no
-        # applicable arm` row. `patient_id` and the owned UIDs are in the
-        # table, so a hand-built REMOVE on one of them still clears a
-        # field the store keys on (#949).
+        # applicable arm` row.
+        #
+        # And never a key (#949, owner ruling Q2 A). `patient_id` and the
+        # owned UIDs are in the table, because the exporter stamps them,
+        # but the store holds each owner's row by that text: cleared, the
+        # next `save()`, `export()` and `compact()` could not write the
+        # row. The loader refuses a REMOVE on each of the three as a rule,
+        # so only a hand-built finding asks; it falls to the same bottom
+        # `else` and declines there.
         return (attr in cls.ENTITY_FIELD_TAGS and hasattr(entity, attr)
+                and attr not in cls._STORE_KEY_FIELDS
                 and not cls._owner_field_gone(entity, attr))
 
     @classmethod
@@ -1325,6 +1332,12 @@ class RemediationService:
         # field, test doubles included.
         tag = cls.ENTITY_FIELD_TAGS.get(attr)
         if tag is None or hasattr(entity, "set_attr") or not hasattr(entity, attr):
+            return False
+        # A key the store holds the row by is never "gone" (#949): None
+        # there is not the end state a removal asks for but an owner the
+        # save refuses, so a REMOVE naming it declines rather than be
+        # counted as satisfied over a session that cannot save.
+        if attr in cls._STORE_KEY_FIELDS:
             return False
         if getattr(entity, attr) is not None:
             return False
@@ -1665,6 +1678,15 @@ class RemediationService:
         "study_instance_uid": "0020,000d",
         "series_instance_uid": "0020,000e",
     }
+
+    #: The fields of `ENTITY_FIELD_TAGS` the store keys an owner's row by
+    #: (`patients.patient_id`, `studies.study_instance_uid`,
+    #: `series.series_instance_uid`). A `REMOVE_TAG` naming one declines
+    #: (#949): `_holds_attr_to_remove` and `_owner_field_gone` both read
+    #: this, so the arm does not clear it and an already-cleared one is
+    #: not read as satisfied. Down here for `ENTITY_FIELD_TAGS`' reason.
+    _STORE_KEY_FIELDS = frozenset(
+        {"patient_id", "study_instance_uid", "series_instance_uid"})
 
     @staticmethod
     def _instances_beneath(entity):

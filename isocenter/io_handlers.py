@@ -2385,12 +2385,49 @@ def _pn_text(value) -> str:
     # joined with (#951; until then it was written `UT` with the re-VR
     # WARNING row, owner ruling Q6 A's residual).
     #
-    # Person Names only. A linkage key holding several values is never
-    # joined: `_refuse_a_multi_valued_key` refuses the file (#747), and a
-    # file refused for its Patient ID never has its name held.
+    # Person Names here; the four text fields of the `series` row are
+    # joined the same way by `_source_text` (#985). A linkage key holding
+    # several values is never joined: `_refuse_a_multi_valued_key` refuses
+    # the file (#747), and a file refused for its Patient ID never has its
+    # name held.
     if isinstance(value, MultiValue):
         return "\\".join(str(v) for v in value)
     return str(value)
+
+
+def _source_text(value):
+    """`value`, or the file's own text when the element holds several values.
+
+    For the four text elements `ingest_worker` hands the parent as fields
+    of `Series` and `Equipment`: Modality, Manufacturer, Manufacturer's
+    Model Name and Device Serial Number.
+
+    Args:
+        value: What pydicom read for the element, or the caller's default
+            for an absent one.
+
+    Returns:
+        The values joined by the backslash that delimited them in the file
+        (PS3.5 6.4) when pydicom read a `MultiValue`; `value` itself, of
+        whatever type, otherwise.
+    """
+    # A `MultiValue` is not a value sqlite binds. Handed on as pydicom gave
+    # it, one such file made the `save(sync=True)` that ends `ingest()`
+    # raise `sqlite3.ProgrammingError: Error binding parameter N: type
+    # 'MultiValue' is not supported`, and nothing from the folder was
+    # stored, an unchanged file beside it included (#985). Joined, not
+    # refused (owner ruling Q5 A): nothing is linked by these four, which
+    # is what sets them apart from #747's keys, and no file is written
+    # from them (#869) -- the instance's own element is held by
+    # `populate_attrs` and exported with the source's values. A machine
+    # rule compares the joined text, so it matches a rule written with
+    # the same text and no other.
+    #
+    # Only a `MultiValue` is touched. One value, an empty element and an
+    # absent one are handed on exactly as before: this is not `str()`.
+    if isinstance(value, MultiValue):
+        return "\\".join(str(v) for v in value)
+    return value
 
 
 def _process_safe(value):
@@ -4539,8 +4576,9 @@ def _series_number_of(ds):
     0 when the file has none, as before, and when pydicom's read raises
     `OverflowError` for an infinite value (#870), which refused the file.
     `populate_attrs` holds the element itself (`_read_element`), and the
-    export drops it with a `DATA_LOSS` row. Every other value is returned
-    as pydicom reads it, unchanged by #870.
+    export drops it with a `DATA_LOSS` row. 0 too when the element holds
+    several values (#985). Every other value is returned as pydicom reads
+    it, unchanged by #870.
 
     Args:
         ds: The pydicom Dataset read from the file.
@@ -4549,9 +4587,18 @@ def _series_number_of(ds):
         The value for `Series.series_number`.
     """
     try:
-        return ds.get("SeriesNumber", 0)
+        value = ds.get("SeriesNumber", 0)
     except OverflowError:
         return 0
+    # Two numbers are not a number, and the column holds one. Handed on as
+    # pydicom's `MultiValue`, the value made the save that ends `ingest()`
+    # raise `sqlite3.ProgrammingError` and the folder was not stored (#985).
+    # 0, as for the unreadable value above, and never a join: the field is
+    # the store's number for the series and names no file (#869). The
+    # file's own element is held by `populate_attrs` with both values.
+    if isinstance(value, MultiValue):
+        return 0
+    return value
 
 
 #: The three Pixel Data elements a frame count divides (PS3.3 C.7.6.3).
@@ -4674,12 +4721,15 @@ def ingest_worker(fp: str) -> Tuple:
             # real one downstream: SHIFT_DATE would jitter it and export
             # it as genuine study timing.
             'sdate': str(ds.StudyDate) if "StudyDate" in ds else None,
-            'modality': ds.get("Modality", "OT"),
+            # `_source_text` on the four text fields of the `series` row:
+            # an element holding two values is a `MultiValue`, which the
+            # store cannot bind (#985).
+            'modality': _source_text(ds.get("Modality", "OT")),
             'sop': ds.get("SOPInstanceUID", None),
             'sop_class': sop_class,
-            'man': ds.get("Manufacturer", ""),
-            'model': ds.get("ManufacturerModelName", ""),
-            'dev_sn': ds.get("DeviceSerialNumber", ""),
+            'man': _source_text(ds.get("Manufacturer", "")),
+            'model': _source_text(ds.get("ManufacturerModelName", "")),
+            'dev_sn': _source_text(ds.get("DeviceSerialNumber", "")),
             'series_num': _series_number_of(ds),
         }
 
@@ -8730,7 +8780,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it.
         # The parent's `ERROR` row, `_report_export_failures`', has the
         # same shape.
-        named =f"instance {uid}" if uid else _NO_SOP_UID
+        named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,

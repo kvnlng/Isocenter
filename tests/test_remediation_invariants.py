@@ -444,6 +444,10 @@ def test_every_field_the_remove_arm_may_clear_is_a_tracked_field():
     every field in the table is tracked by the class that declares it.
     Untrack one, or add an untracked field to the table, and this is red
     before a cleared field goes unsaved.
+
+    Since #949 the arm declines the three keys the store holds a row by
+    (`_STORE_KEY_FIELDS`); they stay in the table, which the stamping
+    rules read, so they are still checked here.
     """
     fields = set(RemediationService.ENTITY_FIELD_TAGS)
     assert fields == {"patient_name", "patient_id", "study_date",
@@ -456,12 +460,18 @@ def test_every_field_the_remove_arm_may_clear_is_a_tracked_field():
             "field would not be saved")
 
 
-@pytest.mark.parametrize("field", sorted(RemediationService.ENTITY_FIELD_TAGS))
+@pytest.mark.parametrize("field", sorted(
+    set(RemediationService.ENTITY_FIELD_TAGS)
+    - RemediationService._STORE_KEY_FIELDS))
 def test_clearing_an_owner_field_after_a_reload_still_needs_a_save(field):
     """The `REMOVE_TAG` Python-attribute arm, which sets the attribute to
     None, over every field it may clear. Behaviour, and no line: what
     marks the entity is `entities._assign_tracked_field`, since #961
     deleted the arm's own `mark_modified()`.
+
+    Not the three keys the store holds a row by (`patient_id` and the
+    two owned UIDs): since #949 the arm declines those, which
+    `tests/test_declined_remediation_is_recorded.py` pins.
     """
     owner = _as_reloaded(_owner_holding(field))
     assert getattr(owner, field) is not None

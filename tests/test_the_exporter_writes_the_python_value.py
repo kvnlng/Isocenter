@@ -1416,11 +1416,30 @@ def _owner(session, kind):
     return {"patient": patient, "study": study, "series": study.series[0]}[kind]
 
 
-def _export_with_an_owner_field(folder, kind, field, value, after_a_pass):
+# The three fields the store keys a row by. A value there that is not a
+# `str` is refused by the save `session.export()` begins with (#949),
+# before any file is planned, as a SOP Instance UID is (#721): owner
+# ruling of 2026-10-09 on #1015 against #1009. `DicomExporter.write_tree()`
+# has no save, so there the stamp's own failure is what a caller meets.
+_STORE_KEYS = {"patient_id", "study_instance_uid", "series_instance_uid"}
+_SAVE_REFUSAL = "hold a key that is not a str"
+
+
+def _refused_by_the_save(raised, rows):
+    """The save's named `ValueError`, and nothing written about it."""
+    assert type(raised) is ValueError, raised
+    assert str(raised).startswith("save: "), raised
+    assert _SAVE_REFUSAL in str(raised), raised
+    assert rows == [], rows
+
+
+def _export_with_an_owner_field(folder, kind, field, value, after_a_pass,
+                                door="export"):
     """Ingest CT_small, optionally `anonymize(audit())`, assign
-    `owner.field = value`, export. Returns what `export()` raised (or
-    None), every exported file's bytes, the source's and the pass's
-    values of the field, and the ERROR / DATA_LOSS rows."""
+    `owner.field = value`, export through `door`: `session.export()`, or
+    `DicomExporter.write_tree()` for `"tree"`. Returns what the door
+    raised (or None), every exported file's bytes, the source's and the
+    pass's values of the field, and the ERROR / DATA_LOSS rows."""
     folder.mkdir(parents=True)
     (folder / "in").mkdir()
     shutil.copy(get_testdata_file("CT_small.dcm"), str(folder / "in" / "a.dcm"))
@@ -1436,8 +1455,13 @@ def _export_with_an_owner_field(folder, kind, field, value, after_a_pass):
         owner = _owner(session, kind)
         setattr(owner, field, value)
         try:
-            session.export(str(out), use_compression=True, show_progress=False)
-        except Exception as exc:  # the UIDs raise before any worker runs
+            if door == "tree":
+                DicomExporter.write_tree(_owner(session, "patient"), str(out),
+                                         show_progress=False)
+            else:
+                session.export(str(out), use_compression=True,
+                               show_progress=False)
+        except Exception as exc:  # the keys raise before any worker runs
             raised = exc
         # So the session can close on a value the store holds.
         setattr(owner, field, before[-1])
@@ -1469,19 +1493,55 @@ def test_an_owners_value_that_cannot_be_stamped_fails_the_file(
     `patient.patient_id = 7` wrote the file with the source's Patient ID
     under a row saying the tag was not exported, and a Patient's Name did
     the same on `main`. The file fails; nothing is on disk; no row says
-    "not exported" for a tag whose value was written."""
+    "not exported" for a tag whose value was written.
+
+    Patient's Name fails the file at `session.export()`. The three keys
+    never reach a worker there: the export's leading save refuses a key
+    that is not a `str` (#949), with no file and no row. The stamp's own
+    failure for a key is pinned through `write_tree()`, in
+    `test_an_owners_key_that_cannot_be_stamped_fails_the_file_at_write_tree`."""
     raised, files, before, rows = _export_with_an_owner_field(
         tmp_path / "out", kind, field, make(), after_a_pass)
     assert raised is not None
     assert files == []
     assert not [details for action, details in rows
                 if action == "DATA_LOSS" and tag in details], rows
-    if kind == "patient":
+    if field in _STORE_KEYS:
+        _refused_by_the_save(raised, rows)
+    else:
         assert isinstance(raised, ExportError), raised
         (failure,) = [details for action, details in rows if action == "ERROR"]
         assert tag in failure, failure
         for value in before:
             assert str(value) not in failure, failure
+
+
+@pytest.mark.parametrize("after_a_pass", [False, True],
+                         ids=["no-pass", "after-audit-and-anonymize"])
+@pytest.mark.parametrize("kind, field, tag, make", [
+    ("patient", "patient_id", "0010,0020", lambda: 7),
+    ("patient", "patient_id", "0010,0020", lambda: np.int64(7)),
+    ("study", "study_instance_uid", "0020,000d", lambda: b"\xff"),
+    ("series", "series_instance_uid", "0020,000e", lambda: b"\xff"),
+], ids=["patient-id-int", "patient-id-numpy", "study-uid-bytes",
+        "series-uid-bytes"])
+def test_an_owners_key_that_cannot_be_stamped_fails_the_file_at_write_tree(
+        tmp_path, monkeypatch, kind, field, tag, make, after_a_pass):
+    """`_merge_stamp`'s failure for the three keys, through the door that
+    reaches it. `write_tree()` runs no save, so nothing refuses the key
+    before the worker: the stamp cannot be written, the file fails, and
+    the instance's own copy (the source's, or the pass's) is not on disk
+    in its place. Until the ruling of 2026-10-09 these cells were asserted
+    through `session.export()`, where #949's save now speaks first."""
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    raised, files, before, rows = _export_with_an_owner_field(
+        tmp_path / "out", kind, field, make(), after_a_pass, door="tree")
+    assert type(raised) is RuntimeError, raised
+    assert f"the owner's value for {tag} cannot be written" in str(raised)
+    assert files == []
+    assert rows == []
+    for value in before:
+        assert str(value) not in str(raised), raised
 
 
 def test_every_refused_stamp_fails_the_file_copy_or_no_copy():
@@ -1541,7 +1601,12 @@ def test_a_hand_built_graph_with_an_unwritable_owner_value_fails_the_file(
     likeliest way to meet this: an integer MRN. The file fails; nothing
     is on disk. For Patient ID that is `main`'s answer; a hand-built
     `patient_name = 7` was a file without the name under one row on
-    `main`, and is a failed file now, by the ruling."""
+    `main`, and is a failed file now, by the ruling.
+
+    At `session.export()` a Patient ID that is not a `str` is refused by
+    the save first (#949; owner ruling of 2026-10-09): the named
+    `ValueError`, no file, no row. `write_tree()` above is where the
+    stamp's failure is asserted for it."""
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
     out = tmp_path / "tree"
     with pytest.raises(RuntimeError):
@@ -1553,7 +1618,7 @@ def test_a_hand_built_graph_with_an_unwritable_owner_value_fails_the_file(
     session = DicomSession(db)
     try:
         session.store.patients.append(_hand_built(patient_id, name))
-        with pytest.raises(ExportError):
+        with pytest.raises(Exception) as refused:
             session.export(str(exported), use_compression=False,
                            show_progress=False)
     finally:
@@ -1563,6 +1628,10 @@ def test_a_hand_built_graph_with_an_unwritable_owner_value_fails_the_file(
     with sqlite3.connect(db) as conn:
         rows = conn.execute("SELECT action_type, details FROM audit_log WHERE "
                             "action_type IN ('ERROR', 'DATA_LOSS')").fetchall()
+    if not isinstance(patient_id, str):
+        _refused_by_the_save(refused.value, rows)
+        return
+    assert isinstance(refused.value, ExportError), refused.value
     assert [action for action, _details in rows] == ["ERROR"], rows
     assert "cannot be written" in rows[0][1], rows
 
@@ -1582,7 +1651,12 @@ def test_a_file_name_refusal_speaks_before_a_refused_stamp(tmp_path):
     file (GHSA-2rc2-r9r5-x7hm, #1024) and its Patient's stamp cannot be
     written. The file-name refusal is raised first in the worker, before
     any dataset is built, so it is the one the row carries: one ERROR
-    row, one failure, nothing on disk."""
+    row, one failure, nothing on disk.
+
+    The unwritable stamp is a Patient's Name of 7, not a Patient ID of 7
+    as it was: a Patient ID that is not a `str` is refused by the export's
+    leading save (#949), so neither refusal this test orders would be
+    reached. The name is not a key and the save holds it."""
     folder = tmp_path / "both"
     folder.mkdir()
     (folder / "in").mkdir()
@@ -1592,13 +1666,13 @@ def test_a_file_name_refusal_speaks_before_a_refused_stamp(tmp_path):
     try:
         session.ingest(str(folder / "in"))
         inst, patient = _instance(session), _owner(session, "patient")
-        uid, patient_id = inst.sop_instance_uid, patient.patient_id
+        uid, name = inst.sop_instance_uid, patient.patient_name
         inst.sop_instance_uid = "../elsewhere"
-        patient.patient_id = 7
+        patient.patient_name = 7
         with pytest.raises(ExportError):
             session.export(str(out), use_compression=True, show_progress=False)
         # So the session can close on values the store holds.
-        inst.sop_instance_uid, patient.patient_id = uid, patient_id
+        inst.sop_instance_uid, patient.patient_name = uid, name
     finally:
         session.close()
     with sqlite3.connect(db) as conn:
@@ -1622,16 +1696,18 @@ def test_an_owners_uid_that_cannot_be_stamped_fails_the_file(
     2): a number never gets as far as a worker, but `b"\\xff"` does. On
     `main` the file went out carrying the instance's own UID, the
     source's or the pass's, under a row saying the tag was not exported.
-    The file fails."""
+
+    At `session.export()` it no longer gets as far as a worker either:
+    the leading save refuses a Study or Series Instance UID that is not a
+    `str` (#949; owner ruling of 2026-10-09), with no file and no row.
+    The stamp's failure, which is what a caller of `write_tree()` meets,
+    is in `test_an_owners_key_that_cannot_be_stamped_fails_the_file_at_write_tree`."""
     raised, files, before, rows = _export_with_an_owner_field(
         tmp_path / "out", kind, field, b"\xff", after_a_pass)
-    assert isinstance(raised, ExportError), raised
     assert files == []
-    assert not [d for action, d in rows if action == "DATA_LOSS"], rows
-    (failure,) = [details for action, details in rows if action == "ERROR"]
-    assert f"the owner's value for {tag} cannot be written" in failure
+    _refused_by_the_save(raised, rows)
     for value in before:
-        assert str(value) not in failure, failure
+        assert str(value) not in str(raised), raised
 
 
 def test_a_study_date_that_names_no_date_is_stamped_as_its_text(tmp_path):

@@ -8,7 +8,8 @@ import weakref
 from typing import List
 from .entities import Patient
 from .persistence import SqliteStore
-from .logger import describe_exception, get_logger
+from .logger import (describe_exception, describe_exception_without_paths,
+                     get_logger)
 
 #: How long `flush()` waits before saying what it is waiting for.
 #:
@@ -212,12 +213,26 @@ def _persistence_worker_loop(manager_ref, work_queue):
             # leave the queue's unfinished count permanently above
             # zero, and `flush()` waits on it: one bad item and every
             # later save hangs forever.
+            payload = None
             try:
                 patients, prune_absent_patients = item
+                payload = (patients, prune_absent_patients)
                 manager.store_backend.save_all(
                     patients, prune_absent_patients=prune_absent_patients)
             except Exception as e:  # pylint: disable=broad-except
                 get_logger().error(f"Background save failed: {describe_exception(e)}")
+                # Remembered here, before the `task_done()` in the
+                # `finally` below, so a `flush()` woken by the count
+                # reaching zero finds it (#941). Only a save that was
+                # really attempted: an item that could not be unpacked
+                # is no save, and running it again at a drain would
+                # raise the unpacking error out of `audit()`.
+                if payload is not None:
+                    manager._remember_failed_save(payload, e)
+            else:
+                # A later save that succeeds is what heals a failed one:
+                # it wrote everything still unsaved.
+                manager._forget_failed_save()
             finally:
                 # Cleared *before* `task_done()`, and the ordering is
                 # load-bearing. Reversed, a flush woken by the count
@@ -245,6 +260,22 @@ def _persistence_worker_loop(manager_ref, work_queue):
             # reference held: a reference kept across it would keep the
             # manager alive a second at a time, forever.
             del manager
+
+
+class _QueuedPatients(list):
+    """The shallow copy of a patient list that `save_async` queues.
+
+    A `list` in every respect the worker and the drains use, plus
+    `source`: the list object it was copied from. A background save
+    writes the copy, so patients added or removed after `save()` do not
+    change it; the retry of a save that failed reads `source` again
+    instead (`PersistenceManager._run_failed_save`, #941). Never pickled:
+    the queue is read by a thread of this process.
+    """
+
+    def __init__(self, patients):
+        super().__init__(patients)
+        self.source = patients
 
 
 class PersistenceManager:
@@ -305,6 +336,29 @@ class PersistenceManager:
         # (`_recover_orphaned_item` already holds the former when it
         # restarts). Never take `_recover_lock` while holding this one.
         self._worker_lock = threading.Lock()
+
+        # The newest background save that failed and that no save has
+        # healed since: `[payload, exception, reported]`, or None (#941).
+        # Until this existed a failed background save was a log line and
+        # nothing else: `save()` had already returned, and `flush()`,
+        # `audit()` and `close()` returned too. `flush()` runs it again on
+        # the caller's thread and raises what it raises
+        # (`_run_failed_save`); `shutdown()` writes one audit row for one
+        # still here (`_report_a_failed_save`). Cleared by any save of
+        # this manager's that returns, and by `Session.save(sync=True)`.
+        # Read and written under `_inflight_lock`, which stays a lock
+        # nothing is taken under: the save itself runs outside it.
+        # Private: no public name carries any of this.
+        self._failed_save = None
+
+        # How the retry of a failed save reads the session's patients as
+        # they stand at the retry: a callable returning that list, set by
+        # `Session` once its store exists, or None for a manager built by
+        # hand (`_run_failed_save` says what that one reads). The
+        # session's callable holds its store weakly and returns None once
+        # the store is gone, so this manager, which its exit handler
+        # keeps alive, does not keep a closed session's graph alive.
+        self._current_patients = None
 
         self._start_worker()
 
@@ -387,7 +441,8 @@ class PersistenceManager:
             get_logger().info("PersistenceManager worker thread started.")
 
     def flush(self):
-        """Blocks until all tasks in the queue have been processed.
+        """Blocks until all tasks in the queue have been processed, then
+        runs a background save that failed and has not been healed.
 
         If a worker has died holding a save, the save is re-queued and a
         worker restarted to drain the queue.
@@ -396,6 +451,35 @@ class PersistenceManager:
         `_FLUSH_REPORT_INTERVAL_S` a wait that has not finished logs a WARNING
         saying what it is waiting for and re-attempts recovery, so a worker
         that dies after this flush began is recovered too.
+
+        Once the queue is empty, the newest background save that failed,
+        if no save has succeeded since, is run again on this thread. It
+        saves the patients as they stand now, not the copy that was
+        queued. A session's manager reads `session.store.patients` at
+        this moment, so a patient dropped from or added to the session
+        since, by editing the list or by assigning a new one, is dropped
+        from or added to the store. A manager built by hand holds no
+        session: it reads again the list object `save_async` was handed.
+        A failure that has passed heals here and nothing is said. One
+        that has not is raised.
+
+        Raises:
+            Exception: Whatever that save raises: the store's named
+                `TypeError` or `ValueError` for a value or key it cannot
+                hold, an `OSError`, the sidecar gate's `RuntimeError`.
+                The failure stays remembered, so the next `flush()` runs
+                it again, and `shutdown()` records it.
+        """
+        self._wait()
+        self._run_failed_save()
+
+    def _wait(self):
+        """Blocks until all tasks in the queue have been processed.
+
+        `flush()` without its second half: it runs no save and raises
+        nothing for one that failed. For a caller that is about to save
+        the session itself (`Session.save(sync=True)`), or that drains in
+        the middle of work a raise would leave half done.
         """
         # No timeout, ever: a bounded wait that gave up would turn a
         # visible hang into a silently dropped save, and callers flush so
@@ -434,6 +518,119 @@ class PersistenceManager:
                 f"unfinished_tasks={self.queue.unfinished_tasks}, "
                 f"worker_alive={alive}, in_flight_items={inflight}")
             self._recover_orphaned_item()
+
+    def _remember_failed_save(self, payload, exc):
+        """Record `payload` as the newest background save that failed.
+
+        Args:
+            payload (tuple): `(patients, prune_absent_patients)`, as queued.
+            exc (BaseException): What `save_all` raised.
+        """
+        with self._inflight_lock:
+            self._failed_save = [payload, exc, False]
+
+    def _forget_failed_save(self):
+        """Forget the failed background save: a later save has returned.
+
+        Called by the worker and the drains after a `save_all` of theirs
+        returns, and by `Session.save(sync=True)` after its own.
+        """
+        with self._inflight_lock:
+            self._failed_save = None
+
+    def _run_failed_save(self):
+        """Run the remembered failed save on this thread; raise what it raises.
+
+        Nothing to do, and nothing raised, when no failed save is
+        remembered. Otherwise `save_all` is called once, with a fresh
+        copy of the list object the failed `save_async` was handed, as
+        that list stands now, and the failed save's
+        `prune_absent_patients`. On return the failure is forgotten. On
+        a raise it is remembered again, with the new exception, unless a
+        newer failure was recorded meanwhile.
+
+        Raises:
+            BaseException: Whatever `save_all` raises, unchanged.
+        """
+        # **The session's list as it stands now, not the copy that was
+        # queued** (owner ruling on #941, 2026-10-09). The queued copy is
+        # the list as it was when `save()` was called; a caller who
+        # answered the refusal by dropping the offending patient from the
+        # session would be refused for it again at every drain, by a
+        # retry of a list the session no longer holds, and a patient
+        # added since would not be saved.
+        #
+        # **Read through `_current_patients`, at the retry.** The session
+        # gives the manager a callable that returns `store.patients` when
+        # called, so a caller who drops a patient by assigning
+        # `session.store.patients` a new list (a list comprehension is
+        # the ordinary way) is healed like one who called `.remove()`.
+        # Reading the list *object* `save()` was handed is not enough:
+        # after a rebind that object is no longer the session's (review
+        # of #1015, finding 1). A manager built by hand has no callable
+        # and no session; it reads the list object `save_async` was
+        # handed (`_QueuedPatients.source`). Copied again here either
+        # way, because `save_all` walks its argument and the caller may
+        # edit theirs meanwhile.
+        #
+        # **Taken out under the lock, run outside it.** Two flushes at
+        # once cannot both run it, and `_inflight_lock` is never held
+        # across `save_all`, which takes the sidecar gate and sqlite. The
+        # caller has just seen the queue empty, so no worker is inside
+        # `save_all` at this instant; one queued from another thread a
+        # moment later is no different from `Session.save(sync=True)`
+        # beside a background save, which the store already serialises.
+        #
+        # `BaseException`, so a `KeyboardInterrupt` in the middle of the
+        # save does not leave the failure forgotten with nothing saved.
+        with self._inflight_lock:
+            failed, self._failed_save = self._failed_save, None
+        if failed is None:
+            return
+        (patients, prune_absent_patients), _, reported = failed
+        get_logger().warning(
+            "A background save failed earlier and no save has succeeded "
+            "since; running it again now, on the calling thread.")
+        try:
+            current = self._current_patients
+            now = current() if current is not None else None
+            if now is None:
+                now = getattr(patients, "source", patients)
+            self.store_backend.save_all(
+                list(now), prune_absent_patients=prune_absent_patients)
+        except BaseException as exc:
+            with self._inflight_lock:
+                if self._failed_save is None:
+                    self._failed_save = [failed[0], exc, reported]
+            raise
+
+    def _report_a_failed_save(self):
+        """Write the one audit row for a failed save the session ends with.
+
+        When a background save failed, no save has succeeded since, and
+        the row has not been written for it yet: one `ERROR` row keyed
+        `SESSION`, through `_report_unreconciled`. Never raises.
+        """
+        # `shutdown()` is where a session ends: `close()` calls it, and so
+        # does the exit handler of a session never closed, which is the
+        # one case no draining call can reach. It does not run the save
+        # again: `shutdown()` is bounded and never raises, and a save that
+        # could not be written a moment ago is not what `close()` should
+        # wait on. **Once per failure**: `close()` and then the exit
+        # handler both come here, and so does a second `close()`.
+        #
+        # The cause is spelled without a filesystem path, as the export's
+        # rows spell an `OSError`: the row is kept.
+        with self._inflight_lock:
+            failed = self._failed_save
+            if failed is None or failed[2]:
+                return
+            failed[2] = True
+            exc = failed[1]
+        self._report_unreconciled(
+            "A background save() failed and no later save succeeded before "
+            "the session ended, so the store does not hold what that save "
+            f"was asked to write: {describe_exception_without_paths(exc)}.")
 
     def _reap_orphans(self):
         """Pop and return the payloads whose owning worker is dead.
@@ -525,7 +722,9 @@ class PersistenceManager:
         # Shallow copy the list itself so if the session adds/removes patients, we have the old list.
         # But if attributes of patients change, we see the change. This is usually
         # acceptable "eventual consistency" for this UX.
-        self.queue.put((list(patients), prune_absent_patients))
+        # The copy also remembers the list it was copied from, which is
+        # what a retry of this save reads if it fails (#941).
+        self.queue.put((_QueuedPatients(patients), prune_absent_patients))
 
     def has_pending_saves(self):
         """Is any save queued or in flight right now?
@@ -547,8 +746,11 @@ class PersistenceManager:
         `_SHUTDOWN_JOIN_TIMEOUT_S` for the worker. Then, always, writes any
         orphaned or still-queued save to the store, unless the worker is
         still running, in which case it is left to that worker and reported
-        at ERROR and as an audit row. Bounded: it never waits on the queue's
-        unfinished count. The manager can be restarted by `save_async`.
+        at ERROR and as an audit row. Last, when a background save failed
+        and no save has succeeded since, writes one `ERROR` audit row keyed
+        `SESSION` saying so, once per failure; that save is not run again
+        here. Bounded: it never waits on the queue's unfinished count, and
+        it never raises. The manager can be restarted by `save_async`.
         """
         # Not `flush()`, and must never become one: `close()` and `__exit__`
         # call this, and a context manager that does not exit is worse than a
@@ -557,6 +759,9 @@ class PersistenceManager:
             self._shutdown_worker()
         finally:
             self._drain_recoverable_saves()
+            # Last: the drain above may have written a save that heals
+            # the failure, and then there is nothing to say (#941).
+            self._report_a_failed_save()
 
     def _shutdown_worker(self):
         """Post the sentinel and join, waiting at most `_SHUTDOWN_JOIN_TIMEOUT_S`.
@@ -683,6 +888,11 @@ class PersistenceManager:
                     "never finished.")
                 self.store_backend.save_all(
                     patients, prune_absent_patients=prune_absent_patients)
+                # A save that returns heals an earlier background failure
+                # (#941). One that fails here is reported below, with its
+                # own row, and is not remembered: `shutdown()` would write
+                # a second row for the same save.
+                self._forget_failed_save()
             except Exception as exc:  # pylint: disable=broad-except
                 self._report_unreconciled(
                     "PersistenceManager could not write a save its worker "

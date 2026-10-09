@@ -175,6 +175,12 @@ COMMITTED = {
                           "multi_valued_keys-sop-uid.dcm",
                           "multi_valued_keys-study-uid.dcm"],
     "multi_valued_pn": ["multi_valued_pn-1.dcm"],
+    "multi_valued_series_fields": [
+        "multi_valued_series_fields-manufacturer.dcm",
+        "multi_valued_series_fields-modality.dcm",
+        "multi_valued_series_fields-model.dcm",
+        "multi_valued_series_fields-serial.dcm",
+        "multi_valued_series_fields-series-number.dcm"],
     "no_patient_id": ["no_patient_id-s1-1.dcm", "no_patient_id-s2-1.dcm",
                       "no_patient_id-s3-1.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],

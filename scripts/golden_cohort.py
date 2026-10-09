@@ -561,6 +561,34 @@ def multi_valued_pn(out: Path):
     write(ds, out / "multi_valued_pn-1.dcm")
 
 
+def multi_valued_series_fields(out: Path):
+    """Five CTs of one patient, one study each, each with two values in
+    one element ingest builds the `series` row from (#985): Manufacturer,
+    Manufacturer's Model Name, Device Serial Number, Modality and Series
+    Number. Any one of them made `ingest()` raise
+    `sqlite3.ProgrammingError`, so the member's session stored and
+    exported nothing; each is now ingested with the field held as the
+    source's text (0 for Series Number) and its own element exported as
+    the source wrote it, where the policy keeps it. No other input holds
+    two values in any of the five."""
+    def two(dataset, keyword, text):
+        # Past pydicom's VM check: each of the five takes one value.
+        tag = pydicom.datadict.tag_for_keyword(keyword)
+        dataset[tag] = pydicom.DataElement(
+            tag, pydicom.datadict.dictionary_VR(tag), text,
+            validation_mode=pydicom.config.IGNORE)
+
+    for n, (keyword, label, text) in enumerate((
+            ("Manufacturer", "manufacturer", "Acme\\Imaging"),
+            ("ManufacturerModelName", "model", "Golden\\Mark2"),
+            ("DeviceSerialNumber", "serial", "GOLD-SN-1\\GOLD-SN-2"),
+            ("Modality", "modality", "CT\\MR"),
+            ("SeriesNumber", "series-number", "1\\2")), start=1):
+        ds = ct("multi_valued_series_fields", study=n)
+        two(ds, keyword, text)
+        write(ds, out / f"multi_valued_series_fields-{label}.dcm")
+
+
 def number_vr_on_a_date_or_time(out: Path):
     """A date, a time and a date-time the file wrote under a numeric string
     VR: Date of Gain Calibration `(0014,3076)` under `IS`, Time of Gain
@@ -606,7 +634,7 @@ MEMBERS = {f.__name__: f for f in (
     encapsulated_pdf, unstated_private_vr,
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
     ecg_lead_codes, number_vr_on_a_date_or_time,
-    binary_number_vr_on_a_text_tag)}
+    binary_number_vr_on_a_text_tag, multi_valued_series_fields)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

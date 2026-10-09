@@ -53,6 +53,17 @@ and the VR. Pass the text. The store holds `None`, `str`, `bytes`,
 the instance, the tag and the type ([API stability](stability.md),
 Exceptions).
 
+**What assigning `Instance.sop_instance_uid` does.** It moves the field
+and the `(0008,0018)` element together, and marks the instance edited:
+`instance.sop_instance_uid = "1.2.3.4"` leaves `"1.2.3.4"` in
+`instance.attributes["0008,0018"]`, and the export writes the file as
+`1.2.3.4.dcm` with that UID inside. An instance assigned `''` is not
+written: the export's file-name rule refuses a UID that cannot name a
+file, and reports it as a failure keyed `UNKNOWN`. Assigning
+the value the field already holds changes nothing. `series.series_instance_uid`,
+`study.study_instance_uid` and `patient.patient_id` need no such step:
+the export stamps each file's copy from the owner.
+
 ::: isocenter.entities
     handler: python
     options:

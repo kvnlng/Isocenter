@@ -222,22 +222,34 @@ def test_the_merge_drains_pending_saves_before_it_mutates(tmp_path,
     Without the drain, a snapshot still holding the duplicate would walk
     it after its studies were moved, and upsert its name and status over
     the survivor's row. So the flush has to see the graph as it was.
+
+    The drain is the manager's `_wait` since #941: `flush()` also runs a
+    background save that failed and raises it, which a drain in the
+    middle of a pass must not.
     """
     session, report, stored, arrived = _two_passes_in_one_session(tmp_path)
     try:
         before = [(p, list(p.studies)) for p in session.store.patients]
         seen = []
-        real_flush = session.persistence_manager.flush
+        real_flush = session.persistence_manager._wait
 
         def recording_flush():
             seen.append([(p, list(p.studies))
                          for p in session.store.patients] == before)
             return real_flush()
 
-        monkeypatch.setattr(session.persistence_manager, "flush",
+        monkeypatch.setattr(session.persistence_manager, "_wait",
                             recording_flush)
+        # Watching `_wait` alone cannot tell the two apart, because
+        # `flush()` calls it (review of #1015, finding 6).
+        raising = []
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            lambda: raising.append(1))
         session.anonymize(report)
 
+        assert raising == [], (
+            "the merge drained with flush(), which runs a failed "
+            "background save and raises it in the middle of the pass")
         assert seen, "the merge never drained the persistence queue"
         assert seen[0] is True, "the graph was mutated before the drain"
         assert arrived.studies == []
@@ -253,9 +265,12 @@ def test_no_duplicate_no_drain(tmp_path, monkeypatch):
         session.ingest(str(tmp_path / "in"))
         report = session.audit()
         calls = []
-        real_flush = session.persistence_manager.flush
-        monkeypatch.setattr(session.persistence_manager, "flush",
-                            lambda: (calls.append(1), real_flush())[1])
+        # Both spellings: the merge's drain is `_wait` since #941, and
+        # watching `flush` alone would pass whatever `anonymize()` did.
+        for name in ("flush", "_wait"):
+            real = getattr(session.persistence_manager, name)
+            monkeypatch.setattr(session.persistence_manager, name,
+                                lambda real=real: (calls.append(1), real())[1])
         session.anonymize(report)
         assert calls == []
 
@@ -361,8 +376,11 @@ def test_a_restore_across_jitter_schemes_refuses_before_it_restores(
         revisions = (stored._revision, inst._revision)
         attributes = dict(inst.attributes)
         drained = []
-        monkeypatch.setattr(session.persistence_manager, "flush",
-                            lambda: drained.append(1))
+        # Both spellings: the restore's drain is `_wait` since #941, and
+        # watching `flush` alone would pass whatever the restore did.
+        for name in ("flush", "_wait"):
+            monkeypatch.setattr(session.persistence_manager, name,
+                                lambda: drained.append(1))
 
         with pytest.raises(RuntimeError) as raised:
             session.recover_patient_identity(pseudonym, restore=True)
@@ -391,6 +409,9 @@ def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
     The merge drains too, but only on a collision and only after the
     restore has written, so it cannot stand in for this one: the first
     flush has to see the patient still under its pseudonym.
+
+    Both are the manager's `_wait` since #941 (the wait alone; a restore
+    does not run a failed background save again).
     """
     write_ct(tmp_path / "first" / "a.dcm", "PAT-001", "1")
     write_ct(tmp_path / "second" / "c.dcm", "PAT-001", "3")
@@ -414,16 +435,23 @@ def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
                   for i in se.instances]
         attributes = dict(inst.attributes)
         seen = []
-        real_flush = session.persistence_manager.flush
+        real_flush = session.persistence_manager._wait
 
         def recording_flush():
             seen.append((stored.patient_id, inst.attributes == attributes))
             return real_flush()
 
-        monkeypatch.setattr(session.persistence_manager, "flush",
+        monkeypatch.setattr(session.persistence_manager, "_wait",
                             recording_flush)
+        # `flush()` calls `_wait`, so `_wait` alone cannot tell them apart.
+        raising = []
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            lambda: raising.append(1))
         session.recover_patient_identity(pseudonym, restore=True)
 
+        assert raising == [], (
+            "the restore drained with flush(), which runs a failed "
+            "background save and raises it")
         assert seen, "the restore never drained the persistence queue"
         assert seen[0] == (pseudonym, True), (
             "the restore wrote before the drain")
