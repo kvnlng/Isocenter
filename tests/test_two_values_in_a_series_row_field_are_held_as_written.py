@@ -143,6 +143,16 @@ def test_an_absent_element_is_handed_on_as_before(tmp_path):
     assert (meta["modality"], meta["series_num"]) == ("OT", 0)
 
 
+@pytest.mark.parametrize("value", [None, 7, 1.5, b"x", ["A", "B"], ""],
+                         ids=["none", "int", "float", "bytes", "list", "empty"])
+def test_anything_that_is_not_a_multivalue_is_returned_as_given(value):
+    """`_source_text` is not `str()`: only a `MultiValue` is joined.
+    Returning `str(value)` otherwise turns an absent value into `'None'`
+    in a field the store holds, and that variant passed every other test
+    in this file."""
+    assert io_handlers._source_text(value) is value
+
+
 def test_three_values_and_an_empty_one_are_joined_as_written(tmp_path):
     """The join is the file's own text: every value, an empty one too."""
     path = _two_valued(tmp_path, "Manufacturer", "A\\\\C")

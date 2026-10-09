@@ -240,8 +240,16 @@ def test_the_merge_drains_pending_saves_before_it_mutates(tmp_path,
 
         monkeypatch.setattr(session.persistence_manager, "_wait",
                             recording_flush)
+        # Watching `_wait` alone cannot tell the two apart, because
+        # `flush()` calls it (review of #1015, finding 6).
+        raising = []
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            lambda: raising.append(1))
         session.anonymize(report)
 
+        assert raising == [], (
+            "the merge drained with flush(), which runs a failed "
+            "background save and raises it in the middle of the pass")
         assert seen, "the merge never drained the persistence queue"
         assert seen[0] is True, "the graph was mutated before the drain"
         assert arrived.studies == []
@@ -435,8 +443,15 @@ def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
 
         monkeypatch.setattr(session.persistence_manager, "_wait",
                             recording_flush)
+        # `flush()` calls `_wait`, so `_wait` alone cannot tell them apart.
+        raising = []
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            lambda: raising.append(1))
         session.recover_patient_identity(pseudonym, restore=True)
 
+        assert raising == [], (
+            "the restore drained with flush(), which runs a failed "
+            "background save and raises it")
         assert seen, "the restore never drained the persistence queue"
         assert seen[0] == (pseudonym, True), (
             "the restore wrote before the drain")

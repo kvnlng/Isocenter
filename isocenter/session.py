@@ -16,6 +16,7 @@ import multiprocessing
 import concurrent.futures
 import functools
 import numbers
+import weakref
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
@@ -1533,6 +1534,16 @@ class DicomSession:
 
         # Hydrate memory from DB
         self.store = DicomStore()
+        # The retry of a failed background save writes this store's
+        # patients as they stand at the retry (#941). The attribute is
+        # read at the call, because a caller may assign `store.patients`
+        # a new list. Through a weak reference: the manager is kept alive
+        # by its exit handler, and must not keep a closed session's graph
+        # alive with it. None once the store is gone, and the manager
+        # then reads what it was handed.
+        self.persistence_manager._current_patients = (
+            lambda store=weakref.ref(self.store):
+            getattr(store(), "patients", None))
 
         if db_exists:
             print(f"Loading session from {self.persistence_file}...")
@@ -5309,21 +5320,24 @@ class DicomSession:
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
 
+        # Drained after every plan and before the first token is embedded,
+        # for the reason `lock_identities` gives. Once, here: nothing
+        # below enqueues a save, so the
+        # per-patient writes (`persist=True`) and the chunk flushes
+        # (`auto_persist_chunk_size`) all find the rows a queued save was
+        # about to write. **Before the key is committed**: the drain can
+        # raise a failed background save (#941), and a lock that raises
+        # there has locked nobody, so it must not leave a new key file
+        # behind (#813; review of #1015, finding 3).
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
+
         # The key file is written only now, every plan having succeeded,
         # and only when one carries a token (#813). If another session
         # wrote its key first, every patient is planned again under it.
         if self._commit_lock_key(plans.values()):
             plans = {pid: self._planned_identity_lock(patient_map[pid], tags_to_lock)
                      for pid in plans}
-
-        # Drained after every plan and before the first token is embedded,
-        # for the reason `lock_identities` gives. Once, here: nothing
-        # below enqueues a save, so the
-        # per-patient writes (`persist=True`) and the chunk flushes
-        # (`auto_persist_chunk_size`) all find the rows a queued save was
-        # about to write.
-        if hasattr(self, 'persistence_manager'):
-            self.persistence_manager.flush()
 
         with progress_bar(plans, desc="Locking Identities",
                           unit="patient") as pbar:
@@ -6534,6 +6548,10 @@ class DicomSession:
                 `":memory:"` store whose environment asks for worker
                 recycling and a pass-lock wait that expires. The original
                 rules are restored first.
+            Exception: Propagated from `redact()`'s entry drain: a
+                background `save()` that failed and still fails (#941),
+                before anything is redacted. The original rules are
+                restored first.
         """
         # Swap in a single-rule configuration, run redact() against it, then
         # restore the original rules in `finally` regardless of outcome.
@@ -6600,6 +6618,11 @@ class DicomSession:
                 Raised at the merge, after the remediations are applied.
                 Unreachable on a graph the library built, and reachable on
                 one built in user code.
+            Exception: With no `findings`, whatever the `audit()` it
+                begins with raises, a background `save()` that failed and
+                still fails among them (#941), before anything is
+                remediated. Handed its findings it makes no such call and
+                does not raise that.
         """
         from .remediation import RemediationService
 
@@ -6903,7 +6926,11 @@ class DicomSession:
                 written uncompressed instead, also named at INFO (#771).
             check_burned_in (bool): If True, scans for PHI before exporting and
                 withholds every instance that still carries an identifier,
-                at any level of its hierarchy. Each withheld instance
+                at any level of its hierarchy. The scan is an `audit()`,
+                run before the export's own save, so it raises what
+                `audit()` raises, a background `save()` that failed and
+                still fails among them (#941), with nothing written to
+                the folder. Each withheld instance
                 writes one `WARNING` audit row naming it and the level
                 (patient, study, series or instance) that carried the
                 identifier, never the value, so the report grades

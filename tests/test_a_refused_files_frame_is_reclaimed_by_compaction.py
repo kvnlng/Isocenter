@@ -139,9 +139,13 @@ def test_the_refused_file_ingested_again_is_kept(tmp_path, monkeypatch):
     write_ct(tmp_path / "in" / "a.dcm", BAD, 943)
     write_ct(tmp_path / "in" / "b.dcm", "GOOD-943", 944)
     with Session(str(tmp_path / "s.db")) as session:
-        _refuse_the_linkage_of(monkeypatch, BAD)
-        assert session.ingest(str(tmp_path / "in")).ingested == 1
-        monkeypatch.undo()
+        # A context of its own: `monkeypatch.undo()` would also undo the
+        # autouse thread setting, and the second ingest would run under
+        # the default pool.
+        with monkeypatch.context() as patch:
+            _refuse_the_linkage_of(patch, BAD)
+            assert session.ingest(str(tmp_path / "in")).ingested == 1
+        assert os.environ["ISOCENTER_FORCE_THREADS"] == "1"
         again = session.ingest(str(tmp_path / "in"))
         assert again.failures == []
         assert again.ingested == 1, "the refused file, and not the one already held"
@@ -153,3 +157,25 @@ def test_the_refused_file_ingested_again_is_kept(tmp_path, monkeypatch):
         session.compact()
         assert _sidecar(tmp_path) == 2 * frame
         assert _blobs(tmp_path) == [("pixels", frame, 1)] * 2
+
+
+def test_a_refused_file_does_not_hold_its_uid_within_the_same_call(
+        tmp_path, monkeypatch):
+    """Two files of one SOP Instance UID in **one** `ingest()` call, the
+    first refused at linkage: the second is kept, not declined as a
+    duplicate, because the refusal comes before the UID is recorded as
+    held.
+
+    The test above cannot see that: `held` is rebuilt from the graph at
+    every call, so a second call never sees what the first call's refusal
+    did to it. With `held[inst.sop_instance_uid] = inst` moved above the
+    linkage, the test above stays green and this one is red (the second
+    file is declined, `ingested == 0`)."""
+    write_ct(tmp_path / "in" / "a.dcm", BAD, 943)
+    write_ct(tmp_path / "in" / "b.dcm", "GOOD-943", 943)
+    _refuse_the_linkage_of(monkeypatch, BAD)
+    with Session(str(tmp_path / "s.db")) as session:
+        summary = session.ingest(str(tmp_path / "in"))
+        assert [os.path.basename(path) for path, _ in summary.failures] == ["a.dcm"]
+        assert (summary.ingested, summary.declined) == (1, 0)
+        assert [p.patient_id for p in session.store.patients] == ["GOOD-943"]

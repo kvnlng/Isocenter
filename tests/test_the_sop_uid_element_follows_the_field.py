@@ -115,6 +115,19 @@ def test_assigning_the_value_already_held_changes_nothing(tmp_path):
         assert instance.attributes[ELEMENT] == "9.9.9"
 
 
+def test_a_new_uid_is_written_over_an_element_written_around_the_entity(tmp_path):
+    """The element follows whatever it held before, not only when it
+    equalled the old field. A hook that wrote the element "only when it
+    equals the old field" (the condition the comment in `__setattr__`
+    forbids) leaves `9.9.9` here, and the export would again write a file
+    named by one UID and carrying another."""
+    with _session(tmp_path) as session:
+        instance = _instance(session)
+        instance.attributes[ELEMENT] = "9.9.9"
+        instance.sop_instance_uid = "1.2.3.4"
+        assert instance.attributes[ELEMENT] == "1.2.3.4"
+
+
 def test_the_assignment_records_no_source_uid(tmp_path):
     """Control, green on main: `SOURCE_SOP_UID_ATTR` is `_take_sop_uid`'s
     to write, for a UID the library moved. A caller's assignment is not

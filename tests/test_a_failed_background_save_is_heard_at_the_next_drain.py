@@ -34,8 +34,11 @@ import datetime
 import os
 import sqlite3
 import subprocess
+import gc
 import sys
 import textwrap
+import threading
+import weakref
 
 import pytest
 
@@ -218,9 +221,20 @@ def _built(pid):
             .end_instance().end_series().end_study().build())
 
 
+def _remove(session, patient):
+    session.store.patients.remove(patient)
+
+
+def _rebind(session, patient):
+    """The ordinary way to drop a patient: a new list, assigned."""
+    session.store.patients = [p for p in session.store.patients
+                              if p is not patient]
+
+
+@pytest.mark.parametrize("drop", [_remove, _rebind], ids=["remove", "rebind"])
 @pytest.mark.parametrize("door, prepare", DOORS)
 def test_dropping_the_refused_patient_heals_at_the_next_draining_call(
-        tmp_path, door, prepare):
+        tmp_path, door, prepare, drop):
     """Two patients; the second holds a value the store refuses, and the
     background save fails. The caller answers by dropping that patient
     from the session. The next draining call saves the session as it now
@@ -228,7 +242,10 @@ def test_dropping_the_refused_patient_heals_at_the_next_draining_call(
 
     Red while the retry saved the copy the failed save was handed: that
     copy still held the dropped patient, so every door raised its
-    `TypeError` for a patient the session no longer had."""
+    `TypeError` for a patient the session no longer had. And red, for
+    `rebind`, while the retry read the list *object* `save()` was handed:
+    a caller who assigned `session.store.patients` a new list was refused
+    for the dropped patient at every call (review of #1015, finding 1)."""
     write_ct(tmp_path / "in" / "b.dcm", OTHER, 942)
     session = _session(tmp_path)
     try:
@@ -241,7 +258,7 @@ def test_dropping_the_refused_patient_heals_at_the_next_draining_call(
         _background_save(session)
         assert _patient_ids(tmp_path / "s.db") == [PID, OTHER]
 
-        session.store.patients.remove(other)
+        drop(session, other)
         door(session)
 
         stored = _patient_ids(tmp_path / "s.db")
@@ -295,24 +312,253 @@ def test_the_retry_is_handed_a_copy_and_prunes_as_the_failed_save_asked(tmp_path
         session.close()
 
 
-def test_a_manager_used_directly_retries_the_list_object_it_was_handed(tmp_path):
-    """The manager holds no session. What `flush()` retries is the list
-    object `save_async` was handed, read again at the retry: for
-    `Session.save()` that is `session.store.patients`, and for a caller
-    of `save_async` it is their own list."""
+def test_a_manager_with_no_session_retries_the_list_object_it_was_handed(tmp_path):
+    """A manager built by hand holds no session. What its `flush()`
+    retries is the list object `save_async` was handed, read again at the
+    retry. A session's own manager reads `session.store.patients`
+    instead, which the tests above pin."""
     session = _session(tmp_path)
+    bare = manager_module.PersistenceManager(session.store_backend)
     try:
         counted = _Counted(session.store_backend, failures=1)
         mine = list(session.store.patients)
-        session.persistence_manager.save_async(mine, prune_absent_patients=True)
-        session.persistence_manager.queue.join()
+        bare.save_async(mine, prune_absent_patients=True)
+        bare.queue.join()
         mine.append(_built("PID-941-MINE"))
-        session.persistence_manager.flush()
+        bare.flush()
         assert counted.calls == 2
         assert _patient_ids(tmp_path / "s.db") == [PID, "PID-941-MINE"]
         assert len(session.store.patients) == 1
     finally:
+        bare.shutdown()
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# The calls that begin with `audit()` or `redact()` (owner ruling of
+# 2026-10-09 on the review's finding 2: they raise, and everything says so)
+# ---------------------------------------------------------------------------
+
+CALLERS = [
+    pytest.param(lambda s, t: s.anonymize(), id="anonymize-no-argument"),
+    pytest.param(lambda s, t: s.redact_by_machine("SN-NOT-HERE-941", [0, 8, 0, 8]),
+                 id="redact_by_machine"),
+    pytest.param(lambda s, t: s.export(str(t / "out"), check_burned_in=True,
+                                       show_progress=False),
+                 id="export-check_burned_in"),
+    pytest.param(lambda s, t: s.lock_identities([PID]), id="lock-a-list"),
+]
+
+
+@pytest.mark.parametrize("call", CALLERS)
+def test_a_call_that_begins_with_a_draining_call_raises_the_failed_save(
+        tmp_path, call):
+    """`anonymize()` with no findings calls `audit()`,
+    `redact_by_machine()` calls `redact()`, the pre-export scan calls
+    `audit()` before the export's own save, and `lock_identities()` given
+    a list is the batch lock. Each raises the failed save from that inner
+    call, before it has written anything. On `main` each returned."""
+    session = _session(tmp_path)
+    try:
+        _lock(session)
+        _fail_persistently(session)
+        with pytest.raises(TypeError) as raised:
+            call(session, tmp_path)
+        assert f"holds a set at {TAG}" in str(raised.value)
+        assert not os.path.exists(tmp_path / "out")
+        assert _rows(tmp_path / "s.db") == []
+    finally:
+        _instance(session).set_attr(TAG, 7)
+        session.close()
+
+
+def test_anonymize_handed_its_findings_does_not_raise_the_failed_save(tmp_path):
+    """`anonymize(report)` makes no draining call of its own, so it
+    returns over a standing failure; the next `audit()` raises it."""
+    session = _session(tmp_path)
+    try:
+        report = session.audit()
+        _fail_persistently(session)
+        assert session.anonymize(report) > 0
+        with pytest.raises(TypeError):
+            session.audit()
+    finally:
+        _instance(session).set_attr(TAG, 7)
+        session.close()
+
+
+@pytest.mark.parametrize("lock", [
+    lambda s: s.lock_identities(PID),
+    lambda s: s.lock_identities_batch([PID]),
+], ids=["lock", "lock-batch"])
+def test_a_lock_that_raises_at_its_drain_creates_no_key_file(tmp_path, lock):
+    """The key file is written only by a lock that writes a token (#813).
+    The batch form committed its key and then drained, so a failed
+    background save left a new `isocenter.key` beside a session with
+    nothing locked (review of #1015, finding 3)."""
+    session = _session(tmp_path)
+    key = tmp_path / "isocenter.key"
+    try:
+        _lock(session)
+        assert not key.exists()
+        _fail_persistently(session)
+        with pytest.raises(TypeError):
+            lock(session)
+        assert not key.exists()
+    finally:
+        _instance(session).set_attr(TAG, 7)
+        session.close()
+
+
+def test_a_report_generated_before_close_does_not_see_the_failure(tmp_path):
+    """A limit, pinned so the entry's sentence is a measurement:
+    `generate_report()` is not one of the calls that run the failed save,
+    and the row is written when the session ends. So a report generated
+    in the same session, with every save failing and no draining call
+    after the last one, grades as if the saves had been written."""
+    session = _session(tmp_path)
+    try:
+        report = session.audit()
+        _Counted(session.store_backend, failures=10 ** 6)
+        session.anonymize(report)
+        _background_save(session)
+        assert _grade(session, tmp_path) == "PASS"
+    finally:
+        session.close()
+    [(kind, key, _)] = _rows(tmp_path / "s.db")
+    assert (kind, key) == ("ERROR", "SESSION")
+
+
+# ---------------------------------------------------------------------------
+# The manager's own order and bookkeeping (review of #1015, finding 6)
+# ---------------------------------------------------------------------------
+
+def test_flush_waits_for_the_queue_before_it_runs_the_failed_save(tmp_path):
+    """A failed save is remembered, and a second background save is in
+    the worker's hands when `flush()` is called. `flush()` must wait for
+    it first: it succeeds, which heals the failure, and `flush()` then
+    runs nothing. A `flush()` that retried before waiting would call
+    `save_all` a third time, beside the worker's."""
+    session = _session(tmp_path)
+    store = session.store_backend
+    real = store.save_all
+    calls, parked, release = [], threading.Event(), threading.Event()
+
+    def save_all(*args, **kwargs):
+        calls.append(threading.current_thread() is threading.main_thread())
+        if len(calls) == 1:
+            raise OSError(28, "No space left on device")
+        if len(calls) == 2:
+            parked.set()
+            assert release.wait(30)
+        return real(*args, **kwargs)
+
+    store.save_all = save_all
+    try:
+        _instance(session).set_attr(TAG, 7)
+        _background_save(session)
+        session.save()
+        assert parked.wait(30)
+        # An Event, not `Thread.is_alive()` after a timed join.
+        returned = threading.Event()
+
+        def flush():
+            session.persistence_manager.flush()
+            returned.set()
+
+        threading.Thread(target=flush, daemon=True).start()
+        assert not returned.wait(0.5), "flush() returned with a save still running"
+        assert len(calls) == 2, "flush() ran the failed save before it waited"
+        release.set()
+        assert returned.wait(30)
+        assert len(calls) == 2
+        assert _stored(tmp_path / "s.db") == [7]
+    finally:
+        release.set()
+        store.save_all = real
+        session.close()
+    assert _rows(tmp_path / "s.db") == []
+
+
+def test_the_manager_does_not_keep_a_closed_sessions_graph_alive(tmp_path):
+    """The manager outlives its session through its exit handler. Its way
+    of reading the session's patients at a retry holds the store weakly,
+    so a closed session's patients are not kept until the process ends."""
+    session = _session(tmp_path)
+    manager = session.persistence_manager
+    store = weakref.ref(session.store)
+    assert manager._current_patients() is session.store.patients
+    session.close()
+    del session
+    gc.collect()
+    assert store() is None
+    assert manager._current_patients() is None
+
+
+def test_a_queued_save_written_at_shutdown_heals_the_failure(tmp_path):
+    """`shutdown()` writes a save its worker left on the queue
+    (`_drain_queued_saves`). When that write returns it is a later save
+    that succeeded, so the session does not end over an unhealed failure
+    and no row is written. Driven through the manager's private parts:
+    the worker is stopped and an item put on the queue by hand."""
+    session = _session(tmp_path)
+    manager = session.persistence_manager
+    _Counted(session.store_backend, failures=1)
+    _instance(session).set_attr(TAG, 7)
+    _background_save(session)
+    assert manager._failed_save is not None
+    manager._shutdown_worker()
+    manager.queue.put((list(session.store.patients), True))
+    session.close()
+    assert _stored(tmp_path / "s.db") == [7]
+    assert _rows(tmp_path / "s.db") == []
+
+
+def test_a_newer_failure_is_not_overwritten_by_the_retrys_own(tmp_path):
+    """While the retry of one failed save is running, the worker records
+    another. The retry then raises too. What stays remembered is the
+    newer failure, not the retry's."""
+    session = _session(tmp_path)
+    manager = session.persistence_manager
+    real = session.store_backend.save_all
+    newer = OSError(5, "newer")
+    try:
+        _Counted(session.store_backend, failures=1)
+        _instance(session).set_attr(TAG, 7)
+        _background_save(session)
+
+        def retry(*args, **kwargs):
+            manager._remember_failed_save(([], False), newer)
+            raise OSError(28, "the retry's own")
+
+        session.store_backend.save_all = retry
+        with pytest.raises(OSError, match="the retry's own"):
+            manager.flush()
+        assert manager._failed_save[1] is newer
+    finally:
+        session.store_backend.save_all = real
+        manager._forget_failed_save()
+        session.close()
+
+
+def test_a_failure_already_reported_is_not_reported_again_after_a_retry(tmp_path):
+    """One row per failure. `shutdown()` writes the row; the manager can
+    be used again afterwards; a `flush()` then runs the save, which fails
+    again, and a second `shutdown()` writes no second row for it."""
+    session = _session(tmp_path)
+    manager = session.persistence_manager
+    try:
+        _fail_persistently(session)
+        manager.shutdown()
+        assert len(_rows(tmp_path / "s.db")) == 1
+        with pytest.raises(TypeError):
+            manager.flush()
+        manager.shutdown()
+        assert len(_rows(tmp_path / "s.db")) == 1
+    finally:
+        _instance(session).set_attr(TAG, 7)
+        session.close()
+    assert len(_rows(tmp_path / "s.db")) == 1
 
 
 def test_a_later_synchronous_save_clears_the_failure(tmp_path):

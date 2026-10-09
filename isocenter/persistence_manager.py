@@ -351,6 +351,15 @@ class PersistenceManager:
         # Private: no public name carries any of this.
         self._failed_save = None
 
+        # How the retry of a failed save reads the session's patients as
+        # they stand at the retry: a callable returning that list, set by
+        # `Session` once its store exists, or None for a manager built by
+        # hand (`_run_failed_save` says what that one reads). The
+        # session's callable holds its store weakly and returns None once
+        # the store is gone, so this manager, which its exit handler
+        # keeps alive, does not keep a closed session's graph alive.
+        self._current_patients = None
+
         self._start_worker()
 
         # **A weakref, not `self.shutdown`.** `atexit.register` holds its
@@ -445,14 +454,14 @@ class PersistenceManager:
 
         Once the queue is empty, the newest background save that failed,
         if no save has succeeded since, is run again on this thread. It
-        saves the list object that save was handed, as that list stands
-        now, not the copy that was queued: for `Session.save()` that is
-        `session.store.patients`, so a patient dropped from or added to
-        the session since is dropped from or added to the store. This
-        manager holds no session: called directly, after a `save_async`
-        of a list of the caller's own, it reads that list again. A
-        failure that has passed heals here and nothing is said. One that
-        has not is raised.
+        saves the patients as they stand now, not the copy that was
+        queued. A session's manager reads `session.store.patients` at
+        this moment, so a patient dropped from or added to the session
+        since, by editing the list or by assigning a new one, is dropped
+        from or added to the store. A manager built by hand holds no
+        session: it reads again the list object `save_async` was handed.
+        A failure that has passed heals here and nothing is said. One
+        that has not is raised.
 
         Raises:
             Exception: Whatever that save raises: the store's named
@@ -543,21 +552,26 @@ class PersistenceManager:
         Raises:
             BaseException: Whatever `save_all` raises, unchanged.
         """
-        # **The caller's list as it stands now, not the copy that was
+        # **The session's list as it stands now, not the copy that was
         # queued** (owner ruling on #941, 2026-10-09). The queued copy is
         # the list as it was when `save()` was called; a caller who
         # answered the refusal by dropping the offending patient from the
         # session would be refused for it again at every drain, by a
         # retry of a list the session no longer holds, and a patient
-        # added since would not be saved. The manager holds no session,
-        # so "the session's list" is the list object `save_async` was
-        # handed (`_QueuedPatients.source`): `Session.save()` hands
-        # `session.store.patients`, which the session never rebinds after
-        # construction. A caller who rebinds `store.patients` to a new
-        # list, or who called `save_async` with a list of their own, gets
-        # a retry of the object that was handed over. Copied again here,
-        # because `save_all` walks its argument and the caller may edit
-        # theirs meanwhile.
+        # added since would not be saved.
+        #
+        # **Read through `_current_patients`, at the retry.** The session
+        # gives the manager a callable that returns `store.patients` when
+        # called, so a caller who drops a patient by assigning
+        # `session.store.patients` a new list (a list comprehension is
+        # the ordinary way) is healed like one who called `.remove()`.
+        # Reading the list *object* `save()` was handed is not enough:
+        # after a rebind that object is no longer the session's (review
+        # of #1015, finding 1). A manager built by hand has no callable
+        # and no session; it reads the list object `save_async` was
+        # handed (`_QueuedPatients.source`). Copied again here either
+        # way, because `save_all` walks its argument and the caller may
+        # edit theirs meanwhile.
         #
         # **Taken out under the lock, run outside it.** Two flushes at
         # once cannot both run it, and `_inflight_lock` is never held
@@ -578,9 +592,12 @@ class PersistenceManager:
             "A background save failed earlier and no save has succeeded "
             "since; running it again now, on the calling thread.")
         try:
+            current = self._current_patients
+            now = current() if current is not None else None
+            if now is None:
+                now = getattr(patients, "source", patients)
             self.store_backend.save_all(
-                list(getattr(patients, "source", patients)),
-                prune_absent_patients=prune_absent_patients)
+                list(now), prune_absent_patients=prune_absent_patients)
         except BaseException as exc:
             with self._inflight_lock:
                 if self._failed_save is None:

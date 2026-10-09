@@ -404,27 +404,41 @@ otherwise.
   after a `save()` without `sync=True` whose write failed: each drains
   the queue on entry and then runs that save again itself, on the calling
   thread, before it does anything else. That save writes the session's
-  patients as they stand then (`session.store.patients`), not as they
-  stood when `save()` was called: a patient removed from the session
-  since is removed from the store, and one added since is saved.
-  (`session.persistence_manager` is not tier 1. Its `flush()`, called
-  directly, reads again the list object the failed save was handed.)
-  If the save now succeeds, nothing is raised and nothing is said. If it fails again, the call raises what
-  the save raises: the `TypeError` or `ValueError` above, an `OSError`,
-  or the sidecar lock's `RuntimeError`. The next such call runs it again,
-  until a save succeeds. `save()` itself still returns before the write
-  and raises nothing for it, and `close()` does not raise for it.
-  `save(sync=True)`, `export()` and `compact()` save the session
-  themselves, as before. `redact()` with no rules loaded returns 0 before
-  it drains. `anonymize()` and `recover_patient_identity()` wait for the
-  queue where they did and do not run a failed save.
+  patients as they stand then (`session.store.patients`, read at that
+  moment), not as they stood when `save()` was called: a patient removed
+  from the session since, by editing the list or by assigning
+  `session.store.patients` a new one, is removed from the store, and one
+  added since is saved. If the save now succeeds, nothing is raised and
+  nothing is said. If it fails again, the call raises what the save
+  raises: the `TypeError` or `ValueError` above, an `OSError`, or the
+  sidecar lock's `RuntimeError`. The next such call runs it again, until
+  a save succeeds. A lock that raises this way has embedded no token and
+  created no key file.
+  The calls that begin with one of those four raise it too, from that
+  inner call and before they write anything: `anonymize()` with no
+  findings (it calls `audit()`), `redact_by_machine()` (it calls
+  `redact()`), `export(check_burned_in=True)` (its pre-export scan is an
+  `audit()`, before the export's own save), and `lock_identities()`
+  given a list or a report (the batch form).
+  `anonymize(report)`, handed its findings, makes no such call and
+  returns; so does `recover_patient_identity()`. Both wait for the queue
+  where they did and do not run a failed save.
+  `save()` itself still returns before the write and raises nothing for
+  it, and `close()` does not raise for it. `save(sync=True)`, `export()`
+  and `compact()` save the session themselves, as before. `redact()`
+  with no rules loaded returns 0 before it drains.
   A session that ends, by `close()` or when the process exits with the
   session still referenced and never closed, with a failed background
   save that no later save has healed
   writes one `ERROR` audit row keyed `SESSION` (`A background save()
   failed and no later save succeeded before the session ended, ...`), so
-  a later session's report on that store grades `REVIEW_REQUIRED`
-  (#941).
+  a later session's report on that store grades `REVIEW_REQUIRED`.
+  `generate_report()` is not one of the calls above, and the row is
+  written when the session ends: a report generated in the same session,
+  with no `audit()` after the failed save, does not show the failure.
+  One session used from two threads at once can have a retry on one
+  thread fail while a save on the other succeeds; the failure then
+  stays recorded although nothing is unsaved (#941).
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.
 - `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`:
