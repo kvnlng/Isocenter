@@ -194,6 +194,7 @@ COMMITTED = {
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
+    "sop_classes_in_the_file_meta": ["sop_classes_in_the_file_meta-1.dcm"],
     "source_says_unmodified": ["source_says_unmodified-1.dcm"],
     "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
                             "unstated_private_vr-implicit.dcm",

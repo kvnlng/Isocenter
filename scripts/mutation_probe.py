@@ -258,7 +258,7 @@ TARGETS = {
     #     CT missing a Type 2 element. Killed since by
     #     tests/test_validation.py::
     #     test_a_missing_type_2_element_is_reported_and_an_empty_one_is_not.
-    "isocenter/validation.py": (["tests/test_type_1_geometry_is_checked_beyond_ct.py", "tests/test_a_series_number_rule_reaches_the_export.py", "tests/test_export_error.py",
+    "isocenter/validation.py": (["tests/test_two_values_in_a_series_row_field_are_held_as_written.py", "tests/test_type_1_geometry_is_checked_beyond_ct.py", "tests/test_a_series_number_rule_reaches_the_export.py", "tests/test_export_error.py",
                                  "tests/test_a_missing_type_2_element_is_written_empty.py",
                                  "tests/test_missing_study_date.py",
                                  "tests/test_floor_policy.py", "tests/test_io.py",

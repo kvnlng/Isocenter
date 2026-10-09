@@ -2401,7 +2401,8 @@ def _source_text(value):
 
     For the four text elements `ingest_worker` hands the parent as fields
     of `Series` and `Equipment`: Modality, Manufacturer, Manufacturer's
-    Model Name and Device Serial Number.
+    Model Name and Device Serial Number. And, since #998, for the SOP
+    Class UID it hands on as `Instance.sop_class_uid`.
 
     Args:
         value: What pydicom read for the element, or the caller's default
@@ -4828,10 +4829,25 @@ def ingest_worker(fp: str) -> Tuple:
         # never appends this file's frame to the sidecar (#1022).
         _refuse_a_key_that_is_not_text(ds)
 
-        # Determine SOP Class UID with fallback to File Meta
-        sop_class = str(ds.get("SOPClassUID", ""))
+        # Determine SOP Class UID with fallback to File Meta.
+        # `_source_text` inside `str()`, on both reads: an element holding
+        # two values is a `MultiValue`, and `str()` of that is the text of
+        # a Python list, which the field, the store's column and the scan
+        # clone then held (#998). Joined, not refused (owner ruling Q6 A):
+        # nothing is linked by the SOP class. With `(0008,0016)` in the
+        # dataset no exported byte follows the field: the element is
+        # written from the instance's own, which `populate_attrs` holds
+        # with both values, and pydicom's writer copies that into
+        # `(0002,0002)`. On the fallback read below the instance has no
+        # element of its own, so the field IS what `(0008,0016)` and
+        # `(0002,0002)` are exported from: the list's text went out as one
+        # value there, and the joined text goes out as the source's two
+        # (review of #1046). The validator reads the field through the
+        # file meta, and takes two classes as a class it does not know
+        # (`IODValidator._modules_for`).
+        sop_class = str(_source_text(ds.get("SOPClassUID", "")))
         if not sop_class and "MediaStorageSOPClassUID" in ds.file_meta:
-            sop_class = str(ds.file_meta.MediaStorageSOPClassUID)
+            sop_class = str(_source_text(ds.file_meta.MediaStorageSOPClassUID))
 
         # Extract Linking Metadata
         meta = {

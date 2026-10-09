@@ -678,6 +678,22 @@ def linkage_key_not_text(out: Path):
         write(ds, out / f"linkage_key_not_text-{label}.dcm")
 
 
+def sop_classes_in_the_file_meta(out: Path):
+    """One CT with no SOP Class UID `(0008,0016)` in its dataset and two
+    values, CT and MR Image Storage, in the file meta's Media Storage SOP
+    Class UID `(0002,0002)` (#998). With no element in the dataset the
+    instance's class is the worker's text of the file meta's, and that
+    text is all an export has to write. Before #998 it was the text of a
+    Python list, exported as one value in both elements; it is now the
+    source's two values. No other input takes the worker's file-meta arm
+    with more than one value."""
+    ds = ct("sop_classes_in_the_file_meta")
+    del ds[0x00080016]
+    ds.file_meta[0x00020002] = pydicom.DataElement(
+        0x00020002, "UI", [CT, "1.2.840.10008.5.1.4.1.1.4"])
+    write(ds, out / "sop_classes_in_the_file_meta-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -686,7 +702,8 @@ MEMBERS = {f.__name__: f for f in (
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
     ecg_lead_codes, number_vr_on_a_date_or_time,
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
-    source_says_unmodified, linkage_key_not_text)}
+    source_says_unmodified, linkage_key_not_text,
+    sop_classes_in_the_file_meta)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
