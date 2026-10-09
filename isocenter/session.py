@@ -27,7 +27,7 @@ from pydicom.multival import MultiValue
 
 from .io_handlers import (DicomImporter, DicomExporter, DeidMarkers, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
-                          SidecarWaveformLoader,
+                          SidecarWaveformLoader, export_output_path,
                           export_folder_names, export_stamp_attributes, GRADED_LOSS_SCOPES,
                           normalize_id_filter, redaction_in_effect, select_patient_ids,
                           unmatched_patient_ids_sentence, unmatched_subset_uids_sentence)
@@ -7698,12 +7698,21 @@ class DicomSession:
                         if why is not None:
                             continue
 
+                        # The SOP Instance UID names the file: it is
+                        # unique where InstanceNumber is not. Through the
+                        # one helper both doors call, never formatted
+                        # here: a UID that cannot name a file is refused
+                        # there (GHSA-2rc2-r9r5-x7hm). The refused
+                        # instance is still planned, with nowhere to go
+                        # and its refusal, so it is counted in "of N
+                        # planned" and fails with its own `ERROR` row
+                        # while the rest are written.
+                        output_path, refusal = export_output_path(
+                            series_path, instance)
                         tasks.append(ExportContext(
                             instance=instance,
-                            # The SOP Instance UID names the file: it is
-                            # unique where InstanceNumber is not.
-                            output_path=os.path.join(
-                                series_path, f"{instance.sop_instance_uid}.dcm"),
+                            output_path=output_path,
+                            refusal=refusal,
                             patient_attributes=patient_attrs,
                             study_attributes=study_attrs,
                             series_attributes=series_attrs,

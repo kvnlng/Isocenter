@@ -1358,6 +1358,39 @@ def test_a_hand_built_graph_the_exporter_can_stamp_is_written(tmp_path):
     assert written.PatientID == "PAT" and str(written.PatientName) == "Doe^Jane"
 
 
+def test_a_file_name_refusal_speaks_before_a_refused_stamp(tmp_path):
+    """Two reasons to fail one file: its SOP Instance UID cannot name a
+    file (GHSA-2rc2-r9r5-x7hm, #1024) and its Patient's stamp cannot be
+    written. The file-name refusal is raised first in the worker, before
+    any dataset is built, so it is the one the row carries: one ERROR
+    row, one failure, nothing on disk."""
+    folder = tmp_path / "both"
+    folder.mkdir()
+    (folder / "in").mkdir()
+    shutil.copy(get_testdata_file("CT_small.dcm"), str(folder / "in" / "a.dcm"))
+    db, out = str(folder / "s.db"), folder / "out"
+    session = DicomSession(db)
+    try:
+        session.ingest(str(folder / "in"))
+        inst, patient = _instance(session), _owner(session, "patient")
+        uid, patient_id = inst.sop_instance_uid, patient.patient_id
+        inst.sop_instance_uid = "../elsewhere"
+        patient.patient_id = 7
+        with pytest.raises(ExportError):
+            session.export(str(out), use_compression=True, show_progress=False)
+        # So the session can close on values the store holds.
+        inst.sop_instance_uid, patient.patient_id = uid, patient_id
+    finally:
+        session.close()
+    with sqlite3.connect(db) as conn:
+        errors = [details for (details,) in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type = 'ERROR'")]
+    assert len(errors) == 1, errors
+    assert "SOP Instance UID (0008,0018) cannot name a file" in errors[0]
+    assert "cannot be written" not in errors[0]
+    assert [p for p in tmp_path.rglob("*.dcm") if "in" not in p.parts] == []
+
+
 @pytest.mark.parametrize("after_a_pass", [False, True],
                          ids=["no-pass", "after-audit-and-anonymize"])
 @pytest.mark.parametrize("kind, field, tag", [

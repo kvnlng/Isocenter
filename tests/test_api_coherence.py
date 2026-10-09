@@ -326,6 +326,49 @@ def test_one_sanitizer_for_folder_names():
         "ConfigLoader.clean_filename; both sanitize folder names")
 
 
+def test_the_exported_file_name_is_built_in_one_place():
+    """Two doors each formatted `<SOP Instance UID>.dcm` themselves, and
+    neither checked it (GHSA-2rc2-r9r5-x7hm). `io_handlers.export_file_name`
+    is the one place the name is built, and the one place it is refused;
+    a third door that formats its own is red here before anyone asks
+    whether it checks.
+
+    Read from the syntax tree, not the text: every string literal in the
+    package that ends in `.dcm`, a docstring excepted. However a name is
+    put together (`f"{uid}.dcm"`, `uid + ".dcm"`, `"%s.dcm" % uid`,
+    `"{}.dcm".format(uid)`, an f-string under any prefix or over any
+    variable name) the suffix is a literal, and the package holds exactly
+    one. Comments are not in the tree. Not seen: a suffix that is not a
+    literal ending in `.dcm` (`"." + "dcm"`, `os.extsep`, a constant
+    imported from outside the package), and a writer outside the package
+    (a third-party exporter names its own files, #783).
+    """
+    import ast
+
+    package_dir = os.path.dirname(isocenter.__file__)
+    spelled = {}
+    for root, _, files in os.walk(package_dir):
+        for name in sorted(files):
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            docstrings = {
+                id(node.value) for node in ast.walk(tree)
+                if isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)}
+            hits = [node.lineno for node in ast.walk(tree)
+                    if isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and node.value.endswith(".dcm")
+                    and id(node) not in docstrings]
+            if hits:
+                spelled[os.path.relpath(path, package_dir)] = hits
+    assert list(spelled) == ["io_handlers.py"], spelled
+    assert len(spelled["io_handlers.py"]) == 1, spelled
+
+
 def test_clean_filename_does_not_treat_a_falsy_value_like_0_as_missing():
     """`ConfigLoader.clean_filename` must not treat a falsy-but-real value
     like the integer `0` as missing.
