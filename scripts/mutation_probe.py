@@ -198,7 +198,8 @@ TARGETS = {
                                "tests/test_save_all_contract.py",
                                "tests/test_written_uids_names_only_uids.py",
                                "tests/test_scaffolding.py",
-                               "tests/test_tag_key_normalisation.py"], 30),
+                               "tests/test_tag_key_normalisation.py",
+                               "tests/test_the_exporter_writes_the_python_value.py"], 30),
     # 99 sites; budget 30 is a stride of 3, 33 mutants: all 33
     # killed. Seven files, 75.6s per pass -- the slowest of the #439 rows,
     # measured with other suites on the machine.
@@ -464,6 +465,7 @@ TARGETS = {
                                   "tests/test_a_multi_valued_person_name_is_held_as_written.py",
                                   "tests/test_a_float_in_a_ds_fits_sixteen_characters.py",
                                   "tests/test_a_number_in_an_is_fits_its_range.py",
+                                  "tests/test_the_exporter_writes_the_python_value.py",
                                   "tests/test_a_pixel_lut_is_kept_beyond_the_vendor_blob_limit.py",
                                   "tests/test_an_over_long_short_length_value_round_trips.py",
                                   "tests/test_a_geometry_rewrite_at_export_is_said.py",
@@ -772,6 +774,7 @@ TARGETS = {
                               "tests/test_a_store_keeps_its_place_when_the_process_moves.py",
                               "tests/test_an_instance_with_no_uid_is_refused_before_the_save.py",
                               "tests/test_a_numpy_number_set_into_an_attribute_is_saved.py",
+                              "tests/test_the_exporter_writes_the_python_value.py",
                               "tests/test_a_value_the_store_cannot_hold_is_refused_by_name.py",
                               "tests/test_a_private_ov_takes_the_size_gate.py",
                               "tests/test_an_absent_instance_number_is_not_invented.py",
@@ -1064,6 +1067,7 @@ TARGETS = {
                                "tests/test_a_multi_valued_linkage_key_is_refused_by_name.py",
                                "tests/test_a_lut_descriptor_pydicom_cannot_use_is_no_descriptor.py",
                                "tests/test_a_numpy_number_set_into_an_attribute_is_saved.py",
+                               "tests/test_the_exporter_writes_the_python_value.py",
                                "tests/test_a_value_the_store_cannot_hold_is_refused_by_name.py",
                                "tests/test_a_frame_j2k_cannot_carry_is_written_uncompressed.py",
                                "tests/test_a_float_in_a_ds_fits_sixteen_characters.py",

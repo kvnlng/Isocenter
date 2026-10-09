@@ -37,7 +37,16 @@ Nor is any other numpy value: a `datetime64`, a `timedelta64`, a complex
 number and a masked value stay as given, and the save refuses them.
 A value written straight into `attributes` is not seen by the entity
 (call `mark_modified()`), and a numpy number written that way is
-converted when it is saved. The store holds `None`, `str`, `bytes`,
+converted when it is saved. `export()` writes one as the Python number
+it equals whether or not it was saved, so the file is the same before
+and after a save and a reopen; it writes a `tuple` as the list it
+equals, and a `Decimal` (which the save refuses, and which only a value
+written straight into `attributes` or a graph built by hand can hold) as
+the `float` it equals. None of the three is changed in `attributes`.
+A number under a standard element whose VR holds text
+(`set_attr("0008,1090", 7)`) is not written: the file is exported
+without that element, under one `DATA_LOSS` row naming the tag, the type
+and the VR. Pass the text. The store holds `None`, `str`, `bytes`,
 `bool`, `int`, `float`, pydicom's DS and IS values, and lists of those;
 `set_attr()` raises nothing for anything else, and the next
 `save(sync=True)`, `export()` or `compact()` raises `TypeError` naming

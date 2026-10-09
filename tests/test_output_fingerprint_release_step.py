@@ -151,6 +151,7 @@ def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
 COMMITTED = {
     "big_endian_words": ["big_endian_words-1.dcm"],
     "big_lut": ["big_lut-1.dcm"],
+    "binary_number_vr_on_a_text_tag": ["binary_number_vr_on_a_text_tag-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
     "ecg_lead_codes": ["ecg_lead_codes-2008-12lead.dcm",
@@ -183,6 +184,7 @@ COMMITTED = {
     "no_patient_id": ["no_patient_id-s1-1.dcm", "no_patient_id-s2-1.dcm",
                       "no_patient_id-s3-1.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
+    "number_vr_on_a_date_or_time": ["number_vr_on_a_date_or_time-1.dcm"],
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
