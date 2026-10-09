@@ -12211,8 +12211,8 @@ class DicomExporter:
             losses (list): As for `_merge`.
 
         Raises:
-            ValueError: Naming the tag and why the stamp was refused,
-                never a value.
+            ValueError: Naming the tag and the reason its `DATA_LOSS`
+                row would have carried; it adds no value of its own.
         """
         # Owner ruling on #1009 (finding 3). A stamp `_merge` refuses
         # leaves `ds` holding what the instance's merge put there: the
