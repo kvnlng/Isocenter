@@ -297,6 +297,39 @@ fixes, never features.
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
 
+   **Start no other heavy run while the map build runs** (#975): not
+   the 3.12 shards, not a fingerprint `check`, not another agent's gate.
+   Each test's coverage is written by its own processes as small sqlite
+   files, tens of thousands of them, and on a machine at load 80 the
+   1.0.0rc14 build ended with one of them unreadable (`Couldn't use data
+   file '…': database disk image is malformed … 1 file errored`).
+   `coverage combine` exits 0 over such a file, and until #975 the build
+   wrote a map without that process's data and exited 0 too.
+
+   **If the build ends `no map written`**, it has refused to do that: it
+   names the data files `coverage combine` left unread, writes nothing,
+   leaves any `.test-map.json` already there as it was, and exits with
+   the suite's status, or with 9 when the suite passed. The same ending
+   covers a `coverage combine` that itself exits non-zero, which it does
+   over a data file with a table missing (`no such table:
+   other_db.context`; it then leaves every data file, and the line names
+   them after `coverage combine exited 1 and left`) and when no data
+   file was written at all (`No data to combine`; the line says
+   `coverage combine exited 1 and left no data file`). So a build's
+   `exit=1` is always the suite's: no ending of the map step exits 1 on
+   a green suite. Then:
+   - **the suite's result stands.** The line `the suite exited N` and the
+     last test line above it are the 3.14t integration result, recorded
+     as usual with the `exit=` the build gave: `the suite exited 0` with
+     `exit=9` is a green integration run and no map. It is not a failure
+     or a hang under the rerun rule above, and the suite is not run
+     again for it;
+   - **the map is not part of the release.** Keep the previous one (an
+     older map selects more, toward the `TARGETS` rows; what it can miss
+     is said above), or build it again outside the
+     release path, on a quiet machine, by the same command;
+   - say which in the release-commit PR.
+
    **If the map build hangs**, step 1's 3.14t run is plain `pytest`,
    without coverage, split into shards (owner ruling on #796,
    2026-09-24): `PYTHON_GIL=0 python -m pytest -v --shard=I/N; echo
@@ -519,10 +552,12 @@ fixes, never features.
      `test_a_rule_cannot_remove_a_study_or_series_uid.py` (4),
      `test_repeating_group_rules.py` (1) and
      `test_uids_are_replaced_by_the_project_secret.py` (1);
-   - 4 that need `coverage`, which is in the `dev` extra and which
+   - 7 that need `coverage`, which is in the `dev` extra and which
      `tests.yml` deliberately does not install
-     (`tests/test_skip_contract.py` says why): three in
-     `test_changed_code_selects_its_tests.py` and
+     (`tests/test_skip_contract.py` says why): six in
+     `test_changed_code_selects_its_tests.py` (the three that build a
+     small real map, and since #975 the three cases of
+     `test_combine_names_the_data_file_it_could_not_read`) and
      `test_coverage_keeps_worker_data_under_chdir.py`'s one;
    - 2 by platform: `test_the_store_location_advice.py`'s macOS test, and
      `test_redaction_names_its_strategy.py`'s free-threaded test, which
@@ -536,8 +571,14 @@ fixes, never features.
      `origin/main`), 1 in step 6's run from the tag (`origin/main` still
      does not, until step 8), none in a dispatch from `main`.
 
-   That is **21 in a rehearsal, 20 in the publish run and 19 in a
-   dispatch from `main`**, and one fewer each on 3.14t. **Any other
+   That is **24 in a rehearsal, 23 in the publish run and 22 in a
+   dispatch from `main`**, and one fewer each on 3.14t. **These totals
+   are derived, not yet seen on a runner**: what a runner has shown is
+   19 on 3.12 and 18 on 3.14t in a dispatch (run 37846349518), before
+   #975 added three cases that need `coverage`; each total here is that
+   reading plus three, plus the released section's one or two. The first
+   rehearsal after #975 replaces them: write the counts it shows here,
+   in a PR of its own, and take this sentence out. **Any other
    number is a finding**: find the test (`pytest -rs` prints the reason;
    a runner's `-v` log prints only `SKIPPED`), and either it is a test
    that has stopped running, or this list is out of date and the same
