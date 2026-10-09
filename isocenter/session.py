@@ -1872,16 +1872,13 @@ class DicomSession:
         if sync and hasattr(self, 'store_backend'):
             get_logger().info("Saving session (Synchronous)...")
             # `_wait()`, not `flush()` (#941): `flush()` would first run a
-            # background save that failed, with the patients *that* save
-            # was handed, and raise what it raises. This call is about to
-            # save the session as it stands now and raise what that
-            # raises, which is the same exception while nothing has
-            # changed and the right one when something has: a caller who
-            # answered a refused save by dropping a patient from
-            # `store.patients` would otherwise be refused for a patient
-            # the session no longer holds, by the one call that can clear
-            # the failure. On return this save has written everything
-            # that one would have, so the manager forgets it.
+            # background save that failed, over this same list as it
+            # stands, and raise what it raises. This call is about to
+            # make that very save itself, so running it through `flush()`
+            # first would save the session twice when the failure has
+            # passed, and raise the same exception one call earlier when
+            # it has not. On return this save has written everything that
+            # one would have, so the manager forgets it.
             if hasattr(self, 'persistence_manager'):
                 self.persistence_manager._wait()
             self.store_backend.save_all(

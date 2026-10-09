@@ -403,8 +403,13 @@ otherwise.
 - `audit()`, `redact()`, `lock_identities()` and `lock_identities_batch()`,
   after a `save()` without `sync=True` whose write failed: each drains
   the queue on entry and then runs that save again itself, on the calling
-  thread, before it does anything else. If the save now succeeds, nothing
-  is raised and nothing is said. If it fails again, the call raises what
+  thread, before it does anything else. That save writes the session's
+  patients as they stand then (`session.store.patients`), not as they
+  stood when `save()` was called: a patient removed from the session
+  since is removed from the store, and one added since is saved.
+  (`session.persistence_manager` is not tier 1. Its `flush()`, called
+  directly, reads again the list object the failed save was handed.)
+  If the save now succeeds, nothing is raised and nothing is said. If it fails again, the call raises what
   the save raises: the `TypeError` or `ValueError` above, an `OSError`,
   or the sidecar lock's `RuntimeError`. The next such call runs it again,
   until a save succeeds. `save()` itself still returns before the write

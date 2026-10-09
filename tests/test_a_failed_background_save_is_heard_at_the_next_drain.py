@@ -30,6 +30,7 @@ The failure used here is a value the store refuses by name (#775): a
 `set` in an attribute, which fails every time until it is replaced; and
 `save_all` made to raise `OSError` once, for the failure that passes.
 """
+import datetime
 import os
 import sqlite3
 import subprocess
@@ -40,6 +41,7 @@ import pytest
 
 from isocenter import Session
 from isocenter import persistence_manager as manager_module
+from isocenter.builders import DicomBuilder
 
 from support.ct_small_files import write_ct
 
@@ -193,9 +195,85 @@ def test_a_failure_that_has_passed_heals_at_the_drain_with_nothing_said(tmp_path
     assert _rows(tmp_path / "s.db") == []
 
 
-def test_the_drain_saves_what_the_failed_save_was_asked_to_save(tmp_path):
-    """The payload: the patients that save was handed, pruning as it
-    asked."""
+# ---------------------------------------------------------------------------
+# Owner ruling of 2026-10-09: the retry saves the session's list as it
+# stands at the drain, not the copy the failed save was handed
+# ---------------------------------------------------------------------------
+
+OTHER = "PID-941-B"
+
+
+def _patient_ids(db):
+    with sqlite3.connect(str(db)) as conn:
+        return sorted(row[0] for row in conn.execute(
+            "SELECT patient_id FROM patients"))
+
+
+def _built(pid):
+    """A patient built by hand, never saved."""
+    return (DicomBuilder.start_patient(pid, "Added^Later")
+            .add_study(f"1.2.941.{len(pid)}", datetime.date(2023, 1, 1))
+            .add_series(f"1.2.941.{len(pid)}.1", "CT", 1)
+            .add_instance(f"1.2.941.{len(pid)}.1.1", "1.2.840.10008.5.1.4.1.1.2", 1)
+            .end_instance().end_series().end_study().build())
+
+
+@pytest.mark.parametrize("door, prepare", DOORS)
+def test_dropping_the_refused_patient_heals_at_the_next_draining_call(
+        tmp_path, door, prepare):
+    """Two patients; the second holds a value the store refuses, and the
+    background save fails. The caller answers by dropping that patient
+    from the session. The next draining call saves the session as it now
+    stands: no exception, and the dropped patient's rows are pruned.
+
+    Red while the retry saved the copy the failed save was handed: that
+    copy still held the dropped patient, so every door raised its
+    `TypeError` for a patient the session no longer had."""
+    write_ct(tmp_path / "in" / "b.dcm", OTHER, 942)
+    session = _session(tmp_path)
+    try:
+        if prepare is not None:
+            prepare(session)
+        [other] = [p for p in session.store.patients if p.patient_id == OTHER]
+        [bad] = [i for st in other.studies for se in st.series
+                 for i in se.instances]
+        bad.set_attr(TAG, {1, 2})
+        _background_save(session)
+        assert _patient_ids(tmp_path / "s.db") == [PID, OTHER]
+
+        session.store.patients.remove(other)
+        door(session)
+
+        stored = _patient_ids(tmp_path / "s.db")
+        assert len(stored) == 1 and OTHER not in stored
+        session.persistence_manager.flush()
+    finally:
+        session.close()
+    assert _rows(tmp_path / "s.db") == []
+
+
+def test_a_patient_added_after_the_failed_save_is_saved_by_the_retry(tmp_path):
+    """`save_all` fails once; a patient is then added to the session. The
+    drain's save holds it. Red while the retry saved the earlier copy."""
+    session = _session(tmp_path)
+    try:
+        counted = _Counted(session.store_backend, failures=1)
+        _instance(session).set_attr(TAG, 7)
+        _background_save(session)
+        session.store.patients.append(_built("PID-941-ADDED"))
+        session.persistence_manager.flush()
+        assert counted.calls == 2
+        assert _patient_ids(tmp_path / "s.db") == [PID, "PID-941-ADDED"]
+        assert _stored(tmp_path / "s.db").count(7) == 1
+    finally:
+        session.close()
+    assert _rows(tmp_path / "s.db") == []
+
+
+def test_the_retry_is_handed_a_copy_and_prunes_as_the_failed_save_asked(tmp_path):
+    """The store is handed a list of its own, never the session's list
+    object (a save walks it while the caller may edit theirs), with the
+    failed save's `prune_absent_patients`."""
     session = _session(tmp_path)
     try:
         counted = _Counted(session.store_backend, failures=1)
@@ -203,14 +281,36 @@ def test_the_drain_saves_what_the_failed_save_was_asked_to_save(tmp_path):
         real = counted.real
 
         def recording(patients, prune_absent_patients=False):
-            seen.append((list(patients), prune_absent_patients))
+            seen.append((patients, list(patients), prune_absent_patients))
             return real(patients, prune_absent_patients=prune_absent_patients)
 
         counted.real = recording
         _instance(session).set_attr(TAG, 7)
         _background_save(session)
         session.persistence_manager.flush()
-        assert seen == [(list(session.store.patients), True)]
+        [(handed, held, prune)] = seen
+        assert handed is not session.store.patients
+        assert (held, prune) == (list(session.store.patients), True)
+    finally:
+        session.close()
+
+
+def test_a_manager_used_directly_retries_the_list_object_it_was_handed(tmp_path):
+    """The manager holds no session. What `flush()` retries is the list
+    object `save_async` was handed, read again at the retry: for
+    `Session.save()` that is `session.store.patients`, and for a caller
+    of `save_async` it is their own list."""
+    session = _session(tmp_path)
+    try:
+        counted = _Counted(session.store_backend, failures=1)
+        mine = list(session.store.patients)
+        session.persistence_manager.save_async(mine, prune_absent_patients=True)
+        session.persistence_manager.queue.join()
+        mine.append(_built("PID-941-MINE"))
+        session.persistence_manager.flush()
+        assert counted.calls == 2
+        assert _patient_ids(tmp_path / "s.db") == [PID, "PID-941-MINE"]
+        assert len(session.store.patients) == 1
     finally:
         session.close()
 
