@@ -32,10 +32,18 @@ Patient ID and all, with the arm restored).
 instances hold no UID (#721; until then, sqlite's `IntegrityError`), and
 never reaches the write door.
 
+**Since GHSA-2rc2-r9r5-x7hm a second door stands in front of that one.**
+`io_handlers.export_file_name` refuses an empty UID where the plan is
+built, so the write is not reached. The failure keeps its key and its
+first words (`UNKNOWN`, "an instance with no SOP Instance UID"); its
+reason is the rule's. The test below runs both ways, because with the
+rule in front the write's refusal is pinned by nothing else.
+
 **Why this file imports what it does.** `isocenter.session` and
-`isocenter.builders` are named, so their probe rows are charged. It does
-not name `isocenter.io_handlers`; it is on that row for its measured kill
-of M613-1, named in the row's comment (#441).
+`isocenter.builders` are named, so their probe rows are charged.
+`isocenter.io_handlers` is named by the patch that takes the file-name
+rule away; the file was on that row already for its measured kill of
+M613-1, named in the row's comment (#441).
 """
 import datetime
 import os
@@ -67,13 +75,28 @@ def _files(folder):
                   for root, _, names in os.walk(folder) for name in names)
 
 
-def test_an_instance_without_a_uid_is_a_failure_not_a_written_uid(tmp_path):
+@pytest.mark.parametrize("name_rule", [True, False],
+                         ids=["as shipped", "the write's refusal alone"])
+def test_an_instance_without_a_uid_is_a_failure_not_a_written_uid(
+        tmp_path, monkeypatch, name_rule):
     """One ingested CT and one hand-built instance whose SOP Instance UID is
     `""`. The CT is written and named by its UID; the other is a failure
     keyed `UNKNOWN` (so it was planned and refused, not skipped), nothing
     of the hand-built patient reaches the summary's repr, and exactly one
-    file is on disk. Kills M613-1 (`enforce_file_format=True` turned off
-    at the write) and M613-2 (that plus the path arm restored)."""
+    file is on disk.
+
+    Two refusals stand between that instance and a file. Since
+    GHSA-2rc2-r9r5-x7hm the file-name rule refuses an empty UID before
+    the worker writes anything, so as shipped the write's own refusal is
+    never reached, and M613-1 (`enforce_file_format=True` turned off at
+    the write) survives the first parameter: measured. The second names
+    the file as it was named before the rule, in the parent, where the
+    plan is built, so the write's refusal is the only one left. That one
+    kills M613-1 and M613-2 (M613-1 plus the path arm restored)."""
+    if not name_rule:
+        monkeypatch.setattr(
+            "isocenter.io_handlers.export_file_name",
+            lambda instance: f"{instance.sop_instance_uid}.dcm")
     write_ct(tmp_path / "in" / "a.dcm", "PAT-613", "6131")
     good_uid = f"{study_uid('6131')}.1.1"
     with DicomSession(str(tmp_path / "s.db")) as session:
@@ -93,6 +116,7 @@ def test_an_instance_without_a_uid_is_a_failure_not_a_written_uid(tmp_path):
     assert summary.written == 1
     assert [uid for uid, _ in summary.failures] == ["UNKNOWN"]
     assert "no SOP Instance UID" in summary.failures[0][1]
+    assert ("cannot name a file: it is empty" in summary.failures[0][1]) is name_rule
     for secret in ("Subject_", HAND_BUILT_PID):
         assert secret not in repr(summary), repr(summary)
     files = _files(out)
