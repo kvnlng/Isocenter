@@ -36,9 +36,10 @@ a neighbour.
 It lives in a file of its own because of what `pytest --changed` reads. A
 walk of `*.py` is selected by every changed Python file, and a file that
 parses source is selected with every module it names. Inside
-`tests/test_parallel_contract.py` either would bring that whole file, which
-spawns pools for minutes, into nearly every selection. Here the cost is one
-parse of the tree. A change to that file selects this one by name.
+`tests/test_parallel_contract.py` either would bring that whole file, about
+a minute and a half of spawned pools on a runner, into nearly every
+selection. Here the cost is one parse of the tree. A change to that file
+selects this one by name.
 
 ## What this deliberately cannot see
 
