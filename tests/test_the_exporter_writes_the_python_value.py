@@ -1202,3 +1202,51 @@ def test_a_study_date_that_names_no_date_is_stamped_as_its_text(tmp_path):
     written = pydicom.dcmread(io.BytesIO(files[0]))
     assert bytes(written.get_item(0x00080020).value) == b"7 "
     assert rows == []
+
+
+# -- A numpy scalar under a binary VR fails the file, as its twin does --------
+
+_BINARY_TAGS = {"OB": "0042,0011", "OW": "0028,1201", "OF": "0064,0009",
+                "OD": "0070,150d", "OL": "0066,0040", "OV": "0072,0081"}
+
+
+def test_each_binary_tag_is_the_vr_it_is_listed_under():
+    """(0072,0083) is `UV` and (0008,3002) is `UI`; the table is checked."""
+    for vr, tag in _BINARY_TAGS.items():
+        assert pydicom.datadict.dictionary_VR(_numbers(tag)) == vr, (vr, tag)
+_NUMPY_SCALARS = {
+    "uint8": lambda: np.uint8(200), "uint16": lambda: np.uint16(7),
+    "int32": lambda: np.int32(7), "int64": lambda: np.int64(7),
+    "float32": lambda: np.float32(1.5), "float64": lambda: np.float64(1.5),
+    "bool": lambda: np.bool_(True), "0-d": lambda: np.array(7),
+}
+
+
+@pytest.mark.parametrize("vr", sorted(_BINARY_TAGS))
+@pytest.mark.parametrize("kind", sorted(_NUMPY_SCALARS))
+def test_a_numpy_scalar_under_a_binary_vr_fails_the_file_as_its_twin_does(
+        vr, kind):
+    """Owner ruling of 2026-10-09 on the review of #1009 (finding 4): fail
+    everywhere. Before the conversion a live numpy scalar under OB, OD,
+    OF, OL, OV or OW was written as the bytes of its own buffer
+    (`np.uint8(200)` as `c8 00`, under every one of the six), where its
+    Python twin and the reopened store failed the file. It is its twin
+    now, and the twin's answer is pydicom's at `dcmwrite`. What a number
+    under a binary VR should export as is #1018."""
+    tag, make = _BINARY_TAGS[vr], _NUMPY_SCALARS[kind]
+    twin = make().item()
+    assert type(twin) in (int, float, bool)
+    with pytest.raises(TypeError, match="bytes-like object is required"):
+        _merged({tag: twin})
+    with pytest.raises(TypeError, match="bytes-like object is required"):
+        _merged({tag: make()})
+
+
+@pytest.mark.parametrize("vr", sorted(_BINARY_TAGS))
+def test_bytes_and_a_1_d_array_under_a_binary_vr_are_written_as_they_were(vr):
+    """The control: what a binary VR does hold is not converted."""
+    tag = _BINARY_TAGS[vr]
+    raw, losses, notes = _merged({tag: b"ABCDEFGH"})
+    assert raw(tag) == (vr, b"ABCDEFGH") and losses == [] and notes == []
+    raw, losses, notes = _merged({tag: np.array([7], dtype=np.int64)})
+    assert raw(tag) == (vr, b"\x07" + b"\x00" * 7) and losses == []
