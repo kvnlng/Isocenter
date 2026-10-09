@@ -198,7 +198,8 @@ TARGETS = {
                                "tests/test_save_all_contract.py",
                                "tests/test_written_uids_names_only_uids.py",
                                "tests/test_scaffolding.py",
-                               "tests/test_tag_key_normalisation.py"], 30),
+                               "tests/test_tag_key_normalisation.py",
+                               "tests/test_the_exporter_writes_the_python_value.py"], 30),
     # 99 sites; budget 30 is a stride of 3, 33 mutants: all 33
     # killed. Seven files, 75.6s per pass -- the slowest of the #439 rows,
     # measured with other suites on the machine.
