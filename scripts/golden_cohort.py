@@ -645,6 +645,39 @@ def source_says_unmodified(out: Path):
     write(ds, out / "source_says_unmodified-1.dcm")
 
 
+def linkage_key_not_text(out: Path):
+    """An ordinary CT and five CTs of five other patients, each stating a
+    VR that is not text for one linkage key (#1022): SOP Instance UID
+    under `OB`, Patient ID under `US`, Study Instance UID under `OB`,
+    Series Instance UID under `IS`, Patient ID under `SQ`. The first two
+    made `ingest()` raise `ValueError` and store nothing; the next two
+    were ingested, linked under the Python text of the value
+    (`b'…'`, `7`); the last was refused with a row quoting a `TypeError`
+    whose words differ between 3.12 and 3.14t. Each of the five is now
+    refused at ingest with an `ERROR` row naming the element and the VR,
+    and the ordinary file is ingested and exported. No other input states
+    a VR that is not text for a linkage key."""
+    write(ct("linkage_key_not_text", study=1, pid="GOLD-linkage_key_not_text-good"),
+          out / "linkage_key_not_text-good.dcm")
+    item = Dataset()
+    item.CodeValue = "GOLD"
+    for n, (tag, vr, value, label) in enumerate((
+            (0x00080018, "OB", None, "sop-uid-ob"),
+            (0x00100020, "US", 7, "patient-id-us"),
+            (0x0020000D, "OB", None, "study-uid-ob"),
+            (0x0020000E, "IS", "7", "series-uid-is"),
+            (0x00100020, "SQ", Sequence([item]), "patient-id-sq")), start=2):
+        ds = ct("linkage_key_not_text", study=n,
+                pid=f"GOLD-linkage_key_not_text-{label}")
+        if value is None:
+            # The UID's own text, padded to even length with a NUL as a
+            # UI is: the bytes a writer that mislabels the element leaves.
+            text = str(ds[tag].value).encode("ascii")
+            value = text + b"\0" * (len(text) % 2)
+        ds[tag] = pydicom.DataElement(tag, vr, value)
+        write(ds, out / f"linkage_key_not_text-{label}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -653,7 +686,7 @@ MEMBERS = {f.__name__: f for f in (
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
     ecg_lead_codes, number_vr_on_a_date_or_time,
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
-    source_says_unmodified)}
+    source_says_unmodified, linkage_key_not_text)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

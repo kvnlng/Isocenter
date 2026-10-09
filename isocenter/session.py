@@ -2629,6 +2629,17 @@ class DicomSession:
         leave them in the sidecar as dead space until `compact()`, which
         reclaims them in a store that holds at least one instance (#943).
 
+        **A file linked by something that is not one text value.** A file
+        is linked by its SOP Instance UID, Study Instance UID, Series
+        Instance UID and Patient ID. One that holds two values in any of
+        them (#747), or that states a VR for one that is not text (`OB`,
+        `US`, `DS`, `SQ` and the like, in an Explicit VR file; #1022), is
+        rejected as above: that file only, with a reason naming the
+        element and the count or the VR, never a value, and nothing of it
+        in the sidecar. Until #1022 a SOP Instance UID or Patient ID
+        under such a VR made this call raise `ValueError` from its save
+        and store nothing.
+
         **Hidden files.** A file found walking `directory` whose name
         starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
         counted in `IngestSummary.hidden`, and the console summary prints
