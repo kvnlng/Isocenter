@@ -1575,9 +1575,11 @@ class Instance(DicomItem):
             # Storage SOP Instance UID from the dataset's own `0008,0018`.
             # Left behind, the element made `inst.sop_instance_uid =
             # '1.2.3.4'` export `1.2.3.4.dcm` carrying the earlier UID
-            # inside, and `= ''` the dotfile `.dcm`. Now an emptied UID
-            # reaches the write with an empty element and fails there, keyed
-            # UNKNOWN, as a hand-built UID-less instance does (#613).
+            # inside, and `= ''` the dotfile `.dcm`. An emptied UID is now
+            # refused at export by the file-name rule
+            # (`io_handlers.export_file_name`, GHSA-2rc2-r9r5-x7hm), keyed
+            # UNKNOWN; with the element following, nothing behind that
+            # rule still holds the earlier UID.
             #
             # **The element first, then the field, then the revision**
             # (`_assign_tracked_field` says why a value precedes its

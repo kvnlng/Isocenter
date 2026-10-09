@@ -17,10 +17,11 @@ and the revision and left the element, so after one assignment:
 Every library writer that moves the UID sets both (`_take_sop_uid`, the
 redaction parent, the redaction withdrawal). Only a caller's own
 assignment left them apart. Now the assignment writes the element first,
-then the field, then the revision, once. An emptied UID therefore reaches
-the write with no `(0008,0018)`, and fails there as a hand-built UID-less
-instance always has (#613): keyed `UNKNOWN`, one `ERROR` row, no file. No
-new exception, and `''` is still not refused by the save (#721's control).
+then the field, then the revision, once. An emptied UID is refused at
+export by the file-name rule (`io_handlers.export_file_name`, 1.0.0rc16,
+GHSA-2rc2-r9r5-x7hm), as it is on `main` without this change: keyed
+`UNKNOWN`, one `ERROR` row, no file. No new exception here, and `''` is
+still not refused by the save (#721's control).
 """
 import copy
 import os
@@ -189,10 +190,14 @@ def test_an_assigned_uid_is_exported_under_itself(tmp_path):
         assert _rows(session, "ERROR", "WARNING") == []
 
 
-def test_an_emptied_uid_fails_at_the_write_and_no_dotfile_is_written(tmp_path):
-    """On main: the dotfile `.dcm` carrying `FIRST`, `''` in
-    `written_uids`, no failure, no row. Now what a hand-built UID-less
-    instance does (#613)."""
+def test_an_emptied_uid_is_refused_by_the_file_name_rule(tmp_path):
+    """At fd359eb3: the dotfile `.dcm` carrying `FIRST`, `''` in
+    `written_uids`, no failure, no row. Since 1.0.0rc16 the file-name
+    rule refuses it before anything is written
+    (`io_handlers.export_file_name`, GHSA-2rc2-r9r5-x7hm), on `main` as
+    here: that refusal is the rule's, not this change's. What this change
+    adds is that the element is empty too, so nothing behind the rule
+    still holds the earlier UID."""
     with _session(tmp_path) as session:
         _instance(session).sop_instance_uid = ""
         summary = session.export(str(tmp_path / "out"), use_compression=False,
@@ -202,8 +207,11 @@ def test_an_emptied_uid_fails_at_the_write_and_no_dotfile_is_written(tmp_path):
         assert key == "UNKNOWN"
         assert reason == (
             "Export failed for an instance with no SOP Instance UID: "
-            "ValueError: Validation Errors: ['[Type 1 Error] Missing "
-            "0008,0018 in Common']")
+            "FileNameRefused: SOP Instance UID (0008,0018) cannot name a "
+            "file: it is empty. The export names each file by that UID, so "
+            "no file was written for this instance, in the export folder "
+            "or anywhere else.")
+        assert _instance(session, "").attributes[ELEMENT] == ""
         assert [os.path.basename(f) for f in _files(tmp_path / "out")] == \
             [f"{OTHER}.dcm"]
         [(kind, uid, details)] = _rows(session, "ERROR")
