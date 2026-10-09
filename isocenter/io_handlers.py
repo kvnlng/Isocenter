@@ -6330,6 +6330,11 @@ class DeidMarkers:
             `(0012,0063)`, after the source's, unless it is already last.
         temporal: Longitudinal Temporal Information Modified `(0028,0303)`,
             `REMOVED` or `MODIFIED`, replacing the source's.
+        withdraw_unmodified: Do not carry a source's `(0028,0303)
+            UNMODIFIED` into the file: this store took a date out of it
+            and shifted none (#1011). Nothing is written in its place, and
+            any other source value stays. Only ever set with `temporal`
+            None.
     """
     # Decided in the parent because the worker cannot: the statuses and
     # policies it rests on are not on the lightweight copy a process
@@ -6337,6 +6342,7 @@ class DeidMarkers:
     identity_removed: bool = False
     method_value: Optional[str] = None
     temporal: Optional[str] = None
+    withdraw_unmodified: bool = False
 
 
 def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
@@ -6352,7 +6358,9 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
     same policy and release is idempotent; a different policy or release
     appends, which is PS3.3's "successive de-identification steps".
     Patient Identity Removed is not written when `ds` says Burned In
-    Annotation `YES`.
+    Annotation `YES`. Under `markers.withdraw_unmodified`, a `(0028,0303)`
+    that says `UNMODIFIED` is deleted from `ds` and nothing is written
+    there.
 
     Args:
         ds: The pydicom dataset being written; edited in place.
@@ -6387,6 +6395,17 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
         ds.add_new(0x00120063, "LO", values)
     if markers.temporal:
         ds.add_new(0x00280303, "CS", markers.temporal)
+    elif markers.withdraw_unmodified:
+        # Only the one value, whoever wrote it: `MODIFIED` and `REMOVED`
+        # are a source's claims about an earlier step, and stay. Case and
+        # padding are ignored for the reason Burned In Annotation's are
+        # above. Two values are not the enumerated value: `str()` of them
+        # is no `UNMODIFIED`, and they are left as written. No row and no
+        # note: no marker has ever written either.
+        held = ds.get(0x00280303)
+        if held is not None \
+                and str(held.value).strip().upper() == "UNMODIFIED":
+            del ds[0x00280303]
 
 
 @dataclass

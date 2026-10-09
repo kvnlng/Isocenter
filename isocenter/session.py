@@ -750,6 +750,59 @@ def _date_state(value, vr: str, vouched: bool) -> str:
     return "shifted" if vouched else "found"
 
 
+#: `_longitudinal_temporal_marker`'s third answer: write nothing, and do not
+#: carry a source's `UNMODIFIED` either (#1011). Never a value of
+#: `(0028,0303)`: the planner turns it into `DeidMarkers.withdraw_unmodified`
+#: and it reaches no file.
+_SOURCE_CLAIM_WITHDRAWN = "WITHDRAWN"
+
+
+def _a_date_this_store_took(instance, stamps) -> bool:
+    """Whether the file `instance` exports as lacks a top-level date because
+    this store's remediation emptied it, removed it, or wrote the VR's dummy
+    to it.
+
+    Read from the instance's own record (`Instance.record_remediation`), which
+    is stored, so the answer is the same from a reopened store. DA and DT
+    only, by the dictionary's VR: TM is not a date here, as it is not for the
+    stamp. Not seen: a date inside a sequence (a nested item keeps no record,
+    #991), a private date (the record holds one word for every odd-group tag),
+    and a date replaced by a value that is not the dummy.
+
+    Args:
+        instance (Instance): The instance being exported.
+        stamps (dict): What `export_stamp_attributes` writes over the
+            instance's own top-level attributes.
+
+    Returns:
+        bool: True when the record names at least one DA or DT tag and the
+            file will carry nothing, or the dummy, there.
+    """
+    # Two halves, and both are needed. The record says this store wrote
+    # there; the value says the date is still gone. The value is the one the
+    # file will carry, the owner stamp where there is one: a Study Date the
+    # pass removed is recorded on each instance's copy and written, empty,
+    # from the `Study`. So a date written back since, by hand or by a
+    # restore, stops counting with no invalidation pass, and
+    # `_date_state(..., False)` is what makes "replaced" mean the dummy: a
+    # rule's own non-dummy value is a date in the file, as the stamp reads
+    # it.
+    #
+    # A graph stand-in that is no `Instance`, and an instance from a store
+    # written before the record existed, have no record: nothing taken, and
+    # a source's value stays, which is what #978 left.
+    tags = set((getattr(instance, "_remediated_blank", None) or "").split())
+    tags |= set(getattr(instance, "_remediated_values", None) or {})
+    carried = {**instance.attributes, **stamps}
+    for tag in tags:
+        vr = _dictionary_vr(tag)
+        if vr not in ("DA", "DT"):
+            continue
+        if _date_state(carried.get(tag), vr, False) == "gone":
+            return True
+    return False
+
+
 def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
     """What Longitudinal Temporal Information Modified `(0028,0303)` says about
     the file `instance` exports as.
@@ -771,8 +824,11 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
         Optional[str]: `"MODIFIED"` when at least one date is shifted by this
             store, whatever the rest are (#978); `"REMOVED"` when every date
             is gone (or there is none); None when nothing is shifted and a
-            date is as found, and a source's value then stays. `UNMODIFIED`
-            is never returned.
+            date is as found, and a source's value then stays;
+            `_SOURCE_CLAIM_WITHDRAWN` in that last case when this store took
+            a top-level date out of the file (`_a_date_this_store_took`),
+            and a source's `UNMODIFIED` then does not stay (#1011).
+            `UNMODIFIED` is never returned.
     """
     # A shift this store wrote is always marked (owner ruling on #978).
     # Until then a date as found withheld the marker, so a policy that
@@ -810,7 +866,16 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
             found = found or state == "found"
     if shifted:
         return "MODIFIED"
-    return None if found else "REMOVED"
+    if not found:
+        return "REMOVED"
+    # Nothing shifted, a date as found: no enumerated value is true, so
+    # nothing is written. A source's own `UNMODIFIED` was left beside a
+    # date this run emptied, removed or dummied, in a file stamped
+    # `(0012,0062) YES` (#1011). It is withdrawn on this store's own record
+    # and on nothing else (owner ruling Q4 A): with no date of its doing
+    # gone from the file, the source's claim is the source's and stays.
+    return (_SOURCE_CLAIM_WITHDRAWN
+            if _a_date_this_store_took(instance, stamps) else None)
 
 
 def _is_private_tag(tag: str) -> bool:
@@ -7653,8 +7718,12 @@ class DicomSession:
             temporal = None
             if _TEMPORAL_MODIFIED not in ruled:
                 temporal = _longitudinal_temporal_marker(study, instance, stamps)
+            # The third answer is an instruction, never a value (#1011).
+            withdraw = temporal == _SOURCE_CLAIM_WITHDRAWN
             return DeidMarkers(identity_removed=_IDENTITY_REMOVED not in ruled,
-                               method_value=method, temporal=temporal)
+                               method_value=method,
+                               temporal=None if withdraw else temporal,
+                               withdraw_unmodified=withdraw)
         return plan
 
     def _report_statuses_under_another_policy(self, triples, folder, fmt):

@@ -679,7 +679,9 @@ def _says(value, then=None):
     # source's value stays, unchanged by #978. `basic` empties Study Date,
     # so the one date as found is the only thing that withholds `REMOVED`.
     ("basic", KEEP_SERIES_DATE, None, False, None),
-    ("basic", KEEP_SERIES_DATE, _says("UNMODIFIED"), False, "UNMODIFIED"),
+    # Since #1011 a source's `UNMODIFIED` is withdrawn here: `basic`
+    # emptied or dummied the other dates, and this store's record says so.
+    ("basic", KEEP_SERIES_DATE, _says("UNMODIFIED"), False, None),
     ("basic", KEEP_SERIES_DATE, None, True, "MODIFIED"),
     ("basic", {}, _nested_unruled_date, False, None),
     ("basic", {"remove_private_tags": False}, _private_date, False, None),
@@ -696,7 +698,7 @@ def _says(value, then=None):
         "none_shifts_study_date_alone",
         "none_replaces_a_source_unmodified",
         "no_shift_a_kept_series_date",
-        "no_shift_a_source_unmodified_stays",
+        "no_shift_a_source_unmodified_goes_beside_dates_this_store_took",
         "no_shift_a_source_modified_stays",
         "no_shift_a_nested_date_as_found",
         "no_shift_a_private_date_as_found",
@@ -719,9 +721,13 @@ def test_the_temporal_marker_follows_the_files_dates(
 
     **With no shift, a date as found still writes nothing**, at the top
     level, nested, private with its VR recorded, or a DT, and the
-    source's value stays, `UNMODIFIED` included (a date kept on purpose
-    cannot be told from one no rule named, so `UNMODIFIED` is never
-    written, and never taken away on no evidence).
+    source's value stays (a date kept on purpose cannot be told from one
+    no rule named, so `UNMODIFIED` is never written, and never taken away
+    on no evidence). Since #1011 this store's own record of a date it
+    emptied, removed or wrote the dummy to is that evidence, for a
+    source's `UNMODIFIED` alone: `basic` plus a kept Series Date exports
+    no `(0028,0303)` where it exported the source's `UNMODIFIED`; `none`
+    with Study Date kept touches no date and the source's value stays.
 
     Kills: the walk skipping nested items or private tags; the dummy read
     as found; `UNMODIFIED` written; the source value overwritten when
@@ -731,6 +737,305 @@ def test_the_temporal_marker_follows_the_files_dates(
     ds = _pipeline(tmp_path, profile, source=source, **extra)
     assert _markers(ds)["removed"] == "YES", "setup: the pass was whole"
     assert _markers(ds)["temporal"] == expected
+
+
+# --- #1011: a source's UNMODIFIED beside a date this store took -------------
+
+def _rules(**by_tag):
+    """`privacy_profile: none` plus one rule per `t<gggg>_<eeee>=ACTION`
+    (or a whole rule dict)."""
+    return {"phi_tags": {
+        key[1:].replace("_", ","): (rule if isinstance(rule, dict)
+                                    else {"action": rule})
+        for key, rule in by_tag.items()}}
+
+
+def _a_birth_date(ds):
+    ds.PatientBirthDate = "19500101"
+
+
+def _an_empty_content_date(ds):
+    ds.ContentDate = ""
+
+
+def _a_nested_date(ds):
+    """Scheduled-step item holding a date `(0040,0244)`."""
+    item = Dataset()
+    item.add_new(0x00400244, "DA", "20040119")
+    ds.add_new(0x00400275, "SQ", Sequence([item]))
+
+
+def _two_exports(tmp_path, source, extra, profile="none"):
+    """The pass, then the file exported twice: by the session that ran the
+    pass, and by a session reopened on the saved store under the same
+    configuration. Returns `(live, reopened, rows, grade)`: the two
+    written datasets, the store's ERROR/WARNING/DATA_LOSS rows, and the
+    grade the live session's report states."""
+    db = str(tmp_path / "s.db")
+    config = _profile_config(tmp_path, profile, "c", **extra)
+    with DicomSession(db) as session:
+        session.ingest(source)
+        if config:
+            session.load_config(config)
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "live"), use_compression=False,
+                       show_progress=False)
+        report = tmp_path / "report.md"
+        session.generate_report(str(report))
+        session.save(sync=True)
+    with DicomSession(db) as session:
+        if config:
+            session.load_config(config)
+        session.export(str(tmp_path / "reopened"), use_compression=False,
+                       show_progress=False)
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT action_type, details FROM audit_log WHERE action_type "
+            "IN ('ERROR', 'WARNING', 'DATA_LOSS') ORDER BY rowid").fetchall()
+    text = report.read_text(encoding="utf-8")
+    grade = [g for g in ("PASS", "REVIEW_REQUIRED", "FAIL") if f"**{g}**" in text]
+    return (_written(tmp_path / "live"), _written(tmp_path / "reopened"),
+            rows, grade)
+
+
+def _source_says(tmp_path, value, then=None):
+    """A source stating `(0028,0303) value`, asserted to hold it: a source
+    without the element would pass "absent afterwards" for nothing."""
+    source = _source(tmp_path / "in", edit=_says(value, then))
+    held = pydicom.dcmread(str(Path(source) / "ct.dcm"))[TEMPORAL].value
+    assert held == value, "setup: the source states it"
+    return source
+
+
+@pytest.mark.parametrize("extra, edit, taken", [
+    (_rules(t0008_0020="REMOVE"), None, ("0008,0020", "")),
+    (_rules(t0008_0020="EMPTY"), None, ("0008,0020", "")),
+    (_rules(t0008_0020="KEEP", t0008_0023="REMOVE"), None, ("0008,0023", None)),
+    (_rules(t0008_0020="KEEP", t0008_0023="EMPTY"), None, ("0008,0023", "")),
+    (_rules(t0008_0020="KEEP", t0008_0023="REPLACE"), None,
+     ("0008,0023", "19000101")),
+    (_rules(t0008_0020="KEEP", t0010_0030="REMOVE"), _a_birth_date,
+     ("0010,0030", None)),
+], ids=["study_date_removed", "study_date_emptied", "content_date_removed",
+        "content_date_emptied", "content_date_dummied", "birth_date_removed"])
+def test_a_sources_unmodified_is_withdrawn_beside_a_date_this_store_took(
+        tmp_path, extra, edit, taken):
+    """#1011 (owner ruling Q4 A, 2026-10-09). The source says `(0028,0303)
+    UNMODIFIED`; the pass shifts no date, leaves others as ingested, and
+    empties, removes or writes the dummy to one top-level date. Until
+    #1011 the file was stamped `(0012,0062) YES` beside the source's
+    `UNMODIFIED`, which was false of it. Now `(0028,0303)` is absent:
+    nothing is written in its place, since no enumerated value says "some
+    removed, none shifted, some kept". No row, and the grade stays PASS.
+
+    Asserted live **and** from a reopened store: the evidence is the
+    instance's stored record (`__remediated__`), not session state.
+
+    Kills: the source's value left; `REMOVED` or `MODIFIED` written in its
+    place; the record read from the live session only; the dummy arm
+    (`_remediated_values`) not read; the owner-stamped Study Date not
+    read."""
+    source = _source_says(tmp_path, "UNMODIFIED", edit)
+    live, reopened, rows, grade = _two_exports(tmp_path, source, extra)
+    tag, expected = taken
+    key = int(tag.replace(",", ""), 16)
+    for ds in (live, reopened):
+        assert (ds[key].value if key in ds else None) == expected, \
+            "setup: the date this store took"
+        assert ds.SeriesDate == "19970430", "setup: a date as ingested"
+        assert _markers(ds)["removed"] == "YES"
+        assert _markers(ds)["temporal"] is None
+    assert rows == []
+    assert grade == ["PASS"]
+
+
+@pytest.mark.parametrize("extra, edit", [
+    (_rules(t0008_0020="KEEP"), None),
+    (_rules(t0008_0020="KEEP"), _an_empty_content_date),
+    (_rules(t0008_0020="KEEP", t0010_0010="REMOVE", t0008_0080="EMPTY",
+            t0008_0090="REPLACE"), None),
+], ids=["no_date_touched", "a_date_the_source_left_empty",
+        "only_elements_that_are_not_dates_taken"])
+def test_a_sources_unmodified_stays_where_this_store_took_no_date(
+        tmp_path, extra, edit):
+    """The other side of Q4 A (B would have dropped these): with no date
+    touched by this store, the source's `UNMODIFIED` is the source's claim
+    and stays. A date the source itself left empty is not one this store
+    took. A name removed, an institution emptied and a physician replaced
+    are in the record and are not dates.
+
+    Kills: a blanket withdrawal whenever nothing is determined; the
+    record read without its VR filter (any removal withdrawing it); an
+    empty date read as taken on no record."""
+    source = _source_says(tmp_path, "UNMODIFIED", edit)
+    live, reopened, rows, grade = _two_exports(tmp_path, source, extra)
+    for ds in (live, reopened):
+        assert _markers(ds)["removed"] == "YES"
+        assert _markers(ds)["temporal"] == "UNMODIFIED"
+    assert rows == [] and grade == ["PASS"]
+
+
+@pytest.mark.parametrize("stated, expected", [
+    ("MODIFIED", "MODIFIED"), ("REMOVED", "REMOVED"),
+    ("unmodified", None), (" UNMODIFIED", None),
+    (["UNMODIFIED", "UNMODIFIED"], ["UNMODIFIED", "UNMODIFIED"]),
+    (None, None)],
+    ids=["modified", "removed", "lower_case", "padded", "two_values", "absent"])
+def test_only_a_sources_unmodified_is_withdrawn(tmp_path, stated, expected):
+    """Beside a Study Date this store removed. A source's `MODIFIED` or
+    `REMOVED` is its claim about an earlier step and stays. `unmodified`
+    is no valid CS and is read as its writer meant it, as Burned In
+    Annotation `yes` is. Two values are not the enumerated value and are
+    left as written. A source that states nothing gains nothing.
+
+    Kills: the element deleted whatever it says; a case-sensitive
+    comparison; an element written where the source had none."""
+    def edit(ds):
+        if stated is not None:
+            with pydicom.config.disable_value_validation():
+                ds.add_new(TEMPORAL, "CS", stated)
+    source = _source(tmp_path / "in", edit=edit)
+    ds = _pipeline(tmp_path, "none", source=source,
+                   **_rules(t0008_0020="REMOVE"))
+    assert _markers(ds)["removed"] == "YES", "setup: the pass was whole"
+    assert ds.StudyDate == "", "setup: the date this store took"
+    assert _markers(ds)["temporal"] == expected
+
+
+def test_a_rule_on_the_marker_keeps_a_sources_unmodified(tmp_path):
+    """A rule on `(0028,0303)`, KEEP included, means the configuration
+    decides that element (M7): the export neither stamps nor withdraws
+    it. Kills: the withdrawal placed outside the `ruled` check."""
+    source = _source_says(tmp_path, "UNMODIFIED")
+    ds = _pipeline(tmp_path, "none", source=source, **_rules(
+        t0008_0020="KEEP", t0008_0023="REMOVE", t0028_0303="KEEP"))
+    assert _markers(ds)["removed"] == "YES"
+    assert "ContentDate" not in ds, "setup: the date this store took"
+    assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def test_a_date_written_back_since_does_not_withdraw_it(tmp_path):
+    """The record says where this store wrote; the file says whether the
+    date is still gone. A Content Date this store removed and a caller
+    then wrote back, under a re-audit that keeps it, is a date in the file
+    again: nothing of this store's doing is left in it, and the source's
+    `UNMODIFIED` stays. Kills: the record's word read without asking what
+    the file will carry at that tag."""
+    source = _source_says(tmp_path, "UNMODIFIED")
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(source)
+        session.load_config(_config(
+            tmp_path, "first.yaml", privacy_profile="none",
+            **_rules(t0008_0020="KEEP", t0008_0023="REMOVE")))
+        session.anonymize(session.audit())
+        [inst] = _instances(session)
+        assert "0008,0023" in (inst._remediated_blank or "").split(), "setup"
+        inst.set_attr("0008,0023", "19970430")
+        session.load_config(_config(
+            tmp_path, "second.yaml", privacy_profile="none",
+            **_rules(t0008_0020="KEEP", t0008_0023="KEEP")))
+        session.anonymize(session.audit())
+        assert "0008,0023" in (inst._remediated_blank or "").split(), \
+            "setup: the record still names the tag"
+        session.export(str(out), use_compression=False, show_progress=False)
+    ds = _written(out)
+    assert _markers(ds)["removed"] == "YES", "setup: the re-audit was whole"
+    assert ds.ContentDate == "19970430", "setup: the date is back"
+    assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def test_a_study_date_set_back_on_the_study_does_not_withdraw_it(tmp_path):
+    """The Study Date a file carries is the `Study`'s (#566, #624), so that
+    is the value asked about, not the instance's copy, which the removal
+    took out of the graph and nothing puts back. Kills: the instance's own
+    attributes read without the owner stamps over them."""
+    source = _source_says(tmp_path, "UNMODIFIED")
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(source)
+        session.load_config(_config(tmp_path, "first.yaml", privacy_profile="none",
+                                    **_rules(t0008_0020="REMOVE")))
+        session.anonymize(session.audit())
+        [inst] = _instances(session)
+        assert "0008,0020" in (inst._remediated_blank or "").split(), "setup"
+        session.store.patients[0].studies[0].study_date = "20040119"
+        session.load_config(_config(tmp_path, "second.yaml", privacy_profile="none",
+                                    **_rules(t0008_0020="KEEP")))
+        session.anonymize(session.audit())
+        assert not inst.attributes.get("0008,0020"), \
+            "setup: the instance's own copy is still gone"
+        session.export(str(out), use_compression=False, show_progress=False)
+    ds = _written(out)
+    assert _markers(ds)["removed"] == "YES", "setup: the re-audit was whole"
+    assert ds.StudyDate == "20040119", "setup: the owner's date is written"
+    assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def _a_private_date(ds):
+    ds.add_new(0x00330010, "LO", "E2 PRIVATE")
+    ds.add_new(0x00331001, "DA", "20040119")
+
+
+@pytest.mark.parametrize("extra, edit, gone", [
+    (_rules(t0008_0020="KEEP", t0008_0030="REMOVE"), None,
+     lambda ds: "StudyTime" not in ds or ds.StudyTime in ("", None)),
+    (_rules(t0008_0020="KEEP", t0040_0244="REMOVE"), _a_nested_date,
+     lambda ds: 0x00400244 not in ds[0x00400275][0]),
+    (_rules(t0008_0020="KEEP"), _a_private_date,
+     lambda ds: 0x00331001 not in ds),
+    (_rules(t0008_0020="KEEP",
+            t0008_0023={"action": "REPLACE", "value": "20000101"}), None,
+     lambda ds: ds.ContentDate == "20000101"),
+], ids=["a_time", "a_nested_date", "a_private_date",
+        "a_date_replaced_by_a_value_that_is_not_the_dummy"])
+def test_the_limits_of_what_withdraws_a_sources_unmodified(
+        tmp_path, extra, edit, gone):
+    """Pinned limits of #1011, not behaviour to rely on: each of these
+    exports the source's `UNMODIFIED` beside something this store took.
+
+    - **A time** (owner ruling Q5 A): DA and DT only, as the stamp reads;
+      an emptied or removed TM does not count.
+    - **A date inside a sequence** (#991): a nested item has no record of
+      what a pass left in it, so there is nothing to read.
+    - **A private date** removed by `remove_private_tags`: the record
+      holds the one word `private` for every odd-group tag, which names
+      no element and no VR.
+    - **A date replaced by a value of the configuration's that is not the
+      VR's dummy**: the ruling names emptied, removed and dummied; the
+      stamp reads such a value as a date in the file.
+
+    A test here going red means one of them changed: move it to the test
+    above, with an `**Output:**` line."""
+    source = _source_says(tmp_path, "UNMODIFIED", edit)
+    live, reopened, _, _ = _two_exports(tmp_path, source, extra)
+    for ds in (live, reopened):
+        assert gone(ds), "setup: what this store took"
+        assert _markers(ds)["removed"] == "YES"
+        assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def test_write_tree_writes_a_sources_unmodified_as_the_graph_holds_it(tmp_path):
+    """`write_tree()` is the serializer without the pipeline: it stamps
+    nothing and withdraws nothing, so the graph's `(0028,0303)` is written
+    beside the removed Study Date. Kills: the withdrawal placed where both
+    doors pass (`_create_ds`, `export_stamp_attributes`)."""
+    source = _source_says(tmp_path, "UNMODIFIED")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(source)
+        session.load_config(_config(tmp_path, "c.yaml", privacy_profile="none",
+                                    **_rules(t0008_0020="REMOVE")))
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "session"), use_compression=False,
+                       show_progress=False)
+        for patient in session.store.patients:
+            DicomExporter.write_tree(patient, str(tmp_path / "tree"),
+                                     show_progress=False)
+        [inst] = _instances(session)
+        assert inst.attributes["0028,0303"] == "UNMODIFIED", \
+            "the withdrawal never enters the graph"
+    assert _markers(_written(tmp_path / "session"))["temporal"] is None
+    assert _markers(_written(tmp_path / "tree"))["temporal"] == "UNMODIFIED"
 
 
 # --- M13: a declared burned-in annotation (review of L12, F1) ---------------
