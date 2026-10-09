@@ -2460,7 +2460,8 @@ a file named directly is read whatever its name.</p>
               <div class="doc-md-description">
                 <p>The SOP Instance UID of each instance
 that reached disk, and nothing else. An instance with no UID
-is not written and is in <code>failures</code>.</p>
+is not written and is in <code>failures</code>; so is one whose UID
+cannot name a file (<code>export_file_name</code>), under that UID.</p>
               </div>
             </td>
           </tr>
