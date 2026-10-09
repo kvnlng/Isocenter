@@ -7845,6 +7845,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             instance could not be written.
     """
     losses: List[Tuple[str, str]] = []
+    # The instance's rows for tags an owner stamps, and where they were.
+    spared: List[Tuple[str, str]] = []
+    spared_at = 0
     corrections: List[str] = []
     warnings: List[str] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
@@ -7901,10 +7904,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # sentence per instance after the merges. The three stamp
         # merges below are standard tags and pass none.
         revrs: List[_ReVr] = []
+        spared_at = len(losses)
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs, corrections=corrections,
                              warnings=warnings)
+        # Before the items are merged, so that an item's own row for the
+        # same tag is not deduped against one about to be taken away.
+        spared = DicomExporter._take_copies_a_stamp_replaces(
+            losses, spared_at, ctx.patient_attributes, ctx.study_attributes,
+            ctx.series_attributes)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
                                        revrs=revrs, corrections=corrections,
                                        warnings=warnings)
@@ -8724,6 +8733,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it.
         # The parent's `ERROR` row, `_report_export_failures`', has the
         # same shape.
+        #
+        # No file, so no stamp answers for the instance's own copies:
+        # their rows go back where they were (`_take_copies_a_stamp_replaces`).
+        losses[spared_at:spared_at] = [row for row in spared
+                                       if row not in losses]
         named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
@@ -11431,7 +11445,8 @@ def _refuse_a_number_as_text(vr, value):
     Each atom (the value, or each member of a `list` or `MultiValue`) is
     refused when its type is exactly `int`, `float`, `bool`, `complex`,
     `Decimal` or `Fraction`, or when it is a numpy scalar that is not text
-    or a numpy array that is not an array of text. Everything else passes,
+    or a numpy array that is neither empty nor an array of text.
+    Everything else passes,
     as it always has: text, bytes, `None`, pydicom's `PersonName`, a
     `date` in a DA, and pydicom's `DSfloat`, `IS` and `DSdecimal`.
 
@@ -11488,6 +11503,10 @@ def _refuse_a_number_as_text(vr, value):
     #   `ORIGINAL\PRIMARY`, and refusing every `np.ndarray` lost it under
     #   a row saying text is not text. `_is_an_array_of_text` lets it by,
     #   to do what it did; an array holding any number is still refused.
+    # - **An empty array holds no number**, whatever its dtype
+    #   (`np.array([])` is float64), so it passes, to be what it was: a
+    #   zero-length element under LO, as the empty list is, and pydicom's
+    #   own refusal under PN, UI and DA (second delta review, N4).
     # - **One level deep**: a list inside the list is not looked into,
     #   as `_export_value` does not look into it.
     # - **Dropped, not written as `str(value)`**: `'7'` is no date, time
@@ -11498,7 +11517,8 @@ def _refuse_a_number_as_text(vr, value):
     for atom in atoms:
         if isinstance(atom, (str, bytes)):
             continue
-        if isinstance(atom, np.ndarray) and _is_an_array_of_text(atom):
+        if isinstance(atom, np.ndarray) and (
+                atom.size == 0 or _is_an_array_of_text(atom)):
             continue
         if (type(atom) in _CALLERS_NUMBERS
                 or isinstance(atom, (np.generic, np.ndarray))):
@@ -12439,6 +12459,45 @@ class DicomExporter:
             raise ValueError(
                 f"the owner's value for {tag} cannot be written "
                 f"({reason}); the file is not written")
+
+    @staticmethod
+    def _take_copies_a_stamp_replaces(losses, start, *stamps):
+        """Take out the instance's loss rows for tags an owner stamps.
+
+        Args:
+            losses (list): The worker's `(scope, detail)` rows, edited in
+                place. Called straight after the instance's own top-level
+                merge, so `losses[start:]` is that merge's rows.
+            start (int): Where that merge began appending.
+            *stamps (dict): The owner mappings `_merge_stamp` will write.
+
+        Returns:
+            list: The rows taken out, for the worker to put back if the
+                file is not written.
+        """
+        # Second delta review of #1009, N2. An instance's copy of Patient
+        # ID that `_merge` cannot write (`7`, since the text gate) got
+        # `Tag 0010,0020 not exported (data loss)` beside a file holding
+        # (0010,0020) with the Patient's value. The row was false: the
+        # copy is never what the file carries, the stamp is. PN and UI
+        # copies had said it all along (they raise at `add_new`); the
+        # gate extended it to LO and DA.
+        #
+        # - **A written file holds every stamp**: one that cannot be
+        #   written raises out of `_merge_stamp` and fails the file. So
+        #   the rows are spared whenever a file is written, and the
+        #   worker puts them back when none is, beside the ERROR row.
+        # - **Taken out before the sequences are merged.** A nested
+        #   item's Patient ID is no owner's to stamp, its row has the
+        #   same text, and `_merge` dedupes by text: left in until the
+        #   stamps were written, the instance's row would have swallowed
+        #   the item's and then been dropped.
+        # - **Matched on the row's own prefix**, the one `_merge` writes.
+        stamped = tuple(f"Tag {tag} not exported" for attrs in stamps
+                        for tag in attrs)
+        taken = [row for row in losses[start:] if row[1].startswith(stamped)]
+        losses[start:] = [row for row in losses[start:] if row not in taken]
+        return taken
 
     @staticmethod
     def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",
