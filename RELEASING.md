@@ -309,7 +309,15 @@ fixes, never features.
    **If the build ends `no map written`**, it has refused to do that: it
    names the data files `coverage combine` left unread, writes nothing,
    leaves any `.test-map.json` already there as it was, and exits with
-   the suite's status, or with 9 when the suite passed. Then:
+   the suite's status, or with 9 when the suite passed. The same ending
+   covers a `coverage combine` that itself exits non-zero, which it does
+   over a data file with a table missing (`no such table:
+   other_db.context`; it then leaves every data file, and the line names
+   them after `coverage combine exited 1 and left`) and when no data
+   file was written at all (`No data to combine`; the line says
+   `coverage combine exited 1 and left no data file`). So a build's
+   `exit=1` is always the suite's: no ending of the map step exits 1 on
+   a green suite. Then:
    - **the suite's result stands.** The line `the suite exited N` and the
      last test line above it are the 3.14t integration result, recorded
      as usual with the `exit=` the build gave: `the suite exited 0` with
@@ -317,7 +325,8 @@ fixes, never features.
      or a hang under the rerun rule above, and the suite is not run
      again for it;
    - **the map is not part of the release.** Keep the previous one (an
-     older map selects more, never less), or build it again outside the
+     older map selects more, toward the `TARGETS` rows; what it can miss
+     is said above), or build it again outside the
      release path, on a quiet machine, by the same command;
    - say which in the release-commit PR.
 
@@ -563,7 +572,13 @@ fixes, never features.
      does not, until step 8), none in a dispatch from `main`.
 
    That is **24 in a rehearsal, 23 in the publish run and 22 in a
-   dispatch from `main`**, and one fewer each on 3.14t. **Any other
+   dispatch from `main`**, and one fewer each on 3.14t. **These totals
+   are derived, not yet seen on a runner**: what a runner has shown is
+   19 on 3.12 and 18 on 3.14t in a dispatch (run 37846349518), before
+   #975 added three cases that need `coverage`; each total here is that
+   reading plus three, plus the released section's one or two. The first
+   rehearsal after #975 replaces them: write the counts it shows here,
+   in a PR of its own, and take this sentence out. **Any other
    number is a finding**: find the test (`pytest -rs` prints the reason;
    a runner's `-v` log prints only `SKIPPED`), and either it is a test
    that has stopped running, or this list is out of date and the same

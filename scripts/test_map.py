@@ -798,16 +798,18 @@ def describe(sel, mapping, repo):
 
 #: What `build` exits with when the suite passed and no map was written
 #: (#975). Outside pytest's own statuses (0 to 5), so a release record
-#: that says `exit=9` cannot be read as a test result.
+#: that says `exit=9` cannot be read as a test result. Not 1: that is
+#: pytest's "tests failed", the one reading this value exists to prevent.
 EXIT_NO_MAP = 9
 
 
 def combine(rc, env, cwd):
-    """Run `coverage combine`; return the data files it could not read.
+    """Run `coverage combine`; return its exit status and the data files
+    it could not read.
 
     `coverage combine` exits 0 when a data file is unreadable: it warns
     (`Couldn't use data file '…': database disk image is malformed`),
-    counts it (`1 file errored`) and goes on, so `check=True` sees
+    counts it (`1 file errored`) and goes on, so its status alone says
     nothing (#975: the 1.0.0rc14 map build, on a machine at load 80).
     What it does do is leave that file where it was, while every file it
     read, or skipped as a duplicate, is deleted. So the answer is read
@@ -815,22 +817,31 @@ def combine(rc, env, cwd):
     change. `tests/test_changed_code_selects_its_tests.py` holds both
     halves against the installed coverage.
 
+    Not `check=True`: over a data file with a table missing (`no such
+    table: other_db.context`) combine exits 1 and leaves every file, and
+    with no data file at all it exits 1 saying `No data to combine`.
+    Raising here killed `build` with a traceback and exit 1, pytest's
+    "tests failed", before it had said what the suite did (review of
+    #1007). The caller refuses the map on either answer.
+
     Its output is not captured: the warning names the file and the
     reason, and the person cutting a release needs to see it.
     """
     import sys
     data = Path(env["COVERAGE_FILE"])
-    subprocess.run([sys.executable, "-m", "coverage", "combine",
-                    f"--rcfile={rc}"], cwd=cwd, env=env, check=True)
-    return sorted(path.name for path in data.parent.glob(data.name + ".*"))
+    done = subprocess.run([sys.executable, "-m", "coverage", "combine",
+                           f"--rcfile={rc}"], cwd=cwd, env=env, check=False)
+    return done.returncode, sorted(
+        path.name for path in data.parent.glob(data.name + ".*"))
 
 
 def build(repo, out_dir, sha=None):
     """Run the suite under per-test contexts and write the map to out_dir.
 
     Exits with the suite's status. A map is written whenever every data
-    file was read, red suite or green; when one was not, nothing is
-    written, a map already in out_dir is left as it was, and a green
+    file was read, red suite or green; when one was not, or `coverage
+    combine` itself exited non-zero, nothing is written, a map already in
+    out_dir is left as it was, the suite's status is printed, and a green
     suite exits `EXIT_NO_MAP`.
     """
     import sys
@@ -869,18 +880,26 @@ def build(repo, out_dir, sha=None):
         suite = subprocess.run([sys.executable, "-m", "coverage", "run",
                                 f"--rcfile={rc}", "-m", "pytest", "-q"],
                                cwd=repo, env=env, check=False)
-        unread = combine(rc, env, repo)
-        if unread:
+        combined, unread = combine(rc, env, repo)
+        if unread or combined:
             # Before from_coverage: a map built from the rest would lack
             # whatever those processes ran, and select too little with
             # nothing to say so. No map is the honest result -- the
             # selector widens for a missing or older one.
+            if unread and combined:
+                why = (f"coverage combine exited {combined} and left "
+                       f"{len(unread)} data file(s) ({', '.join(unread)})")
+            elif unread:
+                why = (f"coverage combine could not read {len(unread)} data "
+                       f"file(s) ({', '.join(unread)})")
+            else:
+                why = (f"coverage combine exited {combined} and left no "
+                       "data file")
             print(f"the suite exited {suite.returncode}; no map written: "
-                  f"coverage combine could not read {len(unread)} data "
-                  f"file(s) ({', '.join(unread)}), so a map would lack what "
-                  f"those processes ran. {Path(out_dir) / MAP_FILE} is left "
-                  "as it was. The suite's result stands; build the map "
-                  "again on a quiet machine (#975)")
+                  f"{why}, so a map would lack what those processes ran. "
+                  f"{Path(out_dir) / MAP_FILE} is left as it was. The "
+                  "suite's result stands; build the map again on a quiet "
+                  "machine (#975)")
             return suite.returncode or EXIT_NO_MAP
         gil = getattr(sys, "_is_gil_enabled", lambda: True)()
         mapping = from_coverage(Path(scratch) / ".coverage", repo, sha,

@@ -765,13 +765,125 @@ def test_a_build_whose_combine_left_a_data_file_writes_no_map(
     with pytest.raises(SystemExit) as stopped:
         test_map.main(["build", "--sha", "abc", "--out", str(tmp_path)])
 
-    assert stopped.value.code == (suite_status or test_map.EXIT_NO_MAP)
-    assert stopped.value.code != 0
+    # The literal, not the constant: 1 is pytest's "tests failed", and a
+    # constant set to 1 would turn a green integration run into a red one
+    # in the release record with every other assertion here still true.
+    assert test_map.EXIT_NO_MAP == 9
+    assert stopped.value.code == (suite_status or 9)
     assert previous.read_text() == "the map of the release before"
     said = capsys.readouterr().out
     assert left in said
     assert f"the suite exited {suite_status}" in said
     assert "no map" in said
+
+
+class _Ran:
+    def __init__(self, returncode, stdout=""):
+        self.returncode, self.stdout = returncode, stdout
+
+
+def _build_with_combine(monkeypatch, tmp_path, suite_status, combine_step):
+    """Run `build` through its command line with doubles for the three
+    commands it launches. `combine_step(data)` is handed the combined
+    file's path and returns combine's exit status. The double honours
+    `check=True` as `subprocess.run` does, so a build that checks a
+    command which exited non-zero dies here as it would for real."""
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            done = _Ran(0, "tests/test_x.py::test_a\n")
+        elif "combine" in cmd:
+            done = _Ran(combine_step(Path(kwargs["env"]["COVERAGE_FILE"])))
+        else:
+            done = _Ran(suite_status if "run" in cmd else 0)
+        if kwargs.get("check") and done.returncode:
+            raise subprocess.CalledProcessError(done.returncode, cmd)
+        return done
+
+    monkeypatch.setattr(test_map.subprocess, "run", run)
+    with pytest.raises(SystemExit) as stopped:
+        test_map.main(["build", "--sha", "abc", "--out", str(tmp_path)])
+    return stopped.value.code
+
+
+def _no_map_from_unread_data(*args, **kwargs):
+    raise AssertionError("a map was read out of data combine did not "
+                         "finish reading")
+
+
+@pytest.mark.parametrize("suite_status", [0, 1])
+def test_a_build_whose_combine_failed_leaving_its_files_writes_no_map(
+        tmp_path, monkeypatch, capsys, suite_status):
+    """Review of #1007: `coverage combine` exits 1, not 0, over a data
+    file with a table missing (`no such table: other_db.context`, the
+    half-written shape `.coveragerc` names), and leaves every data file.
+    `build` checked that command, so it died with a traceback and exit 1
+    and never printed the suite's status: a green 3.14t integration run
+    read as pytest's "tests failed". It is the same refusal as a file
+    left behind, with the same exit."""
+    left = [".coverage.host.pid7.Xa", ".coverage.host.pid8.Xb"]
+
+    def combine_step(data):
+        for name in left:
+            (data.parent / name).write_bytes(b"a table short")
+        return 1
+
+    monkeypatch.setattr(test_map, "from_coverage", _no_map_from_unread_data)
+    previous = tmp_path / test_map.MAP_FILE
+    previous.write_text("the map of the release before")
+
+    code = _build_with_combine(monkeypatch, tmp_path, suite_status,
+                               combine_step)
+
+    assert code == (suite_status or 9)
+    assert previous.read_text() == "the map of the release before"
+    said = capsys.readouterr().out
+    assert f"the suite exited {suite_status}" in said
+    assert "no map written" in said
+    assert "coverage combine exited 1" in said
+    assert all(name in said for name in left)
+
+
+@pytest.mark.parametrize("suite_status", [0, 1])
+def test_a_build_whose_combine_failed_leaving_nothing_writes_no_map(
+        tmp_path, monkeypatch, capsys, suite_status):
+    """`coverage combine` also exits 1 with `No data to combine`, when no
+    process wrote a data file. Nothing is left to name, so the message
+    says that; the suite's status and the exit are as for any build that
+    wrote no map."""
+    monkeypatch.setattr(test_map, "from_coverage", _no_map_from_unread_data)
+    previous = tmp_path / test_map.MAP_FILE
+    previous.write_text("the map of the release before")
+
+    code = _build_with_combine(monkeypatch, tmp_path, suite_status,
+                               lambda data: 1)
+
+    assert code == (suite_status or 9)
+    assert previous.read_text() == "the map of the release before"
+    said = capsys.readouterr().out
+    assert f"the suite exited {suite_status}" in said
+    assert "no map written" in said
+    assert "coverage combine exited 1 and left no data file" in said
+
+
+def test_a_build_whose_combine_read_everything_writes_the_map(
+        tmp_path, monkeypatch, capsys):
+    """The other direction, and it needs no `coverage`, so a runner sees
+    it: the combined file combine writes is not a file it could not read.
+    A leftover check that matched it would refuse every map, and only the
+    cases below, which skip where `coverage` is not installed, said so."""
+    def combine_step(data):
+        data.write_bytes(b"the combined data")
+        return 0
+
+    monkeypatch.setattr(test_map, "from_coverage",
+                        lambda *a, **k: {"functions": {}, "workers": {},
+                                         "unmapped": []})
+
+    code = _build_with_combine(monkeypatch, tmp_path, 0, combine_step)
+
+    assert code == 0
+    assert (tmp_path / test_map.MAP_FILE).exists()
+    assert "no map" not in capsys.readouterr().out
 
 
 def _coverage_child_env(data_file):
@@ -814,8 +926,9 @@ def test_combine_names_the_data_file_it_could_not_read(tmp_path, damage):
     elif damage == "not sqlite":
         victim.write_bytes(b"\x00" * 4096)
 
-    unread = test_map.combine(rc, env, tmp_path)
+    status, unread = test_map.combine(rc, env, tmp_path)
 
+    assert status == 0
     assert unread == ([] if damage == "none" else [victim.name])
     assert (tmp_path / ".coverage").exists()
 
