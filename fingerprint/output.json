@@ -135735,14 +135735,14 @@
   }
  },
  "provenance": {
-  "dirty": true,
+  "dirty": false,
   "gil": true,
-  "git_sha": "0ba7b58c0164cc9bd40846f8165578d288a7c6e4",
+  "git_sha": "c14c3c30019bb8a61a625e96d8418f415fe1ceed",
   "isocenter_version": "1.0.0rc16",
-  "jobs": 6,
+  "jobs": 8,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 609
+  "seconds": 649
  },
  "schema": 1,
  "toolchain": {
