@@ -117,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Output (#940), a tuple:** `(1, 2)`, written around the entity or through `set_attr()`, exported live. In each case the same store reopened already wrote what is written now.
     - In an IS and a DS, top level and inside a sequence item: dropped under a STANDARD `DATA_LOSS` row (`int() argument must be a string, a bytes-like object or a real number, not 'tuple'`; `float() argument …`), `PASS`; written `1\2` and `1.0\2.0`, no row, `PASS`.
     - Under `US or SS` (`(0028,0106)`), FD (`(0018,9087)`, `(0018,9217)`) and SL (`(0018,6020)`): the file failed (`ExportError`, nothing on disk in a one-file export, an `ERROR` row `OSError`, `REVIEW_REQUIRED`); written `SS`, `FD` and `SL`, no row, `PASS`.
-    - Under a private tag whose VR was recorded as `US` (measured on `_merge`): `LO ['1', '2']` and the re-VR sentence (`recorded US, written LO`) an export writes as a `WARNING` row; now `US [1, 2]` and no sentence.
+    - Under a private tag whose VR was recorded as `US` (measured on `_merge`): `LO ['1', '2']` and the re-VR sentence (`recorded US, written LO`) an export writes as a `WARNING` row; now `US [1, 2]` and no sentence. Recorded as `PN` (measured on `_merge`, against `main` at 080d23b2, which holds #951): `('A^B', 'C^D')` was `LO` with the re-VR sentence and is `PN`, two names, no sentence; `('A^B\C^D',)` was dropped under a PRIVATE row (`no VR fits a tuple value`) and is written `PN`. Each is what its list already got. `np.int64(7)` and `('A^B', np.int64(7))` there were dropped under a PRIVATE row and are written `LO` (`7`; `A^B\7`) with the re-VR sentence, as `7` and `['A^B', 7]` are; #939's row is for a standard element.
     - In an LO: the file failed; now #939's answer.
     - Unchanged: `(1, 2)` under a private tag with no recorded VR (`LO 1\2`), `('A', 'B')` in an LO (`A\B`), and `(1.5, 2.5)` in an IS (`2\2` with the `WARNING`).
   - **Output (#940), a `Decimal`** (ruling Q3 A), in a graph built by hand or written around the entity with no `mark_modified()`; through `set_attr()` the export's leading save still raises #775's `TypeError`, before and after:
@@ -132,7 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - In PN and UI (14 cells): the element was already lost under a STANDARD row, `PASS`, and still is; the row's sentence changes, from pydicom's (`AttributeError: 'int' object has no attribute 'split'`; `TypeError: A UID must be created from a string`) to the one above. A numpy number assigned to `Patient.patient_name` is the same row.
     - A numpy value that is not a number, in an LO: `np.array([7])` was written as 8 raw bytes with no row and `PASS`, and `np.datetime64('2020-01-02')` and `np.ma.masked` failed the file; each is now the one lost element with its row (`a ndarray is not text, and LO holds text`).
   - **The output fingerprint does not move.** `python -m scripts.output_fingerprint check --jobs 4` reports no difference on 3.12 and on 3.14t: no member of the reference cohort holds a numpy value, a tuple, a `Decimal` or a number under a text VR, because no ingest produces one. `fingerprint/output.json` is not retaken.
-
 
 ## [1.0.0rc15] - 2026-10-07
 
