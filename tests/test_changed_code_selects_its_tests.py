@@ -513,12 +513,14 @@ def _shares_history(path, ref):
 def test_select_prints_its_reasons_and_what_it_is_for():
     if not _git_tree(REPO):
         pytest.skip("not a git work tree: a `git archive` copy has no diff")
-    # `select` diffs from its merge base with main. The release rehearsal
-    # checks out release/X.Y alone (actions/checkout fetches one branch),
-    # so neither `origin/main` nor `main` exists there and `select` exits
+    # `select` diffs from its merge base with main. A checkout of one
+    # branch alone has neither `origin/main` nor `main` (the release
+    # rehearsal's was one until tests.yml fetched every branch and tag,
+    # #966; a single-branch clone still is), and `select` then exits
     # asking for a base, as it should. That refusal is not this test's
     # subject: with no main to find, name HEAD as the base so the output
-    # is still read. Where main exists, the default path is the one run.
+    # is still read. Where main exists, the default path is the one run,
+    # and since #966 that is the path a runner takes.
     base = ([] if any(_shares_history(REPO, r) for r in ("origin/main", "main"))
             else ["--base", "HEAD"])
     out = subprocess.run(
