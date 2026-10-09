@@ -11270,15 +11270,15 @@ _TEXT_VRS = frozenset({"AE", "AS", "CS", "DA", "DT", "TM", "LO", "LT", "PN",
                        "SH", "ST", "UC", "UI", "UR", "UT"})
 
 
-#: A caller's number, by its exact type. Not `numbers.Number`: pydicom's
+#: A plain number, by its exact type. Not `numbers.Number`: pydicom's
 #: `DSfloat`, `IS`, `ISfloat` and `DSdecimal` are numbers to that test and
-#: are a file's own values (see `_refuse_a_number_as_text`).
+#: carry a file's own text (see `_refuse_a_number_as_text`).
 _CALLERS_NUMBERS = frozenset({int, float, bool, complex, Decimal, Fraction})
 
 
 def _refuse_a_number_as_text(vr, value):
     """Raise when `value`, about to be written under text VR `vr`, holds a
-    caller's number.
+    plain number.
 
     Each atom (the value, or each member of a `list` or `MultiValue`) is
     refused when its type is exactly `int`, `float`, `bool`, `complex`,
@@ -11311,12 +11311,22 @@ def _refuse_a_number_as_text(vr, value):
     #   hands ingest a `DSfloat`: a number to `isinstance`, and the
     #   file's own text to pydicom's DA, DT and TM writers, which write
     #   its `original_string`. Refused here, a source's own element was
-    #   lost that had always been written. So a value pydicom built is
-    #   never this gate's, under any text VR, and exports as it did
-    #   before the gate: written under DA, DT and TM, the element lost
-    #   with pydicom's sentence under PN and UI, and the whole file
-    #   failed under the other ten (`object of type 'IS' has no len()`;
-    #   #1017, not made an element's loss here).
+    #   lost that had always been written. So pydicom's own value
+    #   classes (`IS`, `DSfloat`, `DSdecimal`) are never this gate's,
+    #   under any text VR, and export as they did before the gate:
+    #   written under DA, DT and TM, the element lost with pydicom's
+    #   sentence under PN and UI, and the whole file failed under the
+    #   other ten (`object of type 'IS' has no len()`; #1017, not made
+    #   an element's loss here).
+    # - **A file's own US, SS, UL, SL, FL or FD value IS this gate's**
+    #   (owner ruling of 2026-10-09). pydicom builds a plain `int` or
+    #   `float` for those, ingest records a wire VR for odd groups only,
+    #   and the store writes a bare number: after ingest, and after a
+    #   reopen, nothing in the graph tells a file that stated `US 42`
+    #   for an LO tag from `set_attr(tag, 42)` (measured in the PR). So
+    #   it loses that one element under this row, as a caller's number
+    #   does, where the whole file failed before the gate. #1017 holds
+    #   both halves of "a file's own number under a text tag".
     # - **A caller's own subclass of `int` or `float` passes too**, an
     #   `IntEnum` say, because the exact-type test cannot tell it from
     #   pydicom's. It then fails the whole file at `dcmwrite`, as it

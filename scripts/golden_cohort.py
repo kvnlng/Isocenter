@@ -580,13 +580,33 @@ def number_vr_on_a_date_or_time(out: Path):
     write(ds, out / "number_vr_on_a_date_or_time-1.dcm")
 
 
+def binary_number_vr_on_a_text_tag(out: Path):
+    """Three text tags the file wrote under a binary numeric VR:
+    Manufacturer's Model Name `(0008,1090)`, an LO, under `US`; Patient
+    Position `(0018,5100)`, a CS, under `SS`; Manufacturer `(0008,0070)`,
+    an LO, under `FD`. No row of Table E.1-1 names any of the three.
+    pydicom reads each as a plain `int` or `float`, which nothing in the
+    graph tells from a caller's number, so the exporter's text gate drops
+    each under a `DATA_LOSS` row and writes the rest of the file (#939;
+    owner ruling of 2026-10-09 on the delta review of #1009; #1017).
+    Before the gate the whole file failed. The sibling of
+    `number_vr_on_a_date_or_time`, whose `IS` and `DS` values are
+    pydicom's own classes and are written."""
+    ds = ct("binary_number_vr_on_a_text_tag")
+    for tag, vr, value in ((0x00081090, "US", 42), (0x00185100, "SS", -3),
+                           (0x00080070, "FD", 4.5)):
+        ds[tag] = pydicom.DataElement(tag, vr, value)
+    write(ds, out / "binary_number_vr_on_a_text_tag-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
     encapsulated_pdf, unstated_private_vr,
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
-    ecg_lead_codes, number_vr_on_a_date_or_time)}
+    ecg_lead_codes, number_vr_on_a_date_or_time,
+    binary_number_vr_on_a_text_tag)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

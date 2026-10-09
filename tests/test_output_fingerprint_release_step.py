@@ -151,6 +151,7 @@ def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
 COMMITTED = {
     "big_endian_words": ["big_endian_words-1.dcm"],
     "big_lut": ["big_lut-1.dcm"],
+    "binary_number_vr_on_a_text_tag": ["binary_number_vr_on_a_text_tag-1.dcm"],
     "curve_overlay": ["curve_overlay-1.dcm"],
     "ecg": ["ecg-1.dcm"],
     "ecg_lead_codes": ["ecg_lead_codes-2008-12lead.dcm",

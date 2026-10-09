@@ -1147,6 +1147,48 @@ def test_a_numpy_array_holding_a_number_under_a_text_vr_is_still_refused(make):
     assert detail.endswith("TypeError: a ndarray is not text, and LO holds text")
 
 
+# -- A file's own binary number under a text tag is a plain number ------------
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["live", "reopened"])
+def test_a_files_own_us_ss_or_fd_under_a_text_tag_loses_that_element(
+        tmp_path, reopen):
+    """Owner ruling of 2026-10-09 on the delta review of #1009 (finding
+    3). pydicom builds a plain `int` or `float` for US, SS and FD, and
+    after ingest nothing in the graph tells a file that stated `US 42`
+    for an LO tag from `set_attr(tag, 42)`: so the gate takes it, the one
+    element is lost under #939's row and the file is written, where the
+    whole file failed before the gate. pydicom's own `IS` and `DSfloat`
+    are the other half (#1017)."""
+    cells = (("0008,1090", "US", 42, "int", "LO"),
+             ("0018,5100", "SS", -3, "int", "CS"),
+             ("0008,0070", "FD", 4.5, "float", "LO"))
+
+    def source(given):
+        for tag, vr, value, _kind, _text in cells:
+            given[_numbers(tag)] = pydicom.DataElement(_numbers(tag), vr, value)
+
+    held = {}
+
+    def look(inst, item, session):
+        for tag, _vr, value, _kind, _text in cells:
+            held[tag] = (type(inst.attributes[tag]), inst.attributes[tag],
+                         inst.attribute_vrs.get(tag))
+
+    result = _run(tmp_path / "out", look, reopen=reopen, source=source)
+    # What the graph holds: the plain number and no record of the file's VR.
+    assert held == {tag: (type(value), value, None)
+                    for tag, _vr, value, _kind, _text in cells}
+    assert result["written"] == 1, result["written"]
+    for tag, _vr, _value, _kind, _text in cells:
+        assert _element(result, tag) is None
+    assert sorted((action, scope, details.split("Tag ", 1)[1])
+                  for action, scope, details in result["rows"]) == sorted(
+        ("DATA_LOSS", "STANDARD",
+         f"{tag} not exported (data loss): TypeError: a {kind} is not text, "
+         f"and {text} holds text") for tag, _vr, _value, kind, text in cells)
+    assert result["grade"] == _PASS
+
+
 # -- An owner's stamp that cannot be written fails the file -------------------
 
 def _owner(session, kind):
