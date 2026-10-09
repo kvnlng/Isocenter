@@ -5,9 +5,7 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0rc16] - YYYY-MM-DD
-
-<!-- YYYY-MM-DD, here and in CITATION.cff's `date-released`, is a placeholder and not what RELEASING.md asks for: "The private fix", step 2, says to choose a disclosure time and write its UTC date, and step 6 has the reviewer check that both dates are it. No disclosure time is chosen yet. The owner writes the date in both files when it is; that is a date-only delta, which the reviewer re-approves ("Disclosure", step 1). -->
+## [1.0.0rc16] - 2026-10-09
 
 **This release carries one security fix and nothing else.** No commit is picked from `main`. Exported output changes for one kind of instance only, as the entry's `**Output:**` line says: an instance whose SOP Instance UID is not text, is empty, holds anything but letters, digits, `_`, `-` and `.`, or begins with `.`, is no longer written. `fingerprint/output.json` is as 1.0.0rc15 left it; the `**Output:**` line says why no member of the reference cohort can show the change, and that adding none is the owner's exception.
 
