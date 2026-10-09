@@ -136,12 +136,32 @@ jobs:
     # became four shards (#707): step sum 38, plus the old 7-minute margin.
     # Step sum 40 since the timings upload (2026-10-07, #935 Q3): a
     # 5-minute margin, and the cap stands.
-    timeout-minutes: 45
+    # Step sum 45 since the tesseract download is retried in its step
+    # (#984, 2026-10-08: that step went from 3 to 8), so the cap is 50:
+    # the same 5-minute margin.
+    timeout-minutes: 50
 
     steps:
     - uses: actions/checkout@v7
+      # All history, every branch and every tag (#966, owner ruling
+      # 2026-10-08). The default is one commit, with no tag and, off
+      # `main`, no `origin/main`, and the tests that compare this tree
+      # with released text skip without them -- green.
+      # tests/test_released_changelog_sections_stay_as_released.py reads
+      # each `v*` tag and `origin/main`, and
+      # tests/test_config_behaviour_is_versioned.py the previous final
+      # tag: 43 of the 61 skips of the rc15 publish's 3.12 jobs, and 83
+      # of the 101 of its rehearsal, where the branch has no tag yet.
+      # RELEASING.md, "Cutting a release", step 4, says what still skips.
+      #
+      # The cap stays 3 minutes: the whole repository is a 43 MiB pack
+      # (2026-10-08), seconds on a runner. If the history ever grows
+      # into the cap, fetch the tags and `main` by name instead of
+      # dropping this -- a shallow checkout is what hid those tests.
       timeout-minutes: 3
-    
+      with:
+        fetch-depth: 0
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       timeout-minutes: 3
@@ -149,7 +169,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
         
     - name: Install tesseract
-      timeout-minutes: 3
+      # 8 since #984; the last paragraph of the comment below has the sum.
+      timeout-minutes: 8
       # pytesseract is a wrapper; the OCR itself is a system binary pip
       # cannot supply. Without it `pixel_analysis.HAS_OCR` is still True
       # (it means only that pytesseract imported), but the OCR probe
@@ -171,10 +192,53 @@ jobs:
       # proves it: pip cannot supply this binary, so an install that
       # half-worked would resurface as #44 -- a silent skip that looks
       # like a passing suite.
+      #
+      # The download is retried here, in the step (#984, owner ruling
+      # 2026-10-08). On 2026-10-07 the mirror left some runners'
+      # connections to apt's 30-second timeout, package after package
+      # (`Ign:` lines 30-40 s apart). Under the 3-minute cap this step
+      # then had, one `apt-get install` was still waiting when the cap
+      # fired in six of 32 jobs of the rc15 rehearsal (run 37677947792)
+      # and three of 32 of the rc15 publish (run 37681895889), one of
+      # them a floor job, before any test had run; jobs that got through
+      # took up to 173 s, against a median of 13 s over 80 jobs.
+      #
+      # Three things here are load-bearing:
+      #   - Each attempt has its own bound (`timeout`). The installs
+      #     stalled, they did not fail: a loop around an unbounded
+      #     attempt never reaches its second turn.
+      #   - The loop only downloads (`--download-only`), and what one
+      #     attempt fetched stays in apt's cache for the next. The
+      #     install that runs dpkg is `--no-download`, outside the loop
+      #     and under no `timeout`: it cannot wait on a mirror, and a
+      #     bound that fired inside dpkg would leave the package
+      #     database half-configured.
+      #   - `sudo timeout`, not `timeout sudo`: `--kill-after` sends
+      #     SIGKILL, which sudo cannot pass on, so killing sudo would
+      #     leave apt-get running and holding the dpkg lock.
+      #
+      # Worst case, every bound reached: update 45+5, four attempts of
+      # 75+5 (two of apt's own timeouts and room; a healthy download
+      # and unpack took 3-5 s together), three pauses of 15: 415 s,
+      # which leaves 65 s of the 8 minutes to unpack (under 8 s after
+      # the slowest download measured) and check the version.
+      # tests/test_packaging_contract.py runs this script against
+      # recorders and pins the retry, the bounds and that sum. A step
+      # that still times out, or fails after its fourth attempt, has
+      # had its retries: RELEASING.md's rerun rule says what it is.
       run: |
-        sudo apt-get update \
-          || echo "::warning::apt-get update had failing sources; continuing"
-        sudo apt-get install -y tesseract-ocr
+        sudo timeout --kill-after=5 45 apt-get update \
+          || echo "::warning::apt-get update failed, had failing sources or ran out of time; continuing"
+        for attempt in 1 2 3 4; do
+          if sudo timeout --kill-after=5 75 apt-get install -y --download-only tesseract-ocr; then
+            break
+          fi
+          echo "::warning::tesseract download attempt $attempt of 4 failed or ran out of time"
+          if [ "$attempt" -lt 4 ]; then
+            sleep 15
+          fi
+        done
+        sudo apt-get install -y --no-download tesseract-ocr
         tesseract --version
 
     - name: Install Dependencies

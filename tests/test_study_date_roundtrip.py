@@ -253,8 +253,13 @@ def test_a_datetime_study_date_is_refused_at_the_boundary():
         Study("1.2.9.1", datetime(2024, 1, 15, 10, 30))
 
     study = Study("1.2.9.1", date(2024, 1, 15))
-    with pytest.raises(TypeError, match=r"0008,0030"):
+    with pytest.raises(TypeError, match=r"0008,0030") as refusal:
         study.study_date = datetime(2024, 1, 15, 10, 30)
+    # The advice names the element on the instances, which is what a file
+    # carries. It named `Study.study_time` until #953, when the export
+    # stopped stamping Study Time from that field.
+    assert "on each of the study's instances" in str(refusal.value)
+    assert "study_time" not in str(refusal.value)
 
     # A refused write leaves the field as it was, and the values the
     # library itself produces still assign: a date, and None (#60).

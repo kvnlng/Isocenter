@@ -1363,6 +1363,18 @@ def _value_fits_vr(value, vr: str) -> bool:
             return False
         if vr not in _TEXT_VR_MAX and vr not in _TEXT_VR_UNCAPPED:
             return False
+        if vr == 'PN' and '\\' in value:
+            # A recorded `PN` holding a backslash is the source's own
+            # several Person Names: `_pn_text` holds every multi-valued PN
+            # as one backslash-joined `str` (#937), never as a list, so
+            # here the backslash is the value delimiter and the refusal
+            # below would send a source value nothing replaced to `UT`,
+            # with a WARNING row, and a re-ingest of that export would
+            # record `UT` for good (#951). Each value must still fit by
+            # itself. `PN` only: every other 1-n text VR holds a source's
+            # several values as a list, so a backslash in a `str` under
+            # one of those came from a `set_attr` or a REPLACE.
+            return all(_value_fits_vr(part, vr) for part in value.split('\\'))
         if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
             return False
         cap = _TEXT_VR_MAX.get(vr)
@@ -2366,10 +2378,11 @@ def _pn_text(value) -> str:
     # carries the source's values with the source's VM -- two Operators'
     # Names (VM 1-n) stay two, and a Patient's Name the source wrote with
     # two (VM 1, non-conformant) is written as the source wrote it, as a
-    # multi-valued LO is. The one place this costs: a *private* PN of
-    # several values is written `UT` with the re-VR WARNING row, because
-    # `_merge`'s private arm does not put a backslash-bearing `str` under
-    # a multi-valued VR (owner ruling Q6 A).
+    # multi-valued LO is. A *private* PN of several values is written
+    # `PN` too, under an Explicit VR export: `_value_fits_vr` reads a
+    # backslash under a recorded `PN` as the delimiter this function
+    # joined with (#951; until then it was written `UT` with the re-VR
+    # WARNING row, owner ruling Q6 A's residual).
     #
     # Person Names only. A linkage key holding several values is never
     # joined: `_refuse_a_multi_valued_key` refuses the file (#747), and a
@@ -10131,12 +10144,13 @@ def export_stamp_attributes(patient, study, series):
 
     What the export writes over the instance's own attributes, as
     `export_folder_names` is where it writes them; `session.export()` and
-    `DicomExporter.write_tree()` both use it. Study Time is stamped only
-    when the study has one. Equipment (Manufacturer, Model Name, Device
-    Serial Number), Series Number and Modality are never stamped: they
-    are written from the instance, which is what `anonymize()` edits
-    (#570, #869). A hand-built graph gets them onto the instances from
-    `SeriesBuilder`.
+    `DicomExporter.write_tree()` both use it. Equipment (Manufacturer,
+    Model Name, Device Serial Number), Series Number, Modality and Study
+    Time are never stamped: they are written from the instance, which is
+    what `anonymize()` edits (#570, #869, #953). A hand-built graph gets
+    equipment, Series Number and Modality onto the instances from
+    `SeriesBuilder`, and sets `(0008,0030)` on its instances when it
+    wants a Study Time; `Study.study_time` reaches no file.
 
     Args:
         patient (Patient): The patient root.
@@ -10149,10 +10163,15 @@ def export_stamp_attributes(patient, study, series):
     """
     # Three things this deliberately does not stamp; do not add any:
     #
-    # * No Study Time unless the study has one. The worker writes a
-    #   zero-length Study Time when nothing supplied one (Type 2
-    #   "unknown"); a literal is a fabricated clinical time, and a `""`
-    #   here would overwrite the instance's real value.
+    # * No Study Time, from `Study.study_time` or as a literal (#953).
+    #   Each file carries its own instance's `0008,0030`, the element
+    #   `anonymize()` applies a configuration's rule to. Stamped from the
+    #   Study, a time a caller had set was written over an element the
+    #   policy had emptied, removed or replaced, under a PASS and
+    #   `(0012,0062) YES`; and since `study_time` is not stored, a
+    #   reopened export of the same store wrote something else. The
+    #   worker writes a zero-length Study Time when the instance has none
+    #   (Type 2 "unknown"); a literal is a fabricated clinical time.
     # * No equipment. It comes from the instance, which is what
     #   `anonymize()` edits; `Series.equipment` keeps the source serial on
     #   purpose, because `redact()` matches rules on it, so stamping from
@@ -10178,8 +10197,6 @@ def export_stamp_attributes(patient, study, series):
         # holds a `date`, a string or None.
         "0008,0020": format_study_date(study.study_date),
     }
-    if getattr(study, 'study_time', None):
-        study_attributes["0008,0030"] = study.study_time
 
     # No Series Number and no Modality (#869): each file carries its own
     # instance's `0020,0011` and `0008,0060`, the elements `anonymize()`

@@ -2807,7 +2807,11 @@ class Study(TrackedEntity):
         date_shifted (bool): Whether dates in this study have been shifted.
             Whether *this* study date is one the shift produced is
             `date_shift_vouches_for`.
-        study_time (Optional[str]): The time of the study.
+        study_time (Optional[str]): A time of the study a caller may hold
+            here. Ingest never sets it, the store has no column for it
+            (it reads None after a reopen), and no export writes it: each
+            file carries its own instance's Study Time `(0008,0030)`
+            (#953), as it does its own Series Number and Modality.
     """
     study_instance_uid: str
     study_date: Any
@@ -2842,6 +2846,10 @@ class Study(TrackedEntity):
     #: export writes from the study and a scan reads on it. Not
     #: `date_shifted` or `_shifted_study_date`, which only remediation
     #: writes, beside its own `mark_modified()`; not `series`, structure.
+    #: `study_time` is neither written by the export (since #953) nor
+    #: read by a scan, and no save stores it. It stays tracked, so
+    #: assigning it still reads as an edit (grade condition 8): whether
+    #: the field is kept, stored or retired is not decided here.
     _TRACKED_FIELDS: ClassVar[frozenset] = frozenset({
         "study_instance_uid", "study_date", "study_time"})
 
@@ -2864,7 +2872,7 @@ class Study(TrackedEntity):
             raise TypeError(
                 "Study.study_date holds a date, not a datetime: call "
                 ".date() on it, and put the time of day in Study Time "
-                "(0008,0030) -- Study.study_time -- instead. A datetime "
+                "(0008,0030) on each of the study's instances instead. A datetime "
                 "here comes back from the store as an ISO string and "
                 "exports as an illegal DA value.")
         # ...and the DA-string boundary, for the same reason. Hydration

@@ -634,7 +634,10 @@ def test_t_u4_a_full_pass_folds_the_uid_copies(tmp_path):
 #
 # Owner rulings (2026-10-06): Q1 A, an owner holding no value leaves the copy
 # `''`, as Q-C2 does; Q2 A, an instance REMOVE beside an owner REPLACE on the
-# same tag declines with a row.
+# same tag declines with a row. Q1 A was reversed on 2026-10-08 (Q-D1-1 A,
+# #948): under an owner holding no value the copy is removed, with its row,
+# because the scan raises a REMOVE on anything present and the `''` copy was
+# raised again by every audit.
 
 REMOVE_REASON = (
     "{tag} is written by the export from the {owner}, which still holds a "
@@ -656,11 +659,16 @@ def _all_rows(session):
             "SELECT action_type, entity_uid, details FROM audit_log").fetchall()
 
 
-def _remove_session(tmp_path, suffix, rules, nested=False):
+def _remove_session(tmp_path, suffix, rules, nested=False, source=None):
     """CT_small as `PID-624`/`Alpha^One` under `privacy_profile: none` plus
-    `rules`, audited. Returns the open session, the report, and the
-    patient, study and instance."""
+    `rules`, audited. `source`, when given, edits the dataset before it is
+    ingested. Returns the open session, the report, and the patient, study
+    and instance."""
     path = write_ct(tmp_path / "in" / "a.dcm", "PID-624", suffix, name="Alpha^One")
+    if source is not None:
+        ds = pydicom.dcmread(str(path))
+        source(ds)
+        ds.save_as(str(path))
     if nested:
         ds = pydicom.dcmread(str(path))
         item = pydicom.Dataset()
@@ -800,30 +808,133 @@ def test_an_absent_copy_is_not_read_as_removed_while_the_owner_holds_a_value(tmp
         assert _exported(_exported_file(session, tmp_path), tag) == source
 
 
-@pytest.mark.parametrize("which", ["name", "date"])
-def test_a_remove_under_an_owner_holding_no_value_leaves_the_copy_empty(
-        tmp_path, which):
-    """Q1 A. The owner cleared by hand and not handed in: the export writes
-    the element empty, so the copy is set to `''` (Q-C2), nothing is left
-    in the graph or the file, and the finding is satisfied: REMEDIATED, no
-    row. The `''` reaches the store. Kills an owner holding None read as
-    "not handed in" (the copy would keep the source value)."""
+@pytest.mark.parametrize("which, empty", [("name", None), ("name", ""), ("date", None)],
+                         ids=["name-none", "name-blank", "date-none"])
+def test_a_remove_under_an_owner_holding_no_value_removes_the_copy(
+        tmp_path, which, empty):
+    """Q-D1-1 A (#948), which reverses C3's Q1 A for this case. The owner
+    cleared by hand and not handed in: the export writes the element empty
+    whatever the copy holds, so removing the copy is true of the file, and
+    the arm removes it: absent, one `REMEDIATION_REMOVE` row, REMEDIATED,
+    something to save. Absent after a save and a reopen, and a re-audit
+    raises nothing on the tag. Under Q1 A the copy was set to `''` with no
+    row, which every later audit raised again (a REMOVE is raised on
+    anything present). Kills an owner holding None read as "not handed in"
+    (the copy would keep the source value), and, in the `name-blank` cell,
+    a predicate that reads only None as no value: a Patient's Name of `''`
+    is what ingest gives a source with an empty one. (A Study holds a date
+    or None, so the date has no such cell.)"""
     rules, tag, _owner, field, _source = REMOVED[which]
     session, report, patient, study, inst = _remove_session(tmp_path, "7644", rules)
     with session:
-        setattr(patient if which == "name" else study, field, None)
-        session.anonymize(_instance_findings(report))
+        owner = patient if which == "name" else study
+        setattr(owner, field, empty)
+        assert session.anonymize(_instance_findings(report)) == len(
+            _instance_findings(report))
         rows = _all_rows(session)
-        assert inst.attributes[tag] == ""
+        assert tag not in inst.attributes
         assert inst.phi_status is PhiStatus.REMEDIATED
+        assert inst.has_unsaved_changes
         assert _declined(rows) == []
-        assert _removal_rows(rows, inst, tag) == []
+        assert _removal_rows(rows, inst, tag) == [
+            f"Removed Tag {tag} from {inst.sop_instance_uid}"]
         assert _exported(_exported_file(session, tmp_path), tag) == ""
         session.save(sync=True)
     with Session(str(tmp_path / "s.db")) as reopened:
+        reopened.load_config(str(tmp_path / "c.yaml"))
         [again] = [i for p in reopened.store.patients for st in p.studies
                    for se in st.series for i in se.instances]
-        assert again.attributes[tag] == ""
+        assert tag not in again.attributes
+        # The instance's, not the owner's: a Patient holding `''` raises
+        # its own REMOVE (the `name-blank` cell), which is not this copy.
+        assert [f for f in reopened.audit().findings
+                if f.entity_type == "Instance"
+                and tag in (f.tag, f.remediation_proposal.target_attr)] == []
+
+
+def _blank_date(ds):
+    ds.StudyDate = ""
+
+
+def _dotted_date(ds):
+    # The ACR-NEMA spelling: present, not empty, and no Study holds it.
+    ds[0x00080020] = pydicom.DataElement(
+        0x00080020, "DA", "1994.11.05", validation_mode=pydicom.config.IGNORE)
+
+
+def _on_the_date(findings):
+    return [(f.entity_type, f.remediation_proposal.action_type) for f in findings
+            if f.remediation_proposal.target_attr in ("0008,0020", "study_date")]
+
+
+@pytest.mark.parametrize("source, held", [(_blank_date, ""), (_dotted_date, "1994.11.05")],
+                         ids=["empty", "dotted"])
+def test_a_source_date_no_study_holds_settles_under_remove_in_one_pass(
+        tmp_path, source, held):
+    """#948, with no hand edit: a regression of #958 shipped in 1.0.0rc14
+    and rc15. A source whose Study Date is present and empty, or spelled
+    `1994.11.05`, gives a Study holding no date and an instance copy
+    holding the source's text. Under `0008,0020: REMOVE`, whole reports
+    only: one pass removes the copy with its `REMEDIATION_REMOVE` row and
+    counts it, and the next audit raises nothing, reads the instance
+    CLEARED and grades PASS. In rc14 and rc15 the copy was set to `''`
+    (the dotted date blanked with no row and not counted), and every later
+    audit raised the same instance finding: IDENTIFIED, REVIEW_REQUIRED.
+
+    Under `privacy_profile: none` on purpose: under the floor the instance
+    is IDENTIFIED for other findings on round one. Three rounds, so a fix
+    that settles on round two only is red: no row is added after the
+    first, and every later audit raises nothing on the date."""
+    session, report, _patient, study, inst = _remove_session(
+        tmp_path, "9481", DATE_RULE, source=source)
+    with session:
+        assert study.study_date is None and inst.attributes["0008,0020"] == held
+        assert _on_the_date(report.findings) == [("Instance", "REMOVE_TAG")]
+        assert session.anonymize(report) == len(report.findings)
+        rows = _all_rows(session)
+        assert "0008,0020" not in inst.attributes
+        assert _removal_rows(rows, inst, "0008,0020") == [
+            f"Removed Tag 0008,0020 from {inst.sop_instance_uid}"]
+        assert _declined(rows) == []
+        for _round in (2, 3):
+            again = session.audit()
+            assert _on_the_date(again.findings) == []
+            assert inst.phi_status is PhiStatus.CLEARED
+            assert _grade_of(session, tmp_path) == ["PASS"]
+            session.anonymize(again)
+            assert "0008,0020" not in inst.attributes
+            assert _removal_rows(_all_rows(session), inst, "0008,0020") == [
+                f"Removed Tag 0008,0020 from {inst.sop_instance_uid}"]
+        assert _exported(_exported_file(session, tmp_path), "0008,0020") == ""
+        last = session.audit()
+        assert _on_the_date(last.findings) == []
+        assert inst.phi_status is PhiStatus.CLEARED
+        assert _grade_of(session, tmp_path) == ["PASS"]
+
+
+def _blank_name(ds):
+    ds.PatientName = ""
+
+
+@pytest.mark.parametrize("rules, source, tag", [
+    (NAME_RULE, _blank_name, "0010,0010"),
+    ("  '0008,0020': {action: JITTER, name: Date}\n", _blank_date, "0008,0020"),
+], ids=["an-empty-name-under-remove", "an-empty-date-under-jitter"])
+def test_the_empty_sources_that_always_settled_still_do(tmp_path, rules, source, tag):
+    """Controls for #948, green before it. An empty Patient's Name is held
+    by the Patient as `''`, not None, so the owner's own REMOVE is raised
+    and takes the copies; a JITTER on an empty date raises nothing (the
+    scan's shift arm skips a blank). Both settle: the audit after one pass
+    raises nothing on the tag and grades PASS."""
+    session, report, _patient, _study, inst = _remove_session(
+        tmp_path, "9482", rules, source=source)
+    with session:
+        session.anonymize(report)
+        again = session.audit()
+        assert [f for f in again.findings
+                if tag in (f.tag, f.remediation_proposal.target_attr)] == []
+        assert inst.phi_status is PhiStatus.CLEARED
+        assert _grade_of(session, tmp_path) == ["PASS"]
 
 
 @pytest.mark.parametrize("which", ["name", "date"])
@@ -1117,11 +1228,13 @@ def test_the_owners_removal_in_a_later_pass_exports_no_marker_until_a_reaudit(
     reads IDENTIFIED, the file carries neither `(0012,0062)` nor
     `(0012,0063)` and the run grades REVIEW_REQUIRED; at v1.0.0rc13 it
     carried both at once and graded PASS. After `anonymize(audit())` both
-    are back, and PASS. `(0028,0303)` is in neither: the file keeps Series
-    Date and the other dates as the source held them, and the marker is
-    written only when no date in the file is as found (under the name rule
-    Study Date is shifted all the same). The absent third is the control
-    that the helper does not read every tag as present."""
+    are back, and PASS. `(0028,0303)`: the file keeps Series Date and the
+    other dates as the source held them. Under the name rule Study Date
+    is shifted all the same, and since #978 a shift this store wrote is
+    always marked, so the third is `MODIFIED` there (it was absent until
+    #978, which is what the 1.0.0rc15 record says). Under the date rule
+    nothing is shifted and dates are as found, so it is absent: the
+    control that the helper does not read every tag as present."""
     rules, tag, _owner, _field, _source = REMOVED[which]
     session, report, _patient, _study, inst = _remove_session(tmp_path, "7653", rules)
     with session:
@@ -1137,5 +1250,7 @@ def test_the_owners_removal_in_a_later_pass_exports_no_marker_until_a_reaudit(
         session.anonymize(session.audit())
         present, files = _markers_in_both_exports(session, tmp_path, "after")
         assert [_exported(ds, tag) for ds in files] == [""] * 2
-        assert present == [[True, True, False]] * 2
+        assert present == [[True, True, which == "name"]] * 2
+        if which == "name":
+            assert [str(ds[0x0028, 0x0303].value) for ds in files] == ["MODIFIED"] * 2
         assert _grade_of(session, tmp_path) == ["PASS"]
