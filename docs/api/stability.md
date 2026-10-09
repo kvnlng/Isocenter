@@ -271,6 +271,17 @@ instance_number, file_path, source_path` (`pixel_array` and
 `AttributeError`. `Equipment`: `manufacturer, model_name,
 device_serial_number`.
 
+Assigning `Instance.sop_instance_uid` a value it does not already hold
+also sets `attributes["0008,0018"]` to it and marks the instance edited,
+once. So the export writes that instance under the assigned UID: in the
+file's name, in `(0008,0018)` and in Media Storage SOP Instance UID. An
+instance assigned a UID that cannot name a file (`''` among them) is
+refused at export by the file-name rule and not written, as any such
+instance is: `''` is one of `ExportSummary.failures`, keyed `UNKNOWN`,
+with one `ERROR` audit row. Assigning the value already held
+changes nothing, so an element written straight into `attributes` is not
+brought back by it (#936).
+
 `Series.series_number` and `Series.modality` are the source's Series
 Number and Modality as ingested, and `Instance.instance_number` the
 file's Instance Number. None of the three is what an export writes: the
@@ -380,7 +391,55 @@ otherwise.
   `str` (`None`, or a value of another type), giving the count. Raised
   by the save before it stores or appends anything, so nothing is saved
   or exported. Under `export(check_burned_in=True)` the
-  pre-export scan has already run.
+  pre-export scan has already run. The same three calls raise
+  `ValueError`, at the same point and with the same guarantees, when a
+  patient, study or series in the session holds a key that is not a
+  `str`: `patient.patient_id`, `study.study_instance_uid` or
+  `series.series_instance_uid`. The message gives the count at each of
+  the three levels and no value. An empty `str` is not refused by either
+  check. `anonymize()` never clears one of those three keys: a
+  `REMOVE_TAG` finding naming one is declined with a
+  `REMEDIATION_DECLINED` audit row, and `load_config()` refuses the rule
+  (#949).
+- `audit()`, `redact()`, `lock_identities()` and `lock_identities_batch()`,
+  after a `save()` without `sync=True` whose write failed: each drains
+  the queue on entry and then runs that save again itself, on the calling
+  thread, before it does anything else. That save writes the session's
+  patients as they stand then (`session.store.patients`, read at that
+  moment), not as they stood when `save()` was called: a patient removed
+  from the session since, by editing the list or by assigning
+  `session.store.patients` a new one, is removed from the store, and one
+  added since is saved. If the save now succeeds, nothing is raised and
+  nothing is said. If it fails again, the call raises what the save
+  raises: the `TypeError` or `ValueError` above, an `OSError`, or the
+  sidecar lock's `RuntimeError`. The next such call runs it again, until
+  a save succeeds. A lock that raises this way has embedded no token and
+  created no key file.
+  The calls that begin with one of those four raise it too, from that
+  inner call and before they write anything: `anonymize()` with no
+  findings (it calls `audit()`), `redact_by_machine()` (it calls
+  `redact()`), `export(check_burned_in=True)` (its pre-export scan is an
+  `audit()`, before the export's own save), and `lock_identities()`
+  given a list or a report (the batch form).
+  `anonymize(report)`, handed its findings, makes no such call and
+  returns; so does `recover_patient_identity()`. Both wait for the queue
+  where they did and do not run a failed save.
+  `save()` itself still returns before the write and raises nothing for
+  it, and `close()` does not raise for it. `save(sync=True)`, `export()`
+  and `compact()` save the session themselves, as before. `redact()`
+  with no rules loaded returns 0 before it drains.
+  A session that ends, by `close()` or when the process exits with the
+  session still referenced and never closed, with a failed background
+  save that no later save has healed
+  writes one `ERROR` audit row keyed `SESSION` (`A background save()
+  failed and no later save succeeded before the session ended, ...`), so
+  a later session's report on that store grades `REVIEW_REQUIRED`.
+  `generate_report()` is not one of the calls above, and the row is
+  written when the session ends: a report generated in the same session,
+  with no `audit()` after the failed save, does not show the failure.
+  One session used from two threads at once can have a retry on one
+  thread fail while a save on the other succeeds; the failure then
+  stays recorded although nothing is unsaved (#941).
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.
 - `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`:

@@ -4121,6 +4121,26 @@ class SqliteStore:
         # original data while memory points at the new sidecar frame.
         instance.mark_modified()
 
+    @staticmethod
+    def _owners_without_a_key(patients) -> tuple:
+        """How many patients, studies and series hold a key that is not a `str`.
+
+        Args:
+            patients (List[Patient]): The patients a save was handed.
+
+        Returns:
+            tuple: `(patients, studies, series)` counts over the whole
+                list, each owner counted where the walk meets it.
+        """
+        counts = [0, 0, 0]
+        for patient in patients:
+            counts[0] += not isinstance(patient.patient_id, str)
+            for study in patient.studies:
+                counts[1] += not isinstance(study.study_instance_uid, str)
+                for series in study.series:
+                    counts[2] += not isinstance(series.series_instance_uid, str)
+        return tuple(counts)
+
     def save_all(self, patients: List[Patient],
                  prune_absent_patients: bool = False):
         """Incrementally persist the given patients and their graph.
@@ -4150,7 +4170,10 @@ class SqliteStore:
             ValueError: An instance with unsaved changes holds a SOP
                 Instance UID that is not a `str`; the message gives the count.
                 Raised before the gate is taken: nothing is appended to
-                the sidecar and nothing is stored (#721).
+                the sidecar and nothing is stored (#721). The same for a
+                patient, study or series in `patients` whose Patient ID,
+                Study Instance UID or Series Instance UID is not a `str`,
+                with a count per level (#949).
             RuntimeError: The sidecar gate was not acquired within
                 `_SIDECAR_GATE_TIMEOUT_S`.
             Exception: Any failure inside the transaction, logged and
@@ -4174,13 +4197,44 @@ class SqliteStore:
             for series in study.series for inst in series.instances
             if inst.has_unsaved_changes
             and not isinstance(inst.sop_instance_uid, str))
-        if nameless:
-            raise ValueError(
-                f"save: {nameless} instance(s) hold a SOP Instance UID that "
-                "is not a str (None, or a value of another type), and the "
-                "store keys an instance by that text, so nothing was saved. "
-                "Give each one a str (instance.sop_instance_uid = ...) or "
-                "remove it from its series.")
+        # #949: the store's three other keys, in the same place and by the
+        # same predicate. `patients.patient_id`, `studies.study_instance_uid`
+        # and `series.series_instance_uid` were bound as they stood. None
+        # reached sqlite as `IntegrityError: NOT NULL constraint failed`,
+        # after this save's frames were in the sidecar. **Any other type
+        # was worse: with a key of `7` the save returned, and the store no
+        # longer held that patient's, study's or series' rows** (measured;
+        # sqlite stores the int under a TEXT key, and the rows of the key
+        # the objects no longer hold are pruned). Every owner in
+        # the list is counted, not only one with unsaved changes: the walk
+        # marks only instances persisted (#307), so an owner's flag does
+        # not say whether its row will be written. `""` is not refused, as
+        # above. Counts per level and never a value: a Patient ID is the
+        # identifier.
+        keyless = self._owners_without_a_key(patients)
+        if nameless or any(keyless):
+            # #721's sentence is pinned whole by its test and by callers
+            # who match it: it is said first and unchanged, alone when
+            # only instances are at fault. The owners' is a sentence of its
+            # own, after it when both are.
+            said = []
+            if nameless:
+                said.append(
+                    f"save: {nameless} instance(s) hold a SOP Instance UID that "
+                    "is not a str (None, or a value of another type), and the "
+                    "store keys an instance by that text, so nothing was saved. "
+                    "Give each one a str (instance.sop_instance_uid = ...) or "
+                    "remove it from its series.")
+            if any(keyless):
+                owners = (
+                    f"{keyless[0]} patient(s), {keyless[1]} study(ies) and "
+                    f"{keyless[2]} series hold a key that is not a str (None, "
+                    "or a value of another type): a Patient ID, a Study "
+                    "Instance UID or a Series Instance UID. The store keys "
+                    "each one's row by that text, so nothing was saved. Give "
+                    "each one a str or remove it from its parent.")
+                said.append(owners if nameless else "save: " + owners)
+            raise ValueError(" ".join(said))
 
         tally = _SaveTally()
         _warn_on_shared_patient_ids(self.logger, patients)

@@ -201,3 +201,155 @@ def test_the_store_refuses_before_it_takes_the_sidecar_gate(tmp_path, monkeypatc
     finally:
         monkeypatch.undo()
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# #949: the store's three other keys
+# ---------------------------------------------------------------------------
+#
+# `patients.patient_id`, `studies.study_instance_uid` and
+# `series.series_instance_uid` were bound as they stood. Measured on main at
+# fd359eb3, on 3.12.14 and 3.14.7t:
+#
+# - a key of `None`: `save(sync=True)`, `export()` and `compact()` raised
+#   `sqlite3.IntegrityError: NOT NULL constraint failed: patients.patient_id`
+#   (`studies.study_instance_uid`, `series.series_instance_uid`);
+# - **a key of `7`: `save(sync=True)` returned, and the store's rows for
+#   that patient, study or series were deleted.** The store reopened without
+#   them.
+#
+# The save now refuses a key that is not a `str` in the place #721's check
+# stands: above the sidecar gate, before a frame is appended. #721's
+# sentence (`MESSAGE`, above) is unchanged; the owners' refusal is a
+# sentence of its own, raised alone when only owners are at fault and after
+# #721's when both are.
+
+OWNERS = ("{} patient(s), {} study(ies) and {} series hold a key that is not a "
+          "str (None, or a value of another type): a Patient ID, a Study "
+          "Instance UID or a Series Instance UID. The store keys each one's "
+          "row by that text, so nothing was saved. Give each one a str or "
+          "remove it from its parent.")
+
+KEYS = [
+    pytest.param("patient", "patient_id", (1, 0, 0), id="patient_id"),
+    pytest.param("study", "study_instance_uid", (0, 1, 0), id="study_uid"),
+    pytest.param("series", "series_instance_uid", (0, 0, 1), id="series_uid"),
+]
+OWNER_DOORS = [
+    pytest.param(lambda s, out: s.save(sync=True), id="save"),
+    pytest.param(lambda s, out: s.export(out), id="export"),
+    pytest.param(lambda s, out: s.compact(), id="compact"),
+]
+
+
+def _owner_of(session, instance, level):
+    """The patient, study or series holding `instance`."""
+    for patient in session.store.patients:
+        for study in patient.studies:
+            for series in study.series:
+                if any(i is instance for i in series.instances):
+                    return {"patient": patient, "study": study,
+                            "series": series}[level]
+    raise AssertionError("setup: the instance is not in the session")
+
+
+def _stored(tmp_path):
+    """Row counts and the three key columns, as the store holds them."""
+    import sqlite3
+
+    with sqlite3.connect(str(tmp_path / "s.db")) as conn:
+        return [conn.execute(query).fetchall() for query in (
+            "SELECT patient_id FROM patients ORDER BY 1",
+            "SELECT study_instance_uid FROM studies ORDER BY 1",
+            "SELECT series_instance_uid FROM series ORDER BY 1",
+            "SELECT sop_instance_uid FROM instances ORDER BY 1",
+            "SELECT COUNT(*) FROM instance_blobs")]
+
+
+@pytest.mark.parametrize("value", [None, 7], ids=["none", "int"])
+@pytest.mark.parametrize("level, attr, counts", KEYS)
+@pytest.mark.parametrize("door", OWNER_DOORS)
+def test_a_key_that_is_not_a_str_is_refused_by_count_before_anything_is_written(
+        tmp_path, door, level, attr, counts, value):
+    """Red on main: `IntegrityError` for `None`, after the other instance's
+    frame was appended; for `7` the save returned and the rows were gone
+    (an export raised `ExportError` or a bare `TypeError`). Now nothing is
+    appended, nothing is stored, no folder is made, and the same call
+    returns once the key is given back."""
+    session, victim, other = _session(tmp_path)
+    out = str(tmp_path / "out")
+    try:
+        owner = _owner_of(session, victim, level)
+        kept = getattr(owner, attr)
+        sidecar, stored = _sidecar(tmp_path), _stored(tmp_path)
+        assert [len(rows) for rows in stored[:4]] == [1, 1, 2, 2]
+        setattr(owner, attr, value)
+        with pytest.raises(ValueError) as refused:
+            door(session, out)
+        assert str(refused.value) == "save: " + OWNERS.format(*counts)
+        assert not os.path.exists(out)
+        assert _sidecar(tmp_path) == sidecar
+        assert _stored(tmp_path) == stored
+        assert other.has_unsaved_changes
+        setattr(owner, attr, kept)
+        session.save(sync=True)
+        assert not other.has_unsaved_changes
+        assert _stored(tmp_path)[:4] == stored[:4]
+    finally:
+        session.close()
+
+
+def test_every_owner_without_a_key_is_counted_at_its_level(tmp_path):
+    session, victim, other = _session(tmp_path)
+    try:
+        _owner_of(session, victim, "patient").patient_id = None
+        _owner_of(session, victim, "series").series_instance_uid = None
+        _owner_of(session, other, "series").series_instance_uid = 7
+        with pytest.raises(ValueError) as refused:
+            session.save(sync=True)
+        assert str(refused.value) == "save: " + OWNERS.format(1, 0, 2)
+    finally:
+        session.close()
+
+
+def test_an_instance_and_an_owner_at_fault_are_both_said(tmp_path):
+    """#721's sentence first, byte for byte, then the owners'."""
+    session, victim, _other = _session(tmp_path)
+    try:
+        victim.sop_instance_uid = None
+        _owner_of(session, victim, "study").study_instance_uid = None
+        with pytest.raises(ValueError) as refused:
+            session.save(sync=True)
+        assert str(refused.value) == MESSAGE + " " + OWNERS.format(0, 1, 0)
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("level, attr, _counts", KEYS)
+def test_an_empty_key_is_not_this_refusal(tmp_path, level, attr, _counts):
+    """`""` is a `str`, as for #721: a value sqlite stores. Kills the check
+    widened to `not key`."""
+    session, victim, _other = _session(tmp_path)
+    try:
+        setattr(_owner_of(session, victim, level), attr, "")
+        session.save(sync=True)
+    finally:
+        session.close()
+
+
+def test_the_store_refuses_a_key_before_it_takes_the_sidecar_gate(
+        tmp_path, monkeypatch):
+    """Placement, directly, as for #721 above."""
+    session, victim, _other = _session(tmp_path)
+    try:
+        _owner_of(session, victim, "patient").patient_id = None
+
+        def asked(*_args, **_kwargs):
+            raise AssertionError("the sidecar gate was taken")
+
+        monkeypatch.setattr(SqliteStore, "_hold_sidecar_gate", asked)
+        with pytest.raises(ValueError, match="hold a key that is not a str"):
+            session.store_backend.save_all(session.store.patients)
+    finally:
+        monkeypatch.undo()
+        session.close()
