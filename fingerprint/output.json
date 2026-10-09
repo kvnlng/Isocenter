@@ -4,7 +4,7 @@
    "A": "sha256:8a1fd5e843950909cd83009743d4764c32fd37a63c1242777a761d520cf4c545",
    "B": "sha256:61af4342699942ded6c134fbb1f1dd4770033eb2d2747d90e7b20cad662c635a"
   },
-  "recorder": 3
+  "recorder": 4
  },
  "members": {
   "pydicom-data:693_J2KR.dcm": {
@@ -127418,7 +127418,7 @@
           "0028,3000[0]>0028,3002": "US/implicit [4]",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'int' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -127483,7 +127483,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -127548,7 +127548,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -127824,7 +127824,7 @@
           "0028,3000[0]>0028,3002": "US/implicit [4]",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'int' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -127889,7 +127889,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -127954,7 +127954,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -128116,7 +128116,7 @@
           "0028,3000[0]>0028,3002": "US/implicit [4]",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'int' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -128181,7 +128181,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -128246,7 +128246,7 @@
           "0028,3000[0]>0028,3002": "US/implicit []",
           "0028,3000[0]>0028,3003": "LO/implicit 'GOLD LUT'",
           "0028,3000[0]>0028,3004": "LO/implicit 'HU'",
-          "0028,3000[0]>0028,3006": "None/implicit unreadable: TypeError: 'NoneType' object is not subscriptable",
+          "0028,3000[0]>0028,3006": "None/implicit unconverted sha256:299060755c14c1ba len=8",
           "7fe0,0010": "OW/implicit <pixels>"
          },
          "meta": {
@@ -134917,7 +134917,7 @@
           "0018,0060": "DS/implicit '120'",
           "0018,1000": "LO/implicit 'ANONYMIZED'",
           "0019,0010": "LO/implicit 'SIEMENS MR HEADER'",
-          "0019,1012": "None/implicit unreadable: BytesLengthException: Expected total bytes to be an even multiple of bytes per value. Instead received b'12.5 \\x00' with length 6 and struct format 'l' which corresponds to bytes per value of 4. This occurred while trying to parse (0019,1012) according to VR 'None'. To replace this error with a warning set pydicom.config.convert_wrong_length_to_UN = True.",
+          "0019,1012": "None/implicit unconverted sha256:947644b868eaab59 len=6",
           "0020,000d": "UI/implicit '2.25.255314682850897685567860575086266692020'",
           "0020,000e": "UI/implicit '2.25.236806302508885576371366332359695150866'",
           "0020,0010": "SH/implicit ''",
@@ -135125,7 +135125,7 @@
           "0018,0060": "DS '120'",
           "0018,1000": "LO 'ANONYMIZED'",
           "0019,0010": "LO 'SIEMENS MR HEADER'",
-          "0019,1012": "UN unreadable: BytesLengthException: Expected total bytes to be an even multiple of bytes per value. Instead received b'12.5 \\x00' with length 6 and struct format 'l' which corresponds to bytes per value of 4. This occurred while trying to parse (0019,1012) according to VR 'UN'. To replace this error with a warning set pydicom.config.convert_wrong_length_to_UN = True.",
+          "0019,1012": "UN unconverted sha256:947644b868eaab59 len=6",
           "0020,000d": "UI '2.25.255314682850897685567860575086266692020'",
           "0020,000e": "UI '2.25.236806302508885576371366332359695150866'",
           "0020,0010": "SH ''",
@@ -135737,12 +135737,17 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "c14c3c30019bb8a61a625e96d8418f415fe1ceed",
+  "git_sha": "04afd1ab3dc5f2f09059c1bbe3233c6fe0c4cf20",
   "isocenter_version": "1.0.0rc16",
-  "jobs": 8,
+  "jobs": 4,
+  "parts": [
+   "pydicom:*",
+   "pydicom-data:*",
+   "synthetic:*"
+  ],
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 649
+  "seconds": 567
  },
  "schema": 1,
  "toolchain": {
