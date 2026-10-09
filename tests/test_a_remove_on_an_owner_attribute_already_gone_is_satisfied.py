@@ -108,15 +108,19 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
     read under the pseudonym as `_live_findings` reads it (#644).
 
     The count is asserted, not just the rows: read under the pseudonym
-    the four owner removals are satisfied and the twenty `REPLACE`s are
-    re-applied, which is the CHANGELOG's 24 -> 20. Twenty-four since
-    #557: the floor's four X/D findings here (Instance Creation Date on
-    both files, Series Date and Series Time on CT_small) were REMOVEs,
-    satisfied on the reopened graph, and are now REPLACEs writing their
-    dummy, re-applied like the other twenty. Lose the pseudonym
-    lookup and the pass does not become quiet -- it declines every
-    finding, which `_owner_rows` now sees and this count would fail on
-    either way.
+    the four owner removals are satisfied. Until #952 the `REPLACE`s were
+    re-applied on the reopened graph, each writing the value its element
+    already held, and this asserted `24 + 10`: the released CHANGELOG's
+    24 -> 20 for #661, twenty-four since #557, and ten UID replacements
+    since #544. Since #952 a `REPLACE` on an instance's own element that
+    already holds the value, with the instance's remediation record to
+    vouch for it, is satisfied, and the record survives the save and the
+    reopen: twenty-eight of the thirty-four are satisfied. The six left
+    are the owner-level arms, which #952 does not change: each patient's
+    Patient ID, each Study's UID and each Series' UID, written again onto
+    the value already there. Lose the pseudonym lookup and the pass does
+    not become quiet -- it declines every finding, which `_owner_rows`
+    now sees and this count would fail on either way.
     """
     with _session(tmp_path) as session:
         report = session.audit()
@@ -129,11 +133,11 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
         second.load_config(str(tmp_path / "cfg.yaml"))
         before = len(_rows(second))
 
-        # And the UID replacements (#544), re-applied like the REPLACEs,
-        # each writing the replacement its entity already holds: fourteen
-        # findings over the two files, ten applications, because each
-        # instance's copy of its Study and Series Instance UID folds into
-        # the owner's write.
+        # The UID replacements (#544): fourteen findings over the two
+        # files. Each instance's copy of its Study and Series Instance UID
+        # folds into the owner's write, and the owners' four are among the
+        # six still re-applied; the instances' own six (SOP Instance UID,
+        # Instance Creator UID, Frame of Reference UID) are satisfied.
         uids = sorted((f.entity_type, f.tag) for f in report.findings
                       if f.remediation_proposal is not None
                       and f.remediation_proposal.metadata.get("uid_replacement"))
@@ -141,10 +145,17 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
             [("Instance", tag) for tag in ("0008,0014", "0008,0018", "0020,000d",
                                            "0020,000e", "0020,0052")] * 2
             + [("Series", "0020,000e"), ("Study", "0020,000d")] * 2), uids
-        assert second.anonymize(report) == 24 + 10
+        assert second.anonymize(report) == 6
 
         rows = _rows(second)[before:]
         assert [a for a, _ in rows].count("REMEDIATION_DECLINED") == 0, rows
+        applied = [(a, d) for a, d in rows if a.startswith("REMEDIATION_")]
+        assert [a for a, _ in applied] == ["REMEDIATION_REPLACE"] * 6, applied
+        assert sorted(field for _, d in applied
+                      for field in ("patient_id", "study_instance_uid",
+                                    "series_instance_uid")
+                      if f": {field} -> " in d) == sorted(
+            ["patient_id", "study_instance_uid", "series_instance_uid"] * 2), applied
         assert _owner_rows(second, before) == []
 
 

@@ -170,19 +170,28 @@ def test_the_fill_does_not_overwrite_the_instance_time(tmp_path):
     assert _read_one(via_tree).StudyTime == "072730"
 
 
-def test_a_study_time_on_the_study_is_stamped_on_both_doors(tmp_path):
-    """`Study.study_time` is stamped over the instance's value on both
-    doors -- the session's rule, which `write_tree` now shares. Killing
-    mutation: the helper not stamping `study_time`."""
-    image = [("0008,0030", "072730")]
+@pytest.mark.parametrize("on_the_instance, written", [
+    ([("0008,0030", "072730")], "072730"),
+    ([], ""),
+], ids=["the-instance-has-a-time", "the-instance-has-none"])
+def test_a_study_time_on_the_study_is_stamped_on_neither_door(
+        tmp_path, on_the_instance, written):
+    """`Study.study_time` is not stamped over the instance's value, on
+    either door (#953, owner ruling Q-D1-3 A, as #869 ruled for Series
+    Number and Modality): each file carries its own instance's
+    `(0008,0030)`, the element `anonymize()` applies a rule to, and a
+    zero-length one when the instance has none. Until #953 both doors
+    wrote the Study's `101010` here, which this test pinned on purpose.
+    Killing mutation: the stamp restored in `export_stamp_attributes`."""
     summary, via_session = _session_export(
-        tmp_path, _hand_built(_image(image), study_time="101010"))
+        tmp_path, _hand_built(_image(on_the_instance), study_time="101010"))
     via_tree = _tree_export(
-        tmp_path, _hand_built(_image(image), study_time="101010"))
+        tmp_path, _hand_built(_image(on_the_instance), study_time="101010"))
 
     assert summary.written == 1, summary.failures
-    assert _read_one(via_session).StudyTime == "101010"
-    assert _read_one(via_tree).StudyTime == "101010"
+    for root in (via_session, via_tree):
+        assert _read_one(root)["StudyTime"].VR == "TM"
+        assert _read_one(root).StudyTime == written
 
 
 # ---------------------------------------------------------------------------

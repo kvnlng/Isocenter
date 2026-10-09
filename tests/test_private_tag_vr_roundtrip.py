@@ -486,12 +486,29 @@ def test_a_recorded_vr_does_not_bypass_the_multi_value_shape_guard():
     and `_fallback_multivalue` has always accepted one. Under a recorded
     binary VR it reached `struct.pack` still a tuple and failed the
     whole file with "required argument is not an integer" (#154).
+
+    Until #940 this pinned `LO ['1', '2']`: the gate refused the tuple
+    and the fallback wrote text, with a re-VR `WARNING`. That was the
+    live half of a divergence, because the store writes a tuple as a
+    list and the same store reopened wrote `US [1, 2]` with no row. The
+    exporter now hands every reader the list (`_export_value`), so the
+    tuple never reaches the gate or `struct.pack`, and the recorded VR is
+    kept live as it is after a reopen. The gate's own refusal of a tuple
+    stays, for a caller that asks it directly.
     """
-    ds, losses = _merge_and_write({"0009,1006": (1, 2)},
-                                  {"0009,1006": "US"})
-    assert losses == [], losses
-    assert ds[0x00091006].VR == 'LO'
-    assert list(ds[0x00091006].value) == ['1', '2']
+    revrs = []
+    ds = pydicom.Dataset()
+    losses = []
+    DicomExporter._merge(ds, {"0009,1006": (1, 2)}, losses,
+                         vrs={"0009,1006": "US"}, revrs=revrs)
+    assert losses == [] and revrs == [], (losses, revrs)
+    listed, _ = _merge_and_write({"0009,1006": [1, 2]}, {"0009,1006": "US"})
+    for written in (_merge_and_write({"0009,1006": (1, 2)},
+                                     {"0009,1006": "US"})[0], listed):
+        assert written[0x00091006].VR == 'US'
+        assert list(written[0x00091006].value) == [1, 2]
+    assert _value_fits_vr((1, 2), "US") is False
+    assert _value_fits_vr([1, 2], "US") is True
 
 
 def test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store():

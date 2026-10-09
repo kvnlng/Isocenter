@@ -575,8 +575,11 @@ def test_a_restore_refused_across_jitter_schemes_writes_nothing(tmp_path, monkey
         before = [(dict(i.attributes), i._revision) for i in instances]
         revision = patient._revision
         drained = []
-        monkeypatch.setattr(session.persistence_manager, "flush",
-                            lambda: drained.append(1))
+        # Both spellings: the restore's drain is `_wait` since #941, and
+        # watching `flush` alone would pass whatever the restore did.
+        for name in ("flush", "_wait"):
+            monkeypatch.setattr(session.persistence_manager, name,
+                                lambda: drained.append(1))
 
         with pytest.raises(RuntimeError) as raised:
             session.recover_patient_identity("ANON_616", restore=True)

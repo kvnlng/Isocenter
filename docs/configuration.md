@@ -224,6 +224,7 @@ It is **not** the whole of Annex E. Where it departs from the table:
 * Study and Series Description are emptied rather than removed, because the export directory names read them.
 * Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned. An icon is dropped when its pixels may show what redaction removed, in two tiers: an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export.
 * Retired Curve groups `(50xx)` are removed, by the table's own `50xx,xxxx` row. Overlay groups `(60xx)` are removed whole by `60xx,xxxx`, a rule the table does not have. The table removes Overlay Data `(60xx,3000)` and Overlay Comments `(60xx,4000)`, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them". The two table rows are folded into the group rule, so `"60xx,xxxx": {action: KEEP}` keeps a whole, valid overlay.
+    * A presentation state's Bitmap Display Shutter can name an overlay group this removes: Shutter Overlay Group `(0018,1623)` is kept as written, and then points at a group the file no longer has. PS3.15 Annex E is the authority on what the profile removes: for the overlay group, E.1.1's sentence on overlays quoted above, and for every other attribute, Table E.1-1, which has no row for Shutter Overlay Group. Isocenter does not second-guess either for one object: it neither keeps a group because a shutter names it nor removes the shutter. Removing Overlay Data alone, as the table's own row does, already left that presentation state without a Type 1 element. Where it must stay valid, keep the overlays: `"60xx,xxxx": {action: KEEP}`.
 * Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed.
 * Private attributes are the `remove_private_tags` sweep, not a rule.
 
@@ -395,13 +396,29 @@ two values (PS3.5 6.4), whether or not the attribute allows more than one.
 Isocenter holds the element's text as the file wrote it and, where the
 policy keeps the element, exports the same values: two Operators' Names
 stay two, and a Patient's Name the source wrote with two is written with
-two. One case is written differently: a *private* `PN` holding several
-values, kept with `remove_private_tags: false`. An export in an Explicit
-VR transfer syntax (`use_compression=True`) writes it under `UT`, the same
+two. A *private* `PN` holding several values, kept with
+`remove_private_tags: false`, is written the same way: `PN`, with the
+source's values, and no audit row
+([#951](https://github.com/kvnlng/Isocenter/issues/951)). One case is
+still written differently: a private `PN` holding a value of more than 64
+characters, which `PN` cannot carry. An export in an Explicit VR transfer
+syntax (`use_compression=True`) writes that element under `UT`, the same
 text; an Implicit VR export (`use_compression=False`) names no VR and
 carries the same text. Either way the export writes one `WARNING` row
 naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
 ([#937](https://github.com/kvnlng/Isocenter/issues/937)).
+
+**Two values in an element a series is described by.** Manufacturer,
+Manufacturer's Model Name, Device Serial Number, Modality and Series
+Number each take one value. A file that holds two in one of them
+(`ACME\Imaging`) is ingested: `Series.modality` and the three `Equipment`
+fields hold the file's text, backslash included, and `Series.series_number`
+is 0. A machine rule is compared with that text, as with any one value.
+The file's own element is exported
+with the values the source wrote, where the policy keeps it, and no row is
+written. The series folder is named from one Modality and one number, so
+it reads `OT` for two Modalities and `0` for two Series Numbers
+([#985](https://github.com/kvnlng/Isocenter/issues/985)).
 
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
@@ -570,12 +587,23 @@ The markers rest on the same status the report's grade reads, so any edit after 
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
     * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides. The fingerprint includes the configuration schema version, so a release that raises that version's minor moves the hex in every file it writes, under an unchanged configuration.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
-* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
-    * `REMOVED` when every date is empty or the dummy `19000101`.
-    * `MODIFIED` when the rest are shifts this store wrote.
-    * Nothing when any date is as it was ingested; the source's value, if any, then stays.
+* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `REMOVED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
+    * `MODIFIED` when at least one date is a shift this store wrote, whatever the others are. It replaces the source's value, a source `UNMODIFIED` included. It says that a date in the file was modified, not that every date was: a date beside it may be as it was ingested.
+    * `REMOVED` when no date is shifted and every date is empty or the dummy `19000101`.
+    * Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays.
     * TM is not read: a time of day beside a shifted date does not place the patient in time.
     * `UNMODIFIED` is never written, because a date kept on purpose cannot be told from one no rule named.
+
+    Worked on a CT whose source holds Study Date, Series Date, Acquisition Date, Content Date, Instance Creation Date and an empty Birth Date:
+
+    | Policy | Study Date | The other dates | `(0028,0303)` |
+    |---|---|---|---|
+    | the floor | shifted | empty or `19000101` | `MODIFIED` |
+    | `basic@2026c` | empty | empty or `19000101` | `REMOVED` |
+    | `privacy_profile: none` | shifted (the default for Study Date with no rule) | as ingested | `MODIFIED` |
+    | `none` plus `0008,0020: KEEP` | as ingested | as ingested | nothing; a source's value stays |
+    | the floor plus `0008,0021: KEEP` | shifted | Series Date as ingested, the rest empty or `19000101` | `MODIFIED` |
+    | `basic@2026c` plus `0008,0021: KEEP` | empty | Series Date as ingested, the rest empty or `19000101` | nothing; a source's value stays |
 * **De-identification Method Code Sequence `(0012,0064)`**: no code is written (see the departures above). A source's items pass through.
 
 **Your rules decide.** Table E.1-1 has no row for any of the three elements. A rule you write on one, of any action, `KEEP` included, means the export does not stamp that element: `KEEP` over a source `NO` exports `NO`. The other two are still stamped.
