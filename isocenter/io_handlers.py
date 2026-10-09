@@ -46,6 +46,7 @@ import os
 import pickle
 import sys
 import hashlib
+import threading
 import numbers
 import struct
 from decimal import Decimal
@@ -6530,9 +6531,15 @@ class ExportSummary:
         written_uids (List[str]): The SOP Instance UID of each instance
             that reached disk, and nothing else. An instance with no UID
             is not written and is in `failures`; so is one whose UID
-            cannot name a file (`export_file_name`), under that UID.
+            cannot name a file (`export_file_name`), under that UID. From
+            `session.export()`, an instance whose file another instance's
+            write replaced, because the volume resolves their two file
+            names to one file, is in `failures` too, and the instance the
+            file holds is here (#1020).
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
-            instance that did not reach disk, each with an audit row.
+            instance that did not reach disk, each with an audit row; the
+            instances of one replaced file share one row, which names
+            them all.
         written (int): Files that reached disk, counted over distinct
             UIDs: two instances sharing a UID write one file.
         failed (int): `len(failures)`.
@@ -7270,7 +7277,7 @@ def _verify_readback(path: str, ds, written_pixels=None,
     try:
         readback = pydicom.dcmread(path)
     except Exception as exc:
-        # Without paths: `path` is `<output path>.<pid>.tmp`, under
+        # Without paths: `path` is `<output path>.<pid>.<thread id>.tmp`, under
         # `Subject_<Patient ID>/`, and this message becomes the export's
         # `ERROR` row, where the outer spelling cannot strip it.
         raise RuntimeError(
@@ -8767,7 +8774,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # other's temp files. A worker killed outright can still orphan
         # one `.tmp`; that residue is what atomicity costs, and what
         # cannot exist is a partial under a name a recipient trusts.
-        tmp_path = f"{ctx.output_path}.{os.getpid()}.tmp"
+        #
+        # The thread's id beside the pid (#1020): `write_tree()`'s
+        # workers are threads of one process on a free-threaded build,
+        # and under `ISOCENTER_FORCE_THREADS`. With the pid alone, two
+        # instances sharing a UID had one temp name, and two whose names
+        # the volume folds (`SOPa`, `SOPA`) had one temp file: measured
+        # on 3.14t, the loser of the rename raised `ENOENT`. Two threads
+        # alive at once never share an id.
+        tmp_path = (f"{ctx.output_path}.{os.getpid()}."
+                    f"{threading.get_ident()}.tmp")
         try:
             ds.save_as(tmp_path, enforce_file_format=True)
             # Before the rename, so a file that fails verification is
@@ -12255,6 +12271,12 @@ class DicomExporter:
         as `session.export()` writes (`export_folder_names`), named by SOP
         Instance UID. Elements that could not be written are logged, and
         audited when `store_backend` is given.
+
+        Two instances written to one file are not reported here, whether
+        they share a UID or their file names differ only in a way the
+        volume ignores (letter case on a case-insensitive volume): the
+        later write replaces the earlier and the call returns.
+        `session.export()` writes an `ERROR` row for both cases.
 
         Args:
             patient (Patient): The patient root object.

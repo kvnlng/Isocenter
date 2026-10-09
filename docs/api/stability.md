@@ -213,7 +213,9 @@ on [OCR API](ocr.md)).
 `ExportSummary(written_uids, failures)` plus `written`, `failed`;
 `written_uids` holds the SOP Instance UID of each written instance and
 nothing else: an instance with no UID is not written and is in
-`failures`;
+`failures`, and so is an instance whose file another instance's write
+replaced because the export volume treats their two file names as one
+([Export output](../export-output.md#where-files-land));
 `PhiReport(findings, failures)` with `__len__`, `__iter__`, `__getitem__`,
 `to_dataframe()`; `PhiFinding(entity_uid, entity_type, field_name,
 value, reason, tag, patient_id, entity, remediation_proposal, metadata,
