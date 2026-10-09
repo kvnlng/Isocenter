@@ -1053,6 +1053,11 @@ _OTHER = b"\x18\x00\x64\x10"
     # always was, and it is what a reopened store holds for the 2-tuple.
     pytest.param(lambda: [0x0018, 0x1063],
                  b"\x00\x00\x18\x00\x00\x00\x63\x10", id="list-of-two-ints"),
+    # Only the 2-tuple is one tag. A longer tuple of ints names none, and
+    # is the list it equals, as under every other VR.
+    pytest.param(lambda: (0x0018, 0x1063, 0x1064),
+                 b"\x00\x00\x18\x00\x00\x00\x63\x10\x00\x00\x64\x10",
+                 id="3-tuple"),
 ])
 def test_under_at_a_two_tuple_is_one_tag(make, written):
     """`(0x0018, 0x1063)` is pydicom's ordinary spelling of one tag, and
