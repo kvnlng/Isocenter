@@ -7906,15 +7906,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                                   corrections=corrections)
 
         # 1. Patient Level. The three stamps go through `_merge_stamp`:
-        # one that cannot be written over the instance's copy fails the
-        # file rather than export the copy in its place.
-        DicomExporter._merge_stamp(ds, ctx.patient_attributes, losses)
+        # one that cannot be written fails the file, rather than export
+        # the instance's copy, or no element at all, in its place.
+        DicomExporter._merge_stamp(ds, ctx.patient_attributes)
 
         # 2. Study Level
-        DicomExporter._merge_stamp(ds, ctx.study_attributes, losses)
+        DicomExporter._merge_stamp(ds, ctx.study_attributes)
 
         # 3. Series Level
-        DicomExporter._merge_stamp(ds, ctx.series_attributes, losses)
+        DicomExporter._merge_stamp(ds, ctx.series_attributes)
 
         # 4. The de-identification markers, after every merge and
         # the owner stamps, so they are what the file says last and a
@@ -11218,8 +11218,9 @@ def _one_tag(given, value):
         value: `_export_value(given)`.
 
     Returns:
-        `tuple(value)` when `given` is exactly a `tuple` of two integers
-        (numpy ones as their Python twins); `value` otherwise.
+        `tuple(value)` when `given` is exactly a `tuple` of two parts
+        that are both integers (numpy ones as their Python twins) or both
+        `str`; `value` otherwise.
     """
     # Owner ruling on #1009 (finding 2). `(0x0018, 0x1063)` is pydicom's
     # ordinary spelling of ONE tag, and `[0x0018, 0x1063]` of two,
@@ -11227,10 +11228,16 @@ def _one_tag(given, value):
     # is therefore false under this one VR: converted, a tag a caller
     # wrote was exported as two others with no row.
     #
-    # - **What `AT` takes is unchanged**: one tag as a 2-tuple, a
-    #   `BaseTag` or an int, and a list of those for several. Only the
-    #   2-tuple of integers needs the exception; a tuple of 2-tuples is
-    #   still the list of them, which is several tags either way.
+    # - **Whatever pydicom reads as one tag stays one tag** (owner ruling
+    #   on the delta review of #1009, finding 4): pydicom's `Tag` takes a
+    #   pair when "both arguments [are] the same type and str or int".
+    #   So `isinstance`, not `type(...) is`: `(MyIntEnum.GROUP, 0x1063)`
+    #   and `(True, 7)` are pairs of integers, and `("0018", "1063")` is
+    #   the hex-string pair. Each was one tag before this function and
+    #   two wrong ones, with no row, under an exact-`int` test.
+    # - **Every other tuple is the list it equals**, as under every other
+    #   VR: a tuple of 2-tuples (several tags either way), a 3-tuple, a
+    #   pair of floats, a mixed pair.
     # - **Read from `value`**, so `(np.uint16(0x18), np.uint16(0x1063))`
     #   is the tag its twin is; pydicom refuses the numpy pair itself.
     # - **A reopened store is not covered**: it holds `[24, 4195]` for a
@@ -11238,9 +11245,22 @@ def _one_tag(given, value):
     #   is the store's spelling to fix, not the exporter's to guess at:
     #   a list of two ints is also how two group-0000 tags are spelled.
     if (type(given) is tuple and len(given) == 2 and type(value) is list
-            and all(type(part) in (int, bool) for part in value)):
+            and (all(isinstance(part, int) for part in value)
+                 or all(isinstance(part, str) for part in value))):
         return tuple(value)
     return value
+
+
+def _is_an_array_of_text(array):
+    """Whether numpy array `array` holds text and nothing else.
+
+    A `U` or `S` dtype does; an `object` array does when every member is a
+    `str` or `bytes`.
+    """
+    if array.dtype.kind in "US":
+        return True
+    return array.dtype.kind == "O" and all(
+        isinstance(member, (str, bytes)) for member in array.flat)
 
 
 #: The standard VRs whose value is text and whose writer pydicom runs at
@@ -11262,10 +11282,10 @@ def _refuse_a_number_as_text(vr, value):
 
     Each atom (the value, or each member of a `list` or `MultiValue`) is
     refused when its type is exactly `int`, `float`, `bool`, `complex`,
-    `Decimal` or `Fraction`, or when it is a numpy array or a numpy scalar
-    that is not text. Everything else passes, as it always has: text,
-    bytes, `None`, pydicom's `PersonName`, a `date` in a DA, and every
-    value pydicom built from a file (`DSfloat`, `IS`, `DSdecimal`).
+    `Decimal` or `Fraction`, or when it is a numpy scalar that is not text
+    or a numpy array that is not an array of text. Everything else passes,
+    as it always has: text, bytes, `None`, pydicom's `PersonName`, a
+    `date` in a DA, and pydicom's `DSfloat`, `IS` and `DSdecimal`.
 
     Args:
         vr (str): One of `_TEXT_VRS`.
@@ -11296,10 +11316,20 @@ def _refuse_a_number_as_text(vr, value):
     #   before the gate: written under DA, DT and TM, the element lost
     #   with pydicom's sentence under PN and UI, and the whole file
     #   failed under the other ten (`object of type 'IS' has no len()`;
-    #   #986's class, not made an element's loss here). A subclass of a
-    #   Python number a caller invented passes for the same reason.
+    #   #1017, not made an element's loss here).
+    # - **A caller's own subclass of `int` or `float` passes too**, an
+    #   `IntEnum` say, because the exact-type test cannot tell it from
+    #   pydicom's. It then fails the whole file at `dcmwrite`, as it
+    #   always did, while the same store reopened holds the plain number
+    #   and loses the one element: live and reopened disagree here, and
+    #   that is left with #986.
     # - **`str` and `bytes` are tested first**: `np.str_` and `np.bytes_`
     #   are text and an `np.generic` at once.
+    # - **An array of text is text** (delta review of #1009, finding 5):
+    #   `np.array(["ORIGINAL", "PRIMARY"])` under CS was always written
+    #   `ORIGINAL\PRIMARY`, and refusing every `np.ndarray` lost it under
+    #   a row saying text is not text. `_is_an_array_of_text` lets it by,
+    #   to do what it did; an array holding any number is still refused.
     # - **One level deep**: a list inside the list is not looked into,
     #   as `_export_value` does not look into it.
     # - **Dropped, not written as `str(value)`**: `'7'` is no date, time
@@ -11309,6 +11339,8 @@ def _refuse_a_number_as_text(vr, value):
     atoms = value if isinstance(value, (list, MultiValue)) else (value,)
     for atom in atoms:
         if isinstance(atom, (str, bytes)):
+            continue
+        if isinstance(atom, np.ndarray) and _is_an_array_of_text(atom):
             continue
         if (type(atom) in _CALLERS_NUMBERS
                 or isinstance(atom, (np.generic, np.ndarray))):
@@ -12197,55 +12229,50 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge_stamp(ds, attrs, losses):
+    def _merge_stamp(ds, attrs):
         """Stamp an owner's attributes over the instance's own copies.
 
         `_merge`, for the three owner mappings of
         `export_stamp_attributes`, with one difference: a stamp that
-        cannot be written while the instance's copy of that tag is in
-        `ds` fails the file.
+        cannot be written fails the file.
 
         Args:
             ds (pydicom.Dataset): The dataset, after the instance's merge.
             attrs (dict): One owner's `{"gggg,eeee": value}`.
-            losses (list): As for `_merge`.
 
         Raises:
             ValueError: Naming the tag and the reason its `DATA_LOSS`
                 row would have carried; it adds no value of its own.
         """
-        # Owner ruling on #1009 (finding 3). A stamp `_merge` refuses
-        # leaves `ds` holding what the instance's merge put there: the
-        # element is not lost, the OWNER'S value is, and the file goes out
-        # carrying the instance's copy -- the source's Patient ID, or the
-        # value a pass wrote -- under a row saying the tag was not
-        # exported. `patient.patient_id = 7` failed the file until the
-        # text gate made it one element's loss (#939), and a Patient's
-        # Name did this all along, because PN raises at `add_new`.
+        # Owner rulings on #1009 (2026-10-08, 2026-10-09). A stamp
+        # `_merge` refuses leaves `ds` holding what the instance's merge
+        # put there: the element is not lost, the OWNER'S value is, and
+        # the file goes out carrying the instance's copy -- the source's
+        # Patient ID, or the value a pass wrote -- under a row saying the
+        # tag was not exported. A Patient's Name did that all along (PN
+        # raises at `add_new`), and so did a Study or Series Instance UID
+        # of `bytes`.
         #
-        # - **Only while the copy is in `ds`.** A value neither level can
-        #   write (the same malformed Patient's Name in the instance and
-        #   on the Patient) leaves nothing behind, and stays the one row
-        #   it was: `_merge` dedupes it, which is why the stamp's own
-        #   losses are gathered apart and then offered to `losses`.
+        # - **One rule for every stamp, copy or no copy.** It does not
+        #   ask whether `ds` holds the tag. A graph built by hand holds
+        #   no instance copy of Patient ID, and `Patient(7, ...)` there
+        #   failed the file until the text gate made a number under LO
+        #   one element's loss (#939); asked `Tag in ds`, this let that
+        #   file out with no Patient ID at all (delta review, finding 1).
+        #   So a value neither level can write fails the file too, where
+        #   it was one deduped row.
         # - **A `ValueError` out of the worker**, so the instance fails
         #   as any other does: an ERROR row, an `ExportError`, no file.
         # - **Not for a stamp that is written**: `study.study_date = 7`
         #   is stamped as the text `7`, as it was.
-        own = []
-        DicomExporter._merge(ds, attrs, own)
-        for scope, detail in own:
+        refused = []
+        DicomExporter._merge(ds, attrs, refused)
+        for _scope, detail in refused:
             tag = detail[len("Tag "):len("Tag gggg,eeee")]
-            if Tag(int(tag[:4], 16), int(tag[5:], 16)) in ds:
-                reason = detail.split("(data loss): ", 1)[-1]
-                raise ValueError(
-                    f"the owner's value for {tag} cannot be written "
-                    f"({reason}), and the instance's own {tag} would be "
-                    f"exported in its place; the file is not written")
-            if losses is None:
-                get_logger().warning(detail)
-            elif (scope, detail) not in losses:
-                losses.append((scope, detail))
+            reason = detail.split("(data loss): ", 1)[-1]
+            raise ValueError(
+                f"the owner's value for {tag} cannot be written "
+                f"({reason}); the file is not written")
 
     @staticmethod
     def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",

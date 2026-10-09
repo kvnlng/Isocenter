@@ -30,6 +30,7 @@ are equal. Elements are read as written (`get_item`), never parsed.
 """
 import collections
 import datetime
+import enum
 import fractions
 import hashlib
 import io
@@ -1035,6 +1036,14 @@ _ONE = b"\x18\x00\x63\x10"
 _OTHER = b"\x18\x00\x64\x10"
 
 
+class _IntSubclass(int):
+    pass
+
+
+class _Group(enum.IntEnum):
+    ACQUISITION = 0x0018
+
+
 @pytest.mark.parametrize("make, written", [
     pytest.param(lambda: (0x0018, 0x1063), _ONE, id="2-tuple"),
     pytest.param(lambda: (np.uint16(0x0018), np.uint16(0x1063)), _ONE,
@@ -1058,6 +1067,18 @@ _OTHER = b"\x18\x00\x64\x10"
     pytest.param(lambda: (0x0018, 0x1063, 0x1064),
                  b"\x00\x00\x18\x00\x00\x00\x63\x10\x00\x00\x64\x10",
                  id="3-tuple"),
+    # Delta review of #1009, finding 4: whatever pydicom reads as one tag
+    # stays one tag. Its `Tag` takes a pair of two `int`s or two `str`s.
+    pytest.param(lambda: ("0018", "1063"), _ONE, id="pair-of-hex-strings"),
+    pytest.param(lambda: (_IntSubclass(0x0018), 0x1063), _ONE,
+                 id="pair-with-an-int-subclass"),
+    pytest.param(lambda: (_Group.ACQUISITION, 0x1063), _ONE,
+                 id="pair-with-an-IntEnum"),
+    pytest.param(lambda: (True, 7), b"\x01\x00\x07\x00", id="pair-with-a-bool"),
+    # A pair of floats names no tag; it is the list it equals, which
+    # pydicom has always written as two group-0000 tags.
+    pytest.param(lambda: (1.0, 7), b"\x00\x00\x01\x00\x00\x00\x07\x00",
+                 id="pair-with-a-float"),
 ])
 def test_under_at_a_two_tuple_is_one_tag(make, written):
     """`(0x0018, 0x1063)` is pydicom's ordinary spelling of one tag, and
@@ -1088,6 +1109,42 @@ def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route):
     assert result["written"] == 1, result["written"]
     assert _element(result, AT_TAG) == ("AT", _ONE)
     assert result["rows"] == [] and result["grade"] == _PASS
+
+
+# -- An array of text under a text VR is text ---------------------------------
+
+@pytest.mark.parametrize("tag, make, written", [
+    ("0008,0008", lambda: np.array(["ORIGINAL", "PRIMARY"]),
+     ("CS", b"ORIGINAL\\PRIMARY")),
+    ("0008,1090", lambda: np.array(["A", "B"]), ("LO", b"A\\B ")),
+    ("0008,1090", lambda: np.array(["A", "B"], dtype=object), ("LO", b"A\\B ")),
+    ("0008,1090", lambda: np.array([b"A", b"B"]), ("LO", b"A\\B ")),
+    ("0008,1090", lambda: [np.array(["A", "B"])], ("LO", b"A\\B ")),
+    ("0008,0012", lambda: np.array(["20200101"]), ("DA", b"20200101")),
+], ids=["cs-U", "lo-U", "lo-object", "lo-S", "lo-in-a-list", "da-U"])
+def test_a_numpy_array_of_text_under_a_text_vr_is_written_as_it_was(
+        tag, make, written):
+    """Delta review of #1009, finding 5. The gate refused every
+    `np.ndarray`, and `np.array(["ORIGINAL", "PRIMARY"])` under CS, which
+    was always written, was lost under `a ndarray is not text`. Literal
+    bytes, as measured on `main` at ebcebbe8."""
+    raw, losses, notes = _merged({tag: make()})
+    assert raw(tag) == written
+    assert losses == [] and notes == []
+
+
+@pytest.mark.parametrize("make", [
+    lambda: np.array([7]), lambda: np.array([1.5, 2.5]),
+    lambda: np.array(["A", 7], dtype=object), lambda: np.array([7, 8], dtype=object),
+    lambda: np.array([True]),
+], ids=["int", "float", "object-mixed", "object-ints", "bool"])
+def test_a_numpy_array_holding_a_number_under_a_text_vr_is_still_refused(make):
+    """One number in it and it is not an array of text."""
+    raw, losses, notes = _merged({LO_TAG: make()})
+    assert raw(LO_TAG) is None
+    ((scope, detail),) = losses
+    assert scope == "STANDARD"
+    assert detail.endswith("TypeError: a ndarray is not text, and LO holds text")
 
 
 # -- An owner's stamp that cannot be written fails the file -------------------
@@ -1166,29 +1223,121 @@ def test_an_owners_value_that_cannot_be_stamped_fails_the_file(
             assert str(value) not in failure, failure
 
 
-def test_a_stamp_lost_together_with_the_instances_copy_is_still_one_row():
-    """The refusal is for a stamp whose loss would leave the instance's
-    own copy in the file. A value neither can write (here a Patient's
-    Name pydicom refuses at both levels) leaves no copy behind, and stays
-    the one lost element it was."""
+def test_every_refused_stamp_fails_the_file_copy_or_no_copy():
+    """Owner ruling of 2026-10-09, and the delta review of #1009 (finding
+    1): one rule for every owner stamp. The refusal does not ask whether
+    the instance holds a copy of the tag: with none, `Patient(7, ...)`
+    over a hand-built instance wrote a file with no Patient ID at all,
+    where `main` failed it."""
+    # No copy underneath.
+    with pytest.raises(ValueError) as refused:
+        DicomExporter._merge_stamp(Dataset(), {"0010,0020": 7})
+    assert "0010,0020" in str(refused.value)
+    # The instance's copy written, the stamp refused.
+    ds = Dataset()
+    DicomExporter._merge(ds, {"0010,0010": "SOURCE^NAME", "0010,0020": "ID"}, [])
+    with pytest.raises(ValueError) as refused:
+        DicomExporter._merge_stamp(ds, {"0010,0010": 7, "0010,0020": "NEW"})
+    assert "0010,0010" in str(refused.value)
+    assert "SOURCE" not in str(refused.value)
+    # A value neither level can write: the stamp is refused all the same.
     ds, losses = Dataset(), []
     DicomExporter._merge(ds, {"0010,0010": 7}, losses)
     assert "PatientName" not in ds and len(losses) == 1
-    DicomExporter._merge_stamp(ds, {"0010,0010": 7}, losses)
-    assert "PatientName" not in ds and len(losses) == 1
-
-    # The instance's copy written, the stamp refused: that is the failure.
-    ds, losses = Dataset(), []
-    DicomExporter._merge(ds, {"0010,0010": "SOURCE^NAME", "0010,0020": "ID"}, losses)
-    with pytest.raises(ValueError) as refused:
-        DicomExporter._merge_stamp(ds, {"0010,0010": 7, "0010,0020": "NEW"}, losses)
-    assert "0010,0010" in str(refused.value)
-    assert "SOURCE" not in str(refused.value)
+    with pytest.raises(ValueError):
+        DicomExporter._merge_stamp(ds, {"0010,0010": 7})
     # And a stamp that can be written is written.
-    ds, losses = Dataset(), []
-    DicomExporter._merge(ds, {"0010,0020": "ID"}, losses)
-    DicomExporter._merge_stamp(ds, {"0010,0020": "NEW"}, losses)
-    assert ds.PatientID == "NEW" and losses == []
+    ds = Dataset()
+    DicomExporter._merge(ds, {"0010,0020": "ID"}, [])
+    DicomExporter._merge_stamp(ds, {"0010,0020": "NEW"})
+    assert ds.PatientID == "NEW"
+
+
+def _hand_built(patient_id, name):
+    """A graph built through `DicomBuilder`: its instance holds no copy
+    of Patient ID or Patient's Name, as no hand-built instance does."""
+    from isocenter.builders import DicomBuilder
+    builder = DicomBuilder.start_patient(patient_id, name)
+    instance = (builder.add_study("1.2.826.0.2.999", datetime.date(2023, 1, 2))
+                .add_series("1.2.826.0.3.999", "OT", 3)
+                .add_instance("1.2.826.0.1.999.1", "1.2.840.10008.5.1.4.1.1.7", 1))
+    instance.set_pixel_data(np.arange(64, dtype=np.uint16).reshape(8, 8))
+    instance.end_instance().end_series().end_study()
+    patient = builder.build()
+    (inst,) = patient.studies[0].series[0].instances
+    assert "0010,0020" not in inst.attributes
+    assert "0010,0010" not in inst.attributes
+    return patient
+
+
+@pytest.mark.parametrize("patient_id, name", [
+    (7, "Doe^Jane"), (1.5, "Doe^Jane"), (np.int64(7), "Doe^Jane"),
+    ("PAT", 7), ("PAT", np.int64(7)),
+], ids=["id-int", "id-float", "id-numpy", "name-int", "name-numpy"])
+def test_a_hand_built_graph_with_an_unwritable_owner_value_fails_the_file(
+        tmp_path, monkeypatch, patient_id, name):
+    """The builder route, by both doors. `start_patient(7, ...)` is the
+    likeliest way to meet this: an integer MRN. The file fails; nothing
+    is on disk. For Patient ID that is `main`'s answer; a hand-built
+    `patient_name = 7` was a file without the name under one row on
+    `main`, and is a failed file now, by the ruling."""
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    out = tmp_path / "tree"
+    with pytest.raises(RuntimeError):
+        DicomExporter.write_tree(_hand_built(patient_id, name), str(out),
+                                 show_progress=False)
+    assert not [p for p in out.rglob("*") if p.is_file()]
+
+    db, exported = str(tmp_path / "s.db"), tmp_path / "exported"
+    session = DicomSession(db)
+    try:
+        session.store.patients.append(_hand_built(patient_id, name))
+        with pytest.raises(ExportError):
+            session.export(str(exported), use_compression=False,
+                           show_progress=False)
+    finally:
+        session.store.patients.clear()
+        session.close()
+    assert not [p for p in exported.rglob("*") if p.is_file()]
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute("SELECT action_type, details FROM audit_log WHERE "
+                            "action_type IN ('ERROR', 'DATA_LOSS')").fetchall()
+    assert [action for action, _details in rows] == ["ERROR"], rows
+    assert "cannot be written" in rows[0][1], rows
+
+
+def test_a_hand_built_graph_the_exporter_can_stamp_is_written(tmp_path):
+    """The control for the test above."""
+    out = tmp_path / "tree"
+    DicomExporter.write_tree(_hand_built("PAT", "Doe^Jane"), str(out),
+                             show_progress=False)
+    (path,) = [p for p in out.rglob("*.dcm")]
+    written = pydicom.dcmread(str(path))
+    assert written.PatientID == "PAT" and str(written.PatientName) == "Doe^Jane"
+
+
+@pytest.mark.parametrize("after_a_pass", [False, True],
+                         ids=["no-pass", "after-audit-and-anonymize"])
+@pytest.mark.parametrize("kind, field, tag", [
+    ("study", "study_instance_uid", "0020,000d"),
+    ("series", "series_instance_uid", "0020,000e"),
+])
+def test_an_owners_uid_that_cannot_be_stamped_fails_the_file(
+        tmp_path, kind, field, tag, after_a_pass):
+    """The study and series stamps are reachable (delta review, finding
+    2): a number never gets as far as a worker, but `b"\\xff"` does. On
+    `main` the file went out carrying the instance's own UID, the
+    source's or the pass's, under a row saying the tag was not exported.
+    The file fails."""
+    raised, files, before, rows = _export_with_an_owner_field(
+        tmp_path / "out", kind, field, b"\xff", after_a_pass)
+    assert isinstance(raised, ExportError), raised
+    assert files == []
+    assert not [d for action, d in rows if action == "DATA_LOSS"], rows
+    (failure,) = [details for action, details in rows if action == "ERROR"]
+    assert f"the owner's value for {tag} cannot be written" in failure
+    for value in before:
+        assert str(value) not in failure, failure
 
 
 def test_a_study_date_that_names_no_date_is_stamped_as_its_text(tmp_path):
