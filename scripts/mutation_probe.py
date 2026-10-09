@@ -187,7 +187,10 @@ TARGETS = {
     # 11 sites, exhaustive: all 11 killed. Two files, 46.0s per pass.
     "isocenter/blob_kind.py": (["tests/test_blob_kind_grammar.py",
                                 "tests/test_nested_pixel_carriage.py"], 30),
-    # 16 sites, exhaustive: all 16 killed. Twelve files, 18.5s per pass.
+    # 16 sites, exhaustive: all 16 killed, measured when this row held
+    # twelve files (18.5s per pass). It holds nineteen now, one of them
+    # test_the_exporter_writes_the_python_value.py, which alone runs for
+    # minutes; neither figure has been measured again since.
     "isocenter/builders.py": (["tests/test_a_failed_background_save_is_heard_at_the_next_drain.py", "tests/test_a_series_number_rule_reaches_the_export.py", "tests/test_entities.py", "tests/test_export_contract.py", "tests/test_an_empty_patient_id_is_still_a_patient.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                "tests/test_both_write_doors_stamp_one_answer.py",
                                "tests/test_full_logging.py", "tests/test_io.py",

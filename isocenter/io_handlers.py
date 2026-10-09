@@ -7951,10 +7951,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # sentence per instance after the merges. The three stamp
         # merges below are standard tags and pass none.
         revrs: List[_ReVr] = []
+        own_from = len(losses)
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs, corrections=corrections,
                              warnings=warnings)
+        # Before the items are merged, so that an item's own row for the
+        # same tag is not deduped against one about to be taken away.
+        DicomExporter._take_copies_a_stamp_replaces(
+            losses, own_from, ctx.patient_attributes, ctx.study_attributes,
+            ctx.series_attributes)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
                                        revrs=revrs, corrections=corrections,
                                        warnings=warnings)
@@ -11481,7 +11487,8 @@ def _refuse_a_number_as_text(vr, value):
     Each atom (the value, or each member of a `list` or `MultiValue`) is
     refused when its type is exactly `int`, `float`, `bool`, `complex`,
     `Decimal` or `Fraction`, or when it is a numpy scalar that is not text
-    or a numpy array that is not an array of text. Everything else passes,
+    or a numpy array that is neither empty nor an array of text.
+    Everything else passes,
     as it always has: text, bytes, `None`, pydicom's `PersonName`, a
     `date` in a DA, and pydicom's `DSfloat`, `IS` and `DSdecimal`.
 
@@ -11538,6 +11545,10 @@ def _refuse_a_number_as_text(vr, value):
     #   `ORIGINAL\PRIMARY`, and refusing every `np.ndarray` lost it under
     #   a row saying text is not text. `_is_an_array_of_text` lets it by,
     #   to do what it did; an array holding any number is still refused.
+    # - **An empty array holds no number**, whatever its dtype
+    #   (`np.array([])` is float64), so it passes, to be what it was: a
+    #   zero-length element under LO, as the empty list is, and pydicom's
+    #   own refusal under PN, UI and DA (second delta review, N4).
     # - **One level deep**: a list inside the list is not looked into,
     #   as `_export_value` does not look into it.
     # - **Dropped, not written as `str(value)`**: `'7'` is no date, time
@@ -11548,7 +11559,8 @@ def _refuse_a_number_as_text(vr, value):
     for atom in atoms:
         if isinstance(atom, (str, bytes)):
             continue
-        if isinstance(atom, np.ndarray) and _is_an_array_of_text(atom):
+        if isinstance(atom, np.ndarray) and (
+                atom.size == 0 or _is_an_array_of_text(atom)):
             continue
         if (type(atom) in _CALLERS_NUMBERS
                 or isinstance(atom, (np.generic, np.ndarray))):
@@ -12489,6 +12501,46 @@ class DicomExporter:
             raise ValueError(
                 f"the owner's value for {tag} cannot be written "
                 f"({reason}); the file is not written")
+
+    @staticmethod
+    def _take_copies_a_stamp_replaces(losses, start, *stamps):
+        """Take out the text gate's rows for the instance's own copies of
+        tags an owner stamps.
+
+        Args:
+            losses (list): The worker's `(scope, detail)` rows, edited in
+                place. Called straight after the instance's own top-level
+                merge, so `losses[start:]` is that merge's rows.
+            start (int): Where that merge began appending.
+            *stamps (dict): The owner mappings `_merge_stamp` will write.
+        """
+        # Second delta review of #1009, N2; owner ruling of 2026-10-09 on
+        # #1028. An instance's copy of Patient ID or Study Date holding a
+        # number got `Tag 0010,0020 not exported (data loss)` once the
+        # text gate refused it (#939), beside a file holding the tag with
+        # its owner's value. Before the gate pydicom took the number at
+        # `add_new`, the stamp replaced it, and there was no row: the copy
+        # is never what the file carries.
+        #
+        # - **Only the rows the gate added.** A copy under PN or UI was
+        #   refused by pydicom at `add_new` before the gate and had a row
+        #   in every release; so had `bytes` that do not decode. Those
+        #   rows stay, as untrue as they were, and are #1029's. The gate's
+        #   own are told by its sentence under a VR other than PN and UI.
+        # - **Never put back.** With no file written there was no such
+        #   row before the gate either.
+        # - **Taken out before the sequences are merged.** A nested
+        #   item's Patient ID is no owner's to stamp, its row has the
+        #   same text, and `_merge` dedupes by text: taken out any later,
+        #   the instance's row would have swallowed the item's first.
+        # - **Matched on the row's own prefix**, the one `_merge` writes.
+        stamped = tuple(f"Tag {tag} not exported" for attrs in stamps
+                        for tag in attrs)
+        gates = tuple(f"is not text, and {vr} holds text"
+                      for vr in sorted(_TEXT_VRS - {"PN", "UI"}))
+        losses[start:] = [row for row in losses[start:]
+                          if not (row[1].startswith(stamped)
+                                  and row[1].endswith(gates))]
 
     @staticmethod
     def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",
