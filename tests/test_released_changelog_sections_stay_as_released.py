@@ -33,8 +33,9 @@ The rule this pins, for each `## [X]` heading other than `[Unreleased]`:
   shape of the defect, which inserts lines. Any added or removed line is red,
   with the diff against the base tag.
 * **Skipped**, naming why: no present tag's CHANGELOG.md holds the heading (a
-  fresh clone without tags, CI's shallow checkout), or `git` cannot read this
-  tree. So `test_the_live_check_reads_a_tag` pins, where the tags are present,
+  fresh clone without tags; CI's checkout was one until #966 made it fetch
+  every tag, and there the section being released still has none before
+  its tag is pushed), or `git` cannot read this tree. So `test_the_live_check_reads_a_tag` pins, where the tags are present,
   that the check reads one and acts on what it finds: without it, a check that
   skipped everywhere or compared the tree with itself would stay green.
 

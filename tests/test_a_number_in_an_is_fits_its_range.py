@@ -161,13 +161,19 @@ def test_an_int_past_a_float_is_dropped_with_the_range_words():
 
 
 def test_a_numpy_integer_past_the_range_is_dropped():
+    """The row quotes the Python number, as it does for the `int` and as
+    it does once the store has held the value: until #938 a numpy integer
+    written around the entity was quoted by numpy's `repr`,
+    `np.int64(1099511627776)`, in the live export only."""
     from isocenter.io_handlers import DicomExporter
 
     ds, losses = pydicom.Dataset(), []
     DicomExporter._merge(ds, {"0018,1150": np.int64(2 ** 40)}, losses)
     assert 0x00181150 not in ds
     (loss,) = losses
-    assert "np.int64(1099511627776) is outside IS's range" in loss[1], losses
+    assert loss[1] == ("Tag 0018,1150 not exported (data loss): ValueError: "
+                       "1099511627776 is outside IS's range, -2147483648 to "
+                       "2147483647"), losses
 
 
 _LO, _HI = -2 ** 31, 2 ** 31 - 1

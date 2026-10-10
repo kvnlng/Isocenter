@@ -652,7 +652,7 @@ def _string_literals_in_package():
     `f"{RESOURCES_DIR}/redaction_rules.json"` that is
     `"/redaction_rules.json"`, which is not the basename the caller
     checks for. Measured by review of #391: that rewrite of the
-    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 436 turns
+    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 437 turns
     `test_every_shipped_resource_is_named_by_the_package` red. That is
     the safe direction (a resource the walk cannot
     see reads as unnamed, never as named), and it is the same rule the
@@ -1417,6 +1417,301 @@ def test_the_job_cap_cannot_fire_before_a_steps_own_timeout():
         f"of the step allowances ({step_total}); some step's timeout is "
         "unreachable and a hang there dies as 'cancelled' with no "
         "failing step in the log -- the exact shape of #243/#250")
+
+
+def test_the_gate_checkout_brings_the_tags_and_main():
+    """A runner must hold the refs the release checks read (#966).
+
+    `actions/checkout` fetches one commit by default: no tag, and no
+    `origin/main` unless `main` is the ref being run. Every test that
+    compares this tree with a released one then skips, and a skip is
+    green. Read from the logs of four release and dispatch runs: 43 of
+    the 61 tests the rc15 publish skipped on 3.12 (run 37681895889), and
+    83 of the 101 its rehearsal skipped (run 37677947792), were
+    `tests/test_released_changelog_sections_stay_as_released.py`'s
+    comparisons with each tag and with `origin/main`, and
+    `test_no_row_the_previous_final_release_shipped_has_moved` -- the
+    check RELEASING.md says stops a release when it skips for want of
+    tags. On a runner it had never run.
+
+    `fetch-depth: 0` is the checkout action's "all history for all
+    branches and tags". Owner ruling on #966, 2026-10-08.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    checkouts = [step for step in steps
+                 if str(step.get("uses", "")).startswith("actions/checkout@")]
+    assert len(checkouts) == 1, (
+        f"tests.yml's test job has {len(checkouts)} checkout steps")
+    depth = (checkouts[0].get("with") or {}).get("fetch-depth")
+    assert depth == 0, (
+        f"tests.yml checks out with fetch-depth {depth!r}: without 0 the "
+        "runner has no tags and no origin/main, and the comparisons with "
+        "released text skip in every release run instead of running (#966)")
+
+
+# --- The tesseract install retries inside its step (#984) --------------
+#
+# On 2026-10-07 the Ubuntu mirror answered some runners' connections and
+# left others to apt's 30-second timeout, package after package. One
+# `apt-get install` under the step's 3-minute cap was still cycling
+# through `Ign:` lines when the cap fired, in six of 32 jobs at the rc15
+# rehearsal and three of 32 at the rc15 publish, before any test ran; a
+# job that did finish took up to 173 s. Owner ruling, 2026-10-08: retry
+# inside the step, a loop with a pause.
+#
+# The tests below RUN the step's script, with `sudo`, `timeout`,
+# `apt-get`, `sleep` and `tesseract` replaced by recorders on PATH. A
+# test that matched the text for `for attempt` would stay green with the
+# per-attempt bound deleted, and without that bound there is no retry:
+# the first attempt eats the whole cap, as it did.
+
+_STUB = """#!/bin/sh
+echo "{name} $*" >> "$STUB_LOG"
+{body}
+"""
+
+_STUB_BODIES = {
+    "sudo": 'exec "$@"',
+    # Drop the options and the duration; run the rest.
+    "timeout": ('while [ "${1#--}" != "$1" ]; do shift; done\n'
+                'shift\nexec "$@"'),
+    "sleep": "exit 0",
+    # The binary exists only once an install put it there.
+    "tesseract": '[ -e "$STUB_STATE/installed" ] || exit 127\n'
+                 'echo "tesseract 5.3.4"',
+    # `update` exits as told. A download from the network fails
+    # $STUB_FAILING_DOWNLOADS times and then leaves the archives in the
+    # cache; `--no-download` installs from the cache or fails; a plain
+    # `install` is a download and an install in one, as the step ran it
+    # before #984.
+    "apt-get": """
+case " $* " in
+  *" update "*) exit "${STUB_UPDATE_STATUS:-0}" ;;
+  *" --no-download "*)
+    [ -e "$STUB_STATE/fetched" ] || exit 100
+    : > "$STUB_STATE/installed"; exit 0 ;;
+esac
+tried=$(cat "$STUB_STATE/tried" 2>/dev/null || echo 0)
+tried=$((tried + 1))
+echo "$tried" > "$STUB_STATE/tried"
+[ "$tried" -gt "${STUB_FAILING_DOWNLOADS:-0}" ] || exit 100
+: > "$STUB_STATE/fetched"
+case " $* " in
+  *" --download-only "*) ;;
+  *) : > "$STUB_STATE/installed" ;;
+esac
+exit 0
+""",
+}
+
+
+def _install_tesseract_step():
+    import yaml
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    found = [step for step in steps if step.get("name") == "Install tesseract"]
+    assert len(found) == 1, (
+        "tests.yml no longer has exactly one step named 'Install "
+        "tesseract'; RELEASING.md's rerun rule names it")
+    return found[0]
+
+
+def _run_the_install_step(tmp_path, failing_downloads, update_status=0):
+    """Run the step's script against the recorders; (exit status, calls)."""
+    bash = shutil.which("bash")
+    assert bash, "bash is what a runner runs this step with"
+    stubs, state = tmp_path / "stubs", tmp_path / "state"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    stubs.mkdir()
+    state.mkdir()
+    for name, body in _STUB_BODIES.items():
+        stub = stubs / name
+        stub.write_text(_STUB.format(name=name, body=body), encoding="utf-8")
+        stub.chmod(0o755)
+    log = tmp_path / "calls.log"
+    log.write_text("", encoding="utf-8")
+    script = tmp_path / "step.sh"
+    script.write_text(_install_tesseract_step()["run"], encoding="utf-8")
+    # `bash -e {0}` is how GitHub runs a `run:` with no `shell:`.
+    done = subprocess.run(
+        [bash, "-e", str(script)], cwd=tmp_path, capture_output=True,
+        text=True, timeout=60, check=False,
+        env={"PATH": f"{stubs}{os.pathsep}/usr/bin{os.pathsep}/bin",
+             "STUB_LOG": str(log), "STUB_STATE": str(state),
+             "STUB_FAILING_DOWNLOADS": str(failing_downloads),
+             "STUB_UPDATE_STATUS": str(update_status)})
+    return done.returncode, log.read_text(encoding="utf-8").splitlines()
+
+
+def _downloads(calls):
+    """The apt-get calls that fetch a package from the network."""
+    return [call for call in calls
+            if call.startswith("apt-get ") and " install " in f"{call} "
+            and "--no-download" not in call]
+
+
+def _attempts_allowed(tmp_path):
+    """How many downloads the step makes when every one of them fails."""
+    status, calls = _run_the_install_step(tmp_path, failing_downloads=10 ** 6)
+    assert status != 0, (
+        "the Install tesseract step passed with every download failing: "
+        "the suite would run with no tesseract and skip its OCR tests, "
+        "which is #44")
+    return len(_downloads(calls)), calls
+
+
+def test_the_tesseract_install_passes_at_once_on_a_healthy_mirror(tmp_path):
+    status, calls = _run_the_install_step(tmp_path, failing_downloads=0)
+    assert status == 0, calls
+    assert len(_downloads(calls)) == 1, calls
+    assert not [call for call in calls if call.startswith("sleep ")], (
+        f"a healthy install paused: {calls}")
+    assert calls[-1] == "tesseract --version", (
+        "the version check is no longer the step's last word; it is what "
+        f"proves the binary is there (#44): {calls}")
+
+
+def test_a_tesseract_download_that_fails_is_tried_again_in_the_step(tmp_path):
+    """#984: a download that fails or runs out of time is not the step's end.
+
+    One failure, and every number of failures up to one short of the
+    attempts the step allows, still ends with tesseract installed, and
+    with a pause between one attempt and the next.
+    """
+    allowed, _calls = _attempts_allowed(tmp_path / "worst")
+    assert allowed >= 2, (
+        f"the Install tesseract step makes {allowed} download attempt: "
+        "there is no retry (#984)")
+
+    for failing in range(1, allowed):
+        status, calls = _run_the_install_step(
+            tmp_path / f"failing-{failing}", failing_downloads=failing)
+        assert status == 0, (
+            f"{failing} failed download(s) of an allowed {allowed} failed "
+            f"the step: {calls}")
+        assert len(_downloads(calls)) == failing + 1, calls
+        pauses = [call for call in calls if call.startswith("sleep ")]
+        assert len(pauses) == failing, (
+            f"{failing} failed download(s) and {len(pauses)} pause(s): a "
+            f"retry with no pause asks the same mirror at once: {calls}")
+        assert calls[-1] == "tesseract --version", calls
+
+
+def test_a_failing_apt_update_still_does_not_stop_the_install(tmp_path):
+    """The 2026-08-27 lesson the step's comment carries, kept by #984."""
+    status, calls = _run_the_install_step(
+        tmp_path, failing_downloads=0, update_status=100)
+    assert status == 0, calls
+    assert calls[-1] == "tesseract --version", calls
+
+
+def test_what_reads_the_network_is_bounded_by_root_and_what_runs_dpkg_is_not(
+        tmp_path):
+    """The bound is what makes the loop a retry; where it sits matters.
+
+    The 2026-10-07 installs did not fail, they stalled: without a bound
+    on each attempt the first one runs until the step's cap and no second
+    attempt is made. Four things are held, each by its own assertion:
+
+    - every `apt-get` call that reads the network runs under `timeout`;
+    - every `timeout` is run by `sudo` (`sudo timeout … apt-get`, never
+      `timeout … sudo apt-get`): `--kill-after` sends SIGKILL, which
+      sudo cannot pass on, so killing sudo would leave apt-get running
+      with the dpkg lock held (review of #1005, finding 1);
+    - an `install` under `timeout` only downloads (`--download-only`):
+      one that also unpacked would put dpkg under the bound, and a bound
+      that fired there would leave the package database half-configured
+      for the next attempt (finding 2);
+    - the one install that unpacks reads the cache only (`--no-download`)
+      and is under no `timeout`.
+    """
+    _allowed, calls = _attempts_allowed(tmp_path / "worst")
+    _status, good = _run_the_install_step(tmp_path / "good", 0)
+
+    for run in (calls, good):
+        bounded = [call for call in run if call.startswith("timeout ")]
+        network = [call for call in run if call.startswith("apt-get ")
+                   and "--no-download" not in call]
+        assert network, run
+        for call in network:
+            assert any(entry.endswith(call) for entry in bounded), (
+                f"`{call}` reads the network and does not run under "
+                f"`timeout`: a stalled mirror holds it until the step's "
+                f"cap, and nothing is retried (#984): {run}")
+        for entry in bounded:
+            assert " sudo " not in f"{entry} " and f"sudo {entry}" in run, (
+                f"`{entry}` is not run by sudo, or runs sudo itself: the "
+                f"order is `sudo timeout … apt-get`, so that the SIGKILL "
+                f"of `--kill-after` reaches apt-get and not a sudo that "
+                f"cannot pass it on: {run}")
+            if " install " in f"{entry} ":
+                assert "--download-only" in entry.split(), (
+                    f"`{entry}` installs under `timeout` without "
+                    f"`--download-only`: dpkg would run under the bound, "
+                    f"and a bound that fired inside it leaves the package "
+                    f"database half-configured: {run}")
+
+    unpacking = [call for call in good
+                 if call.startswith("apt-get ") and "--no-download" in call]
+    assert len(unpacking) == 1, (
+        f"the step does not install from the cache exactly once: {good}")
+    assert not [entry for entry in good if entry.startswith("timeout ")
+                and "--no-download" in entry], (
+        f"the install that runs dpkg is under `timeout`: {good}")
+
+
+#: Seconds left, in the worst case, for what the step does besides wait:
+#: unpacking six packages from the cache and the version check. Measured
+#: on four release and dispatch runs of 2026-10-03 to 2026-10-07 (80
+#: jobs): a healthy download and unpack together took 3 to 5 s, and
+#: the slowest job (173 s, run 37681895889) spent 7.6 s between its last
+#: byte fetched and `tesseract 5.3.4`.
+_INSTALL_UNPACK_ALLOWANCE_S = 60
+
+
+def test_the_tesseract_retries_worst_case_fits_the_steps_cap(tmp_path):
+    """Every attempt running to its bound must still end inside the cap.
+
+    Otherwise the last attempts are never made, and the step dies at its
+    `timeout-minutes` naming no attempt -- the 2026-10-07 shape, with a
+    loop around it. Read from the calls the step makes when every
+    download fails: each `timeout`'s duration and its `--kill-after`
+    grace, and each pause. Raising an attempt's bound, the attempts or
+    the pause without raising the cap is red here; raising the cap
+    raises the job cap with it
+    (`test_the_job_cap_cannot_fire_before_a_steps_own_timeout`).
+    """
+    _allowed, calls = _attempts_allowed(tmp_path)
+
+    worst = 0
+    for call in calls:
+        words = call.split()
+        if words[0] == "timeout":
+            options = [word for word in words[1:] if word.startswith("--")]
+            duration = next(word for word in words[1:]
+                            if not word.startswith("--"))
+            assert duration.isdigit(), (
+                f"`{call}`: a bound this test cannot read as seconds")
+            graces = [word.split("=", 1)[1] for word in options
+                      if word.startswith("--kill-after=")]
+            assert len(graces) == 1 and graces[0].isdigit(), (
+                f"`{call}` has no `--kill-after=<seconds>`: an apt-get "
+                "that ignores SIGTERM outlives its bound")
+            worst += int(duration) + int(graces[0])
+        elif words[0] == "sleep":
+            assert words[1].isdigit(), f"`{call}`: not whole seconds"
+            worst += int(words[1])
+
+    cap = _install_tesseract_step()["timeout-minutes"] * 60
+    assert worst + _INSTALL_UNPACK_ALLOWANCE_S <= cap, (
+        f"the Install tesseract step can wait {worst} s in the worst "
+        f"case and needs {_INSTALL_UNPACK_ALLOWANCE_S} s more to unpack, "
+        f"under a cap of {cap} s: the cap fires before the last attempt "
+        "ends (#984)")
 
 
 def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():

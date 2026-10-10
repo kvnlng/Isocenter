@@ -561,13 +561,80 @@ def multi_valued_pn(out: Path):
     write(ds, out / "multi_valued_pn-1.dcm")
 
 
+def multi_valued_series_fields(out: Path):
+    """Five CTs of one patient, one study each, each with two values in
+    one element ingest builds the `series` row from (#985): Manufacturer,
+    Manufacturer's Model Name, Device Serial Number, Modality and Series
+    Number. Any one of them made `ingest()` raise
+    `sqlite3.ProgrammingError`, so the member's session stored and
+    exported nothing; each is now ingested with the field held as the
+    source's text (0 for Series Number) and its own element exported as
+    the source wrote it, where the policy keeps it. No other input holds
+    two values in any of the five."""
+    def two(dataset, keyword, text):
+        # Past pydicom's VM check: each of the five takes one value.
+        tag = pydicom.datadict.tag_for_keyword(keyword)
+        dataset[tag] = pydicom.DataElement(
+            tag, pydicom.datadict.dictionary_VR(tag), text,
+            validation_mode=pydicom.config.IGNORE)
+
+    for n, (keyword, label, text) in enumerate((
+            ("Manufacturer", "manufacturer", "Acme\\Imaging"),
+            ("ManufacturerModelName", "model", "Golden\\Mark2"),
+            ("DeviceSerialNumber", "serial", "GOLD-SN-1\\GOLD-SN-2"),
+            ("Modality", "modality", "CT\\MR"),
+            ("SeriesNumber", "series-number", "1\\2")), start=1):
+        ds = ct("multi_valued_series_fields", study=n)
+        two(ds, keyword, text)
+        write(ds, out / f"multi_valued_series_fields-{label}.dcm")
+
+
+def number_vr_on_a_date_or_time(out: Path):
+    """A date, a time and a date-time the file wrote under a numeric string
+    VR: Date of Gain Calibration `(0014,3076)` under `IS`, Time of Gain
+    Calibration `(0014,3077)` under `DS`, Expiration DateTime `(0008,0416)`
+    under `DS`. No row of Table E.1-1 names any of the three, so each is
+    kept under both configurations. pydicom reads them as `IS` and
+    `DSfloat`, numbers that carry the file's own text, and the exporter
+    writes them under the dictionary's DA, TM and DT from that text
+    (review of #1009: a gate on "a number under a text VR" lost all
+    three). No other input states a VR that disagrees with the
+    dictionary for a standard tag."""
+    ds = ct("number_vr_on_a_date_or_time")
+    for tag, vr, text in ((0x00143076, "IS", "20230101"),
+                          (0x00143077, "DS", "120000.5"),
+                          (0x00080416, "DS", "20230101120000.5")):
+        ds[tag] = pydicom.DataElement(tag, vr, text)
+    write(ds, out / "number_vr_on_a_date_or_time-1.dcm")
+
+
+def binary_number_vr_on_a_text_tag(out: Path):
+    """Three text tags the file wrote under a binary numeric VR:
+    Manufacturer's Model Name `(0008,1090)`, an LO, under `US`; Patient
+    Position `(0018,5100)`, a CS, under `SS`; Manufacturer `(0008,0070)`,
+    an LO, under `FD`. No row of Table E.1-1 names any of the three.
+    pydicom reads each as a plain `int` or `float`, which nothing in the
+    graph tells from a caller's number, so the exporter's text gate drops
+    each under a `DATA_LOSS` row and writes the rest of the file (#939;
+    owner ruling of 2026-10-09 on the delta review of #1009; #1017).
+    Before the gate the whole file failed. The sibling of
+    `number_vr_on_a_date_or_time`, whose `IS` and `DS` values are
+    pydicom's own classes and are written."""
+    ds = ct("binary_number_vr_on_a_text_tag")
+    for tag, vr, value in ((0x00081090, "US", 42), (0x00185100, "SS", -3),
+                           (0x00080070, "FD", 4.5)):
+        ds[tag] = pydicom.DataElement(tag, vr, value)
+    write(ds, out / "binary_number_vr_on_a_text_tag-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
     no_patient_id, withheld, prior_markers, graphic_annotation, big_lut,
     encapsulated_pdf, unstated_private_vr,
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
-    ecg_lead_codes)}
+    ecg_lead_codes, number_vr_on_a_date_or_time,
+    binary_number_vr_on_a_text_tag, multi_valued_series_fields)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

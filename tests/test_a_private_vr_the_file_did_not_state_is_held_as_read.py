@@ -552,35 +552,54 @@ def _private_date(ds):
 
 
 KEEP_PRIVATE = {"remove_private_tags": False}
+#: `basic` empties Study Date where the floor shifts it, so nothing in the
+#: file is shifted and the private date alone decides the marker.
+KEEP_PRIVATE_NO_SHIFT = {"remove_private_tags": False,
+                         "privacy_profile": "basic@2026c"}
 
 
-@pytest.mark.parametrize("syntax, temporal", [
-    # The file stated DA: the date is read, found as it was, and the marker
-    # is withheld.
-    (ExplicitVRLittleEndian, None),
-    # The file stated no VR: the date is `UN` bytes and is not read.
-    (ImplicitVRLittleEndian, "MODIFIED"),
-], ids=["stated-da", "unstated"])
-def test_a_private_date_whose_vr_was_not_stated_does_not_stop_modified(
-        tmp_path, syntax, temporal):
+@pytest.mark.parametrize("config, shifted, syntax, temporal", [
+    # Nothing shifted. The file stated DA: the date is read, found as it
+    # was, and the marker is withheld.
+    (KEEP_PRIVATE_NO_SHIFT, False, ExplicitVRLittleEndian, None),
+    # The file stated no VR: the date is `UN` bytes and is not read, so
+    # every date the walk read is gone.
+    (KEEP_PRIVATE_NO_SHIFT, False, ImplicitVRLittleEndian, "REMOVED"),
+    # Study Date shifted (the floor). Since #978 a shift is always marked,
+    # so the private date decides nothing: `MODIFIED`, read or not. Until
+    # #978 the stated one withheld it (None).
+    (KEEP_PRIVATE, True, ExplicitVRLittleEndian, "MODIFIED"),
+    (KEEP_PRIVATE, True, ImplicitVRLittleEndian, "MODIFIED"),
+], ids=["no-shift-stated-da", "no-shift-unstated",
+        "shift-stated-da", "shift-unstated"])
+def test_a_private_date_whose_vr_was_not_stated_does_not_stop_the_marker(
+        tmp_path, config, shifted, syntax, temporal):
     """Spec test 11. **This pins a documented weakening; review it as one.**
 
     `(0028,0303)` reads a private date only when its VR is recorded. A
     known creator's date from an Implicit VR source used to be recorded
-    under pydicom's dictionary VR and so withheld `MODIFIED`; it is now
-    `UN` bytes, as an unknown creator's always was, and `MODIFIED` is
+    under pydicom's dictionary VR and so withheld the marker; it is now
+    `UN` bytes, as an unknown creator's always was, and the marker is
     written beside a private date left as found. `docs/configuration.md`
     says so, and it is reachable only with `remove_private_tags: false`.
+
+    Since #978 the weakening shows where nothing is shifted: `REMOVED` is
+    written beside the unread date, where a stated `DA` withholds it. With
+    a shifted date in the file `MODIFIED` is written either way, which is
+    #978's rule and not this one's.
     """
     src = _source(tmp_path / "src", syntax, _private_date)
-    session = _session(tmp_path, src, config=KEEP_PRIVATE)
+    session = _session(tmp_path, src, config=config)
     try:
         native = _export(session, tmp_path / "native", False)
     finally:
         session.close()
 
     ds = pydicom.dcmread(str(native))
-    assert ds.StudyDate != "20200101", "setup: the Study Date was shifted"
+    if shifted:
+        assert ds.StudyDate not in ("", "20200101"), "setup: the Study Date was shifted"
+    else:
+        assert ds.StudyDate == "", "setup: the Study Date was emptied"
     assert bytes(ds.get_item(0x3109100A).value) == b"20200115"
     assert ds.get("LongitudinalTemporalInformationModified") == temporal
 

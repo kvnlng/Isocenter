@@ -174,7 +174,20 @@ minor's work. A PR with neither is the next unreleased line's work.
    - **Confirm** on 3.14t:
      `python -m scripts.output_fingerprint check --jobs 4; echo "exit=$?"`
      must report **no difference** (exit 0). The two interpreters are two
-     observations of one recording, never two recordings.
+     observations of one recording, never two recordings. A row that
+     differs between them because it quotes an exception this library
+     did not raise (CPython rewords its own messages between versions) is
+     given a sentence of this library's own at the raise, as #747's was;
+     the fingerprint is never retaken on 3.14t to make the two agree.
+     One such input is known and not yet fixed, and is in no cohort
+     member: a file with two values in Photometric Interpretation is
+     refused at ingest with an `ERROR` row that reads `... TypeError:
+     unhashable type: 'MultiValue'` on 3.12 and `... TypeError: cannot
+     use 'pydicom.multival.MultiValue' as a dict key (unhashable type:
+     'MultiValue')` on 3.14t. Two values in Number of Frames are refused
+     with a row that also quotes the interpreter (`'<' not supported
+     between instances of 'MultiValue' and 'int'`), in the same words on
+     both today (#942, open).
    - **Name it.** Commit the file, and name every group the check's
      report lists in the change's `CHANGELOG.md` entry, in a line
      beginning `**Output:**` that says what changed and why. A difference
@@ -296,6 +309,39 @@ fixes, never features.
    map selects more, toward those rows. What it misses is a call path
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
+
+   **Start no other heavy run while the map build runs** (#975): not
+   the 3.12 shards, not a fingerprint `check`, not another agent's gate.
+   Each test's coverage is written by its own processes as small sqlite
+   files, tens of thousands of them, and on a machine at load 80 the
+   1.0.0rc14 build ended with one of them unreadable (`Couldn't use data
+   file '…': database disk image is malformed … 1 file errored`).
+   `coverage combine` exits 0 over such a file, and until #975 the build
+   wrote a map without that process's data and exited 0 too.
+
+   **If the build ends `no map written`**, it has refused to do that: it
+   names the data files `coverage combine` left unread, writes nothing,
+   leaves any `.test-map.json` already there as it was, and exits with
+   the suite's status, or with 9 when the suite passed. The same ending
+   covers a `coverage combine` that itself exits non-zero, which it does
+   over a data file with a table missing (`no such table:
+   other_db.context`; it then leaves every data file, and the line names
+   them after `coverage combine exited 1 and left`) and when no data
+   file was written at all (`No data to combine`; the line says
+   `coverage combine exited 1 and left no data file`). So a build's
+   `exit=1` is always the suite's: no ending of the map step exits 1 on
+   a green suite. Then:
+   - **the suite's result stands.** The line `the suite exited N` and the
+     last test line above it are the 3.14t integration result, recorded
+     as usual with the `exit=` the build gave: `the suite exited 0` with
+     `exit=9` is a green integration run and no map. It is not a failure
+     or a hang under the rerun rule above, and the suite is not run
+     again for it;
+   - **the map is not part of the release.** Keep the previous one (an
+     older map selects more, toward the `TARGETS` rows; what it can miss
+     is said above), or build it again outside the
+     release path, on a quiet machine, by the same command;
+   - say which in the release-commit PR.
 
    **If the map build hangs**, step 1's 3.14t run is plain `pytest`,
    without coverage, split into shards (owner ruling on #796,
@@ -469,6 +515,93 @@ fixes, never features.
    only, so a second rehearsal of the same version cannot upload; its
    build gates and test matrix still run. A date correction (step 3,
    "Both dates are UTC") is not rehearsed again.
+
+   **A job that went red in `Install tesseract`, before any test ran, is
+   not a test result** (#984). That step downloads the package up to
+   four times, each attempt bounded, with a pause between them, for
+   about seven minutes in all (`tests.yml` has the figures; until
+   2026-10-08 it was one unbounded attempt under a 3-minute cap, which
+   stalled in six jobs of the rc15 rehearsal and three of its publish
+   run). It says nothing about the code, and it is not the one failure
+   step 1's rerun rule allows a run, which is about tests. **Read the
+   step's log first: how long it took says which of two things it was.**
+   - **About seven minutes, with attempts cut off at their bound** (the
+     step's `download attempt N of 4 failed or ran out of time`
+     warnings 90 s or so apart, or the step's own timeout): the package
+     mirror was out of that runner's reach. `gh run rerun <run id>
+     --failed` once. If the rerun is red the same way, stop rerunning
+     and wait for the mirror; a third attempt at once asks it the same
+     question.
+   - **Under a minute, the four attempts failing as soon as they
+     start** (three 15-second pauses, about 45 s): that is not a mirror
+     out of reach. apt was answered and refused: a package that is not
+     there, a source line that is broken, a 404, or a mirror answering
+     503. Read apt's error in the log before any rerun; waiting may not
+     change it (a 503 passes, a missing package does not), and it may
+     need a fix to `tests.yml`.
+
+   **What the rerun does depends on which job was red.** The upload
+   needs `build` and `test-floor`, not `test-supported`:
+   - a `test-floor` job red (3.12, 3.14t): nothing was uploaded, and
+     the rerun runs the upload job once the floor is green;
+   - only `test-supported` jobs red (3.13, 3.14): the upload was not
+     held back. In step 6 the version is already on PyPI, as a rehearsal's
+     is on TestPyPI, and the rerun only completes the compatibility
+     table. Most of rc15's nine were these: four of six at the
+     rehearsal, two of three at the publish.
+
+   Record each such attempt, with the run's id and the jobs, in the
+   release-commit PR or the record-back PR (step 8). A job red in any
+   other step, or in `Run Tests`, is not this case.
+
+   **Count the skips** in the rehearsal, and again in step 6's run: the
+   last line of each shard's `Run Tests` step, added up over the eight
+   shards of a version. Since #966 the runners fetch every tag and
+   `origin/main`, and what skips is a short, fixed list. On 3.12, 3.13
+   and 3.14 (3.14t skips one fewer, as marked):
+   - 12 parametrized combinations that do not exist, skipped everywhere:
+     the rules `set_phi_tag` cannot spell, in
+     `test_a_rule_that_cannot_be_honoured_is_refused.py` (6),
+     `test_a_rule_cannot_remove_a_study_or_series_uid.py` (4),
+     `test_repeating_group_rules.py` (1) and
+     `test_uids_are_replaced_by_the_project_secret.py` (1);
+   - 7 that need `coverage`, which is in the `dev` extra and which
+     `tests.yml` deliberately does not install
+     (`tests/test_skip_contract.py` says why): six in
+     `test_changed_code_selects_its_tests.py` (the three that build a
+     small real map, and since #975 the three cases of
+     `test_combine_names_the_data_file_it_could_not_read`) and
+     `test_coverage_keeps_worker_data_under_chdir.py`'s one;
+   - 2 by platform: `test_the_store_location_advice.py`'s macOS test, and
+     `test_redaction_names_its_strategy.py`'s free-threaded test, which
+     runs on 3.14t (so 1 there);
+   - 1 until a final release from v1.0.0 on carries
+     `tests/test_config_behaviour_is_versioned.py`:
+     `test_no_row_the_previous_final_release_shipped_has_moved` (step 1);
+   - the section being released, in
+     `tests/test_released_changelog_sections_stay_as_released.py`: 2 in
+     a rehearsal (no tag holds `[X.Y.Z]` yet, and neither does
+     `origin/main`), 1 in step 6's run from the tag (`origin/main` still
+     does not, until step 8), none in a dispatch from `main`.
+
+   That is **24 in a rehearsal, 23 in the publish run and 22 in a
+   dispatch from `main`**, and one fewer each on 3.14t. **These totals
+   are derived, not yet seen on a runner**: what a runner has shown is
+   19 on 3.12 and 18 on 3.14t in a dispatch (run 37846349518), before
+   #975 added three cases that need `coverage`; each total here is that
+   reading plus three, plus the released section's one or two. The first
+   rehearsal after #975 replaces them: write the counts it shows here,
+   in a PR of its own, and take this sentence out. **Any other
+   number is a finding**: find the test (`pytest -rs` prints the reason;
+   a runner's `-v` log prints only `SKIPPED`), and either it is a test
+   that has stopped running, or this list is out of date and the same
+   PR corrects it. Before #966 a release run skipped 57 to 101 tests
+   and was green: every comparison with a tag or with `origin/main`
+   skipped in a checkout that had neither. A local run's count differs
+   (`coverage` is installed, the platform is another), and so does its
+   collection: a Linux runner collects one test more than macOS on
+   arm64, `test_pixel_dtype_roundtrip.py`'s `float128` case, a type
+   numpy has only there.
 5. **Tag** the release commit, or the last fix merged after it (step 3)
    (an admin step). First make step 3's date check ("Both dates are
    UTC"): tag only if step 6, dispatched at once, will upload on the
@@ -486,7 +619,8 @@ fixes, never features.
    wheel and `isocenter/_version.py` all name the same version. It then
    checks the wheel carries its own resources, runs the 3.12 and 3.14t
    floor (which blocks the upload) and 3.13 and 3.14 (which only report),
-   and uploads by Trusted Publishing.
+   and uploads by Trusted Publishing. Step 4's rule for a job red in
+   `Install tesseract`, and its skip count, apply to this run too.
 7. **Create the GitHub Release** for `vX.Y.Z`, with the `[X.Y.Z]` changelog
    section as its notes. This does not publish anything. Zenodo archives it
    and mints the version DOI.
@@ -1064,7 +1198,11 @@ An admin does these steps in one sitting, without pausing between them.
 5. **Publish**: `gh workflow run publish.yml --ref vX.Y.Z -f
    target=pypi`, and watch it to the upload. **A red `test-floor` job is
    rerun once** (`gh run rerun <run id> --failed`; owner ruling on #867,
-   2026-09-30). If it is still red, the fix goes forward in the same
+   2026-09-30). **A job red in `Install tesseract`, before any test
+   ran, does not spend that rerun** (owner ruling on #984, 2026-10-08):
+   it is not a test result, it is rerun under the rule of "Cutting a
+   release", step 4, and this one rerun stays for a test failure. If the
+   floor is still red after its one rerun, the fix goes forward in the same
    sitting. It takes "The private fix" steps 2 to 6 (the tests, the runs
    and the review), though nothing about it is private any more, then
    these steps again from step 1, so that the UTC date check runs

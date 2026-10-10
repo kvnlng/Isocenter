@@ -49,6 +49,7 @@ import hashlib
 import numbers
 import struct
 from decimal import Decimal
+from fractions import Fraction
 from math import ceil, isfinite
 from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
@@ -104,7 +105,7 @@ from pydicom.values import convert_numbers
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
-                       iter_item_tree, PhiStatus)
+                       iter_item_tree, PhiStatus, _python_value)
 from .uids import generated_uid
 from .reversibility import ReversibilityService
 from .logger import (describe_exception, describe_exception_without_paths,
@@ -1363,6 +1364,18 @@ def _value_fits_vr(value, vr: str) -> bool:
             return False
         if vr not in _TEXT_VR_MAX and vr not in _TEXT_VR_UNCAPPED:
             return False
+        if vr == 'PN' and '\\' in value:
+            # A recorded `PN` holding a backslash is the source's own
+            # several Person Names: `_pn_text` holds every multi-valued PN
+            # as one backslash-joined `str` (#937), never as a list, so
+            # here the backslash is the value delimiter and the refusal
+            # below would send a source value nothing replaced to `UT`,
+            # with a WARNING row, and a re-ingest of that export would
+            # record `UT` for good (#951). Each value must still fit by
+            # itself. `PN` only: every other 1-n text VR holds a source's
+            # several values as a list, so a backslash in a `str` under
+            # one of those came from a `set_attr` or a REPLACE.
+            return all(_value_fits_vr(part, vr) for part in value.split('\\'))
         if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
             return False
         cap = _TEXT_VR_MAX.get(vr)
@@ -2366,17 +2379,55 @@ def _pn_text(value) -> str:
     # carries the source's values with the source's VM -- two Operators'
     # Names (VM 1-n) stay two, and a Patient's Name the source wrote with
     # two (VM 1, non-conformant) is written as the source wrote it, as a
-    # multi-valued LO is. The one place this costs: a *private* PN of
-    # several values is written `UT` with the re-VR WARNING row, because
-    # `_merge`'s private arm does not put a backslash-bearing `str` under
-    # a multi-valued VR (owner ruling Q6 A).
+    # multi-valued LO is. A *private* PN of several values is written
+    # `PN` too, under an Explicit VR export: `_value_fits_vr` reads a
+    # backslash under a recorded `PN` as the delimiter this function
+    # joined with (#951; until then it was written `UT` with the re-VR
+    # WARNING row, owner ruling Q6 A's residual).
     #
-    # Person Names only. A linkage key holding several values is never
-    # joined: `_refuse_a_multi_valued_key` refuses the file (#747), and a
-    # file refused for its Patient ID never has its name held.
+    # Person Names here; the four text fields of the `series` row are
+    # joined the same way by `_source_text` (#985). A linkage key holding
+    # several values is never joined: `_refuse_a_multi_valued_key` refuses
+    # the file (#747), and a file refused for its Patient ID never has its
+    # name held.
     if isinstance(value, MultiValue):
         return "\\".join(str(v) for v in value)
     return str(value)
+
+
+def _source_text(value):
+    """`value`, or the file's own text when the element holds several values.
+
+    For the four text elements `ingest_worker` hands the parent as fields
+    of `Series` and `Equipment`: Modality, Manufacturer, Manufacturer's
+    Model Name and Device Serial Number.
+
+    Args:
+        value: What pydicom read for the element, or the caller's default
+            for an absent one.
+
+    Returns:
+        The values joined by the backslash that delimited them in the file
+        (PS3.5 6.4) when pydicom read a `MultiValue`; `value` itself, of
+        whatever type, otherwise.
+    """
+    # A `MultiValue` is not a value sqlite binds. Handed on as pydicom gave
+    # it, one such file made the `save(sync=True)` that ends `ingest()`
+    # raise `sqlite3.ProgrammingError: Error binding parameter N: type
+    # 'MultiValue' is not supported`, and nothing from the folder was
+    # stored, an unchanged file beside it included (#985). Joined, not
+    # refused (owner ruling Q5 A): nothing is linked by these four, which
+    # is what sets them apart from #747's keys, and no file is written
+    # from them (#869) -- the instance's own element is held by
+    # `populate_attrs` and exported with the source's values. A machine
+    # rule compares the joined text, so it matches a rule written with
+    # the same text and no other.
+    #
+    # Only a `MultiValue` is touched. One value, an empty element and an
+    # absent one are handed on exactly as before: this is not `str()`.
+    if isinstance(value, MultiValue):
+        return "\\".join(str(v) for v in value)
+    return value
 
 
 def _process_safe(value):
@@ -4525,8 +4576,9 @@ def _series_number_of(ds):
     0 when the file has none, as before, and when pydicom's read raises
     `OverflowError` for an infinite value (#870), which refused the file.
     `populate_attrs` holds the element itself (`_read_element`), and the
-    export drops it with a `DATA_LOSS` row. Every other value is returned
-    as pydicom reads it, unchanged by #870.
+    export drops it with a `DATA_LOSS` row. 0 too when the element holds
+    several values (#985). Every other value is returned as pydicom reads
+    it, unchanged by #870.
 
     Args:
         ds: The pydicom Dataset read from the file.
@@ -4535,9 +4587,18 @@ def _series_number_of(ds):
         The value for `Series.series_number`.
     """
     try:
-        return ds.get("SeriesNumber", 0)
+        value = ds.get("SeriesNumber", 0)
     except OverflowError:
         return 0
+    # Two numbers are not a number, and the column holds one. Handed on as
+    # pydicom's `MultiValue`, the value made the save that ends `ingest()`
+    # raise `sqlite3.ProgrammingError` and the folder was not stored (#985).
+    # 0, as for the unreadable value above, and never a join: the field is
+    # the store's number for the series and names no file (#869). The
+    # file's own element is held by `populate_attrs` with both values.
+    if isinstance(value, MultiValue):
+        return 0
+    return value
 
 
 #: The three Pixel Data elements a frame count divides (PS3.3 C.7.6.3).
@@ -4660,12 +4721,15 @@ def ingest_worker(fp: str) -> Tuple:
             # real one downstream: SHIFT_DATE would jitter it and export
             # it as genuine study timing.
             'sdate': str(ds.StudyDate) if "StudyDate" in ds else None,
-            'modality': ds.get("Modality", "OT"),
+            # `_source_text` on the four text fields of the `series` row:
+            # an element holding two values is a `MultiValue`, which the
+            # store cannot bind (#985).
+            'modality': _source_text(ds.get("Modality", "OT")),
             'sop': ds.get("SOPInstanceUID", None),
             'sop_class': sop_class,
-            'man': ds.get("Manufacturer", ""),
-            'model': ds.get("ManufacturerModelName", ""),
-            'dev_sn': ds.get("DeviceSerialNumber", ""),
+            'man': _source_text(ds.get("Manufacturer", "")),
+            'model': _source_text(ds.get("ManufacturerModelName", "")),
+            'dev_sn': _source_text(ds.get("DeviceSerialNumber", "")),
             'series_num': _series_number_of(ds),
         }
 
@@ -7887,10 +7951,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # sentence per instance after the merges. The three stamp
         # merges below are standard tags and pass none.
         revrs: List[_ReVr] = []
+        own_from = len(losses)
         DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs, corrections=corrections,
                              warnings=warnings)
+        # Before the items are merged, so that an item's own row for the
+        # same tag is not deduped against one about to be taken away.
+        DicomExporter._take_copies_a_stamp_replaces(
+            losses, own_from, ctx.patient_attributes, ctx.study_attributes,
+            ctx.series_attributes)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
                                        revrs=revrs, corrections=corrections,
                                        warnings=warnings)
@@ -7906,14 +7976,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         _write_back_nested_pixels(ds, inst, ctx, losses, warnings=warnings,
                                   corrections=corrections)
 
-        # 1. Patient Level
-        DicomExporter._merge(ds, ctx.patient_attributes, losses)
+        # 1. Patient Level. The three stamps go through `_merge_stamp`:
+        # one that cannot be written fails the file, rather than export
+        # the instance's copy, or no element at all, in its place.
+        DicomExporter._merge_stamp(ds, ctx.patient_attributes)
 
         # 2. Study Level
-        DicomExporter._merge(ds, ctx.study_attributes, losses)
+        DicomExporter._merge_stamp(ds, ctx.study_attributes)
 
         # 3. Series Level
-        DicomExporter._merge(ds, ctx.series_attributes, losses)
+        DicomExporter._merge_stamp(ds, ctx.series_attributes)
 
         # 4. The de-identification markers, after every merge and
         # the owner stamps, so they are what the file says last and a
@@ -10279,12 +10351,13 @@ def export_stamp_attributes(patient, study, series):
 
     What the export writes over the instance's own attributes, as
     `export_folder_names` is where it writes them; `session.export()` and
-    `DicomExporter.write_tree()` both use it. Study Time is stamped only
-    when the study has one. Equipment (Manufacturer, Model Name, Device
-    Serial Number), Series Number and Modality are never stamped: they
-    are written from the instance, which is what `anonymize()` edits
-    (#570, #869). A hand-built graph gets them onto the instances from
-    `SeriesBuilder`.
+    `DicomExporter.write_tree()` both use it. Equipment (Manufacturer,
+    Model Name, Device Serial Number), Series Number, Modality and Study
+    Time are never stamped: they are written from the instance, which is
+    what `anonymize()` edits (#570, #869, #953). A hand-built graph gets
+    equipment, Series Number and Modality onto the instances from
+    `SeriesBuilder`, and sets `(0008,0030)` on its instances when it
+    wants a Study Time; `Study.study_time` reaches no file.
 
     Args:
         patient (Patient): The patient root.
@@ -10297,10 +10370,15 @@ def export_stamp_attributes(patient, study, series):
     """
     # Three things this deliberately does not stamp; do not add any:
     #
-    # * No Study Time unless the study has one. The worker writes a
-    #   zero-length Study Time when nothing supplied one (Type 2
-    #   "unknown"); a literal is a fabricated clinical time, and a `""`
-    #   here would overwrite the instance's real value.
+    # * No Study Time, from `Study.study_time` or as a literal (#953).
+    #   Each file carries its own instance's `0008,0030`, the element
+    #   `anonymize()` applies a configuration's rule to. Stamped from the
+    #   Study, a time a caller had set was written over an element the
+    #   policy had emptied, removed or replaced, under a PASS and
+    #   `(0012,0062) YES`; and since `study_time` is not stored, a
+    #   reopened export of the same store wrote something else. The
+    #   worker writes a zero-length Study Time when the instance has none
+    #   (Type 2 "unknown"); a literal is a fabricated clinical time.
     # * No equipment. It comes from the instance, which is what
     #   `anonymize()` edits; `Series.equipment` keeps the source serial on
     #   purpose, because `redact()` matches rules on it, so stamping from
@@ -10326,8 +10404,6 @@ def export_stamp_attributes(patient, study, series):
         # holds a `date`, a string or None.
         "0008,0020": format_study_date(study.study_date),
     }
-    if getattr(study, 'study_time', None):
-        study_attributes["0008,0030"] = study.study_time
 
     # No Series Number and no Modality (#869): each file carries its own
     # instance's `0020,0011` and `0008,0060`, the elements `anonymize()`
@@ -11235,6 +11311,263 @@ def _standard_un_decoded(elem, encoding):
         return None
 
 
+#: The member types of a list `_export_value` has nothing to do for: the
+#: plain Python ones, and pydicom's `DSfloat` and `IS`, which is what a
+#: reopened store hands back for every multi-valued DS and IS and which
+#: are never converted. Exact types, never `isinstance`: `Decimal` and a
+#: numpy number must not be in it, and a `DSdecimal` is rare enough to
+#: take the slow path, which returns it untouched as well.
+_PLAIN_TYPES = frozenset({int, float, str, bool, type(None),
+                          pydicom.valuerep.DSfloat, pydicom.valuerep.IS})
+
+
+def _float_of(member):
+    """A `Decimal` a float can hold as that `float`; anything else itself."""
+    # Two tests, and each has a value only it catches. `is_finite()` first,
+    # because `float(Decimal("sNaN"))` raises and this runs outside the
+    # per-element `try`. Then the float's own: `Decimal("1e400")` is finite
+    # and `float()` of it is `inf`, with no error, and no float equals it.
+    # Converted, it would be written `LO inf` under a private tag with no
+    # row, where the `Decimal` is dropped with one; so it stays a `Decimal`
+    # and nothing new is written silently (owner ruling on #938).
+    if type(member) is Decimal and member.is_finite():
+        as_float = float(member)
+        if isfinite(as_float):
+            return as_float
+    return member
+
+
+def _export_value(value):
+    """`value` as the Python value it equals, for the writer.
+
+    A numpy bool, integer or float becomes its Python twin
+    (`entities._python_value`: a scalar, a 0-d array, or one held directly
+    by a `list` or `tuple`), a `tuple` becomes the `list` it equals, and a
+    `Decimal` a float can hold, alone or directly in a list, becomes that
+    `float` (a non-finite one, and one past a float's range, stays a
+    `Decimal`). Everything else is returned **as the same object**: a source's
+    `DSfloat`, `IS` and `DSdecimal` (so `original_string` survives),
+    `MultiValue`, bytes, a list of plain Python values, and the numpy
+    values #926 says are not numbers. Never raises.
+
+    Args:
+        value: An attribute value, as the graph holds it.
+
+    Returns:
+        The value to write: the twin, a new list, or `value` itself.
+    """
+    # #938, #979, #940. `set_attr` and the store each give the graph one
+    # representation; a value written around the entity
+    # (`attributes[tag] = value`), or held by a hand-built graph, met
+    # neither, and `_merge`'s readers each asked it a different type
+    # question (`isinstance(v, (int, float))`, `float`, `numbers.Real`,
+    # `numbers.Integral`, and pydicom's own). So one store exported two
+    # ways, live and reopened. This is the one answer, in front of all of
+    # them.
+    #
+    # - **`_python_value` is the only converter of a numpy value.** Its
+    #   kind test, masked test and twin-type test are not restated here.
+    # - **`type(...) is`, never `isinstance`.** pydicom's `DSdecimal` is a
+    #   `Decimal` subclass carrying `original_string`: `isinstance` would
+    #   make a source DS a bare float and re-spell it. A `MultiValue` is
+    #   not a `list` and is never scanned, which is what a live ingest
+    #   holds for every multi-valued element.
+    # - **It never raises**, because `_merge` calls it outside the
+    #   per-element `try`, where a raise costs the file and not the
+    #   element. `float(Decimal("sNaN"))` raises, hence `is_finite()` in
+    #   `_float_of`; a `Decimal` left unconverted takes the answer it
+    #   always had.
+    # - **One level deep, and exact containers only**, as `_python_value`
+    #   is (`type(value) in (list, tuple)`). What is NOT covered, and
+    #   exports as it did before: a list or tuple inside a list or tuple
+    #   (`[[np.int64(1)]]`, `[(1, 2)]`, `((1, 2), (3, 4))`), and a
+    #   subclass of either (a namedtuple). For those a live export can
+    #   still differ from the Python twin's and from a reopened one:
+    #   `[[np.int64(1)]]` under LO is written as 8 raw bytes where
+    #   `[[1]]` fails the file, and a namedtuple under FD fails the file
+    #   where the list a reopened store holds is written. Nothing reads a
+    #   nested list as a value, so there is no right answer to convert
+    #   it to; #926 ruled the same for `set_attr`.
+    # - **Under `AT`, one tag stays one tag**: `_merge` hands a 2-tuple of
+    #   integers back as a tuple (`_one_tag`), because as the list it
+    #   equals pydicom reads it as two tags.
+    # - **The tuple stays a tuple in the graph** (#926 pins `set_attr`
+    #   storing the object given); the store already writes it as a list,
+    #   and this is the exporter agreeing with the store.
+    # - **The first test is only a fast path**, and no export can show
+    #   it go: without it the answer is the same and slower. A reopened
+    #   store hands back a plain list for a multi-valued element, 65,536
+    #   ints for a `US` LUT Data or a list of `DSfloat` for a DS, and the
+    #   two scans below cost about 6 ms on such a list where one C-level
+    #   pass over its types costs 0.5 ms (measured in the PR for #938). `type(value) is list`, because a
+    #   tuple must still be converted; an allowlist, so a type nobody
+    #   thought of takes the slow path, never the wrong one.
+    if type(value) is list and set(map(type, value)) <= _PLAIN_TYPES:
+        return value
+    value = _python_value(value)
+    if type(value) is tuple:
+        value = list(value)
+    if type(value) is Decimal:
+        return _float_of(value)
+    if type(value) is list and any(type(member) is Decimal for member in value):
+        return [_float_of(member) for member in value]
+    return value
+
+
+def _one_tag(given, value):
+    """Under `AT`: `value`, or the 2-tuple `given` was when it names one tag.
+
+    Args:
+        given: The value as the graph holds it.
+        value: `_export_value(given)`.
+
+    Returns:
+        `tuple(value)` when `given` is exactly a `tuple` of two parts
+        that are both integers (numpy ones as their Python twins) or both
+        `str`; `value` otherwise.
+    """
+    # Owner ruling on #1009 (finding 2). `(0x0018, 0x1063)` is pydicom's
+    # ordinary spelling of ONE tag, and `[0x0018, 0x1063]` of two,
+    # `(0000,0018)` and `(0000,1063)`. "A tuple is the list it equals"
+    # is therefore false under this one VR: converted, a tag a caller
+    # wrote was exported as two others with no row.
+    #
+    # - **Whatever pydicom reads as one tag stays one tag** (owner ruling
+    #   on the delta review of #1009, finding 4): pydicom's `Tag` takes a
+    #   pair when "both arguments [are] the same type and str or int".
+    #   So `isinstance`, not `type(...) is`: `(MyIntEnum.GROUP, 0x1063)`
+    #   and `(True, 7)` are pairs of integers, and `("0018", "1063")` is
+    #   the hex-string pair. Each was one tag before this function and
+    #   two wrong ones, with no row, under an exact-`int` test.
+    # - **Every other tuple is the list it equals**, as under every other
+    #   VR: a tuple of 2-tuples (several tags either way), a 3-tuple, a
+    #   pair of floats, a mixed pair.
+    # - **Read from `value`**, so `(np.uint16(0x18), np.uint16(0x1063))`
+    #   is the tag its twin is; pydicom refuses the numpy pair itself.
+    # - **A reopened store is not covered**: it holds `[24, 4195]` for a
+    #   2-tuple it saved (JSON has no tuple), and exports two tags. That
+    #   is the store's spelling to fix, not the exporter's to guess at:
+    #   a list of two ints is also how two group-0000 tags are spelled.
+    if (type(given) is tuple and len(given) == 2 and type(value) is list
+            and (all(isinstance(part, int) for part in value)
+                 or all(isinstance(part, str) for part in value))):
+        return tuple(value)
+    return value
+
+
+def _is_an_array_of_text(array):
+    """Whether numpy array `array` holds text and nothing else.
+
+    A `U` or `S` dtype does; an `object` array does when every member is a
+    `str` or `bytes`.
+    """
+    if array.dtype.kind in "US":
+        return True
+    return array.dtype.kind == "O" and all(
+        isinstance(member, (str, bytes)) for member in array.flat)
+
+
+#: The standard VRs whose value is text and whose writer pydicom runs at
+#: `dcmwrite`: its text VRs less IS and DS, which take numbers and have
+#: arms of their own in `_merge`.
+_TEXT_VRS = frozenset({"AE", "AS", "CS", "DA", "DT", "TM", "LO", "LT", "PN",
+                       "SH", "ST", "UC", "UI", "UR", "UT"})
+
+
+#: A plain number, by its exact type. Not `numbers.Number`: pydicom's
+#: `DSfloat`, `IS`, `ISfloat` and `DSdecimal` are numbers to that test and
+#: carry a file's own text (see `_refuse_a_number_as_text`).
+_CALLERS_NUMBERS = frozenset({int, float, bool, complex, Decimal, Fraction})
+
+
+def _refuse_a_number_as_text(vr, value):
+    """Raise when `value`, about to be written under text VR `vr`, holds a
+    plain number.
+
+    Each atom (the value, or each member of a `list` or `MultiValue`) is
+    refused when its type is exactly `int`, `float`, `bool`, `complex`,
+    `Decimal` or `Fraction`, or when it is a numpy scalar that is not text
+    or a numpy array that is neither empty nor an array of text.
+    Everything else passes,
+    as it always has: text, bytes, `None`, pydicom's `PersonName`, a
+    `date` in a DA, and pydicom's `DSfloat`, `IS` and `DSdecimal`.
+
+    Args:
+        vr (str): One of `_TEXT_VRS`.
+        value: The value, after `_export_value`.
+
+    Raises:
+        TypeError: Naming the atom's type and the VR, never the value.
+            Raised inside `_merge`'s per-element `try`, so it becomes that
+            element's `DATA_LOSS` row.
+    """
+    # #939, owner ruling Q1 A. pydicom accepts `7` under LO at `add_new`
+    # and raises in `filewriter.write_text` when the dataset is written,
+    # past `_merge`'s per-element `try`: one `set_attr("0008,1090", 7)`
+    # failed the whole file. PN and UI raised at `add_new` already and
+    # lost one element; the other thirteen now do what those two did, and
+    # all fifteen say this sentence.
+    #
+    # - **The type only.** Not `_value_fits_vr`: its caps and format
+    #   checks would drop source values that export today (an LO past 64
+    #   characters, a DA that names no date).
+    # - **A caller's number by its exact type, never `numbers.Number`**
+    #   (review of #1009). A file that wrote Acquisition Time under `DS`
+    #   hands ingest a `DSfloat`: a number to `isinstance`, and the
+    #   file's own text to pydicom's DA, DT and TM writers, which write
+    #   its `original_string`. Refused here, a source's own element was
+    #   lost that had always been written. So pydicom's own value
+    #   classes (`IS`, `DSfloat`, `DSdecimal`) are never this gate's,
+    #   under any text VR, and export as they did before the gate:
+    #   written under DA, DT and TM, the element lost with pydicom's
+    #   sentence under PN and UI, and the whole file failed under the
+    #   other ten (`object of type 'IS' has no len()`; #1017, not made
+    #   an element's loss here).
+    # - **A file's own US, SS, UL, SL, FL or FD value IS this gate's**
+    #   (owner ruling of 2026-10-09). pydicom builds a plain `int` or
+    #   `float` for those, ingest records a wire VR for odd groups only,
+    #   and the store writes a bare number: after ingest, and after a
+    #   reopen, nothing in the graph tells a file that stated `US 42`
+    #   for an LO tag from `set_attr(tag, 42)` (measured in the PR). So
+    #   it loses that one element under this row, as a caller's number
+    #   does, where the whole file failed before the gate. #1017 holds
+    #   both halves of "a file's own number under a text tag".
+    # - **A caller's own subclass of `int` or `float` passes too**, an
+    #   `IntEnum` say, because the exact-type test cannot tell it from
+    #   pydicom's. It then fails the whole file at `dcmwrite`, as it
+    #   always did, while the same store reopened holds the plain number
+    #   and loses the one element: live and reopened disagree here, and
+    #   that is left with #986.
+    # - **`str` and `bytes` are tested first**: `np.str_` and `np.bytes_`
+    #   are text and an `np.generic` at once.
+    # - **An array of text is text** (delta review of #1009, finding 5):
+    #   `np.array(["ORIGINAL", "PRIMARY"])` under CS was always written
+    #   `ORIGINAL\PRIMARY`, and refusing every `np.ndarray` lost it under
+    #   a row saying text is not text. `_is_an_array_of_text` lets it by,
+    #   to do what it did; an array holding any number is still refused.
+    # - **An empty array holds no number**, whatever its dtype
+    #   (`np.array([])` is float64), so it passes, to be what it was: a
+    #   zero-length element under LO, as the empty list is, and pydicom's
+    #   own refusal under PN, UI and DA (second delta review, N4).
+    # - **One level deep**: a list inside the list is not looked into,
+    #   as `_export_value` does not look into it.
+    # - **Dropped, not written as `str(value)`**: `'7'` is no date, time
+    #   or UID, and `'True'` is nobody's Code String.
+    # - **No value in the message.** The row is read by people the value
+    #   may not be for; the tag, the type and the VR locate it.
+    atoms = value if isinstance(value, (list, MultiValue)) else (value,)
+    for atom in atoms:
+        if isinstance(atom, (str, bytes)):
+            continue
+        if isinstance(atom, np.ndarray) and (
+                atom.size == 0 or _is_an_array_of_text(atom)):
+            continue
+        if (type(atom) in _CALLERS_NUMBERS
+                or isinstance(atom, (np.generic, np.ndarray))):
+            raise TypeError(f"a {type(atom).__name__} is not text, and {vr} "
+                            f"holds text")
+
+
 #: PS3.5 Table 6.2-1: a Decimal String value is at most 16 characters.
 _DS_MAX = 16
 
@@ -12124,6 +12457,92 @@ class DicomExporter:
         return ds
 
     @staticmethod
+    def _merge_stamp(ds, attrs):
+        """Stamp an owner's attributes over the instance's own copies.
+
+        `_merge`, for the three owner mappings of
+        `export_stamp_attributes`, with one difference: a stamp that
+        cannot be written fails the file.
+
+        Args:
+            ds (pydicom.Dataset): The dataset, after the instance's merge.
+            attrs (dict): One owner's `{"gggg,eeee": value}`.
+
+        Raises:
+            ValueError: Naming the tag and the reason its `DATA_LOSS`
+                row would have carried; it adds no value of its own.
+        """
+        # Owner rulings on #1009 (2026-10-08, 2026-10-09). A stamp
+        # `_merge` refuses leaves `ds` holding what the instance's merge
+        # put there: the element is not lost, the OWNER'S value is, and
+        # the file goes out carrying the instance's copy -- the source's
+        # Patient ID, or the value a pass wrote -- under a row saying the
+        # tag was not exported. A Patient's Name did that all along (PN
+        # raises at `add_new`), and so did a Study or Series Instance UID
+        # of `bytes`.
+        #
+        # - **One rule for every stamp, copy or no copy.** It does not
+        #   ask whether `ds` holds the tag. A graph built by hand holds
+        #   no instance copy of Patient ID, and `Patient(7, ...)` there
+        #   failed the file until the text gate made a number under LO
+        #   one element's loss (#939); asked `Tag in ds`, this let that
+        #   file out with no Patient ID at all (delta review, finding 1).
+        #   So a value neither level can write fails the file too, where
+        #   it was one deduped row.
+        # - **A `ValueError` out of the worker**, so the instance fails
+        #   as any other does: an ERROR row, an `ExportError`, no file.
+        # - **Not for a stamp that is written**: `study.study_date = 7`
+        #   is stamped as the text `7`, as it was.
+        refused = []
+        DicomExporter._merge(ds, attrs, refused)
+        for _scope, detail in refused:
+            tag = detail[len("Tag "):len("Tag gggg,eeee")]
+            reason = detail.split("(data loss): ", 1)[-1]
+            raise ValueError(
+                f"the owner's value for {tag} cannot be written "
+                f"({reason}); the file is not written")
+
+    @staticmethod
+    def _take_copies_a_stamp_replaces(losses, start, *stamps):
+        """Take out the text gate's rows for the instance's own copies of
+        tags an owner stamps.
+
+        Args:
+            losses (list): The worker's `(scope, detail)` rows, edited in
+                place. Called straight after the instance's own top-level
+                merge, so `losses[start:]` is that merge's rows.
+            start (int): Where that merge began appending.
+            *stamps (dict): The owner mappings `_merge_stamp` will write.
+        """
+        # Second delta review of #1009, N2; owner ruling of 2026-10-09 on
+        # #1028. An instance's copy of Patient ID or Study Date holding a
+        # number got `Tag 0010,0020 not exported (data loss)` once the
+        # text gate refused it (#939), beside a file holding the tag with
+        # its owner's value. Before the gate pydicom took the number at
+        # `add_new`, the stamp replaced it, and there was no row: the copy
+        # is never what the file carries.
+        #
+        # - **Only the rows the gate added.** A copy under PN or UI was
+        #   refused by pydicom at `add_new` before the gate and had a row
+        #   in every release; so had `bytes` that do not decode. Those
+        #   rows stay, as untrue as they were, and are #1029's. The gate's
+        #   own are told by its sentence under a VR other than PN and UI.
+        # - **Never put back.** With no file written there was no such
+        #   row before the gate either.
+        # - **Taken out before the sequences are merged.** A nested
+        #   item's Patient ID is no owner's to stamp, its row has the
+        #   same text, and `_merge` dedupes by text: taken out any later,
+        #   the instance's row would have swallowed the item's first.
+        # - **Matched on the row's own prefix**, the one `_merge` writes.
+        stamped = tuple(f"Tag {tag} not exported" for attrs in stamps
+                        for tag in attrs)
+        gates = tuple(f"is not text, and {vr} holds text"
+                      for vr in sorted(_TEXT_VRS - {"PN", "UI"}))
+        losses[start:] = [row for row in losses[start:]
+                          if not (row[1].startswith(stamped)
+                                  and row[1].endswith(gates))]
+
+    @staticmethod
     def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within="",
                corrections=None, warnings=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
@@ -12210,9 +12629,18 @@ class DicomExporter:
             if g == 0x0000:
                 continue
 
+            # The value as the Python value it equals, once, in front of
+            # every reader below (#938). It rebinds the local and never
+            # writes `attrs`: under threads that is the live graph, and
+            # the edit would be one no revision recorded. The identity
+            # arms above `continue` before this; they take `str` and
+            # bytes only.
+            given, v = v, _export_value(v)
             vr, encoded, re_vr = None, None, None
             try:
                 vr = dictionary_VR(Tag(g, e))
+                if vr == 'AT':
+                    v = _one_tag(given, v)
             except Exception:
                 # Not a standard tag. Almost always a private (odd-group)
                 # one, kept because the caller set `remove_private_tags=
@@ -12229,6 +12657,10 @@ class DicomExporter:
                 # or an over-long value through a VR that mangles it.
                 # When it does not fit, the fallback encoder decides.
                 recorded = (vrs or {}).get(t)
+                if recorded == 'AT':
+                    # One tag stays the 2-tuple it was, here too; the
+                    # recorded-VR gate then refuses it as it always did.
+                    v = _one_tag(given, v)
                 if v is None or (isinstance(v, (list, tuple, MultiValue))
                                  and len(v) == 0):
                     # A zero-length element: the source asserted the
@@ -12281,6 +12713,14 @@ class DicomExporter:
                 # re-encoded silently instead of reported.
                 if vr is not None:
                     vr = _numeric_arm(vr, v)
+                # A number under a standard text VR is this element's
+                # DATA_LOSS row (#939); pydicom would take it here and
+                # fail the whole file at `dcmwrite`. On the standard arm
+                # only (`encoded` is None): a private tag's number is
+                # written as text by the fallback encoder, and a recorded
+                # private VR was already asked by `_value_fits_vr`.
+                if vr in _TEXT_VRS and encoded is None:
+                    _refuse_a_number_as_text(vr, v)
                 # A caller's float in a standard DS, spelled to fit its 16
                 # characters (#723). Here, inside the loss arm's `try`, so
                 # a non-finite float is this element's DATA_LOSS row; and

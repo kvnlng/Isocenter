@@ -339,14 +339,18 @@ def test_the_private_values_ingest_produces_still_save(tmp_path, make, text):
 
 def test_a_background_save_logs_the_named_refusal_once(tmp_path, caplog):
     """`save()` returns before the write; its failure is the worker's
-    log line, which now carries the instance and the tag."""
+    log line, which now carries the instance and the tag. Since #941
+    `flush()` then runs that save itself and raises the same refusal; the
+    worker's line is still logged once."""
     session, inst, _inner = _open(tmp_path)
     with session:
         inst.set_attr(STANDARD, {1, 2})
         with caplog.at_level(logging.ERROR, logger="isocenter"):
             caplog.clear()
             session.save()
-            session.persistence_manager.flush()
+            with pytest.raises(TypeError) as refused:
+                session.persistence_manager.flush()
+        assert str(refused.value) == _message(UID, "set", STANDARD)
         failed = [r.getMessage() for r in caplog.records
                   if r.getMessage().startswith("Background save failed:")]
         assert failed == [
