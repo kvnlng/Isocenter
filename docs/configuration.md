@@ -590,8 +590,9 @@ The markers rest on the same status the report's grade reads, so any edit after 
 * **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says `UN`) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop `REMOVED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
     * `MODIFIED` when at least one date is a shift this store wrote, whatever the others are. It replaces the source's value, a source `UNMODIFIED` included. It says that a date in the file was modified, not that every date was: a date beside it may be as it was ingested.
     * `REMOVED` when no date is shifted and every date is empty or the dummy `19000101`.
-    * Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays.
-    * TM is not read: a time of day beside a shifted date does not place the patient in time.
+    * Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays, with one exception.
+    * A source's `UNMODIFIED` is not carried into such a file when this store's own record shows that it emptied, removed or wrote the dummy to a top-level date of that instance, and the file still lacks that date. The element is then absent: no enumerated value says "some removed, none shifted, some kept". A source's `MODIFIED` or `REMOVED` stays, and so does an `UNMODIFIED` in a file none of whose dates this store took. Three things the record does not show, beside each of which a source's `UNMODIFIED` still stays: a date removed inside a sequence, a private date removed by `remove_private_tags`, and a date a rule replaced with a value of its own that is not the dummy. A source that already says `UNMODIFIED` beside dates an earlier tool emptied is that tool's claim, and stays too. One limit runs the other way: the record does not say whether a removed element held a value, so a `REMOVE` rule on a top-level date the source left empty counts as a date this store took, and a source's `UNMODIFIED` is withdrawn although no date value changed. `EMPTY` and a value-less `REPLACE` on an empty date record nothing and leave it. These limits are [#1044](https://github.com/kvnlng/Isocenter/issues/1044).
+    * TM is not read: a time of day beside a shifted date does not place the patient in time. An emptied or removed time does not withdraw a source's `UNMODIFIED` either.
     * `UNMODIFIED` is never written, because a date kept on purpose cannot be told from one no rule named.
 
     Worked on a CT whose source holds Study Date, Series Date, Acquisition Date, Content Date, Instance Creation Date and an empty Birth Date:
@@ -603,7 +604,7 @@ The markers rest on the same status the report's grade reads, so any edit after 
     | `privacy_profile: none` | shifted (the default for Study Date with no rule) | as ingested | `MODIFIED` |
     | `none` plus `0008,0020: KEEP` | as ingested | as ingested | nothing; a source's value stays |
     | the floor plus `0008,0021: KEEP` | shifted | Series Date as ingested, the rest empty or `19000101` | `MODIFIED` |
-    | `basic@2026c` plus `0008,0021: KEEP` | empty | Series Date as ingested, the rest empty or `19000101` | nothing; a source's value stays |
+    | `basic@2026c` plus `0008,0021: KEEP` | empty | Series Date as ingested, the rest empty or `19000101` | nothing; a source's `MODIFIED` or `REMOVED` stays, a source's `UNMODIFIED` does not |
 * **De-identification Method Code Sequence `(0012,0064)`**: no code is written (see the departures above). A source's items pass through.
 
 **Your rules decide.** Table E.1-1 has no row for any of the three elements. A rule you write on one, of any action, `KEEP` included, means the export does not stamp that element: `KEEP` over a source `NO` exports `NO`. The other two are still stamped.

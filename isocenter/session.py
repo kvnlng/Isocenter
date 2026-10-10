@@ -22,6 +22,7 @@ from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
 import numpy as np
+import pydicom
 import yaml
 from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
@@ -750,6 +751,59 @@ def _date_state(value, vr: str, vouched: bool) -> str:
     return "shifted" if vouched else "found"
 
 
+#: `_longitudinal_temporal_marker`'s third answer: write nothing, and do not
+#: carry a source's `UNMODIFIED` either (#1011). Never a value of
+#: `(0028,0303)`: the planner turns it into `DeidMarkers.withdraw_unmodified`
+#: and it reaches no file.
+_SOURCE_CLAIM_WITHDRAWN = "WITHDRAWN"
+
+
+def _a_date_this_store_took(instance, stamps) -> bool:
+    """Whether the file `instance` exports as lacks a top-level date because
+    this store's remediation emptied it, removed it, or wrote the VR's dummy
+    to it.
+
+    Read from the instance's own record (`Instance.record_remediation`), which
+    is stored, so the answer is the same from a reopened store. DA and DT
+    only, by the dictionary's VR: TM is not a date here, as it is not for the
+    stamp. Not seen: a date inside a sequence (a nested item keeps no record,
+    #991), a private date (the record holds one word for every odd-group tag),
+    and a date replaced by a value that is not the dummy.
+
+    Args:
+        instance (Instance): The instance being exported.
+        stamps (dict): What `export_stamp_attributes` writes over the
+            instance's own top-level attributes.
+
+    Returns:
+        bool: True when the record names at least one DA or DT tag and the
+            file will carry nothing, or the dummy, there.
+    """
+    # Two halves, and both are needed. The record says this store wrote
+    # there; the value says the date is still gone. The value is the one the
+    # file will carry, the owner stamp where there is one: a Study Date the
+    # pass removed is recorded on each instance's copy and written, empty,
+    # from the `Study`. So a date written back since, by hand or by a
+    # restore, stops counting with no invalidation pass, and
+    # `_date_state(..., False)` is what makes "replaced" mean the dummy: a
+    # rule's own non-dummy value is a date in the file, as the stamp reads
+    # it.
+    #
+    # A graph stand-in that is no `Instance`, and an instance from a store
+    # written before the record existed, have no record: nothing taken, and
+    # a source's value stays, which is what #978 left.
+    tags = set((getattr(instance, "_remediated_blank", None) or "").split())
+    tags |= set(getattr(instance, "_remediated_values", None) or {})
+    carried = {**instance.attributes, **stamps}
+    for tag in tags:
+        vr = _dictionary_vr(tag)
+        if vr not in ("DA", "DT"):
+            continue
+        if _date_state(carried.get(tag), vr, False) == "gone":
+            return True
+    return False
+
+
 def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
     """What Longitudinal Temporal Information Modified `(0028,0303)` says about
     the file `instance` exports as.
@@ -771,8 +825,11 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
         Optional[str]: `"MODIFIED"` when at least one date is shifted by this
             store, whatever the rest are (#978); `"REMOVED"` when every date
             is gone (or there is none); None when nothing is shifted and a
-            date is as found, and a source's value then stays. `UNMODIFIED`
-            is never returned.
+            date is as found, and a source's value then stays;
+            `_SOURCE_CLAIM_WITHDRAWN` in that last case when this store took
+            a top-level date out of the file (`_a_date_this_store_took`),
+            and a source's `UNMODIFIED` then does not stay (#1011).
+            `UNMODIFIED` is never returned.
     """
     # A shift this store wrote is always marked (owner ruling on #978).
     # Until then a date as found withheld the marker, so a policy that
@@ -810,7 +867,62 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
             found = found or state == "found"
     if shifted:
         return "MODIFIED"
-    return None if found else "REMOVED"
+    if not found:
+        return "REMOVED"
+    # Nothing shifted, a date as found: no enumerated value is true, so
+    # nothing is written. A source's own `UNMODIFIED` was left beside a
+    # date this run emptied, removed or dummied, in a file stamped
+    # `(0012,0062) YES` (#1011). It is withdrawn on this store's own record
+    # and on nothing else (owner ruling Q4 A): with no date of its doing
+    # gone from the file, the source's claim is the source's and stays.
+    return (_SOURCE_CLAIM_WITHDRAWN
+            if _a_date_this_store_took(instance, stamps) else None)
+
+
+def _delivered_file_identity(path: str) -> Optional[Tuple[int, int]]:
+    """Which file the volume says `path` is, for `_report_export_collisions`.
+
+    The one place the export asks the volume whether two names are one file
+    (#1020), and the seam its tests replace: never patch `os.stat`, which
+    every stat in the process goes through.
+
+    Args:
+        path (str): An output path a worker reported written.
+
+    Returns:
+        Optional[Tuple[int, int]]: `(st_dev, st_ino)`, equal for two paths
+            exactly when they are one file; None when the file cannot be
+            asked about, or the volume reports no inode (`st_ino == 0`, as
+            some network volumes do for every file), neither of which is
+            evidence that two names are one.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    if not stat.st_ino:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
+def _sop_instance_uid_in(path: str) -> Optional[str]:
+    """The SOP Instance UID `(0008,0018)` the file at `path` holds.
+
+    Args:
+        path (str): A written DICOM file.
+
+    Returns:
+        Optional[str]: The UID, or None when the file cannot be read or
+            holds none. Never raises: the caller is reporting on an export
+            that has already finished.
+    """
+    try:
+        ds = pydicom.dcmread(path, specific_tags=[0x00080018],
+                             stop_before_pixels=True)
+        value = ds.get(0x00080018)
+        return None if value is None else str(value.value)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
 
 
 def _is_private_tag(tag: str) -> bool:
@@ -7189,13 +7301,17 @@ class DicomSession:
         summary = self._run_export_batch(tasks, show_progress,
                                          self.store_backend)
 
-        self._report_export_collisions(tasks, summary.written_uids)
+        # Edits `summary`: an instance whose file another instance's write
+        # replaced leaves `written_uids` for `failures` (#1020), so
+        # everything below counts what the folder holds.
+        replaced = self._report_export_collisions(tasks, summary)
 
         # After the batch, not before it. The disclosure is a statement
         # about files a recipient holds, so it has to be made from what
         # was written rather than from what was planned.
         if check_reversibility:
-            self._report_recoverable_identities(tasks, summary.written_uids)
+            self._report_recoverable_identities(tasks, summary.written_uids,
+                                                replaced)
 
         # Recorded for `generate_report`, so the report counts what was
         # written, not only the object graph.
@@ -7244,7 +7360,8 @@ class DicomSession:
 
         return summary
 
-    def _report_recoverable_identities(self, tasks, written_uids) -> int:
+    def _report_recoverable_identities(self, tasks, written_uids,
+                                       replaced=frozenset()) -> int:
         """Report delivered instances whose file still carries its originals.
 
         An instance carrying an Encrypted Attributes Sequence (0400,0500) from
@@ -7252,13 +7369,16 @@ class DicomSession:
         delivered instance carries one, logs a WARNING and writes one
         `REVERSIBLE_EXPORT` audit row; a token in the layout releases before
         1.0 wrote adds a `WARNING` row. An instance counts as delivered when a
-        worker wrote it or its planned file exists on disk.
+        worker wrote it or its planned file exists on disk, unless
+        `_report_export_collisions` found that file to hold another instance.
 
         Args:
             tasks (list): The export plan: each task's instance and output
                 path.
-            written_uids (Iterable[str]): The UID of every instance the workers
-                wrote.
+            written_uids (Iterable[str]): The UID of every instance whose
+                content a file holds, as `_report_export_collisions` left it.
+            replaced (Collection[int]): `id()` of each task whose file was
+                replaced by another instance's, as that method returned it.
 
         Returns:
             int: How many delivered instances carry recoverable identities; 0,
@@ -7275,9 +7395,18 @@ class DicomSession:
         # which get a re-identifiable file treated as safe; an over-claim costs
         # only a disclosure. Only instances not already known to be written are
         # stat-ed, so a clean export does no filesystem work here.
+        #
+        # A replaced task is the one exception to "a file is there" (#1020):
+        # its planned name exists because the volume resolves it to another
+        # instance's file, which was read back and does not hold this one, so
+        # its token is not in the folder. A replaced task never shares the
+        # survivor's UID (`_report_export_collisions`), so leaving it out
+        # of `delivered` leaves it out of `affected` below, unless another
+        # delivered instance holds its UID, which is counted as before.
         delivered = set(written_uids)
         delivered |= {task.instance.sop_instance_uid for task in tasks
                       if task.instance.sop_instance_uid not in delivered
+                      and id(task) not in replaced
                       and os.path.exists(task.output_path)}
         # A set, like `delivered`: the numerator and the denominator
         # must be counted over the same collection, or a duplicate SOP
@@ -7341,23 +7470,35 @@ class DicomSession:
                     details=sentence)
         return len(affected)
 
-    def _report_export_collisions(self, tasks, written_uids) -> int:
-        """Audit every output path that more than one instance was written to.
+    def _report_export_collisions(self, tasks, summary) -> Set[int]:
+        """Audit every file that more than one instance was written to.
 
-        Files are named by SOP Instance UID, so two delivered instances sharing
-        a path leave one file. Each such path gets one `ERROR` audit row, which
-        grades the run `REVIEW_REQUIRED`. Grouped by output path, not by UID; a
-        path every write to failed is not reported, since its failures carry
-        their own rows.
+        Files are named by SOP Instance UID. Two arms, one `ERROR` audit row
+        per file each, which grades the run `REVIEW_REQUIRED`:
+
+        - **One planned path for several instances** (they share a UID):
+          grouped by the exact output path. A path every write to failed is
+          not reported, since its failures carry their own rows. `summary` is
+          left as it is.
+        - **Different planned paths the volume resolves to one file** (#1020:
+          names differing only in letter case on a case-insensitive volume,
+          or in Unicode composition): asked of the volume, after the write,
+          over the tasks this run delivered. The file's `(0008,0018)` is read
+          back; the instance it names stays in `summary.written_uids` and
+          every other member moves to `summary.failures` under the row's
+          sentence. When the file cannot be read back as one of them, all of
+          them move.
 
         Args:
             tasks (list): The export plan: each task's instance and output
                 path.
-            written_uids (Iterable[str]): The UID of every instance the workers
-                wrote.
+            summary (ExportSummary): What the workers reported; edited in
+                place by the second arm.
 
         Returns:
-            int: How many colliding paths were reported.
+            Set[int]: `id()` of each task whose file is known to hold another
+                instance: the second arm's losers where the survivor was
+                read and has another UID. Empty when nothing collided.
         """
         # `ERROR`, not `DATA_LOSS`: the end state is a requested instance that
         # is not in the folder, which is what `_report_export_failures` files
@@ -7369,8 +7510,7 @@ class DicomSession:
         for task in tasks:
             by_path.setdefault(task.output_path, []).append(task)
 
-        written = set(written_uids)
-        collisions = 0
+        written = set(summary.written_uids)
         for path, group in by_path.items():
             if len(group) < 2:
                 continue
@@ -7389,13 +7529,96 @@ class DicomSession:
                 f"folder holds one file for all {len(group)} of "
                 f"them.".split()).replace("|", "\\|")
             get_logger().error("%s: %s", uid, detail)
-            collisions += 1
             if getattr(self, "store_backend", None) is not None:
                 # `log_audit`, not `log_audit_batch` -- see the note in
                 # `_report_export_losses`.
                 self.store_backend.log_audit(
                     action_type="ERROR", entity_uid=uid, details=detail)
-        return collisions
+
+        # Different planned paths, one file (#1020). The volume is asked, and
+        # no name is folded as text, because no text key is right on every
+        # volume: measured on APFS, `SOPa`/`SOPA` are one file where the
+        # volume ignores case and two where it does not, while U+212B and
+        # U+00C5 are one file on both; `lower()` misses the second pair and
+        # NFC + `casefold()` reports the first on a volume that wrote two
+        # files. Asked after the write, never before or by an exclusive
+        # create: re-exporting into a folder that holds an earlier export is
+        # allowed, and each write is a rename that gives its name a file of
+        # its own, so two paths of one inode *afterwards* are one directory
+        # entry (or one folder reached twice), whatever was linked there
+        # before.
+        #
+        # Over what this run delivered only: a task whose worker reported no
+        # write has its own `ERROR` row, and a file found under its name is
+        # an earlier export's. An identity of None (the file is gone, or the
+        # volume gives no inode) is no evidence of one file.
+        by_identity = {}
+        for path, group in by_path.items():
+            delivered = [task for task in group
+                         if task.instance.sop_instance_uid in written]
+            if not path or not delivered:
+                continue
+            identity = _delivered_file_identity(path)
+            if identity is not None:
+                by_identity.setdefault(identity, []).extend(delivered)
+
+        replaced = set()
+        for group in by_identity.values():
+            paths = {task.output_path for task in group}
+            if len(paths) < 2:
+                continue
+            # Which instance the file holds is read from the file: the last
+            # rename wins, and which was last varies by run. One read; every
+            # path of the group is that file.
+            held = _sop_instance_uid_in(group[0].output_path)
+            survivor = next((task for task in group
+                             if task.instance.sop_instance_uid == held), None)
+            uids = sorted(str(task.instance.sop_instance_uid) for task in group)
+            count = len(group)
+            opening = (
+                f"{count} exported instances ({', '.join(uids)}) were written "
+                f"under file names this volume resolves to one file: each "
+                f"successful write replaced the one before it, and the folder "
+                f"holds one file for all {count} of them.")
+            if survivor is None:
+                # Unreadable, or a UID none of them has. Nothing says whose
+                # file it is, so none is reported written, and none is
+                # reported replaced either: the disclosure that follows
+                # still counts every one of them as possibly in the folder.
+                key = "MULTIPLE"
+                closing = (f"Which of them that file carries could not be "
+                           f"read from it, so none of the {count} is reported "
+                           f"as written.")
+            else:
+                key = survivor.instance.sop_instance_uid
+                others = ("other was" if count == 2
+                          else f"other {count - 1} were")
+                closing = (f"That file carries {key}; the {others} not "
+                           f"delivered.")
+            # No path, and pipe-escaped, as the arm above. The sentence above
+            # is not reused: these instances do not share a UID.
+            detail = f"{opening} {closing}".replace("|", "\\|")
+            get_logger().error("%s: %s", key, detail)
+            for task in group:
+                if task is survivor:
+                    continue
+                # By task, one occurrence each: a loser may share the
+                # survivor's UID, which then stays in the list once.
+                if task.instance.sop_instance_uid in summary.written_uids:
+                    summary.written_uids.remove(task.instance.sop_instance_uid)
+                summary.failures.append(
+                    (task.instance.sop_instance_uid, detail))
+                # Known to be absent from the folder only when the file was
+                # read and names another UID. A loser sharing the
+                # survivor's UID may be the one the file holds: which of
+                # two instances of one UID was written last is not read.
+                if survivor is not None \
+                        and task.instance.sop_instance_uid != key:
+                    replaced.add(id(task))
+            if getattr(self, "store_backend", None) is not None:
+                self.store_backend.log_audit(
+                    action_type="ERROR", entity_uid=key, details=detail)
+        return replaced
 
     def _scan_before_export(self) -> Set[str]:
         """Scan for PHI and report what it found, before anything is written.
@@ -7653,8 +7876,12 @@ class DicomSession:
             temporal = None
             if _TEMPORAL_MODIFIED not in ruled:
                 temporal = _longitudinal_temporal_marker(study, instance, stamps)
+            # The third answer is an instruction, never a value (#1011).
+            withdraw = temporal == _SOURCE_CLAIM_WITHDRAWN
             return DeidMarkers(identity_removed=_IDENTITY_REMOVED not in ruled,
-                               method_value=method, temporal=temporal)
+                               method_value=method,
+                               temporal=None if withdraw else temporal,
+                               withdraw_unmodified=withdraw)
         return plan
 
     def _report_statuses_under_another_policy(self, triples, folder, fmt):

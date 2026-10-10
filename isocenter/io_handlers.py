@@ -46,6 +46,7 @@ import os
 import pickle
 import sys
 import hashlib
+import threading
 import numbers
 import struct
 from decimal import Decimal
@@ -6330,6 +6331,11 @@ class DeidMarkers:
             `(0012,0063)`, after the source's, unless it is already last.
         temporal: Longitudinal Temporal Information Modified `(0028,0303)`,
             `REMOVED` or `MODIFIED`, replacing the source's.
+        withdraw_unmodified: Do not carry a source's `(0028,0303)
+            UNMODIFIED` into the file: this store took a date out of it
+            and shifted none (#1011). Nothing is written in its place, and
+            any other source value stays. Only ever set with `temporal`
+            None.
     """
     # Decided in the parent because the worker cannot: the statuses and
     # policies it rests on are not on the lightweight copy a process
@@ -6337,6 +6343,7 @@ class DeidMarkers:
     identity_removed: bool = False
     method_value: Optional[str] = None
     temporal: Optional[str] = None
+    withdraw_unmodified: bool = False
 
 
 def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
@@ -6352,7 +6359,9 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
     same policy and release is idempotent; a different policy or release
     appends, which is PS3.3's "successive de-identification steps".
     Patient Identity Removed is not written when `ds` says Burned In
-    Annotation `YES`.
+    Annotation `YES`. Under `markers.withdraw_unmodified`, a `(0028,0303)`
+    that says `UNMODIFIED` is deleted from `ds` and nothing is written
+    there.
 
     Args:
         ds: The pydicom dataset being written; edited in place.
@@ -6387,6 +6396,17 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
         ds.add_new(0x00120063, "LO", values)
     if markers.temporal:
         ds.add_new(0x00280303, "CS", markers.temporal)
+    elif markers.withdraw_unmodified:
+        # Only the one value, whoever wrote it: `MODIFIED` and `REMOVED`
+        # are a source's claims about an earlier step, and stay. Case and
+        # padding are ignored for the reason Burned In Annotation's are
+        # above. Two values are not the enumerated value: `str()` of them
+        # is no `UNMODIFIED`, and they are left as written. No row and no
+        # note: no marker has ever written either.
+        held = ds.get(0x00280303)
+        if held is not None \
+                and str(held.value).strip().upper() == "UNMODIFIED":
+            del ds[0x00280303]
 
 
 @dataclass
@@ -6511,9 +6531,15 @@ class ExportSummary:
         written_uids (List[str]): The SOP Instance UID of each instance
             that reached disk, and nothing else. An instance with no UID
             is not written and is in `failures`; so is one whose UID
-            cannot name a file (`export_file_name`), under that UID.
+            cannot name a file (`export_file_name`), under that UID. From
+            `session.export()`, an instance whose file another instance's
+            write replaced, because the volume resolves their two file
+            names to one file, is in `failures` too, and the instance the
+            file holds is here (#1020).
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
-            instance that did not reach disk, each with an audit row.
+            instance that did not reach disk, each with an audit row; the
+            instances of one replaced file share one row, which names
+            them all.
         written (int): Files that reached disk, counted over distinct
             UIDs: two instances sharing a UID write one file.
         failed (int): `len(failures)`.
@@ -6557,6 +6583,12 @@ class ExportError(RuntimeError):
     one waveform instance, and its failure is named by that instance's
     UID, as the DICOM one is. Not raised on a partial export.
 
+    One case leaves a file behind (#1020): every planned instance was
+    written under file names the volume resolved to one file, and that
+    file could not be read back as any of them. None is reported as
+    written, so this is raised, and the folder holds that one file; the
+    `ERROR` row keyed `MULTIPLE` says so.
+
     Raised **last**, after every record the run produces, so a caller who
     catches this still holds a correct graph, a complete audit trail and
     a compliance report grading `REVIEW_REQUIRED`. The DICOM path raises
@@ -6591,9 +6623,14 @@ class ExportError(RuntimeError):
         where = f" to {folder}" if folder else ""
         super().__init__(
             f"Export{where} wrote 0 of {attempted} planned instances; "
-            f"{len(self.failures)} failed and nothing reached disk. "
+            f"{len(self.failures)} failed and none is reported as written. "
             f"First: {first[0]}: {first[1]}. See the audit log for the "
             "rest.")
+        # "none is reported as written", where it said "nothing reached
+        # disk" until #1020: instances whose file names the volume resolved
+        # to one file, which then could not be read back as any of them,
+        # are all failures while one file is in the folder. The exception
+        # is not told which case it is, so it says what is true of both.
 
 
 def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
@@ -7251,7 +7288,7 @@ def _verify_readback(path: str, ds, written_pixels=None,
     try:
         readback = pydicom.dcmread(path)
     except Exception as exc:
-        # Without paths: `path` is `<output path>.<pid>.tmp`, under
+        # Without paths: `path` is `<output path>.<pid>.<thread id>.tmp`, under
         # `Subject_<Patient ID>/`, and this message becomes the export's
         # `ERROR` row, where the outer spelling cannot strip it.
         raise RuntimeError(
@@ -8748,7 +8785,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # other's temp files. A worker killed outright can still orphan
         # one `.tmp`; that residue is what atomicity costs, and what
         # cannot exist is a partial under a name a recipient trusts.
-        tmp_path = f"{ctx.output_path}.{os.getpid()}.tmp"
+        #
+        # The thread's id beside the pid (#1020): `write_tree()`'s
+        # workers are threads of one process on a free-threaded build,
+        # and under `ISOCENTER_FORCE_THREADS`. With the pid alone, two
+        # instances sharing a UID had one temp name, and two whose names
+        # the volume folds (`SOPa`, `SOPA`) had one temp file: measured
+        # on 3.14t, the loser of the rename raised `ENOENT`. Two threads
+        # alive at once never share an id.
+        tmp_path = (f"{ctx.output_path}.{os.getpid()}."
+                    f"{threading.get_ident()}.tmp")
         try:
             ds.save_as(tmp_path, enforce_file_format=True)
             # Before the rename, so a file that fails verification is
@@ -12236,6 +12282,12 @@ class DicomExporter:
         as `session.export()` writes (`export_folder_names`), named by SOP
         Instance UID. Elements that could not be written are logged, and
         audited when `store_backend` is given.
+
+        Two instances written to one file are not reported here, whether
+        they share a UID or their file names differ only in a way the
+        volume ignores (letter case on a case-insensitive volume): the
+        later write replaces the earlier and the call returns.
+        `session.export()` writes an `ERROR` row for both cases.
 
         Args:
             patient (Patient): The patient root object.
