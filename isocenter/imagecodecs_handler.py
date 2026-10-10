@@ -270,6 +270,70 @@ def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
     return bytes(eot), bytes(lengths)
 
 
+def _drops_the_table(ds) -> bool:
+    """Does pydicom's decoder ignore this Extended Offset Table and read on?
+
+    True only for the one shape pydicom drops with a warning and then
+    decodes without (`DecodeRunner._validate_options`, 3.0.2): both
+    elements hold bytes, of different lengths. Narrower than
+    `extended_offsets(ds) is None`, which is also true of a Lengths
+    element that is empty (pydicom raises `TypeError: object of type
+    'NoneType' has no len()`) or absent (`AttributeError`): pydicom does
+    not read those files, so nothing defers to it for them.
+
+    Args:
+        ds (pydicom.Dataset): A dataset holding a non-empty
+            `ExtendedOffsetTable`.
+
+    Returns:
+        bool: Whether the decoder walks the fragments without the table.
+    """
+    if "ExtendedOffsetTableLengths" not in ds:
+        return False
+    eot = ds.get("ExtendedOffsetTable")
+    lengths = ds.get("ExtendedOffsetTableLengths")
+    eot = getattr(eot, "value", eot)
+    lengths = getattr(lengths, "value", lengths)
+    return (isinstance(eot, (bytes, bytearray))
+            and isinstance(lengths, (bytes, bytearray))
+            and bool(lengths) and len(eot) != len(lengths))
+
+
+def ragged_offset_table_words(ds) -> Optional[str]:
+    """The refusal for an Extended Offset Table that is no whole number of offsets.
+
+    Only for a table pydicom's decoder walks by (`extended_offsets`) in
+    an encapsulated file. Each offset is 8 bytes, so a 12-byte table
+    names no whole number of frames; pydicom unpacks it and fails in
+    `struct`'s words (`error: unpack requires a buffer of 8 bytes`), and
+    `12 // 8` is not a count to compare NumberOfFrames with (#621). A
+    table pydicom drops is never refused for its length: its offsets say
+    nothing about the frames the decoder reads. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        Optional[str]: One sentence naming the table's length, for the
+        `RuntimeError` `io_handlers._decode_pixels` raises, or None.
+    """
+    # Encapsulated only: pydicom takes no table for native data, so the
+    # two elements on a native file are read by nothing.
+    try:
+        if not ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+        walked_by = extended_offsets(ds)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if walked_by is None or len(walked_by[0]) % 8 == 0:
+        return None
+    # A length only: no byte of the table, and none of the two substrings
+    # `Instance.get_pixel_data` once routed on.
+    return (f"Extended Offset Table is {len(walked_by[0])} bytes long, "
+            f"which is not a whole number of 8-byte offsets, so it names no "
+            f"whole number of frames.")
+
+
 def offset_table_frame_count(ds) -> Optional[FrameCount]:
     """The frames the offset table names, beside the frames declared.
 
@@ -282,7 +346,11 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         cannot be read at all (a `force=True` read of a header-less file
         has an empty `file_meta`) or is not one pydicom can classify,
         NumberOfFrames is not an integer, there is no `PixelData`, the
-        table does not parse, or there is no table to count by and neither
+        table does not parse, an Extended Offset Table pydicom walks by
+        is no whole number of 8-byte offsets (`ragged_offset_table_words`
+        refuses it), or there is no table to count by -- none, or an
+        Extended Offset Table pydicom drops that names fewer frames than
+        declared -- and neither
         pydicom's walk of the fragments (`_walked_excess`) nor, for native
         data, the element's length (`_native_excess`) holds more frames
         than declared. Those two report an excess only, never fewer, and
@@ -347,8 +415,9 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # here rather than a DataElement (pydicom 3.0.2); the `getattr` takes
     # either, so neither shape reads as "no table".
     #
-    # **Counted even when its Lengths disagree**, deliberately unlike the
-    # walks (`extended_offsets`). pydicom drops such a table and walks the
+    # **Counted even when its Lengths disagree, where it names more
+    # frames than declared**, deliberately unlike the walks
+    # (`extended_offsets`). pydicom drops such a table and walks the
     # fragments, and under NumberOfFrames 1 that walk returns frame 0 and
     # never mentions frame 1; counted from the table, ingest keeps frame 0
     # and says it discarded one. Read through the walks' rule instead, the
@@ -360,14 +429,37 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # the frames the decoder reads: pydicom walks the fragments, and the
     # walk can find more. So that one shape -- a table pydicom will not
     # walk by, agreeing with NumberOfFrames -- is asked of the walk too.
-    # A table that disagrees is reported from the table, as above; one
+    # A table that names *more* is reported from the table, as above; one
     # pydicom walks by names every frame it reads.
+    #
+    # **A table pydicom drops that names fewer is not counted** (#621).
+    # The split above exists for the excess direction only. A shortfall
+    # needs at least two declared frames, and pydicom's walk then returns
+    # exactly those (read, no row), more (`_walked_excess` reports them),
+    # or fewer (its own refusal, or the bare `StopIteration`
+    # `io_handlers._decode_pixels` words). Counting the dropped table
+    # refused a file pydicom reads whole. "Drops" is `_drops_the_table`,
+    # not `extended_offsets(ds) is None`: pydicom *fails* on a Lengths
+    # element that is empty or absent, so those are still counted and
+    # refused here in this sentence rather than in pydicom's `TypeError`.
+    #
+    # **A table pydicom walks by whose length is not a multiple of 8
+    # names no whole number of frames**, so no count is offered:
+    # `12 // 8` is not one. `ragged_offset_table_words` is the refusal,
+    # raised by `_decode_pixels`, which every caller of this goes on to.
     eot = ds.get("ExtendedOffsetTable")
     if eot:
         eot_bytes = getattr(eot, "value", eot)
+        walked_by = extended_offsets(ds) is not None
+        if walked_by and len(eot_bytes) % 8:
+            return None
         counted = (len(eot_bytes) // 8, declared, declared_raw,
                    "Extended Offset Table")
-        if counted[0] != declared or extended_offsets(ds) is not None:
+        if walked_by or counted[0] > declared:
+            return counted
+        if counted[0] < declared:
+            if _drops_the_table(ds):
+                return _walked_excess(ds, declared, declared_raw)
             return counted
         return _walked_excess(ds, declared, declared_raw) or counted
 

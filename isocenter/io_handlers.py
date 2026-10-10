@@ -135,6 +135,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
+                                  ragged_offset_table_words,
                                   signed_codestream_refusal)
 from .parallel import (run_parallel, _resolve_strategy,
                        resolve_worker_initializer)
@@ -2673,6 +2674,13 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     refusal = bit_packed_excess_words(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
+    # And an Extended Offset Table pydicom walks by that is no whole
+    # number of 8-byte offsets, which pydicom unpacks and fails on in
+    # `struct`'s words (#621). `offset_table_frame_count` offers no count
+    # for it, so every door arrives here and says this.
+    refusal = ragged_offset_table_words(ds)
+    if refusal is not None:
+        raise RuntimeError(refusal)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
     # `as_array(ds, allow_excess_frames=None)` truncates exactly as `False`
     # does, so passing a None through would silently truncate every
@@ -2829,20 +2837,32 @@ def _no_frame_boundary_words(ds) -> str:
     # codecs-missing message is decided from state since #623, not from
     # "decompress" or "missing dependencies" in a message.)
     #
-    # "with no offset table" is unconditional and true only because of a
-    # guard upstream: a file whose Basic or Extended Offset Table names a
-    # frame count is refused by `imagecodecs_handler.offset_table_frame_count`
-    # before any decode, so a table that disagrees with the fragments never
+    # "with no offset table" is true of a Basic Offset Table only because
+    # of a guard upstream: a file whose Basic Offset Table names a frame
+    # count is refused by `imagecodecs_handler.offset_table_frame_count`
+    # before any decode, so one that disagrees with the fragments never
     # gets here. If that guard stops answering first, the clause becomes
-    # false. The `except` branch says nothing about the table, because it
-    # has parsed nothing to say it from.
+    # false.
+    #
+    # **It is not true of an Extended Offset Table**, since #621: one
+    # pydicom drops (its Lengths element is another length) that names
+    # fewer frames than declared is no longer counted, so a dataset
+    # holding a table arrives here. The clause then says what is true:
+    # none that pydicom walks by. (One it does walk by never raises the
+    # `StopIteration` this words: the count refuses it first.)
+    #
+    # The `except` branch says nothing about the table, because it has
+    # parsed nothing to say it from.
     declared = declared_frame_count(ds)
+    table = "no offset table"
+    if ds.get("ExtendedOffsetTable"):
+        table += " pydicom walks by"
     try:
         buf = BytesIO(ds.PixelData)
         parse_basic_offsets(buf)
         fragments, _offsets = parse_fragments(buf)
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
-                f"with no offset table")
+                f"with {table}")
     except Exception:  # pylint: disable=broad-except
         held = "holds fragments pydicom could not count"
     return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
