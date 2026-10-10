@@ -2401,7 +2401,8 @@ def _source_text(value):
 
     For the four text elements `ingest_worker` hands the parent as fields
     of `Series` and `Equipment`: Modality, Manufacturer, Manufacturer's
-    Model Name and Device Serial Number.
+    Model Name and Device Serial Number. And, since #998, for the SOP
+    Class UID it hands on as `Instance.sop_class_uid`.
 
     Args:
         value: What pydicom read for the element, or the caller's default
@@ -4677,6 +4678,126 @@ def _refuse_a_multi_valued_key(ds) -> None:
                 f"is linked by it, and none is chosen for it.")
 
 
+#: The VRs pydicom reads as a `str` (PS3.5 6.2), which is what a linkage
+#: key is held as. Not `PN` (a `PersonName`), and not `DS` or `IS`: pydicom
+#: reads those as numbers, and hands the text over as a `str` only when it
+#: cannot convert it. Not the exporter's `_TEXT_VRS`, which answers
+#: another question (what the text gate writes) and holds `PN`.
+_VRS_READ_AS_STR = frozenset({
+    "AE", "AS", "CS", "DA", "DT", "LO", "LT", "SH", "ST", "TM", "UC", "UI",
+    "UR", "UT"})
+
+
+#: pydicom reads a `UN` of a tag it knows under the dictionary's VR only
+#: while the value is shorter than this (`pydicom.hooks.raw_element_vr`:
+#: `len(raw.value) < 0xFFFF`); at or past it the value stays `bytes`.
+_UN_READ_AS_KNOWN_BELOW = 0xFFFF
+
+
+def _states_no_vr(raw) -> bool:
+    """Whether a raw element is the file declining to state a VR.
+
+    Args:
+        raw: The element as read, before any conversion.
+
+    Returns:
+        bool: True for a VR of None (an Implicit VR file) and for `UN`
+            while pydicom will read this `UN` under the dictionary's VR.
+    """
+    # `UN` is "unknown", not a claim about the value: three files of
+    # pydicom's own corpus state it for all four linkage keys
+    # (`rtdose_rle.dcm`, `rtdose_rle_1frame.dcm`, `explicit_VR-UN.dcm`),
+    # and pydicom reads each under the dictionary's `UI` and `LO`, as it
+    # does an Implicit VR file. The fingerprint found this: the rule as
+    # first written refused all three. With
+    # `pydicom.config.replace_un_with_known_vr` switched off pydicom hands
+    # such a key over as `bytes`, and `UN` is then refused like `OB`.
+    #
+    # So is a `UN` of 65,535 bytes or more, which pydicom leaves as `bytes`
+    # with the switch on (owner ruling on #1046, 2026-10-10). Decided by
+    # what pydicom will do, from the length the file states, never by
+    # converting the value to see. An element with no stated length here
+    # is not a raw one, and is not vouched for.
+    vr = raw.VR
+    if vr is None:
+        return True
+    return (vr == "UN" and bool(pydicom.config.replace_un_with_known_vr)
+            and getattr(raw, "length", _UN_READ_AS_KNOWN_BELOW)
+            < _UN_READ_AS_KNOWN_BELOW)
+
+
+def _vr_as_stated(vr) -> str:
+    """The words the refusal uses for the VR a file states.
+
+    Args:
+        vr: The two characters the file holds where a VR goes.
+
+    Returns:
+        str: `as XX` for two upper-case ASCII letters, and otherwise a
+            phrase that quotes nothing.
+    """
+    # pydicom takes any two bytes from `AA` to `ZZ` as an explicit VR, so
+    # the second is the file's to choose: `Z\n` put a newline in
+    # `IngestSummary.failures`. A row never carries bytes of the file that
+    # nothing has judged. Two upper-case letters is the shape of every VR
+    # PS3.5 defines, and of `ZZ`, which is named because it can be.
+    text = str(vr)
+    if len(text) == 2 and text.isascii() and text.isalpha() and text.isupper():
+        return f"as {text}"
+    return "under a VR the standard does not define"
+
+
+def _refuse_a_key_that_is_not_text(ds) -> None:
+    """Refuse a file that states a VR that is not text for a linkage key (#1022).
+
+    An Explicit VR file states a VR for each element, and nothing makes it
+    state the dictionary's. pydicom reads `(0008,0018)` written `OB` as
+    `bytes`, `US` as an `int`, `PN` as a `PersonName`, `SQ` as a
+    `Sequence`. Until #1022 a SOP Instance UID or Patient ID held that way
+    reached the save that ends `ingest()`, which refused the whole graph
+    (#721, #949), so one file cost the folder; a Study or Series Instance
+    UID was linked under `str()` of the value (`"b'1.2.3.4\\x00'"`, `'7'`,
+    `'[]'`) with no row; an `SQ` was refused in the interpreter's words,
+    which differ between 3.12 and 3.14t.
+
+    Raises:
+        ValueError: Naming the element and the VR the file states for it.
+    """
+    # The VR and not the value, for two reasons. A DS or IS whose text
+    # pydicom cannot convert (`abc`, `1.2.3.4`) is handed over as a `str`,
+    # so "is the value a `str`" would ingest `DS '1.2.3.4'` and refuse
+    # `DS '1.5'`. And reading the value converts it, which raises for some
+    # (`IS '1e400'`: `OverflowError`), in words that are pydicom's. The
+    # raw element's VR is the file's own statement. `keep_deferred=True`
+    # is what makes the read convert nothing: without it pydicom converts
+    # a zero-length element on the spot (#740's trap), and an empty key
+    # stated `ZZ` was refused as `NotImplementedError: Unknown Value
+    # Representation`. One shape is converted before anyone asks: a `UN`
+    # of undefined length is read by pydicom as a sequence while the file
+    # is parsed, so its VR here is `SQ` and it is refused as one.
+    #
+    # `pydicom.config.datetime_conversion` is the other switch of the
+    # `UN` one's kind: switched on, pydicom hands a key stated `DA`, `DT`
+    # or `TM` over as a date or time object. Nothing in the library sets
+    # it, and the rule does not read it (#1046, reported).
+    #
+    # A file that states no VR for the key (`_states_no_vr`) is read under
+    # the dictionary's `UI` and `LO`, and is not this rule's.
+    #
+    # Never a value in the message, as for #747's refusal above, and never
+    # the name of the Python type pydicom chose: that is pydicom's, and
+    # the VR is the file's. An empty element is refused like a full one:
+    # the rule is one sentence about the file, with no second question.
+    for keyword, name in _LINKAGE_KEY_NAMES:
+        if keyword not in ds:
+            continue
+        raw = ds.get_item(keyword, keep_deferred=True)
+        if not _states_no_vr(raw) and raw.VR not in _VRS_READ_AS_STR:
+            raise ValueError(
+                f"{name} is written {_vr_as_stated(raw.VR)}, not as text; "
+                f"the file is linked by it, and no text is chosen for it.")
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4702,10 +4823,31 @@ def ingest_worker(fp: str) -> Tuple:
         # Eager load (read pixels)
         ds = pydicom.dcmread(fp, stop_before_pixels=False, force=True)
 
-        # Determine SOP Class UID with fallback to File Meta
-        sop_class = str(ds.get("SOPClassUID", ""))
+        # Before anything reads a linkage key: `meta` below converts the
+        # SOP Instance UID, and a value pydicom cannot convert would be
+        # refused in pydicom's words. Here, in the worker, so the parent
+        # never appends this file's frame to the sidecar (#1022).
+        _refuse_a_key_that_is_not_text(ds)
+
+        # Determine SOP Class UID with fallback to File Meta.
+        # `_source_text` inside `str()`, on both reads: an element holding
+        # two values is a `MultiValue`, and `str()` of that is the text of
+        # a Python list, which the field, the store's column and the scan
+        # clone then held (#998). Joined, not refused (owner ruling Q6 A):
+        # nothing is linked by the SOP class. With `(0008,0016)` in the
+        # dataset no exported byte follows the field: the element is
+        # written from the instance's own, which `populate_attrs` holds
+        # with both values, and pydicom's writer copies that into
+        # `(0002,0002)`. On the fallback read below the instance has no
+        # element of its own, so the field IS what `(0008,0016)` and
+        # `(0002,0002)` are exported from: the list's text went out as one
+        # value there, and the joined text goes out as the source's two
+        # (review of #1046). The validator reads the field through the
+        # file meta, and takes two classes as a class it does not know
+        # (`IODValidator._modules_for`).
+        sop_class = str(_source_text(ds.get("SOPClassUID", "")))
         if not sop_class and "MediaStorageSOPClassUID" in ds.file_meta:
-            sop_class = str(ds.file_meta.MediaStorageSOPClassUID)
+            sop_class = str(_source_text(ds.file_meta.MediaStorageSOPClassUID))
 
         # Extract Linking Metadata
         meta = {
@@ -10082,9 +10224,11 @@ def export_file_name(instance) -> str:
     # The type is judged before the text, because what is joined to the
     # folder is `f"{uid}.dcm"` and the text of a `bytes` or a list is its
     # repr: `b'../../x'.dcm` holds the separators the text clauses look
-    # for, in a value they were never shown. A file states `(0008,0018)`
-    # as `OB` and ingest holds `bytes`; `write_tree()` has no save in
-    # front of it to refuse that (#721 is `session.export()`'s).
+    # for, in a value they were never shown. Until #1022 a file that
+    # stated `(0008,0018)` as `OB` put `bytes` here; ingest refuses that
+    # file now, and a caller's assignment is what is left. `write_tree()`
+    # has no save in front of it to refuse that (#721 is
+    # `session.export()`'s).
     # `isinstance`, not `type(uid) is str`: ingest holds a UI value as
     # `pydicom.uid.UID`, a `str` subclass.
     uid = instance.sop_instance_uid

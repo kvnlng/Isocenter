@@ -418,7 +418,18 @@ The file's own element is exported
 with the values the source wrote, where the policy keeps it, and no row is
 written. The series folder is named from one Modality and one number, so
 it reads `OT` for two Modalities and `0` for two Series Numbers
-([#985](https://github.com/kvnlng/Isocenter/issues/985)).
+([#985](https://github.com/kvnlng/Isocenter/issues/985)). SOP Class UID
+`(0008,0016)` is held the same way: a file with two values in it is
+ingested, `Instance.sop_class_uid` holds the file's text
+(`1.2.840.10008.5.1.4.1.1.2\1.2.840.10008.5.1.4.1.1.4`), and the exported
+file carries the source's two values in `(0008,0016)` and in the file
+meta's `(0002,0002)`, with no row. That holds too for a file whose
+dataset has no `(0008,0016)` and whose file meta holds the two values;
+releases before this one exported that file with one value, the text of
+a Python list. Two SOP classes are not a class the
+export's [Type 1 check](export-output.md#what-the-export-changes-on-the-way-out)
+knows, so such a file is not checked
+([#998](https://github.com/kvnlng/Isocenter/issues/998)).
 
 **One `UN` value is resolved rather than kept opaque.** If a private
 `UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte

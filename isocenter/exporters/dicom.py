@@ -22,7 +22,12 @@ class DicomFormatExporter(Exporter):
             io_handlers.ExportSummary: what `_export_dicom` returns on
                 every path, including its empty-plan early return. It
                 raises `io_handlers.ExportError` when zero of N planned
-                instances reached disk and at least one failed.
+                instances are reported written and at least one failed.
+                The folder then holds none of them, except when every
+                planned instance was written under names the volume
+                resolved to one file that could not be read back as any
+                of them (#1020): that one file is left, and the `ERROR`
+                row keyed `MULTIPLE` says so.
         """
         # Unannotated, like `Exporter.export`: the return is an
         # `ExportSummary`, not the `List[str]` `wfdb.py` returns.
