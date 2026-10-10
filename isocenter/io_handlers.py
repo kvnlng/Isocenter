@@ -128,6 +128,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
+                                  bit_packed_excess_words,
                                   colour_conversion, convert_colour,
                                   declared_frame_count,
                                   decode_declared_frames, extended_offsets,
@@ -2662,6 +2663,14 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     # never carry that shape (the writer derives PixelRepresentation and
     # the codestream's sign from one dtype), so the readback never trips it.
     refusal = signed_codestream_refusal(ds)
+    if refusal is not None:
+        raise RuntimeError(refusal)
+    # Before pydicom too: a native 1-bit frame that is not a whole number
+    # of bytes, under more bytes than its declared frames, is one pydicom
+    # slices by a `float` and fails in CPython's words for a slice (#669).
+    # Here rather than at each door, so ingest, the Instance door, the
+    # readback and an icon refuse it in one sentence.
+    refusal = bit_packed_excess_words(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
     # Each keyword is forwarded only when given. On pydicom 3.0.2

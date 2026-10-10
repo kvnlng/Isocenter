@@ -641,6 +641,73 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     return None
 
 
+def bit_packed_excess_words(ds) -> Optional[str]:
+    """The refusal for a native 1-bit frame pydicom would slice by a fraction.
+
+    A native BitsAllocated 1 frame is bit-packed and not padded to a
+    byte, so 3x3 is 1.125 bytes. pydicom reads a `PixelData` longer than
+    the declared frames and one pad byte as holding `len // frame_length`
+    frames, and where that is more than NumberOfFrames it decodes that
+    many -- a `float` count here -- and fails in CPython's words for a
+    slice (`TypeError: slice indices must be integers ...`), which name
+    nothing in the file (#669). `_native_excess` declines the same shape,
+    so nothing reports it either. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        Optional[str]: One sentence of numbers for the `RuntimeError`
+        `io_handlers._decode_pixels` raises, or None: an encapsulated
+        syntax, any other BitsAllocated, a frame that is a whole number
+        of bytes (`_native_excess` counts it), bytes that hold no more
+        frames than declared (pydicom reads those as padding), a
+        NumberOfFrames pydicom refuses (negative, or empty), or anything
+        this cannot read, which the decode that follows refuses.
+    """
+    # **pydicom's own rule** (`DecodeRunner._validate_buffer`, 3.0.2), not
+    # "more bytes than the frames and a pad": the failure needs the bytes
+    # to hold more *frames* than declared. Five bytes under one 27-bit
+    # frame (3x3, three samples) hold one frame; pydicom reads that file
+    # with its excess-padding warning, and so must this. Integer
+    # arithmetic on bits, where pydicom floor-divides by a float number of
+    # bytes: the same quotient, with nothing to round.
+    try:
+        if ds.file_meta.TransferSyntaxUID.is_encapsulated:
+            return None
+        if int(ds.BitsAllocated) != 1:
+            return None
+        rows, cols = int(ds.Rows), int(ds.Columns)
+        samples = int(ds.SamplesPerPixel)
+        # A negative or empty NumberOfFrames is refused by pydicom's
+        # validation in words that name the element; this sentence would
+        # replace them. Absent and 0 are read as 1, as pydicom reads them.
+        if "NumberOfFrames" in ds and int(ds.NumberOfFrames) < 0:
+            return None
+        held = len(ds.PixelData)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    declared = declared_frame_count(ds)
+    frame_bits = rows * cols * samples
+    if frame_bits <= 0 or frame_bits % 8 == 0:
+        return None
+    need = -(-frame_bits * declared // 8)
+    room = held * 8 // frame_bits
+    if held <= need + need % 2 or room <= declared:
+        return None
+    of = (f"{rows}x{cols}" if samples == 1
+          else f"{rows}x{cols} with {samples} samples per pixel")
+    # The read door turns a message holding "no pixel data" into `return
+    # None`; "Pixel Data holds" is not that. Numbers only: no path, no
+    # byte of the file, nothing an interpreter worded.
+    return (f"Pixel Data holds {held} bytes, room for {room} frames of {of} "
+            f"at one bit per sample, where NumberOfFrames is read as "
+            f"{declared} and {'it needs' if declared == 1 else 'they need'} "
+            f"{need}: a frame here is {frame_bits} bits, not a whole number "
+            f"of bytes, so the bytes beyond the declared frames cannot be "
+            f"read as frames.")
+
+
 def frame_count_mismatch(ds) -> Optional[str]:
     """The refusal message when the offset table and NumberOfFrames disagree.
 
