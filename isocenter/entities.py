@@ -930,6 +930,67 @@ def _decode_from_file(ds):
     return _decode_pixels(ds)
 
 
+def _missing_decoder_words(error, ds) -> Optional[str]:
+    """What is missing from this installation, when that is why a decode failed.
+
+    Decided from state, never from the failure's message (#623). Two
+    cases, and nothing else:
+
+    1. The imagecodecs fallback was asked and imagecodecs did not import:
+       an `imagecodecs_handler.ImagecodecsUnavailable` in the failure's
+       cause chain.
+    2. The failure is a `RuntimeError`, the file's transfer syntax is not
+       one the fallback reads, and pydicom's decoder for it reports no
+       usable plugin.
+
+    Args:
+        error (BaseException): The failure `_decode_from_file` raised.
+        ds: The dataset that was being decoded, or None.
+
+    Returns:
+        Optional[str]: One or two sentences naming what is missing and
+        the remedy, or None when nothing is known to be missing -- a
+        refusal on what the file holds, a `TypeError`, a transfer syntax
+        no decoder implements.
+    """
+    # The cause chain is walked in this process, between the raise and
+    # this read: `__cause__` does not survive a pickle, and no process
+    # boundary sits between `_decode_pixels` and `get_pixel_data`.
+    cause, seen = error, set()
+    while cause is not None and id(cause) not in seen:
+        if isinstance(cause, h.ImagecodecsUnavailable):
+            return ("imagecodecs did not import. This library installs it "
+                    "and reads this transfer syntax with it where pydicom "
+                    "cannot; reinstall imagecodecs.")
+        seen.add(id(cause))
+        cause = cause.__cause__
+    if not isinstance(error, RuntimeError) or ds is None:
+        return None
+    # Imported at call time, because `io_handlers` imports this module.
+    from .io_handlers import _IMAGECODECS_FALLBACK_SYNTAXES  # pylint: disable=import-outside-toplevel
+    try:
+        # The lookup is inside the `try` because this runs in an `except`:
+        # `get_decoder` raises `NotImplementedError` for a syntax no
+        # decoder implements, and an exception escaping here would
+        # replace the failure being reported. That file is not this
+        # case's: no plugin would read it.
+        tsyntax = ds.file_meta.TransferSyntaxUID
+        if str(tsyntax) in _IMAGECODECS_FALLBACK_SYNTAXES:
+            # The fallback reads this syntax, and it was asked or would
+            # have been: a refusal here is on what the file holds.
+            return None
+        decoder = get_decoder(tsyntax)
+        if decoder.is_available:
+            return None
+        listed = "; ".join(str(item) for item in decoder.missing_dependencies)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    words = "no installed pydicom plugin reads this transfer syntax."
+    if listed:
+        words += f" pydicom lists: {listed}."
+    return words
+
+
 def _log_memory_only_refusal(uid):
     # Refusing is the guard working: pixel data held only in memory
     # (edited but not yet saved) cannot be re-loaded, so clearing it would
@@ -2015,6 +2076,10 @@ class Instance(DicomItem):
             try:
                 # Read pixel data on demand
                 ds = None
+                # Whether a decoder was asked at all. A refusal this door
+                # makes before that is about the file, and gets no advice
+                # about a decoder (`_missing_decoder_words`).
+                decoder_asked = False
                 try:
                     # `force=True`, and it must stay: the eager read and
                     # this lazy re-read are two reads of the *same*
@@ -2047,12 +2112,15 @@ class Instance(DicomItem):
                     # The wording trap. This rides the outer `except`
                     # into "Lazy load failed for instance <uid>:
                     # RuntimeError: ...", and on the
-                    # way it passes two message matches: "no pixel data"
+                    # way it passes one message match: "no pixel data"
                     # (just below) turns into `return None`, a silent
-                    # nothing, and "decompress" / "missing dependencies"
-                    # turn into the codecs-missing message. The helper's
+                    # nothing. The helper's
                     # "<table> names N frames; NumberOfFrames declares M"
-                    # contains none of them. Do not reword it into one.
+                    # does not contain it. Do not reword it into one. (The
+                    # codecs-missing message was chosen by words too, until
+                    # #623; it is decided from state now, and a refusal
+                    # made here, before any decoder is asked, never gets
+                    # it.)
                     mismatch = h.frame_count_mismatch(ds)
                     if mismatch is not None:
                         raise RuntimeError(mismatch)
@@ -2075,6 +2143,7 @@ class Instance(DicomItem):
                     # exists to catch, and a snapshot taken after would
                     # already contain it and never be tested.
                     snapshot = dict(self.attributes)
+                    decoder_asked = True
                     arr, decoded = _decode_from_file(ds)
                     relabel = (str(decoded) if decoded is not None
                                and str(decoded) != declared else None)
@@ -2189,36 +2258,20 @@ class Instance(DicomItem):
                 if ds is not None and hasattr(ds, "file_meta"):
                     ts_uid = getattr(ds.file_meta, "TransferSyntaxUID", "Unknown")
 
-                # The advice names a remedy for a codec that is missing,
-                # so it follows pydicom's "missing dependencies" or
-                # "decompress" words only when no codec decoded the file:
-                # not when imagecodecs was asked and refused it on what it
-                # holds ("imagecodecs could not decode it either: <why>"),
-                # where installing pillow, pylibjpeg or gdcm changes
-                # nothing -- unless the why is that imagecodecs is not
-                # available, which is a missing codec.
-                words = str(e)
-                if (("missing dependencies" in words or "decompress" in words)
-                        and ("imagecodecs could not decode it either: "
-                             not in words
-                             or "imagecodecs is not available" in words)):
-                    # Enhanced debug output
-                    handlers = []
-                    try:
-                        # pydicom is already imported globally
-                        handlers = [str(h) for h in pydicom.config.pixel_data_handlers]
-                    except AttributeError:
-                        # pydicom 4.0 removes pixel_data_handlers. This is
-                        # only decorating an error message, so an empty list
-                        # is fine -- but do not let it hide the real one.
-                        handlers = []
-
+                # The advice names a remedy for a decoder that is missing,
+                # so it is decided from what is missing and never from the
+                # failure's words (#623): a message that says "decompress"
+                # is not an installation with a decoder absent, and a file
+                # refused on what it holds is not helped by installing
+                # anything.
+                missing = (_missing_decoder_words(e, ds) if decoder_asked
+                           else None)
+                if missing is not None:
                     raise RuntimeError(
                         f"Failed to decompress pixel data for instance {self.sop_instance_uid} "
                         f"(Transfer Syntax: {ts_uid}).\n"
                         f"Underlying Error: {describe_exception_without_paths(e)}\n"
-                        f"Active pydicom handlers: {handlers}\n"
-                        "Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."
+                        f"Missing image codecs: {missing}"
                     ) from e
 
                 # If we just caught the re-raised "no pixel data" exception, it would be handled above,

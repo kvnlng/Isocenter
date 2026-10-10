@@ -113,16 +113,27 @@ def is_available():
     return True
 
 
-def _unavailable() -> RuntimeError:
+class ImagecodecsUnavailable(RuntimeError):
+    """The fallback was asked to decode and imagecodecs did not import.
+
+    A class of its own so that `Instance.get_pixel_data` can tell a
+    missing decoder from a file no decoder reads by what was raised, not
+    by words in a message (#623). Its name is spelled in the row a user
+    reads (`... could not decode it either: ImagecodecsUnavailable:
+    imagecodecs is not available: ...`). At module level, so it pickles.
+    """
+
+
+def _unavailable() -> ImagecodecsUnavailable:
     """The one refusal both decoders raise when imagecodecs did not import.
 
     Callers raise it `from IMPORT_ERROR`, so the cause is chained as well
     as quoted.
 
     Returns:
-        RuntimeError: Carrying the import failure's own words
-        (`describe_exception`), or only "imagecodecs is not available"
-        with no recorded import error.
+        ImagecodecsUnavailable: A `RuntimeError` carrying the import
+        failure's own words (`describe_exception`), or only "imagecodecs
+        is not available" with no recorded import error.
     """
     # The words matter because the stderr print in `is_available()` may
     # never be shown by a worker, a notebook or a log-only deployment, and
@@ -130,8 +141,8 @@ def _unavailable() -> RuntimeError:
     # the whole clue to the fix. Read at call time, so the module global is
     # what it describes.
     if IMPORT_ERROR is None:
-        return RuntimeError("imagecodecs is not available")
-    return RuntimeError(
+        return ImagecodecsUnavailable("imagecodecs is not available")
+    return ImagecodecsUnavailable(
         f"imagecodecs is not available: {describe_exception(IMPORT_ERROR)}")
 
 
@@ -642,10 +653,11 @@ def frame_count_mismatch(ds) -> Optional[str]:
         `offset_table_frame_count`).
     """
     # The wording is load-bearing for `Instance.get_pixel_data`: its file
-    # arm turns a message containing "no pixel data" into `return None` and
-    # one containing "decompress" or "missing dependencies" into the
-    # codecs-missing message. "names N frames; NumberOfFrames declares M"
-    # contains none of the three; keep it that way.
+    # arm turns a message containing "no pixel data" into `return None`.
+    # "names N frames; NumberOfFrames declares M" does not contain it;
+    # keep it that way. (The codecs-missing message was chosen by
+    # "decompress" or "missing dependencies" until #623, and is decided
+    # from state now.)
     counted = offset_table_frame_count(ds)
     if counted is None or counted[0] == counted[1]:
         return None

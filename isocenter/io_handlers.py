@@ -2811,10 +2811,11 @@ def _no_frame_boundary_words(ds) -> str:
     Returns:
         str: One sentence for the `RuntimeError` `_decode_pixels` raises.
     """
-    # The words must carry none of the three substrings
-    # `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
-    # "decompress", "missing dependencies" -- so the read door raises them
-    # as they stand rather than turning them into a codecs-missing message.
+    # The words must not carry the substring `Instance.get_pixel_data`'s
+    # file arm routes on -- "no pixel data", which it turns into `return
+    # None` -- so the read door raises them as they stand. (Its
+    # codecs-missing message is decided from state since #623, not from
+    # "decompress" or "missing dependencies" in a message.)
     #
     # "with no offset table" is unconditional and true only because of a
     # guard upstream: a file whose Basic or Extended Offset Table names a

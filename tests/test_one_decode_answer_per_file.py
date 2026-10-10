@@ -56,10 +56,10 @@ def _refused_everywhere(tmp_path, ds, words, counter):
     assert words in str(decoded), str(decoded)
     read = at_instance(path)
     assert isinstance(read, RuntimeError), read
-    # Either of the door's two raises: a reason that carries pydicom's
-    # "missing dependencies" takes the codecs-missing one. Both name the
-    # instance and never the file, whose folder may be named for the
-    # patient.
+    # Either of the door's two raises (the codecs-missing one is chosen
+    # from state since #623, and none of these files reaches it). Both
+    # name the instance and never the file, whose folder may be named for
+    # the patient.
     assert str(read).startswith(("Lazy load failed for instance ",
                                  "Failed to decompress pixel data for "
                                  "instance ")), str(read)

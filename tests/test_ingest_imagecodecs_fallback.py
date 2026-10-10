@@ -725,8 +725,10 @@ def test_ingest_names_why_imagecodecs_is_unavailable(tmp_path, monkeypatch):
     _without_imagecodecs(monkeypatch)
     reason = ingest_worker(path)[-1]
     assert reason.startswith("Decompression Failed:"), reason
-    assert "imagecodecs is not available: ImportError" in reason, reason
-    assert "libjpeg.so.8" in reason, reason
+    # The refusal's class is in the row, and is its own since #623.
+    assert ("; imagecodecs could not decode it either: "
+            "ImagecodecsUnavailable: imagecodecs is not available: "
+            "ImportError: libjpeg.so.8") in reason, reason
 
 
 def test_the_lazy_load_error_carries_the_true_reason(tmp_path):
@@ -787,7 +789,9 @@ def test_the_read_door_names_why_imagecodecs_is_unavailable(tmp_path,
     # `_decode_pixels`, whose refusal carries the handler's words as the
     # reason imagecodecs could not decode the file either. It read
     # `imagecodecs fallback: ...` when the door asked the handler itself.
-    assert ("imagecodecs could not decode it either: RuntimeError: "
+    # The class is `ImagecodecsUnavailable` since #623: the advice is
+    # chosen by it, and no longer by "decompress" in pydicom's words.
+    assert ("imagecodecs could not decode it either: ImagecodecsUnavailable: "
             "imagecodecs is not available: ImportError") in msg, msg
     assert "libjpeg.so.8" in msg, msg
-    assert "Missing image codecs" in msg, msg
+    assert "Missing image codecs: imagecodecs did not import" in msg, msg
