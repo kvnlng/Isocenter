@@ -3339,7 +3339,7 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     A lossless JPEG or a JPEG 2000 codestream states the sample precision
     every decoder reconstructs against (the SOFn `P` field
     `_jpeg_precision` reads, ITU-T T.81 B.2.2; the SIZ segment's for a
-    codestream). Decoders disagree, silently, about a stream whose decoded
+    codestream). Decoders disagree, silently, about a lossless JPEG whose
     samples exceed it: the imagecodecs fallback returns what the stream
     encodes, and pydicom with pylibjpeg-libjpeg saturates. Nothing is
     rewritten -- the samples are stored and exported as decoded -- and the
@@ -3366,8 +3366,8 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # saturating writes 4095 over the 4200 the stream encodes, altering
     # pixels to match another library's silent alteration, and masking
     # gives 104, which no door produces. Only T.81 lossless is known to
-    # produce the shape: `jpegls_encode` writes the array's width, or masks
-    # into a `bitspersample` (2026.10.10 on), and `jpeg2k_encode` clamps.
+    # reach here in the shape: `jpegls_encode` masks into a `bitspersample`
+    # (2026.10.10 on), and openjpeg's decode clamps what `jpeg2k_encode` wrote.
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
                           or ts in T81_SYNTAXES):
