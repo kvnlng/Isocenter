@@ -2247,6 +2247,16 @@ instance_number, file_path, source_path</code> (<code>pixel_array</code> and
 <code>date_shifted</code> field until 0.9.6; it is gone, and reading it raises
 <code>AttributeError</code>. <code>Equipment</code>: <code>manufacturer, model_name,
 device_serial_number</code>.</p>
+<p>Assigning <code>Instance.sop_instance_uid</code> a value it does not already hold
+also sets <code>attributes["0008,0018"]</code> to it and marks the instance edited,
+once. So the export writes that instance under the assigned UID: in the
+file's name, in <code>(0008,0018)</code> and in Media Storage SOP Instance UID. An
+instance assigned a UID that cannot name a file (<code>''</code> among them) is
+refused at export by the file-name rule and not written, as any such
+instance is: <code>''</code> is one of <code>ExportSummary.failures</code>, keyed <code>UNKNOWN</code>,
+with one <code>ERROR</code> audit row. Assigning the value already held
+changes nothing, so an element written straight into <code>attributes</code> is not
+brought back by it (#936).</p>
 <p><code>Series.series_number</code> and <code>Series.modality</code> are the source's Series
 Number and Modality as ingested, and <code>Instance.instance_number</code> the
 file's Instance Number. None of the three is what an export writes: the
@@ -2351,7 +2361,55 @@ otherwise.</p>
   <code>str</code> (<code>None</code>, or a value of another type), giving the count. Raised
   by the save before it stores or appends anything, so nothing is saved
   or exported. Under <code>export(check_burned_in=True)</code> the
-  pre-export scan has already run.</li>
+  pre-export scan has already run. The same three calls raise
+  <code>ValueError</code>, at the same point and with the same guarantees, when a
+  patient, study or series in the session holds a key that is not a
+  <code>str</code>: <code>patient.patient_id</code>, <code>study.study_instance_uid</code> or
+  <code>series.series_instance_uid</code>. The message gives the count at each of
+  the three levels and no value. An empty <code>str</code> is not refused by either
+  check. <code>anonymize()</code> never clears one of those three keys: a
+  <code>REMOVE_TAG</code> finding naming one is declined with a
+  <code>REMEDIATION_DECLINED</code> audit row, and <code>load_config()</code> refuses the rule
+  (#949).</li>
+<li><code>audit()</code>, <code>redact()</code>, <code>lock_identities()</code> and <code>lock_identities_batch()</code>,
+  after a <code>save()</code> without <code>sync=True</code> whose write failed: each drains
+  the queue on entry and then runs that save again itself, on the calling
+  thread, before it does anything else. That save writes the session's
+  patients as they stand then (<code>session.store.patients</code>, read at that
+  moment), not as they stood when <code>save()</code> was called: a patient removed
+  from the session since, by editing the list or by assigning
+  <code>session.store.patients</code> a new one, is removed from the store, and one
+  added since is saved. If the save now succeeds, nothing is raised and
+  nothing is said. If it fails again, the call raises what the save
+  raises: the <code>TypeError</code> or <code>ValueError</code> above, an <code>OSError</code>, or the
+  sidecar lock's <code>RuntimeError</code>. The next such call runs it again, until
+  a save succeeds. A lock that raises this way has embedded no token and
+  created no key file.
+  The calls that begin with one of those four raise it too, from that
+  inner call and before they write anything: <code>anonymize()</code> with no
+  findings (it calls <code>audit()</code>), <code>redact_by_machine()</code> (it calls
+  <code>redact()</code>), <code>export(check_burned_in=True)</code> (its pre-export scan is an
+  <code>audit()</code>, before the export's own save), and <code>lock_identities()</code>
+  given a list or a report (the batch form).
+  <code>anonymize(report)</code>, handed its findings, makes no such call and
+  returns; so does <code>recover_patient_identity()</code>. Both wait for the queue
+  where they did and do not run a failed save.
+  <code>save()</code> itself still returns before the write and raises nothing for
+  it, and <code>close()</code> does not raise for it. <code>save(sync=True)</code>, <code>export()</code>
+  and <code>compact()</code> save the session themselves, as before. <code>redact()</code>
+  with no rules loaded returns 0 before it drains.
+  A session that ends, by <code>close()</code> or when the process exits with the
+  session still referenced and never closed, with a failed background
+  save that no later save has healed
+  writes one <code>ERROR</code> audit row keyed <code>SESSION</code> (<code>A background save()
+  failed and no later save succeeded before the session ended, ...</code>), so
+  a later session's report on that store grades <code>REVIEW_REQUIRED</code>.
+  <code>generate_report()</code> is not one of the calls above, and the row is
+  written when the session ends: a report generated in the same session,
+  with no <code>audit()</code> after the failed save, does not show the failure.
+  One session used from two threads at once can have a retry on one
+  thread fail while a save on the other succeeds; the failure then
+  stays recorded although nothing is unsaved (#941).</li>
 <li><code>redact()</code>: <code>RuntimeError</code> on a <code>:memory:</code> store when the environment
   asks for worker recycling.</li>
 <li><code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code>:

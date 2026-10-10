@@ -2697,12 +2697,31 @@ Nor is any other numpy value: a <code>datetime64</code>, a <code>timedelta64</co
 number and a masked value stay as given, and the save refuses them.
 A value written straight into <code>attributes</code> is not seen by the entity
 (call <code>mark_modified()</code>), and a numpy number written that way is
-converted when it is saved. The store holds <code>None</code>, <code>str</code>, <code>bytes</code>,
+converted when it is saved. <code>export()</code> writes one as the Python number
+it equals whether or not it was saved, so the file is the same before
+and after a save and a reopen; it writes a <code>tuple</code> as the list it
+equals, and a <code>Decimal</code> (which the save refuses, and which only a value
+written straight into <code>attributes</code> or a graph built by hand can hold) as
+the <code>float</code> it equals. None of the three is changed in <code>attributes</code>.
+A number under a standard element whose VR holds text
+(<code>set_attr("0008,1090", 7)</code>) is not written: the file is exported
+without that element, under one <code>DATA_LOSS</code> row naming the tag, the type
+and the VR. Pass the text. The store holds <code>None</code>, <code>str</code>, <code>bytes</code>,
 <code>bool</code>, <code>int</code>, <code>float</code>, pydicom's DS and IS values, and lists of those;
 <code>set_attr()</code> raises nothing for anything else, and the next
 <code>save(sync=True)</code>, <code>export()</code> or <code>compact()</code> raises <code>TypeError</code> naming
 the instance, the tag and the type (<a href="../stability/">API stability</a>,
 Exceptions).</p>
+<p><strong>What assigning <code>Instance.sop_instance_uid</code> does.</strong> It moves the field
+and the <code>(0008,0018)</code> element together, and marks the instance edited:
+<code>instance.sop_instance_uid = "1.2.3.4"</code> leaves <code>"1.2.3.4"</code> in
+<code>instance.attributes["0008,0018"]</code>, and the export writes the file as
+<code>1.2.3.4.dcm</code> with that UID inside. An instance assigned <code>''</code> is not
+written: the export's file-name rule refuses a UID that cannot name a
+file, and reports it as a failure keyed <code>UNKNOWN</code>. Assigning
+the value the field already holds changes nothing. <code>series.series_instance_uid</code>,
+<code>study.study_instance_uid</code> and <code>patient.patient_id</code> need no such step:
+the export stamps each file's copy from the owner.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -3048,7 +3067,11 @@ Whether <em>this</em> study date is one the shift produced is
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The time of the study.</p>
+                <p>A time of the study a caller may hold
+here. Ingest never sets it, the store has no column for it
+(it reads None after a reopen), and no export writes it: each
+file carries its own instance's Study Time <code>(0008,0030)</code>
+(#953), as it does its own Series Number and Modality.</p>
               </div>
             </td>
           </tr>

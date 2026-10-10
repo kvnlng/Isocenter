@@ -2784,7 +2784,10 @@ report of that store grades <code>REVIEW_REQUIRED</code> (see <a href="#what-to-
 <li>The table's other sequences coded <code>D</code> have no rule: Verifying Observer Sequence and Flow Identifier Sequence. Every identifying attribute their items can hold is a row of its own and is handled where it sits, so the items stay valid. Waveform Annotation Sequence is below.</li>
 <li>Study and Series Description are emptied rather than removed, because the export directory names read them.</li>
 <li>Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned. An icon is dropped when its pixels may show what redaction removed, in two tiers: an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a <em>different</em> instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export.</li>
-<li>Retired Curve groups <code>(50xx)</code> are removed, by the table's own <code>50xx,xxxx</code> row. Overlay groups <code>(60xx)</code> are removed whole by <code>60xx,xxxx</code>, a rule the table does not have. The table removes Overlay Data <code>(60xx,3000)</code> and Overlay Comments <code>(60xx,4000)</code>, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them". The two table rows are folded into the group rule, so <code>"60xx,xxxx": {action: KEEP}</code> keeps a whole, valid overlay.</li>
+<li>Retired Curve groups <code>(50xx)</code> are removed, by the table's own <code>50xx,xxxx</code> row. Overlay groups <code>(60xx)</code> are removed whole by <code>60xx,xxxx</code>, a rule the table does not have. The table removes Overlay Data <code>(60xx,3000)</code> and Overlay Comments <code>(60xx,4000)</code>, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them". The two table rows are folded into the group rule, so <code>"60xx,xxxx": {action: KEEP}</code> keeps a whole, valid overlay.<ul>
+<li>A presentation state's Bitmap Display Shutter can name an overlay group this removes: Shutter Overlay Group <code>(0018,1623)</code> is kept as written, and then points at a group the file no longer has. PS3.15 Annex E is the authority on what the profile removes: for the overlay group, E.1.1's sentence on overlays quoted above, and for every other attribute, Table E.1-1, which has no row for Shutter Overlay Group. Isocenter does not second-guess either for one object: it neither keeps a group because a shutter names it nor removes the shutter. Removing Overlay Data alone, as the table's own row does, already left that presentation state without a Type 1 element. Where it must stay valid, keep the overlays: <code>"60xx,xxxx": {action: KEEP}</code>.</li>
+</ul>
+</li>
 <li>Isocenter's own redaction note in Derivation Description <code>(0008,2111)</code> is kept; any other Derivation Description is removed.</li>
 <li>Private attributes are the <code>remove_private_tags</code> sweep, not a rule.</li>
 </ul>
@@ -2995,13 +2998,28 @@ two values (PS3.5 6.4), whether or not the attribute allows more than one.
 Isocenter holds the element's text as the file wrote it and, where the
 policy keeps the element, exports the same values: two Operators' Names
 stay two, and a Patient's Name the source wrote with two is written with
-two. One case is written differently: a <em>private</em> <code>PN</code> holding several
-values, kept with <code>remove_private_tags: false</code>. An export in an Explicit
-VR transfer syntax (<code>use_compression=True</code>) writes it under <code>UT</code>, the same
+two. A <em>private</em> <code>PN</code> holding several values, kept with
+<code>remove_private_tags: false</code>, is written the same way: <code>PN</code>, with the
+source's values, and no audit row
+(<a href="https://github.com/kvnlng/Isocenter/issues/951">#951</a>). One case is
+still written differently: a private <code>PN</code> holding a value of more than 64
+characters, which <code>PN</code> cannot carry. An export in an Explicit VR transfer
+syntax (<code>use_compression=True</code>) writes that element under <code>UT</code>, the same
 text; an Implicit VR export (<code>use_compression=False</code>) names no VR and
 carries the same text. Either way the export writes one <code>WARNING</code> row
 naming the tag and both VRs, so the run grades <code>REVIEW_REQUIRED</code>
 (<a href="https://github.com/kvnlng/Isocenter/issues/937">#937</a>).</p>
+<p><strong>Two values in an element a series is described by.</strong> Manufacturer,
+Manufacturer's Model Name, Device Serial Number, Modality and Series
+Number each take one value. A file that holds two in one of them
+(<code>ACME\Imaging</code>) is ingested: <code>Series.modality</code> and the three <code>Equipment</code>
+fields hold the file's text, backslash included, and <code>Series.series_number</code>
+is 0. A machine rule is compared with that text, as with any one value.
+The file's own element is exported
+with the values the source wrote, where the policy keeps it, and no row is
+written. The series folder is named from one Modality and one number, so
+it reads <code>OT</code> for two Modalities and <code>0</code> for two Series Numbers
+(<a href="https://github.com/kvnlng/Isocenter/issues/985">#985</a>).</p>
 <p><strong>One <code>UN</code> value is resolved rather than kept opaque.</strong> If a private
 <code>UN</code> value begins with the item tag <code>(FFFE,E000)</code> and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
@@ -3176,15 +3194,71 @@ section but does not change the grade.</p>
 <li>No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.</li>
 </ul>
 </li>
-<li><strong>Longitudinal Temporal Information Modified <code>(0028,0303)</code></strong>, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says <code>UN</code>) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop <code>MODIFIED</code>; it is exported as <code>UN</code>, and <code>remove_private_tags</code> (on by default) removes it.<ul>
-<li><code>REMOVED</code> when every date is empty or the dummy <code>19000101</code>.</li>
-<li><code>MODIFIED</code> when the rest are shifts this store wrote.</li>
-<li>Nothing when any date is as it was ingested; the source's value, if any, then stays.</li>
+<li>
+<p><strong>Longitudinal Temporal Information Modified <code>(0028,0303)</code></strong>, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element whose VR the source did not state (an Implicit VR source, or an Explicit VR one that says <code>UN</code>) has no recorded VR, whether or not pydicom's private dictionary knows its creator, so a date in it is not read and does not stop <code>REMOVED</code>; it is exported as <code>UN</code>, and <code>remove_private_tags</code> (on by default) removes it.</p>
+<ul>
+<li><code>MODIFIED</code> when at least one date is a shift this store wrote, whatever the others are. It replaces the source's value, a source <code>UNMODIFIED</code> included. It says that a date in the file was modified, not that every date was: a date beside it may be as it was ingested.</li>
+<li><code>REMOVED</code> when no date is shifted and every date is empty or the dummy <code>19000101</code>.</li>
+<li>Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays.</li>
 <li>TM is not read: a time of day beside a shifted date does not place the patient in time.</li>
 <li><code>UNMODIFIED</code> is never written, because a date kept on purpose cannot be told from one no rule named.</li>
 </ul>
+<p>Worked on a CT whose source holds Study Date, Series Date, Acquisition Date, Content Date, Instance Creation Date and an empty Birth Date:</p>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Study Date</th>
+<th>The other dates</th>
+<th><code>(0028,0303)</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the floor</td>
+<td>shifted</td>
+<td>empty or <code>19000101</code></td>
+<td><code>MODIFIED</code></td>
+</tr>
+<tr>
+<td><code>basic@2026c</code></td>
+<td>empty</td>
+<td>empty or <code>19000101</code></td>
+<td><code>REMOVED</code></td>
+</tr>
+<tr>
+<td><code>privacy_profile: none</code></td>
+<td>shifted (the default for Study Date with no rule)</td>
+<td>as ingested</td>
+<td><code>MODIFIED</code></td>
+</tr>
+<tr>
+<td><code>none</code> plus <code>0008,0020: KEEP</code></td>
+<td>as ingested</td>
+<td>as ingested</td>
+<td>nothing; a source's value stays</td>
+</tr>
+<tr>
+<td>the floor plus <code>0008,0021: KEEP</code></td>
+<td>shifted</td>
+<td>Series Date as ingested, the rest empty or <code>19000101</code></td>
+<td><code>MODIFIED</code></td>
+</tr>
+<tr>
+<td><code>basic@2026c</code> plus <code>0008,0021: KEEP</code></td>
+<td>empty</td>
+<td>Series Date as ingested, the rest empty or <code>19000101</code></td>
+<td>nothing; a source's value stays</td>
+</tr>
+<tr>
+<td>* <strong>De-identification Method Code Sequence <code>(0012,0064)</code></strong>: no code is written (see the departures above). A source's items pass through.</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
 </li>
-<li><strong>De-identification Method Code Sequence <code>(0012,0064)</code></strong>: no code is written (see the departures above). A source's items pass through.</li>
 </ul>
 <p><strong>Your rules decide.</strong> Table E.1-1 has no row for any of the three elements. A rule you write on one, of any action, <code>KEEP</code> included, means the export does not stamp that element: <code>KEEP</code> over a source <code>NO</code> exports <code>NO</code>. The other two are still stamped.</p>
 <p><strong>Where not.</strong> <code>DicomExporter.write_tree()</code> writes none of them: it is the serializer without the pipeline. A WFDB header has no such field. The markers are never written into the store.</p>

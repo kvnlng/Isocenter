@@ -2608,7 +2608,10 @@ session when it finishes.</p>
 <p>A file that cannot be ingested does not raise. It is counted in the
 returned summary and gets an <code>ERROR</code> audit row naming the path and
 the reason, which bars a <code>PASS</code> grade. Check the return value: a
-run that rejected files completes normally.</p>
+run that rejected files completes normally. A file refused after
+its pixels or waveform samples were read (<code>Linkage Failed</code>) may
+leave them in the sidecar as dead space until <code>compact()</code>, which
+reclaims them in a store that holds at least one instance (#943).</p>
 <p><strong>Hidden files.</strong> A file found walking <code>directory</code> whose name
 starts with <code>.</code> (<code>.DS_Store</code>, AppleDouble <code>._*</code>) is not read. It is
 counted in <code>IngestSummary.hidden</code>, and the console summary prints
@@ -2766,6 +2769,18 @@ the reason.</p>
     <div class="doc doc-contents ">
 
         <p>Persist the current session state to the store.</p>
+<p>Without <code>sync=True</code> the save is queued and this returns before it
+is written, so a failure is not raised here. It is logged at
+ERROR, and then heard at the next call that drains the queue:
+<code>audit()</code>, <code>redact()</code>, <code>lock_identities()</code> and
+<code>lock_identities_batch()</code> run the failed save again themselves and
+raise what it raises (a failure that has passed heals there
+silently). <code>save(sync=True)</code>, <code>export()</code> and <code>compact()</code> save the
+session themselves and raise the same way. A session closed, or a
+process that exits, with a failed background save that no later
+save healed writes one <code>ERROR</code> audit row keyed <code>SESSION</code>, so a
+later session's report on the store grades <code>REVIEW_REQUIRED</code>
+(#941).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2789,9 +2804,9 @@ the reason.</p>
             <td>
               <div class="doc-md-description">
                 <p>If True, block until the save is complete. A
-synchronous save first drains the persistence manager, as
-<code>audit()</code> and <code>redact()</code> do, and never returns early: a
-background save that does not finish blocks it.</p>
+synchronous save first waits for the persistence manager's
+queue, and never returns early: a background save that
+does not finish blocks it.</p>
               </div>
             </td>
             <td>
@@ -3159,6 +3174,21 @@ secret it no longer has.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="Exception">Exception</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When a background <code>save()</code> failed and still fails:
+the entry drain runs that save again and raises what it
+raises (the store's named <code>TypeError</code> or <code>ValueError</code>, an
+<code>OSError</code>, the sidecar gate's <code>RuntimeError</code>), before
+anything is scanned. A failure that has passed is saved
+there and nothing is raised (#941).</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -3378,6 +3408,20 @@ were de-identified under different date-offset schemes.
 Raised at the merge, after the remediations are applied.
 Unreachable on a graph the library built, and reachable on
 one built in user code.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="Exception">Exception</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>With no <code>findings</code>, whatever the <code>audit()</code> it
+begins with raises, a background <code>save()</code> that failed and
+still fails among them (#941), before anything is
+remediated. Handed its findings it makes no such call and
+does not raise that.</p>
               </div>
             </td>
           </tr>
@@ -3724,6 +3768,20 @@ report, the batch form's <code>sqlite3.Error</code> applies.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="Exception">Exception</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When a background <code>save()</code> failed and still fails:
+the lock's drain runs that save again and raises what it
+raises, before any token is embedded. A failure that has
+passed is saved there and nothing is raised (#941). The
+batch form does the same.</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -3935,6 +3993,19 @@ before any patient is planned.</p>
               <div class="doc-md-description">
                 <p>The key file is empty or is not a Fernet key, as
 for <code>lock_identities()</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="Exception">Exception</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>When a background <code>save()</code> failed and still fails:
+the lock's drain runs that save again and raises what it
+raises, before any token is embedded, as for
+<code>lock_identities()</code> (#941).</p>
               </div>
             </td>
           </tr>
@@ -4330,7 +4401,11 @@ configuration retries it.</p>
             <td>
               <div class="doc-md-description">
                 <p>Whatever the redaction backend raised, after logging
-it.</p>
+it. Also, before the pass starts, what a background
+<code>save()</code> that failed raises when the entry drain runs it
+again and it still fails; one that has passed is saved
+there and nothing is raised (#941). A call with no rules
+loaded returns 0 before that drain.</p>
               </div>
             </td>
           </tr>
@@ -4470,6 +4545,19 @@ not be applied. The original rules are restored first.</p>
 <code>":memory:"</code> store whose environment asks for worker
 recycling and a pass-lock wait that expires. The original
 rules are restored first.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="Exception">Exception</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Propagated from <code>redact()</code>'s entry drain: a
+background <code>save()</code> that failed and still fails (#941),
+before anything is redacted. The original rules are
+restored first.</p>
               </div>
             </td>
           </tr>
@@ -4972,7 +5060,11 @@ PatientID. Also, on both formats, from the save an export
 begins with, when an instance with unsaved changes holds a
 SOP Instance UID that is not a <code>str</code>: it gives the count, and
 nothing is saved or written (#721; this was sqlite's
-<code>IntegrityError</code>).</p>
+<code>IntegrityError</code>). The same when a patient, study or
+series holds a Patient ID, Study Instance UID or Series
+Instance UID that is not a <code>str</code>, with a count per level
+(#949; <code>None</code> was sqlite's <code>IntegrityError</code>, and for any
+other type the save returned and the store lost the rows).</p>
               </div>
             </td>
           </tr>
@@ -5838,7 +5930,11 @@ written uncompressed instead, also named at INFO (#771).</p>
               <div class="doc-md-description">
                 <p>If True, scans for PHI before exporting and
 withholds every instance that still carries an identifier,
-at any level of its hierarchy. Each withheld instance
+at any level of its hierarchy. The scan is an <code>audit()</code>,
+run before the export's own save, so it raises what
+<code>audit()</code> raises, a background <code>save()</code> that failed and
+still fails among them (#941), with nothing written to
+the folder. Each withheld instance
 writes one <code>WARNING</code> audit row naming it and the level
 (patient, study, series or instance) that carried the
 identifier, never the value, so the report grades
