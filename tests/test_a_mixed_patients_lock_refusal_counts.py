@@ -60,8 +60,11 @@ def counted(blanked, left, total, holding, rest):
         f"lock_identities: anonymize() emptied or removed {named} on {left} of "
         f"this patient's {total} instances, and "
         f"{'it' if one else 'one or more of them'} still holds a value on "
-        f"{holding}, so the lock would stash an original for some instances and "
-        "none for others. ")
+        f"{holding}, "
+        + ("so the lock would stash an original for some instances and none for "
+           "others. " if one else
+           "so the lock would not stash an original in each of them for every "
+           "instance. "))
     if not rest:
         return (opening + "tags_to_lock names no other tag, so there is nothing "
                 "else to lock" + TAIL)
@@ -104,12 +107,15 @@ def _instances(session):
             for se in st.series for inst in se.instances]
 
 
-def _write(path, suffix, accession, same_study_as=None):
+def _write(path, suffix, accession, same_study_as=None, name=True):
     """CT_small under PID with a birth date and a study date no other file
-    here holds; `same_study_as` makes it a new series of that study."""
+    here holds; `same_study_as` makes it a new series of that study, and
+    `name=False` a file with no Patient's Name element at all."""
     write_ct(path, PID, suffix, study_date=STUDY_DATE, name=NAME, accession=accession)
     ds = pydicom.dcmread(str(path))
     ds.PatientBirthDate = BIRTH
+    if not name:
+        del ds.PatientName
     if same_study_as is not None:
         ds.StudyInstanceUID = study_uid(same_study_as)
         ds.SeriesInstanceUID = f"{study_uid(same_study_as)}.77"
@@ -225,6 +231,54 @@ def test_a_patient_ingested_again_after_a_pass_is_refused_in_counts(tmp_path, sa
                 new.attributes[ACC]) == (NAME, BIRTH, ACC_NEW)
 
 
+@pytest.mark.parametrize("beside", ["after_the_pass", "in_the_pass"])
+@pytest.mark.parametrize("reopen", [False, True], ids=["same_session", "reopened"])
+def test_a_file_that_never_carried_a_name_is_not_one_a_pass_emptied(
+        tmp_path, beside, reopen):
+    """Review of #1061, finding 1. Name under REMOVE, ID kept. File A goes
+    through the pass, file B arrives afterwards with a name, and file C,
+    of the same patient, has no `(0010,0010)` element at all; C arrives
+    after the pass, or goes through it beside A. Only A's own record says
+    a pass removed its name: 1 of 3, and 1 holding.
+
+    The lock stashes a name an instance has no copy of from the patient,
+    and asks every instance of the patient whether a pass wrote that
+    value. That answers whether the patient is refused, and it is not the
+    count: read for the count, it called C a pass's doing and said 2 of
+    3. C has no record of its own in either arrangement, the pass having
+    had no element of C's to remove. Kills the left count read through
+    the patient-level vouch."""
+    first, later = tmp_path / "a", tmp_path / "b"
+    _write(first / "a.dcm", "5941", ACC_OLD)
+    _write(later / "b.dcm", "5942", ACC_NEW)
+    _write((later if beside == "after_the_pass" else first) / "c.dcm", "5943",
+           "ACC-THIRD-594", name=False)
+    session = _session(tmp_path)
+    try:
+        session.configuration.set_phi_tag(NAME_TAG, "REMOVE")
+        session.configuration.set_phi_tag(ID_TAG, "KEEP")
+        session.ingest(str(first))
+        session.anonymize(session.audit())
+        session.save(sync=True)
+        session.ingest(str(later))
+        if reopen:
+            session.save(sync=True)
+            session.close()
+            session = _session(tmp_path)
+        [patient] = session.store.patients
+        made = _instances(session)
+        assert sorted(str(inst.attributes.get(NAME_TAG)) for inst in made) == sorted(
+            ["None", "None", NAME])
+        assert sum(inst.remediation_vouches_for(NAME_TAG, None) for inst in made) == 1
+        assert patient.patient_name is None
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert str(raised.value) == counted([NAME_TAG], 1, 3, 1, [ID_TAG])
+        assert all(SEQ not in inst.sequences for inst in made)
+    finally:
+        session.close()
+
+
 # ---------------------------------------------------------------------------
 # What is counted
 # ---------------------------------------------------------------------------
@@ -309,6 +363,48 @@ def test_a_mixed_patient_with_no_other_tag_to_lock_is_told_so(tmp_path):
             session.lock_identities(PID, tags_to_lock=[ACC])
         assert str(raised.value) == counted([ACC], 1, 2, 1, [])
         assert all(SEQ not in inst.sequences for inst in made)
+
+
+def test_two_blanked_tags_and_no_other_tag_to_lock_advise_no_list(tmp_path):
+    """Review of #1061, finding 3. `tags_to_lock` names exactly the two
+    tags a pass blanked, each on a different instance: counted, in the
+    several-tag words, and the advice is that nothing else is left, never
+    a call with `tags_to_lock=[]`. Kills the no-other-tag arm reached for
+    one blanked tag only."""
+    with _session(tmp_path) as session:
+        made = _hand(session, [[{ACC: ACC_OLD, OTHER: "OTHER-594", "pass": [ACC]}],
+                               [{ACC: ACC_NEW, OTHER: "OTHER-595", "pass": [OTHER]}]])
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID, tags_to_lock=[ACC, OTHER])
+        assert str(raised.value) == counted([ACC, OTHER], 2, 2, 2, [])
+        assert "tags_to_lock=" not in str(raised.value)
+        assert all(SEQ not in inst.sequences for inst in made)
+
+
+@pytest.mark.parametrize("removed_by_a_pass", [False, True],
+                         ids=["never_carried", "copy_removed_by_a_pass"])
+def test_a_name_the_lock_would_stash_from_the_patient_is_a_value_held(
+        tmp_path, removed_by_a_pass):
+    """One instance's name emptied by a pass, one with no copy of the name
+    under a patient that still holds it. The lock stashes the patient's
+    name for the second (#495), so that is an original the advised lock
+    leaves out: 1 of 2, and 1 holding. `holding` reads what the lock
+    would stash; only the first count reads the instance's own record.
+
+    And where that copy is gone because an instance-only pass removed it
+    (its record says so) while the patient kept the name, the instance is
+    still not one of the first count: the lock would stash the name for
+    it, so nothing was left blank there. Kills the first count read from
+    the record without asking whether the lock has a value to stash."""
+    with _session(tmp_path) as session:
+        emptied, bare = _hand(session, [[{"pass": [NAME_TAG]}], [{}]])
+        if removed_by_a_pass:
+            bare.record_remediation(NAME_TAG, None)
+        del bare.attributes[NAME_TAG]
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert str(raised.value) == counted([NAME_TAG], 1, 2, 1, [ID_TAG])
+        assert NAME not in str(raised.value)
 
 
 def test_a_batch_numbers_the_counted_refusal_and_locks_nobody(tmp_path):

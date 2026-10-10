@@ -4829,25 +4829,6 @@ class DicomSession:
         # any literal on it: the value is always the patient's own ID.
         # Every other replacement is quoted; it is what says which pass
         # wrote it.
-        def left_blank(tag, record, members):
-            """Whether a pass left `tag` blank or absent on `members`.
-
-            The one predicate behind both the tags the blank-tag refusal
-            names and the instances it counts (#594), so the two cannot
-            disagree.
-
-            Args:
-                tag (str): The tag, as `gggg,eeee`.
-                record (dict): The record every member shares.
-                members (list): A value-set's instances, or one of them.
-
-            Returns:
-                bool: True when the record holds no value there and a
-                    member's own record says a pass left it so.
-            """
-            return (not str(record.get(tag) or "").strip()
-                    and written_by_a_pass(tag, record.get(tag), members))
-
         def blanked_tags():
             """The tags of `tags_to_lock` a pass emptied or removed.
 
@@ -4857,7 +4838,8 @@ class DicomSession:
                     a pass left it so.
             """
             return [tag for tag in tags_to_lock
-                    if any(left_blank(tag, record, members)
+                    if any(not str(record.get(tag) or "").strip()
+                           and written_by_a_pass(tag, record.get(tag), members)
                            for record, members in groups)]
 
         def carries_a_token_of_ours():
@@ -5118,17 +5100,41 @@ class DicomSession:
             # is neither a pass's doing nor a value held, so it is in
             # neither count and the two need not add up to the total.
             # `holding` reads the blanked tags only, since those are what
-            # the advice drops. Counts and tags; no value. With nothing
-            # held, the sentence is the one it has been, byte for byte.
+            # the advice drops, and reads what the lock would stash, so
+            # a name the patient holds for an instance with no copy is a
+            # value held. Counts and tags; no value. With nothing held,
+            # the sentence is the one it has been, byte for byte.
+            #
+            # **Whether the patient is refused and how many instances a
+            # pass reached are two questions.** `blanked_tags()` answers
+            # the first, and for a name or ID an instance has no copy of
+            # it asks every instance of the patient (`patient_vouched`):
+            # the value is the patient's, and any instance the patient's
+            # write reached vouches for it. `left` answers the second
+            # from the instance's own record alone. Asked through
+            # `written_by_a_pass`, a file that never carried a Patient's
+            # Name was counted as one a pass emptied because another
+            # instance's record said so (review of #1061). Do not fold
+            # the two back into one predicate.
             blanked = blanked_tags()
             holding = sum(len(members) for record, members in groups
                           if any(str(record.get(tag) or "").strip() for tag in blanked))
             if holding:
-                left = sum(any(left_blank(tag, record, [inst]) for tag in blanked)
+                left = sum(any(not str(record.get(tag) or "").strip()
+                               and vouches(inst, tag, inst.attributes.get(tag), True)
+                               for tag in blanked)
                            for record, members in groups for inst in members)
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 one = len(blanked) == 1
                 named = blanked[0] if one else "one or more of " + ", ".join(blanked)
+                # With one tag, some instance holds it and some does not.
+                # With several that is true per tag and not per instance
+                # (each instance may hold one of them), so the clause
+                # says only what holds in every shape.
+                uneven = ("so the lock would stash an original for some instances "
+                          "and none for others" if one else
+                          "so the lock would not stash an original in each of them "
+                          "for every instance")
                 advice = (f"To lock this patient without {'it' if one else 'them'}, "
                           f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r}), "
                           f"which stashes {'it' if one else 'them'} for no instance: a "
@@ -5142,8 +5148,7 @@ class DicomSession:
                     f"lock_identities: anonymize() emptied or removed {named} on "
                     f"{left} of this patient's {len(instances)} instances, and "
                     f"{'it' if one else 'one or more of them'} still holds a value "
-                    f"on {holding}, so the lock would stash an original for some "
-                    "instances and none for others. "
+                    f"on {holding}, {uneven}. "
                     f"{advice}; the token this call would have written is unchanged.")
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
