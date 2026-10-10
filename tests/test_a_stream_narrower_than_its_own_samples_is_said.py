@@ -87,8 +87,8 @@ the very reason the row exists. Each test asserts the fallback actually
 answered (`got["pydicom_calls"]`), so a patch that failed to reach the
 ingest cannot pass for a measurement.
 
-**Only T.81 lossless can be built with this shape** -- see
-`test_the_shape_is_only_constructible_for_t81`.
+**Only T.81 lossless decodes to this shape** (a J2K codestream can hold it;
+openjpeg clamps it) -- see `test_the_shape_is_only_constructible_for_t81`.
 """
 import logging
 import os
@@ -770,11 +770,11 @@ def test_the_shape_is_only_constructible_for_t81():
       read 4095. A precision is under-declared now, and still no sample
       is beyond it.
 
-    `jpeg2k_encode(..., bitspersample=12)` **clamps at encode time** on
-    both (openjpeg 2.5.4): 4970 reads 4095.
+    `jpeg2k_encode(..., bitspersample=12)` writes 4970 under precision 12
+    on both (openjpeg 2.5.4), and **`jpeg2k_decode` clamps**: it reads 4095.
 
-    **What makes this red.** An encoder that writes 4970 into a stream
-    declaring precision 12 fails the bound, and that day #684's gap can
+    **What makes this red.** A JPEG-LS stream declaring precision 12 that
+    decodes to 4970 fails the bound, and that day #684's gap can
     be closed for `.80` with a product test. A `TypeError` that does not
     name the keyword fails the first arm, so a refusal for some other
     reason is not taken for the old signature. The second arm asserts
