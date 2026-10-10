@@ -694,6 +694,78 @@ def sop_classes_in_the_file_meta(out: Path):
     write(ds, out / "sop_classes_in_the_file_meta-1.dcm")
 
 
+def one_bit_excess(out: Path):
+    """An ordinary CT and two native 1-bit files of two other patients,
+    each 3x3 under NumberOfFrames 2 (#669). A bit-packed 3x3 frame is nine
+    bits, so two need three bytes and one pad. The file holding four is
+    read. The file holding six has room for five such frames; pydicom
+    decodes that many, a count that is not a whole number of bytes each,
+    and fails in CPython's words for a slice, so the row read
+    `Decompression Failed: TypeError: slice indices must be integers ...`.
+    It is refused in a sentence naming the bytes held and needed. No other
+    input holds a native 1-bit frame."""
+    write(ct("one_bit_excess", study=1, pid="GOLD-one_bit_excess-good"),
+          out / "one_bit_excess-good.dcm")
+    for n, (held, label) in enumerate(((4, "padded"), (6, "beyond")), start=2):
+        ds = ct("one_bit_excess", study=n, pid=f"GOLD-one_bit_excess-{label}")
+        ds.Rows = ds.Columns = 3
+        ds.NumberOfFrames = 2
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 1, 1, 0
+        ds[0x7FE00010] = pydicom.DataElement(
+            0x7FE00010, "OB", bytes([0b10110010, 0b01001101, 0b00000011,
+                                     0, 0b01010101, 0b00001111][:held]))
+        write(ds, out / f"one_bit_excess-{label}.dcm")
+
+
+#: Two 4x4, 8-bit JPEG 2000 Lossless codestreams, as bytes: frames
+#: `(13 * i) % 256` and `(13 * i + 100) % 256` for i in 0..15. Literals,
+#: not an encoder call, so the generator needs no codec and an encoder's
+#: next version cannot change what it would write.
+_J2K_FRAMES = tuple(bytes.fromhex(text) for text in (
+    "ff4fff5100290000000000040000000400000000000000000000000400000004"
+    "00000000000000000001070101ff52000c00000001000004040001ff5c000440"
+    "40ff640025000143726561746564206279204f70656e4a504547207665727369"
+    "6f6e20322e352e34ff90000a0000000000230001ff93df8090120f84c8100715"
+    "cde8741767895eeaf4887fffd9",
+    "ff4fff5100290000000000040000000400000000000000000000000400000004"
+    "00000000000000000001070101ff52000c00000001000004040001ff5c000440"
+    "40ff640025000143726561746564206279204f70656e4a504547207665727369"
+    "6f6e20322e352e34ff90000a0000000000220001ff93df808801178c4fa6d2c8"
+    "d2006647b87f676e2190ffd9"))
+
+
+def offset_table_edges(out: Path):
+    """An ordinary CT and two JPEG 2000 Lossless files of two other
+    patients, each two frames in two fragments under NumberOfFrames 2 and
+    an empty Basic Offset Table, each with an Extended Offset Table
+    (#621). One table is 12 bytes beside 12 bytes of Lengths: pydicom
+    walks by it, and 12 bytes are no whole number of 8-byte offsets. It
+    was refused as `Extended Offset Table names 1 frames; NumberOfFrames
+    declares 2`, and is refused in a sentence naming the table's length.
+    The other is 8 bytes beside 4 bytes of Lengths: pydicom drops such a
+    table and reads both frames from the fragments. It was refused in
+    that same sentence, and is ingested and exported. No other input
+    holds an Extended Offset Table."""
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    write(ct("offset_table_edges", study=1, pid="GOLD-offset_table_edges-good"),
+          out / "offset_table_edges-good.dcm")
+    offsets = struct.pack("<2Q", 0, 8 + len(_J2K_FRAMES[0]) + len(_J2K_FRAMES[0]) % 2)
+    lengths = struct.pack("<2Q", *(len(frame) for frame in _J2K_FRAMES))
+    for n, (table, sizes, label) in enumerate(
+            ((12, 12, "ragged"), (8, 4, "dropped")), start=2):
+        ds = ct("offset_table_edges", study=n, rows=4, cols=4,
+                pid=f"GOLD-offset_table_edges-{label}",
+                syntax="1.2.840.10008.1.2.4.90")
+        ds.NumberOfFrames = 2
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+        ds.add_new(0x7FE00001, "OV", offsets[:table])
+        ds.add_new(0x7FE00002, "OV", lengths[:sizes])
+        ds[0x7FE00010] = pydicom.DataElement(
+            0x7FE00010, "OB", encapsulate(list(_J2K_FRAMES), has_bot=False))
+        ds[0x7FE00010].is_undefined_length = True
+        write(ds, out / f"offset_table_edges-{label}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -703,7 +775,7 @@ MEMBERS = {f.__name__: f for f in (
     ecg_lead_codes, number_vr_on_a_date_or_time,
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
     source_says_unmodified, linkage_key_not_text,
-    sop_classes_in_the_file_meta)}
+    sop_classes_in_the_file_meta, one_bit_excess, offset_table_edges)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
