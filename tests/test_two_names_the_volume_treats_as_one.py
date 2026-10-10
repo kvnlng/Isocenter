@@ -52,7 +52,7 @@ from pydicom.data import get_testdata_file
 
 from isocenter import io_handlers
 from isocenter import session as session_module
-from isocenter.io_handlers import DicomExporter, ExportSummary
+from isocenter.io_handlers import DicomExporter, ExportError, ExportSummary
 from isocenter.session import DicomSession
 
 #: Read through `session`, never imported from its own module: this file
@@ -199,24 +199,62 @@ def test_a_folded_pair_is_one_error_row_and_one_written_uid(tmp_path):
     assert [f for f in _all_files(out) if f.endswith(".tmp")] == []
 
 
-def test_the_surviving_uid_is_the_one_in_the_file(tmp_path):
-    """Which instance's write lands last varies by run (measured: both
-    outcomes, on both interpreters), so the survivor is read from the file
-    and never taken from the plan's order. Five runs; in each,
-    `written_uids` names what `dcmread` of the folder says. On a volume
-    that keeps the names apart each of the two files holds its own UID.
+@pytest.mark.parametrize("holds", ["SOPa", "SOPA"])
+def test_the_surviving_uid_is_the_one_in_the_file(tmp_path, monkeypatch, holds):
+    """Which instance's write lands last is the pool's to decide (under
+    processes the plan's last won nearly every run here, so a test that
+    waits for both outcomes does not see both). The survivor is therefore
+    read from the file, and this test decides what the file holds: between
+    the batch and the report, the one file is rewritten in place to hold
+    `holds`, once for each of the two. `written_uids` follows the file both
+    times, through `export()`. On a volume that keeps the names apart
+    nothing is rewritten and each of the two files holds its own UID.
 
-    Kills, over five runs: the plan's first, or its last, kept as the
-    survivor (each is right about half the time)."""
+    Kills, on a folding volume, on every run: the plan's first, or its
+    last, kept as the survivor; the UID read back compared after folding
+    its case. (`test_the_read_back_uid_is_compared_as_written` holds the
+    same on every volume.)"""
     folds = _folds(tmp_path)
-    for run in range(5):
-        work = tmp_path / f"run{run}"
-        work.mkdir()
-        summary, out, _, _ = _export(work, "SOPa", "SOPA")
-        held = sorted(str(pydicom.dcmread(f).SOPInstanceUID)
-                      for f in _dcm_files(out))
+    report = DicomSession._report_export_collisions
+
+    def with_the_file_decided(self, tasks, summary):
+        if folds:
+            _write(tasks[0].output_path, holds)
+        return report(self, tasks, summary)
+
+    monkeypatch.setattr(DicomSession, "_report_export_collisions",
+                        with_the_file_decided)
+    summary, out, db, _ = _export(tmp_path, "SOPa", "SOPA")
+    held = sorted(str(pydicom.dcmread(f).SOPInstanceUID)
+                  for f in _dcm_files(out))
+    if not folds:
+        assert held == ["SOPA", "SOPa"]
         assert sorted(summary.written_uids) == held
-        assert len(held) == (1 if folds else 2)
+        return
+    [loser] = {"SOPa", "SOPA"} - {holds}
+    sentence = _folded(["SOPa", "SOPA"], holds)
+    assert held == [holds], "setup: the one file holds what the test wrote"
+    assert summary.written_uids == [holds]
+    assert summary.failures == [(loser, sentence)]
+    assert _rows(db) == [(holds, sentence)]
+
+
+@pytest.mark.parametrize("holds", ["SOPa", "SOPA"])
+def test_the_read_back_uid_is_compared_as_written(tmp_path, holds):
+    """Two UIDs that differ only in letter case, under two hard-linked
+    names of one file, on any volume: the member whose UID the file holds,
+    letter for letter, stays. Kills: the UID read back, or the members',
+    folded in case before they are compared (which keeps one fixed member
+    whatever the file holds)."""
+    tasks, summary = _collide(tmp_path, holds, "SOPa", "SOPA")
+    replaced, rows = _report(tmp_path, tasks, summary)
+    [loser] = {"SOPa", "SOPA"} - {holds}
+    sentence = _folded(["SOPa", "SOPA"], holds)
+    assert summary.written_uids == [holds]
+    assert summary.failures == [(loser, sentence)]
+    assert rows == [(holds, sentence)]
+    assert replaced == {id(task) for task in tasks
+                        if task.instance.sop_instance_uid == loser}
 
 
 def test_a_pair_the_default_pass_renames_is_two_files(tmp_path):
@@ -556,6 +594,82 @@ def test_an_unread_group_is_still_disclosed(tmp_path, monkeypatch):
         assert summary.written_uids == []
         assert session._report_recoverable_identities(
             tasks, summary.written_uids, replaced) == 1
+
+
+def test_export_hands_the_replaced_instances_to_the_disclosure(tmp_path, monkeypatch):
+    """The three tests above call the disclosure with the set in hand; this
+    one goes through `export()`, which must pass it. Two instances of one
+    locked patient, each carrying a token. Exported once as the volume has
+    them (two files): `2 of 2 exported instances carry …`. Exported again
+    with the volume answering "one file" for both paths: one instance
+    stays, the other is replaced, and the row reads `1 of 1`. The replaced
+    instance's planned file does exist (here, really), which is what the
+    disclosure would count it by if `export()` did not say it was replaced.
+
+    The same on every volume: the one function that asks the volume is
+    replaced. Kills: `export()` calling the disclosure without the set the
+    collision report returned."""
+    a, b = f"{ROOT}.1.1.1", f"{ROOT}.1.1.2"
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "test.key"))
+        session.ingest(_source(tmp_path, a, b))
+        session.lock_identities("PAT-1020")
+        session.export(str(tmp_path / "apart"), use_compression=False,
+                       show_progress=False)
+        monkeypatch.setattr(session_module, "_delivered_file_identity",
+                            lambda path: (1, 1))
+        summary = session.export(str(tmp_path / "one"), use_compression=False,
+                                 show_progress=False)
+    assert len(_dcm_files(tmp_path / "one")) == 2, \
+        "setup: the replaced instance's planned file exists"
+    [survivor] = summary.written_uids
+    details = [detail for _, detail in _rows(db, "REVERSIBLE_EXPORT")]
+    assert [d.split(" exported instances carry")[0] for d in details] \
+        == ["2 of 2", "1 of 1"]
+    assert _rows(db, "REVERSIBLE_EXPORT")[1][0] == survivor
+
+
+# --------------------------------------------------------------------------
+# Every instance in a group whose file cannot be read back
+# --------------------------------------------------------------------------
+
+def test_an_export_of_one_unread_group_raises_and_says_what_is_true(
+        tmp_path, monkeypatch):
+    """Every planned instance is in one group, and the group's file cannot
+    be read back as any of them: none is reported written, so `export()`
+    raises `ExportError`, as any export that reports nothing written does,
+    after its records: the `MULTIPLE` row, the `EXPORT` row `wrote 0 of 2
+    planned instances`, `REVIEW_REQUIRED`. A file **is** in the folder, so
+    the exception does not say "nothing reached disk", which it said of
+    every case before #1020; it says none is reported as written.
+
+    The same on every volume: the volume's answer and the read-back are
+    both replaced. Kills: the group's members left in `written_uids` (no
+    raise); the raise placed before the rows; the old sentence."""
+    a, b = f"{ROOT}.1.1.1", f"{ROOT}.1.1.2"
+    monkeypatch.setattr(session_module, "_delivered_file_identity",
+                        lambda path: (1, 1))
+    monkeypatch.setattr(session_module, "_sop_instance_uid_in",
+                        lambda path: None)
+    db, out = tmp_path / "s.db", tmp_path / "out"
+    with DicomSession(str(db)) as session:
+        session.ingest(_source(tmp_path, a, b))
+        with pytest.raises(ExportError) as raised:
+            session.export(str(out), use_compression=False, show_progress=False)
+        grade = _grade(session, tmp_path)
+    sentence = _folded_unread([a, b])
+    assert raised.value.attempted == 2
+    assert sorted(raised.value.failures) == [(a, sentence), (b, sentence)]
+    message = str(raised.value)
+    assert "wrote 0 of 2 planned instances; 2 failed and none is reported " \
+           "as written. First: " in message
+    assert "nothing reached disk" not in message
+    assert _dcm_files(out), "setup: a file is in the folder"
+    assert _rows(db) == [("MULTIPLE", sentence)]
+    [(_, export_row)] = _rows(db, "EXPORT")
+    assert "wrote 0 of 2 planned instances" in export_row
+    assert grade == ["REVIEW_REQUIRED"]
 
 
 # --------------------------------------------------------------------------

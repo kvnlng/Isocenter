@@ -367,7 +367,10 @@ otherwise.
   `.failures` (a list of `(entity_uid, details)`) and `.attempted`,
   raised after the whole pass.
 - `ExportError(failures, attempted, folder=None)`, a `RuntimeError`,
-  raised last and only when zero of N reached disk, by both formats.
+  raised last and only when zero of N are reported written, by both
+  formats. (One file can be in the folder then: N instances written
+  under names the volume resolved to one file that could not be read
+  back, [Export output](../export-output.md#where-files-land).)
 - `compact()`: `RuntimeError` while a pass is open (below).
 - `save(sync=True)`, `compact()` and `export()` (both formats begin with
   a save): `TypeError` when an instance with unsaved changes holds an

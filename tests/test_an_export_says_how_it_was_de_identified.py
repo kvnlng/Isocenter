@@ -758,6 +758,15 @@ def _an_empty_content_date(ds):
     ds.ContentDate = ""
 
 
+#: What a value-less REPLACE writes to a DT (`config_manager.VR_DUMMY`).
+DT_DUMMY = "19000101"
+
+
+def _an_acquisition_datetime(ds):
+    """A top-level DT, `(0008,002a)`: the other VR Q5 A names."""
+    ds.add_new(0x0008002A, "DT", "20040119072730")
+
+
 def _a_nested_date(ds):
     """Scheduled-step item holding a date `(0040,0244)`."""
     item = Dataset()
@@ -816,8 +825,15 @@ def _source_says(tmp_path, value, then=None):
      ("0008,0023", "19000101")),
     (_rules(t0008_0020="KEEP", t0010_0030="REMOVE"), _a_birth_date,
      ("0010,0030", None)),
+    (_rules(t0008_0020="KEEP", t0008_002a="REMOVE"), _an_acquisition_datetime,
+     ("0008,002a", None)),
+    (_rules(t0008_0020="KEEP", t0008_002a="EMPTY"), _an_acquisition_datetime,
+     ("0008,002a", "")),
+    (_rules(t0008_0020="KEEP", t0008_002a="REPLACE"), _an_acquisition_datetime,
+     ("0008,002a", DT_DUMMY)),
 ], ids=["study_date_removed", "study_date_emptied", "content_date_removed",
-        "content_date_emptied", "content_date_dummied", "birth_date_removed"])
+        "content_date_emptied", "content_date_dummied", "birth_date_removed",
+        "datetime_removed", "datetime_emptied", "datetime_dummied"])
 def test_a_sources_unmodified_is_withdrawn_beside_a_date_this_store_took(
         tmp_path, extra, edit, taken):
     """#1011 (owner ruling Q4 A, 2026-10-09). The source says `(0028,0303)
@@ -834,7 +850,8 @@ def test_a_sources_unmodified_is_withdrawn_beside_a_date_this_store_took(
     Kills: the source's value left; `REMOVED` or `MODIFIED` written in its
     place; the record read from the live session only; the dummy arm
     (`_remediated_values`) not read; the owner-stamped Study Date not
-    read."""
+    read; a DT not counted (Q5 A names DA **and** DT: the three
+    `datetime_` cases take `(0008,002a)` by each action)."""
     source = _source_says(tmp_path, "UNMODIFIED", edit)
     live, reopened, rows, grade = _two_exports(tmp_path, source, extra)
     tag, expected = taken
@@ -970,6 +987,68 @@ def test_a_study_date_set_back_on_the_study_does_not_withdraw_it(tmp_path):
     assert _markers(ds)["removed"] == "YES", "setup: the re-audit was whole"
     assert ds.StudyDate == "20040119", "setup: the owner's date is written"
     assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def test_an_instances_own_study_date_does_not_stand_for_the_studys(tmp_path):
+    """The other direction of the test above: the `Study` holds no date
+    (this store removed it) and the instance's own copy holds one a caller
+    wrote back. The file carries the `Study`'s, empty, so the date this
+    store took is still gone from the file and the source's `UNMODIFIED`
+    is withdrawn. Kills: the instance's copy laid over the owner stamp
+    (`{**stamps, **instance.attributes}`), which reads a date the file
+    will not carry."""
+    source = _source_says(tmp_path, "UNMODIFIED")
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(source)
+        session.load_config(_config(tmp_path, "first.yaml", privacy_profile="none",
+                                    **_rules(t0008_0020="REMOVE")))
+        session.anonymize(session.audit())
+        [inst] = _instances(session)
+        assert "0008,0020" in (inst._remediated_blank or "").split(), "setup"
+        inst.set_attr("0008,0020", "20040119")
+        session.load_config(_config(tmp_path, "second.yaml", privacy_profile="none",
+                                    **_rules(t0008_0020="KEEP")))
+        session.anonymize(session.audit())
+        assert inst.attributes.get("0008,0020") == "20040119", \
+            "setup: the instance's own copy holds a date"
+        assert not session.store.patients[0].studies[0].study_date, \
+            "setup: the Study holds none"
+        session.export(str(out), use_compression=False, show_progress=False)
+    ds = _written(out)
+    assert _markers(ds)["removed"] == "YES", "setup: the re-audit was whole"
+    assert ds.StudyDate == "", "setup: the file carries the Study's, empty"
+    assert _markers(ds)["temporal"] is None
+
+
+def _keep_the_identity_marker(extra):
+    return {"phi_tags": {**extra["phi_tags"], "0012,0062": {"action": "KEEP"}}}
+
+
+@pytest.mark.parametrize("extra, edit", [
+    (_rules(t0008_0020="REMOVE"), _says("UNMODIFIED", lambda ds: setattr(
+        ds, "BurnedInAnnotation", "YES"))),
+    (_keep_the_identity_marker(_rules(t0008_0020="REMOVE")),
+     _says("UNMODIFIED")),
+], ids=["burned_in_annotation_yes", "a_rule_on_0012_0062"])
+def test_the_withdrawal_does_not_wait_on_yes(tmp_path, extra, edit):
+    """The withdrawal goes with the markers this export writes, not with
+    `(0012,0062) YES` alone. A file whose YES is held back (it declares
+    Burned In Annotation `YES`), or whose `(0012,0062)` a rule decides, is
+    still a file this export stamps: the method value is written, and the
+    source's `UNMODIFIED` beside the Study Date this store removed is
+    withdrawn. Kills: the withdrawal tied to YES being written."""
+    source = _source(tmp_path / "in", edit=edit)
+    assert pydicom.dcmread(str(Path(source) / "ct.dcm"))[TEMPORAL].value \
+        == "UNMODIFIED", "setup: the source states it"
+    live, reopened, _, _ = _two_exports(tmp_path, source, extra)
+    for ds in (live, reopened):
+        assert ds.StudyDate == "", "setup: the date this store took"
+        markers = _markers(ds)
+        assert markers["removed"] is None, "setup: no YES in this file"
+        assert str(markers["method"]).startswith(
+            f"isocenter/{VERSION}; none; v1:"), "setup: the export stamped it"
+        assert markers["temporal"] is None
 
 
 def _a_private_date(ds):

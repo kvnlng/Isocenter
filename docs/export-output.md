@@ -18,7 +18,9 @@ The filename is the SOP Instance UID, because InstanceNumber is not unique withi
 
 Each file is written under a temporary name and renamed when complete, so a crash never leaves a partial file under a real name. A stray `*.tmp` left by a killed worker is safe to delete.
 
-`export()` returns an `ExportSummary` of what it wrote and raises `ExportError` if it planned files and delivered none. A partial export returns what it wrote, with an `ERROR` audit row for each failure.
+`export()` returns an `ExportSummary` of what it wrote and raises `ExportError` if it planned files and reports none of them written. A partial export returns what it wrote. A failed instance has an `ERROR` audit row keyed on its own UID, with one exception: instances replaced in a file that several names resolved to (above) share one row for the whole group, keyed on the UID of the instance the file carries, which is in `written_uids`, or on `MULTIPLE` when the file could not be read back. So a UID in `failures` does not always key a row; the row's text names every UID of the group.
+
+`ExportError` normally means the folder holds none of the planned files. In one case it holds one: every planned instance was written under names the volume resolved to one file, and that file could not be read back as any of them. None is reported written, the `EXPORT` row reads `wrote 0 of N planned instances`, the `MULTIPLE` row says what happened, and the exception's message says "none is reported as written" (it said "nothing reached disk" before [#1020](https://github.com/kvnlng/Isocenter/issues/1020)).
 
 ## Compression
 
@@ -62,7 +64,7 @@ Each withheld instance writes one `WARNING` audit row naming the instance and th
 - a Photometric Interpretation the file's transfer syntax does not admit, for example `YBR_ICT` on an uncompressed file, or `YBR_PARTIAL_422` and `YBR_PARTIAL_420` under either syntax the export writes. The label is judged on a file with no pixel data too;
 - a `YBR_FULL` image whose samples are 16-bit or signed 8-bit, which `ingest()` cannot read back, because pydicom's colour conversion takes unsigned 8-bit samples only.
 
-An instance that fails is not delivered: it gets an `ERROR` audit row, appears in `ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`.
+An instance that fails verification is not delivered: it gets an `ERROR` audit row keyed on its UID, appears in `ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`.
 
 Without verification, an inadmissible Photometric Interpretation is written as declared with a `WARNING` row, which also grades `REVIEW_REQUIRED`. So turning verification on can cost you a file the default export would have delivered. The 16-bit or signed 8-bit `YBR_FULL` file is conformant DICOM, so the default export writes it, with an INFO line saying Isocenter cannot read it back and no audit row.
 

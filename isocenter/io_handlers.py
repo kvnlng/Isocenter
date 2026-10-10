@@ -6583,6 +6583,12 @@ class ExportError(RuntimeError):
     one waveform instance, and its failure is named by that instance's
     UID, as the DICOM one is. Not raised on a partial export.
 
+    One case leaves a file behind (#1020): every planned instance was
+    written under file names the volume resolved to one file, and that
+    file could not be read back as any of them. None is reported as
+    written, so this is raised, and the folder holds that one file; the
+    `ERROR` row keyed `MULTIPLE` says so.
+
     Raised **last**, after every record the run produces, so a caller who
     catches this still holds a correct graph, a complete audit trail and
     a compliance report grading `REVIEW_REQUIRED`. The DICOM path raises
@@ -6617,9 +6623,14 @@ class ExportError(RuntimeError):
         where = f" to {folder}" if folder else ""
         super().__init__(
             f"Export{where} wrote 0 of {attempted} planned instances; "
-            f"{len(self.failures)} failed and nothing reached disk. "
+            f"{len(self.failures)} failed and none is reported as written. "
             f"First: {first[0]}: {first[1]}. See the audit log for the "
             "rest.")
+        # "none is reported as written", where it said "nothing reached
+        # disk" until #1020: instances whose file names the volume resolved
+        # to one file, which then could not be read back as any of them,
+        # are all failures while one file is in the folder. The exception
+        # is not told which case it is, so it says what is true of both.
 
 
 def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
