@@ -1084,6 +1084,9 @@ def test_the_limits_of_what_withdraws_a_sources_unmodified(
       VR's dummy**: the ruling names emptied, removed and dummied; the
       stamp reads such a value as a date in the file.
 
+    The private date (accepted as stated, owner ruling Q2 A on the review
+    of #1043) and the non-dummy `REPLACE` are in the follow-up, #1044.
+
     A test here going red means one of them changed: move it to the test
     above, with an `**Output:**` line."""
     source = _source_says(tmp_path, "UNMODIFIED", edit)
@@ -1092,6 +1095,73 @@ def test_the_limits_of_what_withdraws_a_sources_unmodified(
         assert gone(ds), "setup: what this store took"
         assert _markers(ds)["removed"] == "YES"
         assert _markers(ds)["temporal"] == "UNMODIFIED"
+
+
+def _an_empty_study_date(ds):
+    ds.StudyDate = ""
+
+
+def _an_empty_datetime(ds):
+    ds.add_new(0x0008002A, "DT", "")
+
+
+def _no_study_date(ds):
+    del ds.StudyDate
+
+
+@pytest.mark.parametrize("extra, edit, expected", [
+    (_rules(t0008_0020="REMOVE"), _an_empty_study_date, None),
+    (_rules(t0008_0020="KEEP", t0008_0023="REMOVE"), _an_empty_content_date,
+     None),
+    (_rules(t0008_0020="KEEP", t0008_002a="REMOVE"), _an_empty_datetime, None),
+    (_rules(t0008_0020="KEEP", t0008_0023="EMPTY"), _an_empty_content_date,
+     "UNMODIFIED"),
+    (_rules(t0008_0020="KEEP", t0008_0023="REPLACE"), _an_empty_content_date,
+     "UNMODIFIED"),
+], ids=["empty_study_date_removed", "empty_content_date_removed",
+        "empty_datetime_removed", "empty_content_date_emptied",
+        "empty_content_date_replaced"])
+def test_a_remove_on_a_date_the_source_left_empty_is_read_as_a_date_taken(
+        tmp_path, extra, edit, expected):
+    """A pinned limit of #1011 (owner ruling Q1 A on the review of #1043,
+    2026-10-10; follow-up #1044), not behaviour to rely on. The record
+    names a tag a `REMOVE` wrote at; it does not say whether the element
+    held a value. So a `REMOVE` rule on a date the **source** left
+    zero-length is read as a date this store took, and the source's
+    `UNMODIFIED` is withdrawn from a file none of whose date values
+    changed. `EMPTY` and a value-less `REPLACE` find nothing to write on
+    an empty element, record nothing, and the claim stays.
+
+    A `None` case here going red means the record learned to tell the two
+    apart (#1044): move it to the "stays" test, with an `**Output:**`
+    line."""
+    source = _source_says(tmp_path, "UNMODIFIED", edit)
+    live, reopened, rows, grade = _two_exports(tmp_path, source, extra)
+    for ds in (live, reopened):
+        assert _markers(ds)["removed"] == "YES"
+        assert ds.SeriesDate == "19970430", "setup: a date as ingested"
+        assert _markers(ds)["temporal"] == expected
+    assert rows == [] and grade == ["PASS"]
+
+
+def test_an_absent_study_date_under_remove_differs_in_the_second_generation(
+        tmp_path):
+    """The same limit met across two exports (#1044). The source has no
+    Study Date and the rule is `0008,0020: REMOVE`: nothing is removed,
+    nothing recorded, and the first export keeps the source's `UNMODIFIED`
+    while stamping the Type 2 Study Date empty. Re-ingested, that empty
+    element is one the second pass removes and records, and the second
+    export withdraws the `UNMODIFIED` from a file with the same dates.
+    Pinned so that the difference is known, not relied on."""
+    source = _source_says(tmp_path, "UNMODIFIED", _no_study_date)
+    extra = _rules(t0008_0020="REMOVE")
+    first = _pipeline(tmp_path, "none", source=source, name="one", **extra)
+    assert first.StudyDate == "", "setup: the export stamps it empty"
+    assert _markers(first)["temporal"] == "UNMODIFIED"
+    second = _pipeline(tmp_path, "none", source=str(tmp_path / "one_out"),
+                       name="two", **extra)
+    assert second.StudyDate == "" and second.SeriesDate == first.SeriesDate
+    assert _markers(second)["temporal"] is None
 
 
 def test_write_tree_writes_a_sources_unmodified_as_the_graph_holds_it(tmp_path):
