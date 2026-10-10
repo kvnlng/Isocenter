@@ -1632,10 +1632,12 @@ _FULLWIDTH_LOWER = "ｒｇｂ"
     (b"RGB", "RGB", None),
     (b"RGB ", "RGB", None),
     ("RGB\t ", "RGB\t", None),
+    (" RG\xdf", "RG\xdf", _LEAD),
+    ("\trgb", "\tRGB", _UPPER),
 ], ids=["lower", "leading-space", "padded-lower", "trailing-pad", "sharp-s",
         "dotless-i", "lower-tab", "space-tab-lower", "bytes-lower",
         "bytes-padded", "bytes-defined", "bytes-trailing-pad",
-        "tab-then-pad"])
+        "tab-then-pad", "space-then-sharp-s", "tab-then-lower"])
 def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
                                                             changes):
     """Only `a`-`z` are upper-cased and only U+0020 is stripped (#612).
@@ -1650,7 +1652,8 @@ def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
     Killing mutations: (s1) Python's own upper-casing (`sharp-s`,
     `dotless-i`); (s2) its own strip (`lower-tab`, `space-tab-lower`);
     (s4) `bytes` left raw (the four `bytes-` rows); (s6) a clause tested
-    with Unicode's predicate (`lower-tab`, `sharp-s`, `space-tab-lower`);
+    with Unicode's predicate (`space-then-sharp-s`, where no `a`-`z` was
+    upper-cased, and `tab-then-lower`, where no space was removed);
     (s7) the silence for a trailing pad tested with Unicode's right-strip
     (`tab-then-pad`, where the pad is all that was removed).
     """
@@ -1714,6 +1717,11 @@ def test_a_multi_valued_label_is_respelled_value_by_value():
         "'RGB', 'YBR_FULL', b'x\\xdf', 'RG\xdf\\t', 5",
         f"{_UPPER} and {_LEAD}")
     assert declared == [" rgb", b"ybr_full", b"x\xdf", "RG\xdf\t", 5]
+
+    # No `str` among them: `bytes` alone is enough for the writer to look.
+    copy, note = _label_as_written({"0028,0004": [b"rgb", b"RGB "]})
+    assert copy["0028,0004"] == ["RGB", "RGB"]
+    assert note == _NOTE.format("b'rgb', b'RGB '", "'RGB', 'RGB'", _UPPER)
 
 
 @pytest.mark.parametrize("label, judged", [
