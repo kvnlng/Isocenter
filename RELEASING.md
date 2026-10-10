@@ -587,7 +587,7 @@ fixes, never features.
    That is **24 in a rehearsal, 23 in the publish run and 22 in a
    dispatch from `main`**, and one fewer each on 3.14t. **The first two
    have been seen on a runner**, at 1.0.0rc17, the first release after
-   #975: its rehearsal (run 38052494952) skipped 24 on each of 3.12,
+   #975: its green rehearsal (run 38052494952) skipped 24 on each of 3.12,
    3.13 and 3.14 and 23 on 3.14t, and its publish run (38053967678) 23
    on each and 22 on 3.14t. **The dispatch's 22 is still derived**: the
    last dispatch read (run 37846349518) skipped 19 on 3.12 and 18 on
