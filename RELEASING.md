@@ -585,13 +585,13 @@ fixes, never features.
      does not, until step 8), none in a dispatch from `main`.
 
    That is **24 in a rehearsal, 23 in the publish run and 22 in a
-   dispatch from `main`**, and one fewer each on 3.14t. **These totals
-   are derived, not yet seen on a runner**: what a runner has shown is
-   19 on 3.12 and 18 on 3.14t in a dispatch (run 37846349518), before
-   #975 added three cases that need `coverage`; each total here is that
-   reading plus three, plus the released section's one or two. The first
-   rehearsal after #975 replaces them: write the counts it shows here,
-   in a PR of its own, and take this sentence out. **Any other
+   dispatch from `main`**, and one fewer each on 3.14t. **The first two
+   have been seen on a runner**, at 1.0.0rc17, the first release after
+   #975: its rehearsal (run 38052494952) skipped 24 on each of 3.12,
+   3.13 and 3.14 and 23 on 3.14t, and its publish run (38053967678) 23
+   on each and 22 on 3.14t. **The dispatch's 22 is still derived**: the
+   last dispatch read (run 37846349518) skipped 19 on 3.12 and 18 on
+   3.14t, before #975 added three cases that need `coverage`. **Any other
    number is a finding**: find the test (`pytest -rs` prints the reason;
    a runner's `-v` log prints only `SKIPPED`), and either it is a test
    that has stopped running, or this list is out of date and the same
