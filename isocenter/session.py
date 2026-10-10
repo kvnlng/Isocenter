@@ -4374,8 +4374,11 @@ class DicomSession:
 
         - a value the lock would capture was written by a remediation
           (`ANONYMIZED`, `ANON_...`, a rule's `value:`, a shifted date);
-        - a tag it names was emptied or removed by `anonymize()`; the
-          message names the `tags_to_lock` that works without it;
+        - a tag it names was emptied or removed by `anonymize()` on any of
+          its instances; the message names the `tags_to_lock` that works
+          without it. Where other instances still hold a value there (a
+          study or series ingested after the pass), the message counts
+          both, and that lock stashes the tag for none of them;
         - a re-lock would lose a value the existing token holds;
         - the patient carries an identity token this library wrote that the
           key at the path given to `enable_reversible_anonymization()` does
@@ -4826,6 +4829,25 @@ class DicomSession:
         # any literal on it: the value is always the patient's own ID.
         # Every other replacement is quoted; it is what says which pass
         # wrote it.
+        def left_blank(tag, record, members):
+            """Whether a pass left `tag` blank or absent on `members`.
+
+            The one predicate behind both the tags the blank-tag refusal
+            names and the instances it counts (#594), so the two cannot
+            disagree.
+
+            Args:
+                tag (str): The tag, as `gggg,eeee`.
+                record (dict): The record every member shares.
+                members (list): A value-set's instances, or one of them.
+
+            Returns:
+                bool: True when the record holds no value there and a
+                    member's own record says a pass left it so.
+            """
+            return (not str(record.get(tag) or "").strip()
+                    and written_by_a_pass(tag, record.get(tag), members))
+
         def blanked_tags():
             """The tags of `tags_to_lock` a pass emptied or removed.
 
@@ -4835,8 +4857,7 @@ class DicomSession:
                     a pass left it so.
             """
             return [tag for tag in tags_to_lock
-                    if any(not str(record.get(tag) or "").strip()
-                           and written_by_a_pass(tag, record.get(tag), members)
+                    if any(left_blank(tag, record, members)
                            for record, members in groups)]
 
         def carries_a_token_of_ours():
@@ -5083,7 +5104,47 @@ class DicomSession:
             # kept nothing. The record names the
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
+            #
+            # **A patient part of which a pass wrote is counted (#594).**
+            # A study or series ingested after `anonymize()` still holds
+            # the originals beside instances the pass blanked, and "this
+            # patient holds no value" is then true of some instances
+            # only; the advised lock goes through and stashes the tag for
+            # none, so the originals that are still there are in no
+            # token. Still refused (owner ruling Q5 A; stashing them is
+            # #1054), in a sentence that counts both and says what the
+            # advice leaves out. Per instance, never per value-set: a
+            # source's own blank shares a record with a pass's blank and
+            # is neither a pass's doing nor a value held, so it is in
+            # neither count and the two need not add up to the total.
+            # `holding` reads the blanked tags only, since those are what
+            # the advice drops. Counts and tags; no value. With nothing
+            # held, the sentence is the one it has been, byte for byte.
             blanked = blanked_tags()
+            holding = sum(len(members) for record, members in groups
+                          if any(str(record.get(tag) or "").strip() for tag in blanked))
+            if holding:
+                left = sum(any(left_blank(tag, record, [inst]) for tag in blanked)
+                           for record, members in groups for inst in members)
+                rest = [tag for tag in tags_to_lock if tag not in blanked]
+                one = len(blanked) == 1
+                named = blanked[0] if one else "one or more of " + ", ".join(blanked)
+                advice = (f"To lock this patient without {'it' if one else 'them'}, "
+                          f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r}), "
+                          f"which stashes {'it' if one else 'them'} for no instance: a "
+                          f"value {'it still holds' if one else 'they still hold'} would "
+                          "be in no token, and could not be recovered if a later "
+                          "anonymize() empties or removes it there too"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: anonymize() emptied or removed {named} on "
+                    f"{left} of this patient's {len(instances)} instances, and "
+                    f"{'it' if one else 'one or more of them'} still holds a value "
+                    f"on {holding}, so the lock would stash an original for some "
+                    "instances and none for others. "
+                    f"{advice}; the token this call would have written is unchanged.")
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
