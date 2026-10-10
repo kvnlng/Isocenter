@@ -778,7 +778,9 @@ def bit_packed_excess_words(ds) -> Optional[str]:
         return None
     declared = declared_frame_count(ds)
     frame_bits = rows * cols * samples
-    if frame_bits <= 0 or frame_bits % 8 == 0:
+    # Zero bits too (a Rows of 0), which is what keeps the division below
+    # from being by nothing.
+    if frame_bits % 8 == 0:
         return None
     need = -(-frame_bits * declared // 8)
     room = held * 8 // frame_bits
