@@ -2795,6 +2795,9 @@ def test_the_pool_internals_the_recycling_watch_reads_are_there():
     another way would leave them unwatched and unbounded. `worker`'s
     parameters are the ones `_recycling_worker` passes on, and
     `IMapIterator.next(timeout=)` raises `multiprocessing.TimeoutError`.
+
+    The pool is left with a task in flight and is ended by
+    `_end_recycling_pool`, as `run_parallel` ends one whose reader stopped.
     """
     import inspect  # pylint: disable=import-outside-toplevel
 
@@ -2821,7 +2824,6 @@ def test_the_pool_internals_the_recycling_watch_reads_are_there():
     pool = _Seen(processes=1, maxtasksperchild=1,
                  context=multiprocessing.get_context("spawn"),
                  exit_grace=parallel._WORKER_EXIT_GRACE_S)
-    started = []
     try:
         assert sorted(pool.imap_unordered(identity, range(4))) == [0, 1, 2, 3]
         started = list(pool._started)
@@ -2834,12 +2836,14 @@ def test_the_pool_internals_the_recycling_watch_reads_are_there():
         with pytest.raises(multiprocessing.TimeoutError):
             pending.next(timeout=0)
     finally:
-        for process in started + list(pool._pool):
-            try:
-                process.kill()
-            except (OSError, ValueError):
-                pass
-        pool.terminate()
+        # The library's own exit, never a kill loop and `pool.terminate()`
+        # here: a worker killed while it waits for a task holds the
+        # inqueue's read lock for good, and `terminate()` on this thread
+        # then waits on it with no worker left (#1010). A worker the pool
+        # has recorded and not yet started has no `kill()` to call either.
+        # `tests/test_no_test_ends_a_pool_by_killing_then_terminating.py`
+        # refuses that ending by its syntax tree.
+        parallel._end_recycling_pool(pool, finished=False)
 
 
 def test_an_exit_code_read_after_another_caller_reaped_is_none():
