@@ -290,9 +290,10 @@ Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CP
 
 ### Decode limits: the evidence
 
-[Codec support](codecs.md#decode-limits) states each limit. The measurements behind the two precision limits:
+[Codec support](codecs.md#decode-limits) states each limit. The measurements behind the precision limits:
 
 - A precision-12 JPEG Lossless stream under BitsStored 16 reads `0..4970` through `imagecodecs` (lj92) and `0..4095` through pydicom with `pylibjpeg-libjpeg`, which saturates.
+- A JPEG 2000 codestream written by `imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K", bitspersample=12)` over unsigned samples up to 4970 declares precision 12 and holds 4970: with the SIZ segment's precision byte changed to 16 bits it decodes to the input exactly. As written it reads `0..4095` through Pillow and through `imagecodecs`, both openjpeg, and `ingest()` of a `.90` file holding it stores `0..4095` and writes no row. Measured on imagecodecs 2026.8.16 and 2026.10.10 (openjpeg 2.5.4); no other JPEG 2000 decoder was tried (#1057).
 - The signed arm is measured unreachable for JPEG Baseline and Extended (`.50`/`.51`), whose decode is not sign-extended at all.
 - `693_J2KR.dcm` from pydicom's test data (a signed JPEG 2000 codestream) reads `int16 [-2000, 2492]` identically through Pillow and through `imagecodecs`, and writes no row.
 - An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision; measured at BitsStored 12, 13 and 16, it reads `int16 [-1996, 1470]` on both routes, with no row.
