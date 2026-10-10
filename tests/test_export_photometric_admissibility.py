@@ -1631,9 +1631,11 @@ _FULLWIDTH_LOWER = "ｒｇｂ"
     (b" MONOCHROME2 ", "MONOCHROME2", _LEAD),
     (b"RGB", "RGB", None),
     (b"RGB ", "RGB", None),
+    ("RGB\t ", "RGB\t", None),
 ], ids=["lower", "leading-space", "padded-lower", "trailing-pad", "sharp-s",
         "dotless-i", "lower-tab", "space-tab-lower", "bytes-lower",
-        "bytes-padded", "bytes-defined", "bytes-trailing-pad"])
+        "bytes-padded", "bytes-defined", "bytes-trailing-pad",
+        "tab-then-pad"])
 def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
                                                             changes):
     """Only `a`-`z` are upper-cased and only U+0020 is stripped (#612).
@@ -1648,9 +1650,9 @@ def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
     Killing mutations: (s1) Python's own upper-casing (`sharp-s`,
     `dotless-i`); (s2) its own strip (`lower-tab`, `space-tab-lower`);
     (s4) `bytes` left raw (the four `bytes-` rows); (s6) a clause tested
-    with Unicode's predicate (`space-tab-lower` keeps its note, and
-    `test_a_character_outside_the_repertoire_is_left_where_it_is` its
-    silence).
+    with Unicode's predicate (`lower-tab`, `sharp-s`, `space-tab-lower`);
+    (s7) the silence for a trailing pad tested with Unicode's right-strip
+    (`tab-then-pad`, where the pad is all that was removed).
     """
     from isocenter.io_handlers import _label_as_written
 

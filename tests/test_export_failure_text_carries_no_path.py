@@ -569,6 +569,22 @@ def test_no_error_row_and_no_export_error_carries_a_traceback(
         assert word not in text, word
 
 
+def test_a_lost_workers_row_carries_no_traceback():
+    """A bare exception in the results is spelled by the same helper.
+
+    Killing mutation (t8): the lost-worker arm left on
+    `describe_exception_without_paths`.
+    """
+    from isocenter.io_handlers import DicomExporter
+
+    lost = _refused_by_pydicoms_writer(_text_under_ob())
+    failures = DicomExporter._report_export_failures([lost])
+
+    assert failures == [("UNKNOWN", (
+        "Export worker failed: TypeError: With tag (0042,0011) got "
+        f"exception: {_root_words(lost)}"))]
+
+
 def test_write_trees_error_carries_no_traceback(tmp_path):
     """`write_tree()` raises on the first failure, quoting its message.
 
