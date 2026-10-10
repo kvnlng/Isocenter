@@ -103,6 +103,7 @@ from pydicom.encaps import encapsulate
 from pydicom.sequence import Sequence
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from isocenter.imagecodecs_handler import _jpegls_precision
 from isocenter.io_handlers import (_beyond_precision_words,
                                    _decode_pixels,
                                    _samples_beyond_stream_precision)
@@ -744,16 +745,74 @@ def test_a_native_file_has_no_stream_precision_to_exceed():
 def test_the_shape_is_only_constructible_for_t81():
     """Why `.80` and `.90` are gated but untested (#684).
 
-    `imagecodecs.jpegls_encode` takes no `bitspersample` at all, so a
-    JPEG-LS stream's precision is always derived from the array and can
-    never be under-declared; and `jpeg2k_encode(..., bitspersample=12)`
-    **clamps at encode time**, so the codestream never contains an
-    over-precision sample. The check is written codec-agnostically because
-    the precision it compares against is read the same way for all of
-    them; only the evidence is T.81.
+    What is pinned is the premise, not an encoder's signature: **no
+    JPEG-LS or JPEG 2000 stream imagecodecs writes for `FILED` decodes to
+    a sample beyond the precision the stream declares.** The check is
+    written codec-agnostically because the precision it compares against
+    is read the same way for all three families; only the evidence is
+    T.81.
+
+    JPEG-LS has two arms, chosen by what the encoder does when asked for
+    precision 12, never by a version number. As measured on 3.12 and
+    3.14t:
+
+    * **`jpegls_encode` refuses `bitspersample`** -- imagecodecs 2026.8.16
+      (charls 2.4.4), whose signature is `(data, /, level=None, *,
+      out=None)`. The refusal is a `TypeError` naming the keyword, so
+      the only stream it writes is derived from the array: precision 16
+      for `uint16`, lossless, and 16 bits hold every sample a `uint16`
+      has. Nothing can be under-declared.
+    * **`jpegls_encode` accepts it** -- imagecodecs 2026.10.10 (charls
+      2.4.4), which is what the release runners installed on 2026-10-09.
+      The stream declares precision 12 and the encode **masks** each
+      sample to its low 12 bits: 4970 reads 874, and the largest sample
+      is 3570, `(FILED & 0xFFF).max()`. A mask, not a clamp, which would
+      read 4095. A precision is under-declared now, and still no sample
+      is beyond it.
+
+    `jpeg2k_encode(..., bitspersample=12)` **clamps at encode time** on
+    both (openjpeg 2.5.4): 4970 reads 4095.
+
+    **What makes this red.** An encoder that writes 4970 into a stream
+    declaring precision 12 fails the bound, and that day #684's gap can
+    be closed for `.80` with a product test. A `TypeError` that does not
+    name the keyword fails the first arm, so a refusal for some other
+    reason is not taken for the old signature. The second arm asserts
+    that `FILED` exceeds the limit it is compared with, so the bound
+    cannot be met by a stream that was never asked to under-declare, nor
+    loosened without that line going red. A stream whose precision the
+    reader cannot find fails before either.
     """
-    with pytest.raises(TypeError):
-        imagecodecs.jpegls_encode(FILED, bitspersample=12)
+    refused = None
+    stream = None
+    try:
+        stream = imagecodecs.jpegls_encode(FILED, bitspersample=12)
+    except TypeError as error:
+        refused = error
+
+    if refused is not None:
+        # The keyword itself is refused, so the precision is the array's.
+        assert "unexpected keyword argument 'bitspersample'" in str(refused)
+        stream = imagecodecs.jpegls_encode(FILED)
+        precision = _jpegls_precision(stream)
+        assert precision == 16
+        limit = (1 << precision) - 1
+        decoded = imagecodecs.jpegls_decode(stream)
+        assert decoded.tolist() == FILED.tolist()
+    else:
+        precision = _jpegls_precision(stream)
+        assert precision == 12
+        limit = (1 << precision) - 1
+        # Under-declared: the source holds a sample the limit excludes.
+        assert int(FILED.max()) == 4970 and int(FILED.max()) > limit
+        decoded = imagecodecs.jpegls_decode(stream)
+        # Masked into the precision, not clamped to it.
+        assert int(decoded[7, 7]) == 874
+        assert decoded.tolist() == (FILED & limit).tolist()
+        assert int(decoded.max()) == 3570
+    # The premise, on either arm.
+    assert int(decoded.max()) <= limit
+
     codestream = imagecodecs.jpeg2k_encode(FILED, level=0, codecformat="J2K",
                                            bitspersample=12)
     assert int(imagecodecs.jpeg2k_decode(codestream).max()) == 4095
