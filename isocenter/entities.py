@@ -909,8 +909,8 @@ def _decode_from_file(ds):
             with no frame boundary, or a decode neither pydicom nor the
             imagecodecs fallback accepts.
         ValueError: Propagated from `_decode_pixels`: a header pydicom's
-            validation refuses, or a pydicom `ValueError` for a syntax with
-            no fallback.
+            validation refuses, a pydicom `ValueError` for a syntax with
+            no fallback, or one the fallback could not read either.
     """
     # Do not give this a decode path of its own: `_decode_pixels` is the
     # function ingest, the export readback and an icon decode go through.

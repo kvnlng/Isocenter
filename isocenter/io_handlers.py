@@ -2643,9 +2643,12 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         RuntimeError: A signed JPEG 2000 codestream under
             PixelRepresentation 0 (refused before pydicom is asked);
             encapsulated fragments with no frame boundary; or any decode
-            neither pydicom nor the fallback accepts.
-        ValueError: A header pydicom's validation refuses, or a pydicom
-            `ValueError` for a syntax with no fallback.
+            neither pydicom nor the fallback accepts, where pydicom's own
+            failure was a `RuntimeError`.
+        ValueError: A header pydicom's validation refuses; a pydicom
+            `ValueError` for a syntax with no fallback; or one the
+            fallback could not read either, which keeps pydicom's class
+            (#683).
     """
     # Read as an attribute, outside the `try`, never with a default: a
     # `force=True` read with no file meta must raise `AttributeError` into
@@ -2956,20 +2959,34 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
 
     Raises:
         RuntimeError: `<pydicom's words>; imagecodecs could not decode it
-            either: <why>`, for every refusal above and any decoder error.
+            either: <why>`, for every refusal above and any decoder error,
+            where pydicom's failure was a `RuntimeError`.
+        ValueError: The same words, where pydicom's failure was a
+            `ValueError` (#683).
     """
     # pydicom's reason stays first so the ingest row still reads
     # `Decompression Failed: <pydicom's words>`.
     def refused(why):
-        """The refusal, pydicom's reason first.
+        """The refusal, pydicom's reason first and in pydicom's class.
 
         Args:
             why (str): Why imagecodecs' decode is refused.
 
         Returns:
-            RuntimeError: The exception to raise.
+            Exception: The exception to raise: exactly `ValueError` where
+            pydicom's failure is one, exactly `RuntimeError` otherwise.
         """
-        return RuntimeError(
+        # The row a user reads begins with this class, and the words
+        # after it are pydicom's: `Decompression Failed: RuntimeError:
+        # could not broadcast ...` named a class pydicom never raised
+        # (#683). One of two exact classes, never `type(pydicom_error)`:
+        # a subclass need not take one string (`UnicodeDecodeError` takes
+        # five arguments), and the sentence is not that class's own.
+        # `_decode_pixels` catches `(RuntimeError, ValueError)` before it
+        # calls this, so no other family arrives.
+        kind = (ValueError if isinstance(pydicom_error, ValueError)
+                else RuntimeError)
+        return kind(
             f"{pydicom_error}; imagecodecs could not decode it either: {why}")
 
     ts = ds.file_meta.TransferSyntaxUID
