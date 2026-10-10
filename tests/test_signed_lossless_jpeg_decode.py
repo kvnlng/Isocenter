@@ -64,8 +64,8 @@ SIGNED = {bs: np.tile(np.array(row, dtype=np.int8 if bs <= 8 else np.int16),
 
 #: A JPEG-LS stream of `SIGNED[12]`'s 12-bit pattern written by pyjpegls
 #: (CharLS) at precision 12 -- what a conformant encoder writes for
-#: BitsStored 12. `imagecodecs.jpegls_encode` cannot write it: it always
-#: writes precision 16 for `uint16`. Checked in as bytes so the test needs
+#: BitsStored 12. `imagecodecs.jpegls_encode(pattern)` writes precision 16
+#: for `uint16`, and took no precision before 2026.10.10. Bytes, so it needs
 #: no encoder this package does not install.
 P12_JPEGLS = bytes.fromhex(
     "ffd8fff7000b0c0010001001011100ffda0008010100000000000000001ffd000000"
