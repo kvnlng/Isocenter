@@ -97,8 +97,8 @@ def test_a_signed_frame_with_high_bit_15_reads_and_writes_one_warning_row(
         read_words):
     """M8: the #446 refusal, and #523's J2K refusal, read now.
 
-    `imagecodecs.jpegls_encode` writes a 12-bit pattern as a precision-16
-    stream, and JPEG-LS is read by its precision, so -800's pattern is
+    `imagecodecs.jpegls_encode(PATTERN12)` writes a precision-16 stream of
+    the 12-bit pattern; JPEG-LS is read by its precision, so -800's pattern is
     3296 and reads back as 3296 -- the row says 16 bits because that is
     the width the read used. The J2K colour file is refused by Pillow on
     both routes, so it is the imagecodecs route that reads it.

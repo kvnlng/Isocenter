@@ -1181,9 +1181,9 @@ def _sign_extend(arr, ds, precision=None):
     # would refuse on one route what every other route reads.
     # The stream's precision where it has one, not BitsStored. The
     # two agree for every conformant encoder. `imagecodecs.jpegls_encode`
-    # cannot write precision 12, so it writes a 12-bit pattern as a
-    # precision-16 stream, and pydicom with pyjpegls reads that stream by
-    # its precision: 3296 for -800's pattern. A stream narrower than
+    # given no `bitspersample` (it took none before 2026.10.10) writes a
+    # 12-bit pattern as a precision-16 stream, which pydicom with pyjpegls
+    # reads by its precision: 3296 for -800's pattern. A stream narrower than
     # BitsStored (precision 12 under BitsStored 16) is read by its 12 bits
     # the same way, -800. A precision-8 stream under BitsStored 12 and
     # BitsAllocated 16 reaches here already widened to `uint16`

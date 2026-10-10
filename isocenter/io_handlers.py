@@ -3366,8 +3366,8 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # saturating writes 4095 over the 4200 the stream encodes, altering
     # pixels to match another library's silent alteration, and masking
     # gives 104, which no door produces. Only T.81 lossless is known to
-    # produce the shape: `jpegls_encode` takes no precision argument and
-    # `jpeg2k_encode` clamps at encode time.
+    # produce the shape: `jpegls_encode` writes the array's width, or masks
+    # into a `bitspersample` (2026.10.10 on), and `jpeg2k_encode` clamps.
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
                           or ts in T81_SYNTAXES):

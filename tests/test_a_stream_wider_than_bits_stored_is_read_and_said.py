@@ -145,7 +145,7 @@ def _precision_rows(rows):
     (J2K_LOSSLESS, _j2k12(IMG12), 8, 12, IMG12, "JPEG 2000 codestream"),
     # A stream at BitsAllocated itself is still wider than BitsStored.
     (LJPEG_SV1, _ljpeg(IMG16, 16), 12, 16, IMG16, "JPEG Lossless stream"),
-    # `jpegls_encode` writes precision 16 for any `uint16` input.
+    # `jpegls_encode(IMG16)`, no `bitspersample`: precision 16 for `uint16`.
     (JPEGLS, imagecodecs.jpegls_encode(IMG16), 12, 16, IMG16,
      "JPEG-LS stream"),
     # Lossy, so `samples` is the stream's own decode (below).
