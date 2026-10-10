@@ -6971,7 +6971,13 @@ class DicomSession:
                 bytes-like, not iterable, or holds an element that is not a
                 `str`.
             ExportError: From either exporter, when zero of N
-                attempted instances reached disk and at least one failed.
+                attempted instances are reported written and at least one
+                failed. The folder then holds none of them, with one
+                exception (#1020): every planned instance was written
+                under file names the volume resolved to one file, and
+                that file could not be read back as any of them; the
+                folder holds that one file and the `ERROR` row keyed
+                `MULTIPLE` says so.
                 An empty plan (zero of zero) does not raise: a subset that
                 matched nothing is a fact about the run, and the `EXPORT`
                 audit row already carries it. Nor does a DICOM export whose
