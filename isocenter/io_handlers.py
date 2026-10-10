@@ -53,7 +53,7 @@ from decimal import Decimal
 from fractions import Fraction
 from math import ceil, isfinite
 from io import BytesIO
-from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet, Union
 from datetime import datetime, date
 from dataclasses import dataclass, field
 from concurrent.futures.process import BrokenProcessPool
@@ -568,7 +568,7 @@ _PHOTOMETRIC_ICON = (
     "sequence item.")
 
 
-def _written_photometric(value) -> Optional[str]:
+def _written_photometric(value) -> Union[str, bytes, None]:
     """One label, normalized for comparison against a syntax's row.
 
     Spelled as a Code String is (`_cs_spelling`), which is what a
@@ -581,10 +581,10 @@ def _written_photometric(value) -> Optional[str]:
         value: The Photometric Interpretation as held on `ds`, or None.
 
     Returns:
-        Optional[str]: The normalized label, or None for an absent or
-        empty value (there is no claim to judge). A `bytes` label that is
-        not ASCII is returned as held, a `bytes`: no row admits it, and
-        the sentence about it quotes the value the file holds.
+        Union[str, bytes, None]: The normalized label, or None for an
+        absent or empty value (there is no claim to judge). A `bytes`
+        label that is not ASCII is returned as held, a `bytes`: no row
+        admits it, and the sentence about it quotes the value as held.
     """
     # Deliberately not `declared_int`'s rule, which reads `[1]` as "not
     # declared": that answers what the graph declared, this answers what
