@@ -93,6 +93,15 @@ class IODValidator:
         # the refusal cannot read two SOP classes.
         sop = ds.file_meta.MediaStorageSOPClassUID if hasattr(
             ds, 'file_meta') else ds.get("SOPClassUID")
+        # Two SOP classes are not a class this table knows, and are not
+        # checked, as before #998: until then the worker held them as the
+        # text of a Python list, one unknown UID. Held as the source's
+        # text (`a\b`), the file meta reads them as pydicom's `MultiValue`,
+        # which a dict cannot look up: without this line every export of
+        # such a file failed with `TypeError: unhashable type:
+        # 'MultiValue'`, in the interpreter's words.
+        if not isinstance(sop, str):
+            return []
         return IODValidator._SOP_RULES.get(sop, [])
 
     @staticmethod
