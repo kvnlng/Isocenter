@@ -88,7 +88,7 @@ answered (`got["pydicom_calls"]`), so a patch that failed to reach the
 ingest cannot pass for a measurement.
 
 **Only T.81 lossless decodes to this shape** (a J2K codestream can hold it;
-openjpeg clamps it) -- see `test_the_shape_is_only_constructible_for_t81`.
+openjpeg clamps it) -- see `test_the_shape_only_decodes_for_t81`.
 """
 import logging
 import os
@@ -742,7 +742,7 @@ def test_a_native_file_has_no_stream_precision_to_exceed():
     assert _samples_beyond_stream_precision(ds, FILED) is None
 
 
-def test_the_shape_is_only_constructible_for_t81():
+def test_the_shape_only_decodes_for_t81():
     """Why `.80` and `.90` are gated but untested (#684).
 
     What is pinned is the premise, not an encoder's signature: **no
