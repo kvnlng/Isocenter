@@ -1340,6 +1340,7 @@ TARGETS = {
                                           "tests/test_extended_offset_table_edges.py",  # #621
                                           "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
                                           "tests/test_compression_deps.py",  # #623: `ImagecodecsUnavailable`
+                                          "tests/test_export_failure_text_carries_no_path.py",  # #623: the same
                                           "tests/test_signed_lossless_jpeg_decode.py",
                                           "tests/test_single_frame_encapsulated_decode.py",
                                           "tests/test_ybr_jpegls_read_doors.py",
