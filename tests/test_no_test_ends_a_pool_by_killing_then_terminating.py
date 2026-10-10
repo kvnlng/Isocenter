@@ -169,30 +169,45 @@ def _python_files(directory=TESTS):
     return sorted(directory.rglob("*.py"))
 
 
-def _offenders(files, root):
-    """`<path relative to root>:<line of the try>` for each refused
-    `finally` in `files`."""
-    offenders = []
+def _walk(files, root):
+    """Parse each of `files` and report what was read beside what was
+    refused.
+
+    Returns:
+        tuple: the name of every file parsed, relative to `root`, and
+        `<name>:<line of the try>` for each refused `finally` in them.
+        The names come back so that a caller asserts its reach on the
+        list that was parsed, not on another call's (review of #1042).
+    """
+    read, offenders = [], []
     for path in files:
         name = path.relative_to(root).as_posix()
         for line in _kills_then_terminates(
                 path.read_text(encoding="utf-8"), name):
             offenders.append(f"{name}:{line}")
-    return offenders
+        read.append(name)
+    return read, offenders
 
 
 def test_no_test_ends_a_pool_by_killing_then_terminating():
-    """No `finally` under `tests/` calls both `.kill()` and `.terminate()`.
+    """No `finally` under `tests/` calls both `.kill()` and `.terminate()`,
+    in a walk that read the file the ending was found in, `conftest.py`
+    and a file below the top level.
 
     End a recycling pool with `parallel._end_recycling_pool(pool,
     finished=False)`: it runs the stdlib's exit on a helper thread, kills by
     sentinel only what is still running after the grace, and holds the
     caller no longer than its two bounds.
 
-    Killing mutation: the old ending restored in
-    `test_the_pool_internals_the_recycling_watch_reads_are_there`.
+    Killing mutations: the old ending restored in
+    `test_the_pool_internals_the_recycling_watch_reads_are_there`; this
+    walk handed no file, or one folder's.
     """
-    offenders = _offenders(_python_files(), ROOT)
+    read, offenders = _walk(_python_files(), ROOT)
+    assert THE_FILE_IT_WAS_FOUND_IN in read, read
+    assert "tests/conftest.py" in read, read
+    assert any(name.startswith("tests/support/") for name in read), (
+        "no file under tests/support was read")
     assert not offenders, (
         "a `finally` kills workers and then calls terminate() on the "
         "caller's thread; a worker killed while it waits for a task holds "
@@ -221,11 +236,12 @@ def test_the_walk_names_a_refused_ending_wherever_it_is_written(tmp_path):
     file and the line of its `try`, and nothing else is named.
 
     The tree under `tests/` holds no such ending, so the walk above passes
-    whether or not it still collects anything; this is what holds it
-    (review of #1010).
+    whether or not it still collects anything; this is what holds the
+    collecting (review of #1042).
 
     Killing mutations: the offender dropped where it is collected; the
-    pattern narrowed to some files; the walk kept to the top level.
+    pattern narrowed to some files; the walk kept to the top level; a file
+    parsed and not reported as read.
     """
     (tmp_path / "below" / "deeper").mkdir(parents=True)
     (tmp_path / "ends_badly.py").write_text(
@@ -241,7 +257,11 @@ def test_the_walk_names_a_refused_ending_wherever_it_is_written(tmp_path):
     (tmp_path / "below" / "notes.txt").write_text(
         THE_ENDING_REFUSED, encoding="utf-8")
 
-    assert _offenders(_python_files(tmp_path), tmp_path) == [
+    read, offenders = _walk(_python_files(tmp_path), tmp_path)
+    assert read == [
+        "below/deeper/ends_badly_too.py", "below/deeper/through_the_library.py",
+        "below/kills.py", "ends_badly.py", "terminates.py"]
+    assert offenders == [
         "below/deeper/ends_badly_too.py:7", "ends_badly.py:5"]
 
 
