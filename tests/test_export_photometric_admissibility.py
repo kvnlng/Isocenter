@@ -1483,3 +1483,395 @@ def test_verify_readback_does_not_judge_an_icon_label(tmp_path):
     assert len(summary.written_uids) == 1, summary
     assert len([r for r in rows if "PhotometricInterpretation" in r[2]]) \
         == 1, rows
+
+
+# ---------------------------------------------------------------------------
+# #646: a three-sample icon labelled `YBR_FULL_422` is written `YBR_FULL`.
+# ---------------------------------------------------------------------------
+#
+# #470 folds the label at the top level: three full samples per pixel are
+# not the subsampled layout `YBR_FULL_422` names. An icon is written from
+# the same kind of array one depth down, and its label reached the file as
+# declared: measured on 067982ec, 12 bytes for 4 pixels under
+# `YBR_FULL_422`, no row, and this library's own re-ingest dropped the
+# icon's pixels with the unrouted `DATA_LOSS` row. No source file reaches
+# it (an 8-bit YBR icon is relabelled `RGB` by its decode at ingest), so
+# these tests are the pin; no cohort member can hold one.
+
+@pytest.mark.parametrize("declared", ["YBR_FULL_422", " ybr_full_422 "],
+                         ids=["as-defined", "padded-lower"])
+def test_a_three_sample_icon_labelled_ybr_full_422_is_written_ybr_full(
+        tmp_path, declared):
+    """The fold, on the pydicom item; the file re-ingests with its icon.
+
+    Killing mutations: (f1) the icon's call to `_full_sample_label`
+    deleted; (f4) the fold placed after the label is judged (no row
+    either way, so only the written label shows it).
+    """
+    rows, exported, grade, _summary = _icon_image(tmp_path, declared)
+
+    icon = exported.IconImageSequence[0]
+    assert icon.PhotometricInterpretation == "YBR_FULL"
+    assert icon.SamplesPerPixel == 3
+    assert icon.PixelData == ICON_SAMPLES[3]
+    # The top level writes no row for its fold, so the icon writes none.
+    assert rows == [], rows
+    assert "PASS" in grade, grade
+
+    reingest = tmp_path / "reingest.db"
+    with DicomSession(str(reingest)) as session:
+        session.ingest(str(tmp_path / "out"))
+    with sqlite3.connect(str(reingest)) as conn:
+        kinds = [k for k, in conn.execute("SELECT kind FROM instance_blobs")]
+        losses = conn.execute("SELECT details FROM audit_log WHERE "
+                              "action_type='DATA_LOSS'").fetchall()
+    assert [k for k in kinds if "0088,0200" in k], (kinds, losses)
+    assert losses == [], losses
+
+
+def test_a_one_sample_icon_labelled_ybr_full_422_is_not_folded(tmp_path):
+    """The fold is for three full samples, as at the top level.
+
+    At one sample the label is wrong in another way, which is not this
+    rule's to answer: it is written as declared. Killing mutation (f2):
+    the fold applied at any sample count.
+    """
+    _rows_, exported, _grade_line, _summary = _icon_image(
+        tmp_path, "YBR_FULL_422", samples=1)
+
+    assert exported.IconImageSequence[
+        0].PhotometricInterpretation == "YBR_FULL_422"
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_the_icon_fold_leaves_the_graph_item_alone(tmp_path, monkeypatch,
+                                                   threads):
+    """Only the file is folded; `write_tree()` writes the same label.
+
+    Killing mutation (f3): the folded label written onto the graph item.
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=3)
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "graph.db")) as session:
+        session.ingest(str(src))
+        patient = session.store.patients[0]
+        item = patient.studies[0].series[0].instances[0].sequences[
+            "0088,0200"].items[0]
+        item.set_attr("0028,0004", "YBR_FULL_422")
+        revision = item._revision
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies,
+                                 compression=None, show_progress=False)
+
+        assert item.attributes["0028,0004"] == "YBR_FULL_422"
+        assert item._revision == revision
+    written = list(out.rglob("*.dcm"))
+    assert len(written) == 1, written
+    assert pydicom.dcmread(str(written[0])).IconImageSequence[
+        0].PhotometricInterpretation == "YBR_FULL"
+
+
+def test_the_fold_is_one_helper_for_both_depths():
+    """`_full_sample_label`: the label and the sample count, nothing else.
+
+    It spells the label as the judgement does, so the two cannot disagree
+    about which label is `YBR_FULL_422`.
+    """
+    from isocenter.io_handlers import _full_sample_label
+
+    assert _full_sample_label("YBR_FULL_422", 3) == "YBR_FULL"
+    assert _full_sample_label(" ybr_full_422 ", 4) == "YBR_FULL"
+    assert _full_sample_label(b"YBR_FULL_422", 3) == "YBR_FULL"
+    assert _full_sample_label("YBR_FULL_422", 1) == "YBR_FULL_422"
+    assert _full_sample_label("YBR_FULL_422", 2) == "YBR_FULL_422"
+    assert _full_sample_label("YBR_FULL", 3) == "YBR_FULL"
+    assert _full_sample_label("RGB", 3) == "RGB"
+    assert _full_sample_label(None, 3) is None
+    # A tab is not padding (#612): this is not that label.
+    assert _full_sample_label("YBR_FULL_422\t", 3) == "YBR_FULL_422\t"
+    held = ["YBR_FULL_422"]
+    assert _full_sample_label(held, 3) is held
+
+
+# ---------------------------------------------------------------------------
+# #612: the respelling is defined on the Code String repertoire alone.
+# ---------------------------------------------------------------------------
+#
+# #532 respelled a declared label with Python's own strip and upper-casing,
+# which are Unicode's: a tab, a newline and a no-break space were removed
+# as if they were padding, and `ß` became `SS`. Measured on 067982ec, an
+# icon declared `'rgß'` was written `RGSS` under a WARNING that said "The
+# label was written as declared". PS3.5 6.2 gives a Code String upper-case
+# A-Z, digits, the space and the underscore, and pads with the space only.
+
+_NOTE = ("PhotometricInterpretation {} is not a defined Code String "
+         "spelling; written as {}, the same label with {} (PS3.5 6.2: a CS "
+         "value is upper case, and its leading and trailing spaces are not "
+         "significant). The samples are unchanged.")
+_UPPER = "its letters upper-cased"
+_LEAD = "its leading spaces removed"
+_FULLWIDTH_LOWER = "ｒｇｂ"
+
+
+@pytest.mark.parametrize("declared, written, changes", [
+    ("monochrome2", "MONOCHROME2", _UPPER),
+    (" MONOCHROME2", "MONOCHROME2", _LEAD),
+    (" rgb ", "RGB", f"{_UPPER} and {_LEAD}"),
+    ("RGB ", "RGB", None),
+    ("monochrome\xdf", "MONOCHROME\xdf", _UPPER),
+    ("monochrome2ı", "MONOCHROME2ı", _UPPER),
+    ("rgb\t", "RGB\t", _UPPER),
+    (" \trgb", "\tRGB", f"{_UPPER} and {_LEAD}"),
+    (b"monochrome2", "MONOCHROME2", _UPPER),
+    (b" MONOCHROME2 ", "MONOCHROME2", _LEAD),
+    (b"RGB", "RGB", None),
+    (b"RGB ", "RGB", None),
+], ids=["lower", "leading-space", "padded-lower", "trailing-pad", "sharp-s",
+        "dotless-i", "lower-tab", "space-tab-lower", "bytes-lower",
+        "bytes-padded", "bytes-defined", "bytes-trailing-pad"])
+def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
+                                                            changes):
+    """Only `a`-`z` are upper-cased and only U+0020 is stripped (#612).
+
+    The note is whole, so a clause is said only when it is true: before,
+    `'monochromeß'` got "its letters upper-cased" for a rewrite to
+    `MONOCHROMESS`, and `'\\tMONOCHROME2'` "its leading spaces removed"
+    for a tab. An ASCII `bytes` label is read as its text; before, it was
+    handed to pydicom raw, which wrote `b'rgb'` as `rgb` with a
+    `UserWarning` and no note.
+
+    Killing mutations: (s1) Python's own upper-casing (`sharp-s`,
+    `dotless-i`); (s2) its own strip (`lower-tab`, `space-tab-lower`);
+    (s4) `bytes` left raw (the four `bytes-` rows); (s6) a clause tested
+    with Unicode's predicate (`space-tab-lower` keeps its note, and
+    `test_a_character_outside_the_repertoire_is_left_where_it_is` its
+    silence).
+    """
+    from isocenter.io_handlers import _label_as_written
+
+    attributes = {"0028,0004": declared, "0028,0002": 3}
+    copy, note = _label_as_written(attributes)
+
+    assert copy["0028,0004"] == written
+    assert type(copy["0028,0004"]) is str
+    assert attributes["0028,0004"] is declared
+    if changes is None:
+        assert note is None
+    else:
+        assert note == _NOTE.format(repr(declared), repr(written), changes)
+    # What is judged is what is written.
+    assert _written_photometric(declared) == written
+    assert _written_photometric(copy["0028,0004"]) == written
+
+
+@pytest.mark.parametrize("declared", [
+    "MONOCHROME2\t", "\tMONOCHROME2", "MONOCHROME2\n", "MONOCHROME2\xa0",
+    "ＲＧＢ", _FULLWIDTH_LOWER, "RG\xdf", b"rg\xdf", b"RG\xdf ",
+    "\t", 7],
+    ids=["tab-pad", "tab-lead", "newline", "nbsp", "fullwidth",
+         "fullwidth-lower", "sharp-s-upper", "bytes-not-ascii",
+         "bytes-not-ascii-padded", "only-a-tab", "number"])
+def test_a_character_outside_the_repertoire_is_left_where_it_is(declared):
+    """Nothing to respell: written as held, no note, judged as held (#612).
+
+    A tab is not padding and a fullwidth letter has no Code String upper
+    case. A `bytes` label that is not ASCII is not text this library can
+    read, so it is left as held and judged as held: before, it was judged
+    as the text of its `repr`, upper-cased (`"B'RG\\\\XDF'"`).
+    """
+    from isocenter.io_handlers import _cs_quoted, _label_as_written
+
+    attributes = {"0028,0004": declared}
+    copy, note = _label_as_written(attributes)
+
+    assert copy is attributes
+    assert note is None
+    judged = _written_photometric(declared)
+    assert judged == (declared if isinstance(declared, (str, bytes))
+                      else str(declared))
+    assert _photometric_warning(judged, IMPLICIT_VR_LE, has_pixels=True) \
+        .startswith(f"PhotometricInterpretation {_cs_quoted(judged)} is not")
+    assert "B'" not in _cs_quoted(judged)
+
+
+def test_a_multi_valued_label_is_respelled_value_by_value():
+    """Each value by its own kind: text, ASCII `bytes`, `bytes` that is not."""
+    from isocenter.io_handlers import _label_as_written
+
+    declared = [" rgb", b"ybr_full", b"x\xdf", "RG\xdf\t", 5]
+    copy, note = _label_as_written({"0028,0004": declared})
+
+    assert copy["0028,0004"] == ["RGB", "YBR_FULL", b"x\xdf", "RG\xdf\t", 5]
+    assert note == _NOTE.format(
+        "' rgb', b'ybr_full', b'x\\xdf', 'RG\xdf\\t', 5",
+        "'RGB', 'YBR_FULL', b'x\\xdf', 'RG\xdf\\t', 5",
+        f"{_UPPER} and {_LEAD}")
+    assert declared == [" rgb", b"ybr_full", b"x\xdf", "RG\xdf\t", 5]
+
+
+@pytest.mark.parametrize("label, judged", [
+    ("   ", None), ("", None), (None, None), (b"  ", None),
+    (" rgb ", "RGB"), (b" rgb ", "RGB")])
+def test_a_label_of_spaces_is_no_label(label, judged):
+    assert _written_photometric(label) == judged
+
+
+def test_an_icon_label_outside_the_repertoire_is_named_as_the_file_holds_it(
+        tmp_path):
+    """`'rgß'` on an icon: the file and the WARNING hold the same label.
+
+    Measured before: the file held `RGSS` and the row said `'RGSS' ... The
+    label was written as declared`. Killing mutation (s3): the judgement
+    left on the old spelling, so the row names a label the file does not
+    hold.
+    """
+    rows, exported, grade, _summary = _icon_image(tmp_path, "rg\xdf")
+
+    assert exported.IconImageSequence[0].PhotometricInterpretation == "RG\xdf"
+    warnings = [r for r in rows if "PhotometricInterpretation" in r[2]]
+    assert len(warnings) == 1, rows
+    assert warnings[0][1] == "WARNING"
+    assert warnings[0][2].startswith(
+        f"PhotometricInterpretation 'RG\xdf' on the icon at {ICON_PATH} is "
+        f"not a label uncompressed pixel data admits: no value of that name "
+        f"is defined for it. The label was written as declared, "), warnings
+    assert "REVIEW_REQUIRED" in grade, grade
+
+
+@pytest.mark.parametrize("declared, written", [
+    ("monochrome\xdf", "MONOCHROME\xdf"), ("MONOCHROME2\t", "MONOCHROME2\t")],
+    ids=["sharp-s", "tab-pad"])
+def test_a_pixel_less_label_outside_the_repertoire_is_written_as_held(
+        tmp_path, declared, written):
+    """The pixel-less door: the file holds what the WARNING quotes (#612).
+
+    Measured before: `'monochromeß'` was written `MONOCHROMESS` under a
+    WARNING naming `'MONOCHROMESS'` as "written as declared", and
+    `'MONOCHROME2\\t'` was written `MONOCHROME2` with no row at all.
+    """
+    outcome = _export(tmp_path, _pixel_less(declared))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == written
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert outcome.warnings[0].startswith(
+        f"PhotometricInterpretation {written!r} is not a label the transfer "
+        f"syntax this file was written under admits ({IMPLICIT_VR_LE}): no "
+        f"value of that name is defined for it. The label was written as "
+        f"declared."), outcome.warnings
+
+
+def test_a_tab_in_a_label_over_pixels_is_written_and_said(tmp_path):
+    """What the stricter strip costs, pinned so it is a decision (#612).
+
+    Before, `'RGB\\t'` over three samples was written `RGB` with no note:
+    the tab was removed as if it were padding. A tab is not in the Code
+    String repertoire and is not padding, so the label is not `RGB`; it
+    is written as held, with the WARNING every label no syntax defines
+    gets, and `verify_readback=True` refuses the file as it refuses any
+    such label (pydicom reads the tab back; it right-strips spaces only).
+    """
+    outcome = _export(tmp_path, _image("RGB\t"))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == "RGB\t"
+    assert outcome.corrections == [], outcome.corrections
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert outcome.warnings[0].startswith(
+        "PhotometricInterpretation 'RGB\\t' is not a label the transfer "
+        "syntax this file was written under admits "), outcome.warnings
+
+    verified = _export(tmp_path / "verified", _image("RGB\t"),
+                       verify_readback=True)
+    assert not verified.ok
+    assert str(verified.error).startswith(
+        "Readback verification failed: PhotometricInterpretation reads "
+        "back as 'RGB\t', which the transfer syntax the file was written "
+        "under does not admit "), verified.error
+
+
+def test_an_ascii_bytes_icon_label_is_written_as_its_text(tmp_path,
+                                                          monkeypatch):
+    """`b'rgb'` on an icon is written `RGB`, and pydicom is handed text.
+
+    Measured before: written `rgb` with pydicom's `UserWarning: Invalid
+    value for VR CS` on the worker's stderr and no note, and re-ingesting
+    the file dropped the icon's pixels. Threads, so the worker's warning
+    would reach `catch_warnings`.
+    """
+    import warnings as _warnings
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        rows, exported, _grade_line, _summary = _icon_image(tmp_path, b"rgb")
+
+    assert exported.IconImageSequence[0].PhotometricInterpretation == "RGB"
+    assert rows == [], rows
+    assert [str(w.message) for w in caught
+            if "Invalid value for VR CS" in str(w.message)] == []
+
+
+def test_a_bytes_label_that_is_not_ascii_does_not_reach_the_file(tmp_path):
+    """A characterisation, unchanged by #612: `_merge` does not write it.
+
+    `bytes` that are not ASCII are left as held by the respelling, and
+    `_merge` then drops the element with its `DATA_LOSS` row, as it did
+    before; so the file holds no label and there is nothing to judge.
+    The judgement's own `bytes` arm is pinned at unit level
+    (`test_a_character_outside_the_repertoire_is_left_where_it_is`).
+    """
+    outcome = _export(tmp_path, _pixel_less(b"rg\xdf"))
+
+    assert outcome.ok, outcome.error
+    assert "PhotometricInterpretation" not in pydicom.dcmread(
+        outcome.output_path)
+    assert outcome.warnings == [], outcome.warnings
+    assert outcome.corrections == [], outcome.corrections
+    assert [(scope, detail.split(":")[0]) for scope, detail in outcome.losses] \
+        == [("STANDARD", "Tag 0028,0004 not exported (data loss)")]
+
+
+def test_a_note_quotes_at_most_a_code_strings_length_of_a_label(tmp_path):
+    """The cut is at 16 characters, and it is the note's, not the file's.
+
+    P4 of #612: the cut had no test. Sixteen characters are quoted whole
+    and seventeen are cut, in the respelling note and in the WARNING for
+    an inadmissible label; the file holds every character either way.
+    Killing mutations (s5): the cut at 15, or at 17.
+    """
+    from isocenter.io_handlers import _cs_quoted, _label_as_written
+
+    sixteen, seventeen = "ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNOPQ"
+    assert _cs_quoted(sixteen) == f"'{sixteen}'"
+    assert _cs_quoted(seventeen) == f"'{sixteen}' (cut at 16 characters)"
+    assert _cs_quoted(b"abcdefghijklmnop\xdf") == \
+        "b'abcdefghijklmnop' (cut at 16 characters)"
+    assert _cs_quoted(b"abcdefghijklmno\xdf") == "b'abcdefghijklmno\\xdf'"
+
+    copy, note = _label_as_written({"0028,0004": seventeen.lower()})
+    assert copy["0028,0004"] == seventeen
+    assert note == _NOTE.format(
+        f"'{sixteen.lower()}' (cut at 16 characters)",
+        f"'{sixteen}' (cut at 16 characters)", _UPPER)
+    _copy, note = _label_as_written({"0028,0004": sixteen.lower()})
+    assert note == _NOTE.format(f"'{sixteen.lower()}'", f"'{sixteen}'",
+                                _UPPER)
+
+    outcome = _export(tmp_path, _pixel_less(seventeen))
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == seventeen
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert outcome.warnings[0].startswith(
+        f"PhotometricInterpretation '{sixteen}' (cut at 16 characters) is "
+        f"not a label "), outcome.warnings
