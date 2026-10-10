@@ -287,6 +287,22 @@ def test_a_dropped_table_naming_more_is_still_counted(tmp_path):
         2, 1, 1, "Extended Offset Table")
 
 
+def test_a_dropped_table_naming_more_is_named_as_the_table_under_two_frames(
+        tmp_path):
+    """24/8, three fragments, NumberOfFrames 2: reported from the table.
+
+    The walk finds three frames as well; the row's subject is the table's
+    all the same, as it was before #621. Only the shortfall moved.
+    """
+    path, ds = _on_disk(tmp_path, _table(3, 2, 24, 8))
+    assert imagecodecs_handler.extended_offsets(ds) is None
+
+    assert offset_table_frame_count(ds) == (
+        3, 2, 2, "Extended Offset Table")
+    assert ingest_worker(path)[0]["offset_table_excess"] == (
+        3, 2, 2, "Extended Offset Table")
+
+
 def test_a_dropped_table_agreeing_with_the_header_is_as_before(tmp_path):
     """16/8 under NumberOfFrames 2: the equal case, read with no row."""
     path, ds = _on_disk(tmp_path, _table(2, 2, 16, 8))

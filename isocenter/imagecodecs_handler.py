@@ -273,30 +273,27 @@ def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
 def _drops_the_table(ds) -> bool:
     """Does pydicom's decoder ignore this Extended Offset Table and read on?
 
-    True only for the one shape pydicom drops with a warning and then
-    decodes without (`DecodeRunner._validate_options`, 3.0.2): both
-    elements hold bytes, of different lengths. Narrower than
-    `extended_offsets(ds) is None`, which is also true of a Lengths
-    element that is empty (pydicom raises `TypeError: object of type
-    'NoneType' has no len()`) or absent (`AttributeError`): pydicom does
-    not read those files, so nothing defers to it for them.
+    Asked only of a table `extended_offsets` has already declined, so the
+    Lengths element is what is left to ask: where it holds bytes they are
+    of another length, which is the one shape pydicom drops with a
+    warning and then decodes without (`DecodeRunner._validate_options`,
+    3.0.2). Narrower than `extended_offsets(ds) is None`, which is also
+    true of a Lengths element read from a file as empty (it holds no
+    value, and pydicom raises `TypeError: object of type 'NoneType' has
+    no len()`) or absent (`AttributeError`): pydicom does not read those
+    files, so nothing defers to it for them.
 
     Args:
         ds (pydicom.Dataset): A dataset holding a non-empty
-            `ExtendedOffsetTable`.
+            `ExtendedOffsetTable` that `extended_offsets` returns None
+            for.
 
     Returns:
         bool: Whether the decoder walks the fragments without the table.
     """
-    if "ExtendedOffsetTableLengths" not in ds:
-        return False
-    eot = ds.get("ExtendedOffsetTable")
     lengths = ds.get("ExtendedOffsetTableLengths")
-    eot = getattr(eot, "value", eot)
     lengths = getattr(lengths, "value", lengths)
-    return (isinstance(eot, (bytes, bytearray))
-            and isinstance(lengths, (bytes, bytearray))
-            and bool(lengths) and len(eot) != len(lengths))
+    return isinstance(lengths, (bytes, bytearray))
 
 
 def ragged_offset_table_words(ds) -> Optional[str]:
