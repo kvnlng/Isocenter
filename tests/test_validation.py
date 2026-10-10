@@ -74,3 +74,34 @@ def test_a_missing_type_2_element_is_reported_and_an_empty_one_is_not():
 
     ds.KVP = ""
     assert IODValidator.validate(ds) == []
+
+
+def test_two_sop_classes_are_not_a_class_the_table_knows():
+    """#998: a file whose SOP Class UID holds two values reaches the
+    validator with pydicom's `MultiValue` in the file meta, since the
+    instance's field holds the source's text. A dict cannot look that up:
+    without the guard both doors raised `TypeError: unhashable type:
+    'MultiValue'` and every export of such a file failed. It is not
+    checked and nothing is filled, which is what an unknown class gets,
+    CT Image Storage being one of the two or not."""
+    from pydicom.dataset import FileMetaDataset
+    from pydicom.multival import MultiValue
+
+    ct, mr = "1.2.840.10008.5.1.4.1.1.2", "1.2.840.10008.5.1.4.1.1.4"
+    bare = Dataset()
+    bare.SOPClassUID = [ct, mr]
+    assert isinstance(bare.SOPClassUID, MultiValue)
+    assert IODValidator.validate(bare) == []
+    assert IODValidator.absent_type2(bare) == []
+
+    filed = Dataset()
+    filed.file_meta = FileMetaDataset()
+    filed.file_meta.MediaStorageSOPClassUID = ct + "\\" + mr
+    assert isinstance(filed.file_meta.MediaStorageSOPClassUID, MultiValue)
+    assert IODValidator.validate(filed) == []
+    assert IODValidator.absent_type2(filed) == []
+
+    # Control: one of the two, alone, is checked.
+    filed.file_meta.MediaStorageSOPClassUID = ct
+    assert IODValidator.validate(filed) != []
+    assert IODValidator.absent_type2(filed) != []
