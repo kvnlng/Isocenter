@@ -2839,7 +2839,7 @@ def test_the_pool_internals_the_recycling_watch_reads_are_there():
         # The library's own exit, never a kill loop and `pool.terminate()`
         # here: a worker killed while it waits for a task holds the
         # inqueue's read lock for good, and `terminate()` on this thread
-        # then waits on it with no child left (#1010). A worker the pool
+        # then waits on it with no worker left (#1010). A worker the pool
         # has recorded and not yet started has no `kill()` to call either.
         # `tests/test_no_test_ends_a_pool_by_killing_then_terminating.py`
         # refuses that ending by its syntax tree.
