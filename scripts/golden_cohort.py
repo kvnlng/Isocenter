@@ -627,6 +627,24 @@ def binary_number_vr_on_a_text_tag(out: Path):
     write(ds, out / "binary_number_vr_on_a_text_tag-1.dcm")
 
 
+def source_says_unmodified(out: Path):
+    """A CT whose source states Longitudinal Temporal Information Modified
+    `(0028,0303) UNMODIFIED`, with no Study Date (so neither configuration
+    shifts anything), a Series Date and a Content Date `basic` writes the
+    dummy to and a Birth Date it empties (this store's record), and a
+    Study Update DateTime `(0008,041f)` no row of Table E.1-1 names, kept
+    as ingested. Nothing shifted and a date as found: the export stamps no
+    `(0028,0303)` of its own, and the source's `UNMODIFIED` is not carried
+    beside the dates this store took (#1011). No other member states
+    `UNMODIFIED`, and every other member with a date as found also has a
+    shifted Study Date, which writes `MODIFIED`."""
+    ds = ct("source_says_unmodified", study_date=None)
+    ds.SeriesDate = ds.ContentDate = "20230101"
+    ds.add_new(0x0008041F, "DT", "20230101120000")
+    ds.LongitudinalTemporalInformationModified = "UNMODIFIED"
+    write(ds, out / "source_says_unmodified-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -634,7 +652,8 @@ MEMBERS = {f.__name__: f for f in (
     encapsulated_pdf, unstated_private_vr,
     multi_valued_keys, lut_unusable_descriptor, multi_valued_pn,
     ecg_lead_codes, number_vr_on_a_date_or_time,
-    binary_number_vr_on_a_text_tag, multi_valued_series_fields)}
+    binary_number_vr_on_a_text_tag, multi_valued_series_fields,
+    source_says_unmodified)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
