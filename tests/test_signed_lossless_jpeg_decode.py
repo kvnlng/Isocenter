@@ -192,7 +192,7 @@ def _assert_reads(got, want):
 
 #: `(ts, bits_stored, encoder)`. Every stream here is written at precision
 #: = BitsStored, so the stream and the header agree on what a sample is.
-#: The JPEG-LS 12-bit case `imagecodecs.jpegls_encode` writes is
+#: The JPEG-LS 12-bit case `_jpegls` writes (no `bitspersample`) is
 #: precision 16 under BitsStored 12, where they disagree; it is S1b.
 _S1_CASES = [
     (LJPEG, 8, _ljpeg), (LJPEG, 12, _ljpeg), (LJPEG, 16, _ljpeg),
@@ -250,7 +250,7 @@ def test_a_precision_16_jpeg_ls_stream_under_bits_stored_12_reads_by_its_precisi
         doors, ts):
     """S1b: where the stream's precision and BitsStored disagree, the stream (#478).
 
-    `imagecodecs.jpegls_encode` always writes precision 16 for `uint16`,
+    `imagecodecs.jpegls_encode(pattern)` writes precision 16 for `uint16`,
     so a 12-bit pattern under a BitsStored 12 header is a precision-16
     stream holding 12-bit samples. The owner's ruling (#478, reversing
     the BitsStored reading #463 shipped): read it by the stream's
@@ -386,10 +386,10 @@ def test_a_precision_12_jpeg_ls_stream_from_another_encoder_reads_exactly(
         doors):
     """S2: the one JPEG-LS fixture whose stream precision is BitsStored.
 
-    `imagecodecs.jpegls_encode` always writes precision 16, so every other
-    JPEG-LS fixture here disagrees with a 12-bit header by construction.
-    This one is CharLS's, at precision 12, and it is what a scanner's
-    encoder writes for BitsStored 12.
+    `imagecodecs.jpegls_encode(pattern)` writes precision 16 for `uint16`, so
+    every other JPEG-LS fixture here disagrees with a 12-bit header by
+    construction. This one is CharLS's, at precision 12, and it is what a
+    scanner's encoder writes for BitsStored 12.
     """
     # The SOF55 precision byte, so the literal cannot drift into another
     # stream without this line saying so.
