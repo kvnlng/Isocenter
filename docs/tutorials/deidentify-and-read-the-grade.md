@@ -395,7 +395,7 @@ second_visit = next(
 (`anonymize()` with no argument audits and then acts on every finding.
 That is the shortcut when you are holding nothing back.) Do not skip
 that call for a later batch. Until a scan reads the new file the store
-holds it as ingested and an export writes it that way, and because the
+holds it as ingested and an export writes it as the store holds it, and because the
 rest of this store has been scanned, the report grades
 `REVIEW_REQUIRED` for it
 ([condition 9](../analytics.md#how-the-grade-is-decided)). The second

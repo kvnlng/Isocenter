@@ -33,6 +33,8 @@ import pytest
 from pydicom.data import get_testdata_file
 from pydicom.dataset import Dataset
 
+import isocenter.reporting as reporting_module
+import isocenter.session as session_module
 from isocenter import Session
 from isocenter.entities import PhiStatus
 from isocenter.io_handlers import DicomExporter
@@ -224,6 +226,9 @@ PASS, RR = "PASS", "REVIEW_REQUIRED"
 SHAPES = {
     # A passed and saved, B ingested after it, exported with no scan since.
     "r1-new-study": (dict(first=[A], later=[B_STUDY]), [RR], (1, 1, 1)),
+    # `patients 1` here is #1065's empty patient, not a designed count:
+    # see `test_a_late_series_of_a_passed_study_is_counted`. It moves to
+    # `(0, 0, 1)` when #1065 is fixed.
     "r2-new-series": (dict(first=[A], later=[B_SERIES]), [RR], (1, 0, 1)),
     "e01-new-patient": (dict(first=[A], later=[B_PATIENT]), [RR], (1, 1, 1)),
     "e06-profile-none": (dict(first=[A], later=[B_STUDY], config=NONE_CONFIG),
@@ -642,6 +647,47 @@ def test_a_status_set_back_to_unscanned_is_no_recorded_status(tmp_path):
 
     assert first == (PASS, [])
     assert second == (PASS, [])
+
+
+def test_the_report_object_holds_the_counts_with_the_gate_open_and_shut(
+        tmp_path, monkeypatch):
+    """`ComplianceReport.never_scanned` is the per-level count whether or
+    not it grades, and `phi_status_recorded` is the gate (review of #1066,
+    note 1).
+
+    Every other test here reads the report file, and the renderer reads
+    only the gate, so nothing else sees the counts: with the field not
+    handed to the report at all, or handed empty while the gate is shut,
+    all of them passed. The report object is taken from the renderer
+    `generate_report` hands it to. Gate shut first (two files, never
+    audited: counted, not graded), then open (a pass, then a late file).
+    """
+    taken = []
+
+    class _Keeping(reporting_module.MarkdownRenderer):
+        def render(self, report, output_path):
+            taken.append(report)
+            super().render(report, output_path)
+
+    monkeypatch.setattr(session_module, "get_renderer", lambda _format: _Keeping())
+    _write(tmp_path / "a", "a.dcm", **A)
+    _write(tmp_path / "a", "b.dcm", **B_PATIENT)
+    _write(tmp_path / "c", "c.dcm", study="8", series="1", accession=ACC_B)
+    with _session(tmp_path) as session:
+        session.ingest(str(tmp_path / "a"))
+        shut_grade, _, _ = _report(session, tmp_path, "shut.md")
+        session.anonymize(session.audit())
+        session.ingest(str(tmp_path / "c"))
+        open_grade, open_reasons, _ = _report(session, tmp_path, "open.md")
+
+    shut, opened = taken
+    assert shut_grade == RR  # no audit rows yet: condition 1, not 9
+    assert (shut.never_scanned, shut.phi_status_recorded) == (
+        {"patients": 2, "studies": 2, "instances": 2}, False)
+    assert not [r for r in shut.review_reasons if _is_line_9(r)]
+    assert (opened.never_scanned, opened.phi_status_recorded) == (
+        {"patients": 1, "studies": 1, "instances": 1}, True)
+    assert (open_grade, open_reasons) == (RR, [_never(1, 1, 1)])
 
 
 def test_the_line_holds_counts_and_no_value(tmp_path):

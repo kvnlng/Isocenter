@@ -270,7 +270,9 @@ class ComplianceReport:
             without it the counts are held and do not grade.
         phi_status_recorded (bool): Whether any patient, study or instance
             in the store held a recorded PHI status, stale or not, when
-            the report was assembled.
+            the report was assembled. `generate_report` always sets it;
+            the False of a report built by hand is a default, not a
+            measurement.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
