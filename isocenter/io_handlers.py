@@ -691,6 +691,22 @@ def _full_sample_label(label, samples):
     return label
 
 
+def _holds_bytes(value) -> bool:
+    """Whether a graph value is `bytes`, or a list, tuple or `MultiValue`
+    directly holding one.
+
+    A `bytes` label is written as held (#612, owner ruling of 2026-10-11).
+    The question is put to the graph, never to the pydicom dataset:
+    pydicom hands a `bytes` Code String back as text, and a one-value
+    list of them as that one text value, so on the dataset the two cannot
+    be told from a label held as text.
+    """
+    if isinstance(value, bytes):
+        return True
+    return isinstance(value, (list, tuple, MultiValue)) and any(
+        isinstance(one, bytes) for one in value)
+
+
 def _cs_falls_back(text: str) -> str:
     """The characters that make `_cs_spelling` fall back for `text`: those
     of its `a`-`z` spelling a file cannot hold. Empty when it does not."""
@@ -8127,12 +8143,13 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # none. Until #646 the label reached the file as declared, and
         # this library's own re-ingest dropped that icon's pixels.
         #
-        # Not for a label the graph holds as `bytes`: that is written as
-        # held (#612, owner ruling of 2026-10-11), and pydicom hands the
-        # item's value back as text, so the helper cannot tell.
+        # Not for a label the graph holds as `bytes`, alone or in a list:
+        # that is written as held (#612, owner ruling of 2026-10-11), and
+        # pydicom hands the item's value back as text, a list of one as
+        # that one value, so the helper cannot tell.
         label = item.get("PhotometricInterpretation")
-        folded = label if isinstance(
-            graph_item.attributes.get("0028,0004"), bytes) \
+        folded = label if _holds_bytes(
+            graph_item.attributes.get("0028,0004")) \
             else _full_sample_label(label, samples)
         if folded is not label:
             item.PhotometricInterpretation = label = folded

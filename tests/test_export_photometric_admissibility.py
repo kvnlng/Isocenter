@@ -54,6 +54,7 @@ from datetime import date
 import numpy as np
 import pydicom
 import pytest
+from pydicom.multival import MultiValue
 
 from isocenter.entities import Instance, Patient, Series, Study
 from isocenter.io_handlers import (DicomExporter, ExportContext,
@@ -1543,23 +1544,116 @@ def test_a_one_sample_icon_labelled_ybr_full_422_is_not_folded(tmp_path):
         0].PhotometricInterpretation == "YBR_FULL_422"
 
 
-@pytest.mark.parametrize("declared, in_file", [
-    (b"YBR_FULL_422", "YBR_FULL_422"), (b"ybr_full_422", "ybr_full_422")])
-def test_an_icon_label_held_as_bytes_is_not_folded(tmp_path, declared,
-                                                   in_file):
-    """A `bytes` label is written as held, the fold included (#612, owner
-    ruling of 2026-10-11).
+def _identity(value):
+    return value
 
-    Measured on 7325ff3a for both: written as held over three full
-    samples. pydicom hands the item's value back as text once it is on
-    the dataset, so the fold asks the graph item what it holds; without
-    that, both were folded to `YBR_FULL`. Killing mutation (b6): the fold
-    applied whatever the graph holds.
+
+_ICON_LABELS_HOLDING_BYTES = [
+    (b"YBR_FULL_422", "YBR_FULL_422"),
+    (b"ybr_full_422", "ybr_full_422"),
+    ([b"YBR_FULL_422"], "YBR_FULL_422"),
+    ((b"YBR_FULL_422",), "YBR_FULL_422"),
+    ([b"ybr_full_422"], "ybr_full_422"),
+    (MultiValue(_identity, [b"YBR_FULL_422"]), "YBR_FULL_422"),
+]
+_ICON_BYTES_IDS = ["bytes", "bytes-lower", "list-of-one", "tuple-of-one",
+                   "list-of-one-lower", "multivalue-of-one"]
+
+
+@pytest.mark.parametrize("compression", [False, True],
+                         ids=["uncompressed", "compressed"])
+@pytest.mark.parametrize("declared, in_file", _ICON_LABELS_HOLDING_BYTES,
+                         ids=_ICON_BYTES_IDS)
+def test_an_icon_label_held_as_bytes_is_not_folded(tmp_path, declared,
+                                                   in_file, compression):
+    """A `bytes` label is written as held, the fold included (#612, owner
+    ruling of 2026-10-11), and so is a list, a tuple or a `MultiValue`
+    holding one.
+
+    Measured on 7325ff3a for the lone values and on c6514632 for the
+    containers of one: written as held over three full samples. pydicom
+    hands the item's value back as text once it is on the dataset, a
+    one-value element as one value, so the fold asks the graph item what
+    it holds; without that, each was folded to `YBR_FULL`. Killing
+    mutations: (b6) the fold applied whatever the graph holds; (b9) the
+    guard asks for a lone `bytes` value only.
     """
-    _rows_, exported, _grade_line, _summary = _icon_image(tmp_path, declared)
+    _rows_, exported, _grade_line, _summary = _icon_image(
+        tmp_path, declared, compression=compression)
 
     assert exported.IconImageSequence[
         0].PhotometricInterpretation == in_file
+
+
+@pytest.mark.parametrize("declared, in_file", _ICON_LABELS_HOLDING_BYTES,
+                         ids=_ICON_BYTES_IDS)
+def test_write_tree_does_not_fold_an_icon_label_held_as_bytes(
+        tmp_path, monkeypatch, declared, in_file):
+    """The serializer alone, under threads: the same label as `export()`."""
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=3)
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "graph.db")) as session:
+        session.ingest(str(src))
+        patient = session.store.patients[0]
+        item = patient.studies[0].series[0].instances[0].sequences[
+            "0088,0200"].items[0]
+        item.set_attr("0028,0004", declared)
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies,
+                                 compression=None, show_progress=False)
+    written = list(out.rglob("*.dcm"))
+    assert len(written) == 1, written
+    assert pydicom.dcmread(str(written[0])).IconImageSequence[
+        0].PhotometricInterpretation == in_file
+
+
+def test_an_icon_label_in_a_list_of_bytes_is_not_folded_after_a_reopen(
+        tmp_path):
+    """The store gives the list back, and the reopened graph is asked."""
+    import os
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=3)
+    out = tmp_path / "out"
+    db = str(tmp_path / "reopen.db")
+    with DicomSession(db) as session:
+        session.ingest(str(src))
+        item = session.store.patients[0].studies[0].series[0].instances[
+            0].sequences["0088,0200"].items[0]
+        item.set_attr("0028,0004", [b"YBR_FULL_422"])
+        session.save(sync=True)
+    with DicomSession(db) as session:
+        item = session.store.patients[0].studies[0].series[0].instances[
+            0].sequences["0088,0200"].items[0]
+        assert item.attributes["0028,0004"] == [b"YBR_FULL_422"]
+        session.export(str(out), show_progress=False)
+    written = [os.path.join(r, f) for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert len(written) == 1, written
+    assert pydicom.dcmread(written[0]).IconImageSequence[
+        0].PhotometricInterpretation == "YBR_FULL_422"
+
+
+def test_what_holds_bytes_is_asked_one_level_down():
+    """`_holds_bytes`: a `bytes` value, or a container directly holding one."""
+    from isocenter.io_handlers import _holds_bytes
+
+    assert _holds_bytes(b"YBR_FULL_422") is True
+    assert _holds_bytes([b"YBR_FULL_422"]) is True
+    assert _holds_bytes((b"YBR_FULL_422",)) is True
+    assert _holds_bytes(MultiValue(_identity, [b"YBR_FULL_422"])) is True
+    assert _holds_bytes(["YBR_FULL_422", b"x"]) is True
+    assert _holds_bytes("YBR_FULL_422") is False
+    assert _holds_bytes(["YBR_FULL_422"]) is False
+    assert _holds_bytes(("YBR_FULL_422",)) is False
+    assert _holds_bytes(MultiValue(str, ["YBR_FULL_422"])) is False
+    assert _holds_bytes([]) is False
+    assert _holds_bytes(None) is False
+    assert _holds_bytes(7) is False
 
 
 @pytest.mark.parametrize("threads", [False, True])
