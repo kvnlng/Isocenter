@@ -135161,6 +135161,13 @@
        ],
        [
         "ERROR",
+        "<src>/offset_table_edges-ragged-bad-header.dcm",
+        "Ingest failed for <src>/offset_table_edges-ragged-bad-header.dcm: Decompression Failed: ValueError: A (0028,0101) 'Bits Stored' value of '17' is invalid, it must be in the range (1, 64) and no greater than the (0028,0100) 'Bits Allocated' value of '8'",
+        null,
+        null
+       ],
+       [
+        "ERROR",
         "<src>/offset_table_edges-ragged.dcm",
         "Ingest failed for <src>/offset_table_edges-ragged.dcm: Decompression Failed: RuntimeError: Extended Offset Table is 12 bytes long, which is not a whole number of 8-byte offsets, so it names no whole number of frames.",
         null,
@@ -136151,6 +136158,10 @@
          "Decompression Failed: RuntimeError: Pixel Data holds 1 fragment with no offset table pydicom walks by, and NumberOfFrames declares 2: pydicom found no frame boundary in them, so the declared frames cannot be read (caused by StopIteration)"
         ],
         [
+         "offset_table_edges-ragged-bad-header.dcm",
+         "Decompression Failed: ValueError: A (0028,0101) 'Bits Stored' value of '17' is invalid, it must be in the range (1, 64) and no greater than the (0028,0100) 'Bits Allocated' value of '8'"
+        ],
+        [
          "offset_table_edges-ragged.dcm",
          "Decompression Failed: RuntimeError: Extended Offset Table is 12 bytes long, which is not a whole number of 8-byte offsets, so it names no whole number of frames."
         ]
@@ -136197,6 +136208,13 @@
         "ERROR",
         "<src>/offset_table_edges-clause.dcm",
         "Ingest failed for <src>/offset_table_edges-clause.dcm: Decompression Failed: RuntimeError: Pixel Data holds 1 fragment with no offset table pydicom walks by, and NumberOfFrames declares 2: pydicom found no frame boundary in them, so the declared frames cannot be read (caused by StopIteration)",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "<src>/offset_table_edges-ragged-bad-header.dcm",
+        "Ingest failed for <src>/offset_table_edges-ragged-bad-header.dcm: Decompression Failed: ValueError: A (0028,0101) 'Bits Stored' value of '17' is invalid, it must be in the range (1, 64) and no greater than the (0028,0100) 'Bits Allocated' value of '8'",
         null,
         null
        ],
@@ -136860,6 +136878,10 @@
          "Decompression Failed: RuntimeError: Pixel Data holds 1 fragment with no offset table pydicom walks by, and NumberOfFrames declares 2: pydicom found no frame boundary in them, so the declared frames cannot be read (caused by StopIteration)"
         ],
         [
+         "offset_table_edges-ragged-bad-header.dcm",
+         "Decompression Failed: ValueError: A (0028,0101) 'Bits Stored' value of '17' is invalid, it must be in the range (1, 64) and no greater than the (0028,0100) 'Bits Allocated' value of '8'"
+        ],
+        [
          "offset_table_edges-ragged.dcm",
          "Decompression Failed: RuntimeError: Extended Offset Table is 12 bytes long, which is not a whole number of 8-byte offsets, so it names no whole number of frames."
         ]
@@ -136878,6 +136900,7 @@
     "offset_table_edges-dropped.dcm": "sha256:20f8955d48a2f93595bf5598f2e9c68e20458bb62c752c26b31bcb65bce74791",
     "offset_table_edges-fewer-excess.dcm": "sha256:589dc4fb75c837b171ac139551ae25915cbbebe97eb76259fe72d4ca72b22451",
     "offset_table_edges-good.dcm": "sha256:76b95cea94b434acbbacf08397f01723e390e327b519525ac248eb9005a6456d",
+    "offset_table_edges-ragged-bad-header.dcm": "sha256:e0378cf12ecd098e0b75e9d3591f4378550f6a8b641befda4ed39010aa832ec6",
     "offset_table_edges-ragged.dcm": "sha256:6013e6b0667792106202f989a81f630fd6220536d50c03c021416cd8832af2f0"
    }
   },
@@ -136897,6 +136920,13 @@
         "ERROR",
         "<src>/one_bit_excess-beyond.dcm",
         "Ingest failed for <src>/one_bit_excess-beyond.dcm: Decompression Failed: RuntimeError: Pixel Data holds 6 bytes, room for 5 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 2 and they need 3: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames.",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "<src>/one_bit_excess-no-frames-value.dcm",
+        "Ingest failed for <src>/one_bit_excess-no-frames-value.dcm: Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room for 3 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 1 and it needs 2: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames.",
         null,
         null
        ],
@@ -137334,6 +137364,10 @@
         [
          "one_bit_excess-beyond.dcm",
          "Decompression Failed: RuntimeError: Pixel Data holds 6 bytes, room for 5 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 2 and they need 3: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames."
+        ],
+        [
+         "one_bit_excess-no-frames-value.dcm",
+         "Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room for 3 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 1 and it needs 2: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames."
         ]
        ],
        "ingested": 2,
@@ -137357,6 +137391,13 @@
         "ERROR",
         "<src>/one_bit_excess-beyond.dcm",
         "Ingest failed for <src>/one_bit_excess-beyond.dcm: Decompression Failed: RuntimeError: Pixel Data holds 6 bytes, room for 5 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 2 and they need 3: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames.",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "<src>/one_bit_excess-no-frames-value.dcm",
+        "Ingest failed for <src>/one_bit_excess-no-frames-value.dcm: Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room for 3 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 1 and it needs 2: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames.",
         null,
         null
        ],
@@ -137645,6 +137686,10 @@
         [
          "one_bit_excess-beyond.dcm",
          "Decompression Failed: RuntimeError: Pixel Data holds 6 bytes, room for 5 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 2 and they need 3: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames."
+        ],
+        [
+         "one_bit_excess-no-frames-value.dcm",
+         "Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room for 3 frames of 3x3 at one bit per sample, where NumberOfFrames is read as 1 and it needs 2: a frame here is 9 bits, not a whole number of bytes, so the bytes beyond the declared frames cannot be read as frames."
         ]
        ],
        "ingested": 2,
@@ -137657,6 +137702,7 @@
    "inputs": {
     "one_bit_excess-beyond.dcm": "sha256:e570437afed11a697cdd0ad969f6cb96991656e58b2deb10156c4c02de62b2d0",
     "one_bit_excess-good.dcm": "sha256:df139d95544cd98602f2f001aabfc45a04b0f9eb00a6f3a1ce54d5fc055f03bc",
+    "one_bit_excess-no-frames-value.dcm": "sha256:b9976265ff99b5e6fe6ecb102866bf0e2e1fa004d1d3cc474ede33cf02dcce99",
     "one_bit_excess-padded.dcm": "sha256:eaa7d970afa6ed58268ca91f7d2478f1a773781e2df6eef2821be6a1195a6e04"
    }
   },
@@ -141481,12 +141527,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "3b7c9c66bb35bda3b200b869ed1150e3ff0fe5ab",
+  "git_sha": "1653fd72d6ea28b6cd3bf95db66baa9c375da529",
   "isocenter_version": "1.0.0rc17",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 664
+  "seconds": 589
  },
  "schema": 1,
  "toolchain": {
