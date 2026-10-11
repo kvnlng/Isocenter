@@ -138467,12 +138467,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "bd1adb1d26d1164d055cbfa208407b01d6e2fc93",
+  "git_sha": "25414ae14c5e0c8daa803107195b84d80f643bfb",
   "isocenter_version": "1.0.0rc17",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 1392
+  "seconds": 2171
  },
  "schema": 1,
  "toolchain": {
