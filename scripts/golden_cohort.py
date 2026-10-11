@@ -694,6 +694,74 @@ def sop_classes_in_the_file_meta(out: Path):
     write(ds, out / "sop_classes_in_the_file_meta-1.dcm")
 
 
+def label_spelling(out: Path):
+    """Four files whose Photometric Interpretation `(0028,0004)` is not
+    spelled as a Code String is (#612). `-no-pixels` is an Encapsulated
+    PDF of its own patient, with no pixel element, declaring
+    `monochrome` followed by the byte `0xDF` (`ß` in the default
+    repertoire): the export respells a declared label, and until #612 did
+    it by Unicode's rules, writing `MONOCHROMESS` under a `WARNING` that
+    said the label was written as declared. `-icon` is a CT whose Icon
+    Image Sequence item declares ` rgb`, a leading space and lower case
+    over three 8-bit samples. `-whitespace` is a second Encapsulated PDF,
+    of a third patient, declaring ` monochrome2` followed by a no-break
+    space (the byte `0xA0`), a carriage return and a line feed: whitespace
+    that is not a space, in ASCII and outside it, which the export
+    removes from a label's ends and names in its note. It has no pixel
+    element because that is the only way a source file brings such a
+    label to the top level: over pixels, ingest refuses the file.
+    `-icon-whitespace` is a second CT, of a fourth patient, whose icon
+    item declares `RGB` followed by a tab: the other door. No
+    other input declares a label outside the Code String repertoire, or
+    one that is respelled at all. No file can hold the third edge, a
+    label the export's own file cannot encode: a Code String is read
+    from a file one byte to a character, so every label a file brings in
+    is one a file can hold."""
+    def pdf(study, name, label):
+        sop = uid("label_spelling", study, 1, 1)
+        ds = FileDataset(None, {}, file_meta=_meta(ENCAPSULATED_PDF, sop, ExplicitVRLittleEndian),
+                         preamble=b"\0" * 128)
+        ds.PatientID, ds.PatientName = f"GOLD-label_spelling-{name}", "GOLDEN^LABEL"
+        ds.StudyInstanceUID = uid("label_spelling", study)
+        ds.SeriesInstanceUID = uid("label_spelling", study, 1)
+        ds.SOPInstanceUID, ds.SOPClassUID = sop, ENCAPSULATED_PDF
+        ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "DOC", 1, 1
+        ds.StudyDate, ds.StudyTime = "20230101", "120000"
+        ds.ContentDate, ds.ContentTime = "20230101", "120000"
+        ds.ConversionType = "WSD"
+        ds.BurnedInAnnotation = "NO"
+        ds.DocumentTitle = "GOLD label"
+        ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+        head = b"%PDF-1.4\n% GOLD label spelling\n"
+        ds.EncapsulatedDocument = head + b"x" * (200 - len(head))
+        ds.EncapsulatedDocumentLength = 200
+        ds.add_new(0x00280004, "CS", label)
+        write(ds, out / f"label_spelling-{name}.dcm")
+
+    # No Specific Character Set, and a Code String is not under one: the
+    # file holds the single byte 0xDF, and pydicom reads it back as `ß`.
+    pdf(1, "no-pixels", "monochrome\xdf")
+    # On the wire the label ends 0xA0 0x0D 0x0A and one pad space, which
+    # pydicom removes on reading: the value read back ends with all three.
+    pdf(3, "whitespace", " monochrome2\xa0\r\n")
+
+    # `-icon-whitespace`: the same item one depth down with a tab at the
+    # end of its label, four bytes on the wire.
+    for study, name, label in ((2, "icon", " rgb"),
+                               (4, "icon-whitespace", "RGB\t")):
+        ds = ct("label_spelling", study=study,
+                pid=f"GOLD-label_spelling-{name}")
+        icon = Dataset()
+        icon.Rows = icon.Columns = 4
+        icon.SamplesPerPixel, icon.PlanarConfiguration = 3, 0
+        icon.BitsAllocated = icon.BitsStored = 8
+        icon.HighBit, icon.PixelRepresentation = 7, 0
+        icon.add_new(0x00280004, "CS", label)
+        icon.add_new(0x7FE00010, "OB", bytes(range(48)))
+        ds.IconImageSequence = Sequence([icon])
+        write(ds, out / f"label_spelling-{name}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -703,7 +771,7 @@ MEMBERS = {f.__name__: f for f in (
     ecg_lead_codes, number_vr_on_a_date_or_time,
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
     source_says_unmodified, linkage_key_not_text,
-    sop_classes_in_the_file_meta)}
+    sop_classes_in_the_file_meta, label_spelling)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
