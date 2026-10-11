@@ -187,21 +187,6 @@ _CS_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz",
                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 
-def _cs_text(value):
-    """`value` as text when it is text or ASCII `bytes`; else itself."""
-    # An ASCII `bytes` label is the label's text in the only encoding a
-    # Code String has, so it is read as that text: handed to pydicom raw
-    # it was written unrespelled, with pydicom's `UserWarning` and no
-    # note (#612). `bytes` that are not ASCII are not text this library
-    # can read, and are left as held.
-    if isinstance(value, bytes):
-        try:
-            return value.decode("ascii")
-        except UnicodeDecodeError:
-            return value
-    return value
-
-
 #: The encoding pydicom's writer gives a Code String, whatever the
 #: dataset's Specific Character Set says: its `default_encoding`, ISO
 #: 8859-1, one byte for each of U+0000 to U+00FF and nothing for anything
@@ -235,8 +220,11 @@ def _cs_spelling(value):
     - Whitespace is removed from both ends, everything Python's own strip
       removes: the space, the ASCII control characters U+0009 to U+000D
       and U+001C to U+001F, U+0085, a no-break space and the Unicode
-      spaces. A file holding one of them at an end of the label is one
-      pydicom and this library's own ingest refuse to decode.
+      spaces. Over pixel data a file holding one of them at an end of
+      the label is one pydicom refuses to decode, and so does this
+      library's own ingest; with no pixel element, or on an icon item
+      whose pixels are not carried, such a file is ingested and the
+      label reaches here as the file held it.
     - `a`-`z` are upper-cased and no other letter is touched: `'rgß'` is
       `RGß`, not Unicode's `RGSS`.
     - **Unless the file cannot hold that spelling.** A character above
@@ -248,19 +236,21 @@ def _cs_spelling(value):
       cannot be encoded either (fullwidth letters) it is still what is
       returned, and the file fails, as it did.
 
-    An ASCII `bytes` value is spelled as its text.
+    Text only. A `bytes` value is not spelled: it is returned as held,
+    ASCII or not, and written as held, which is what releases before
+    #612 did with it (owner ruling, 2026-10-11). A file can bring one
+    in by stating a binary VR for (0028,0004), so respelling it would
+    change what a source's own label exports as.
 
     Args:
         value: One value of a Code String element, as the graph holds it.
 
     Returns:
-        The spelled `str`, or `value` itself when it is neither text nor
-        ASCII `bytes`.
+        The spelled `str`, or `value` itself when it is not a `str`.
     """
-    text = _cs_text(value)
-    if not isinstance(text, str):
+    if not isinstance(value, str):
         return value
-    text = text.strip()
+    text = value.strip()
     spelled = text.translate(_CS_UPPER)
     if _cs_unencodable(spelled):
         return text.upper()
@@ -278,11 +268,12 @@ def _declared_str(attributes: Any, tag: str) -> Optional[str]:
     # Not Python's own strip and upper-casing, which this was until #612:
     # the worker writes the label by `_cs_spelling`, and a resolver that
     # spelled it otherwise answered "leave it alone" about a label the
-    # worker then wrote as a different one.
+    # worker then wrote as a different one. A value that is not text
+    # (`bytes`, a number) is read as the text of its `str`, as it always
+    # was: that names no label, so the resolver leaves it to the writer,
+    # which writes it as held.
     try:
-        text = _cs_spelling(raw)
-        if not isinstance(text, str):
-            text = _cs_spelling(str(text))
+        text = _cs_spelling(raw if isinstance(raw, str) else str(raw))
     except Exception:  # pylint: disable=broad-except
         return None
     return text or None

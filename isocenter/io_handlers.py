@@ -120,7 +120,6 @@ from .pixel_geometry import (
     TAG_FLOAT_PIXEL_DATA,
     _CS_UPPER,
     _cs_spelling,
-    _cs_text,
     _cs_unencodable,
     declared_int,
     resolve_photometric_interpretation,
@@ -572,7 +571,7 @@ _PHOTOMETRIC_ICON = (
     "sequence item.")
 
 
-def _written_photometric(value) -> Union[str, bytes, None]:
+def _written_photometric(value) -> Optional[str]:
     """One label, normalized for comparison against a syntax's row.
 
     Spelled as a Code String is (`_cs_spelling`), which is what a
@@ -585,10 +584,10 @@ def _written_photometric(value) -> Union[str, bytes, None]:
         value: The Photometric Interpretation as held on `ds`, or None.
 
     Returns:
-        Union[str, bytes, None]: The normalized label, or None for an
-        absent or empty value (there is no claim to judge). A `bytes`
-        label that is not ASCII is returned as held, a `bytes`: no row
-        admits it, and the sentence about it quotes the value as held.
+        Optional[str]: The normalized label, or None for an absent or
+        empty value (there is no claim to judge). A value that is not
+        text (`bytes`, a number) is read as the text of its `str`, as
+        it was before #612: no row admits that, which is the answer.
     """
     # Deliberately not `declared_int`'s rule, which reads `[1]` as "not
     # declared": that answers what the graph declared, this answers what
@@ -599,15 +598,8 @@ def _written_photometric(value) -> Union[str, bytes, None]:
     # (`_PhotometricRefusal`) and fails the readback.
     if value is None:
         return None
-    spelled = _cs_spelling(value)
-    if isinstance(spelled, bytes):
-        # Not as the text of its `repr`, which until #612 was upper-cased
-        # with the rest: `b'rg\xdf'` was judged, and quoted, as
-        # `"B'RG\\XDF'"`.
-        return spelled or None
-    if not isinstance(spelled, str):
-        spelled = _cs_spelling(str(spelled))
-    return spelled or None
+    return _cs_spelling(value if isinstance(value, str) else str(value)) \
+        or None
 
 
 #: The longest value a Code String may hold (PS3.5 6.2), and how much of a
@@ -633,6 +625,23 @@ def _cs_removed(text: str) -> Tuple[str, str]:
     kept = text.rstrip()
     body = kept.lstrip()
     return kept[:len(kept) - len(body)], text[len(kept):]
+
+
+def _cs_ends_named(removed) -> Optional[str]:
+    """The whitespace that is not a space in `removed`, named by end and
+    by code point: `its start (U+0009) and its end (U+000A)`. None when
+    only spaces were removed, or nothing.
+
+    Args:
+        removed: `_cs_removed`'s answer for each value spoken for.
+    """
+    ends = []
+    for name, runs in (("start", [lead for lead, _trail in removed]),
+                       ("end", [trail for _lead, trail in removed])):
+        others = set("".join(runs)) - {" "}
+        if others:
+            ends.append(f"its {name} ({_code_points(others)})")
+    return " and ".join(ends) or None
 
 
 def _code_points(chars) -> str:
@@ -689,9 +698,9 @@ def _cs_falls_back(text: str) -> str:
 
 
 def _label_values(attributes) -> list:
-    """The declared values of (0028,0004) that are text, as a list."""
-    # Not `bytes`: an ASCII `bytes` label holds no character a file
-    # cannot, and one that is not ASCII is not respelled at all.
+    """The declared values of (0028,0004), as a list, when the element
+    holds text or a list of values."""
+    # Not a lone `bytes`: it is not respelled at all.
     value = attributes.get("0028,0004")
     if isinstance(value, str):
         return [value]
@@ -714,11 +723,10 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     space that was removed (`'RGB\\t'` is written `RGB`) is named in the
     note by code point. A label the file could not hold so spelled is
     written by `_cs_spelling`'s fallback, and `_label_fallback_warning`
-    speaks for it, not this note. An ASCII `bytes` label is written as its
-    text. A multi-valued declaration has each such value respelled;
-    anything else (`bytes` that are not ASCII, a number) is left as it
-    is. Only `0028,0004` is respelled; other Code String elements are
-    written as held.
+    speaks for it, not this note. A multi-valued declaration has each
+    text value respelled; anything that is not text (`bytes`, a number)
+    is left as it is. Only `0028,0004` is respelled; other Code String
+    elements are written as held.
 
     Args:
         attributes (Mapping): An instance's or sequence item's attributes.
@@ -751,15 +759,16 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     # down (an icon labelled `' rgb'` is also dropped by this library's
     # own re-ingest); its note names the item.
     value = attributes.get("0028,0004")
-    if isinstance(value, (str, bytes)):
+    # Text only. A `bytes` label is written as held (owner ruling,
+    # 2026-10-11): a file that states a binary VR for (0028,0004) brings
+    # one in, and a source's own label exports as it did before #612.
+    if isinstance(value, str):
         declared = [value]
         written_value = _cs_spelling(value)
-        # `b'RGB' == 'RGB'` is False, so an ASCII `bytes` label always
-        # takes the copy: pydicom is handed text.
         if written_value == value:
             return attributes, None
     elif isinstance(value, (list, tuple, MultiValue)) and any(
-            isinstance(v, (str, bytes)) for v in value):
+            isinstance(v, str) for v in value):
         declared = list(value)
         written_value = [_cs_spelling(v) for v in value]
         if written_value == declared:
@@ -778,8 +787,10 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     # each end -- so each is said only where that operation changed
     # something. With Python's own predicates a tab read as "its leading
     # spaces removed" and `ß` as "its letters upper-cased" (#612).
-    texts = [text for text in map(_cs_text, declared)
-             if isinstance(text, str) and not _cs_falls_back(text)]
+    fell_back = [isinstance(d, str) and bool(_cs_falls_back(d))
+                 for d in declared]
+    texts = [d for d, fallen in zip(declared, fell_back)
+             if isinstance(d, str) and not fallen]
     removed = [_cs_removed(text) for text in texts]
     changes = []
     if any(text.translate(_CS_UPPER) != text for text in texts):
@@ -790,21 +801,22 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     # before #612, and said, which it was not (a trailing tab went with
     # no note at all). Named by code point and by end, never written raw
     # into a note.
-    ends = []
-    for name, runs in (("start", [lead for lead, _trail in removed]),
-                       ("end", [trail for _lead, trail in removed])):
-        others = set("".join(runs)) - {" "}
-        if others:
-            ends.append(f"its {name} ({_code_points(others)})")
+    ends = _cs_ends_named(removed)
     if ends:
-        changes.append("the whitespace that is not a space removed from "
-                       + " and ".join(ends))
+        changes.append(
+            f"the whitespace that is not a space removed from {ends}")
     # Nothing to say: trailing spaces alone were removed, and the file
     # pads with them anyway.
     if not changes:
         return copy, None
-    spelled = ", ".join(_cs_quoted(d) for d in declared)
-    as_written = ", ".join(_cs_quoted(w) for w in written)
+    # Neither list quotes a value the fallback wrote: this sentence says
+    # "the same label", and that value is another one.
+    spelled = ", ".join(
+        _cs_quoted(d) for d, fallen in zip(declared, fell_back)
+        if not fallen)
+    as_written = ", ".join(
+        _cs_quoted(w) for w, fallen in zip(written, fell_back)
+        if not fallen)
     return copy, (
         f"PhotometricInterpretation {spelled} is not a defined Code String "
         f"spelling; written as {as_written}, the same label with "
@@ -834,12 +846,15 @@ def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
 
     Returns:
         Optional[str]: One sentence per such value, naming the characters
-        by code point and the label written; None when there is none, or
-        when the fallback cannot be encoded either (the file fails, with
-        its own row, as it did before #612).
+        by code point and the label written, and any whitespace other
+        than the space that went from its ends (the INFO note, which
+        names that for every other label, is not written for this one);
+        None when there is none, or when the fallback cannot be encoded
+        either (the file fails, with its own row, as it did before
+        #612).
     """
     said = []
-    for text in map(_cs_text, _label_values(attributes)):
+    for text in _label_values(attributes):
         if not isinstance(text, str):
             continue
         held = _cs_falls_back(text)
@@ -849,12 +864,15 @@ def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
         if in_file is not None and written not in map(
                 _written_photometric, in_file):
             continue
+        ends = _cs_ends_named([_cs_removed(text)])
+        stripped = (f", with the whitespace that is not a space removed "
+                    f"from {ends}") if ends else ""
         said.append(
             f"PhotometricInterpretation {_cs_quoted(text)} holds a "
             f"character the file cannot hold ({_code_points(held)}); it "
             f"was written as {_cs_quoted(written)}, its upper case by "
-            f"Unicode's rules, and that is the label any other row about "
-            f"this file quotes.")
+            f"Unicode's rules{stripped}, and that is the label any other "
+            f"row about this file quotes.")
     return " ".join(said) or None
 
 

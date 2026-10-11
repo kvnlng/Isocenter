@@ -1586,7 +1586,9 @@ def test_the_fold_is_one_helper_for_both_depths():
 
     assert _full_sample_label("YBR_FULL_422", 3) == "YBR_FULL"
     assert _full_sample_label(" ybr_full_422 ", 4) == "YBR_FULL"
-    assert _full_sample_label(b"YBR_FULL_422", 3) == "YBR_FULL"
+    # `bytes` is not text: not spelled, so not folded, as before #646.
+    held_bytes = b"YBR_FULL_422"
+    assert _full_sample_label(held_bytes, 3) is held_bytes
     assert _full_sample_label("YBR_FULL_422", 1) == "YBR_FULL_422"
     assert _full_sample_label("YBR_FULL_422", 2) == "YBR_FULL_422"
     assert _full_sample_label("YBR_FULL", 3) == "YBR_FULL"
@@ -1636,6 +1638,11 @@ _FELL_BACK = ("PhotometricInterpretation {} holds a character the file "
               "cannot hold ({}); it was written as {}, its upper case by "
               "Unicode's rules, and that is the label any other row about "
               "this file quotes.")
+_FELL_BACK_STRIPPED = (
+    "PhotometricInterpretation {} holds a character the file cannot hold "
+    "({}); it was written as {}, its upper case by Unicode's rules, with "
+    "the whitespace that is not a space removed from {}, and that is the "
+    "label any other row about this file quotes.")
 
 
 def _is_printable_ascii(text):
@@ -1650,10 +1657,6 @@ def _is_printable_ascii(text):
     ("monochrome\xdf", "MONOCHROME\xdf", _UPPER),
     ("rgb\xff", "RGB\xff", _UPPER),
     ("rgb\xb5", "RGB\xb5", _UPPER),
-    (b"monochrome2", "MONOCHROME2", _UPPER),
-    (b" MONOCHROME2 ", "MONOCHROME2", _LEAD),
-    (b"RGB", "RGB", None),
-    (b"RGB ", "RGB", None),
     (" RG\xdf", "RG\xdf", _LEAD),
     ("RGB\t", "RGB", f"{_WS}its end (U+0009)"),
     ("RGB\n", "RGB", f"{_WS}its end (U+000A)"),
@@ -1677,18 +1680,16 @@ def _is_printable_ascii(text):
     ("\t RGB", "RGB", f"{_LEAD} and {_WS}its start (U+0009)"),
     ("RGB\t\t", "RGB", f"{_WS}its end (U+0009)"),
     ("RGB\xa0\t", "RGB", f"{_WS}its end (U+0009, U+00A0)"),
-    (b"RGB\t", "RGB", f"{_WS}its end (U+0009)"),
     ("RG\xdf\n", "RG\xdf", f"{_WS}its end (U+000A)"),
     ("\t", "", f"{_WS}its end (U+0009)"),
     ("   ", "", None),
 ], ids=["lower", "leading-space", "padded-lower", "trailing-pad", "sharp-s",
-        "y-diaeresis", "micro", "bytes-lower", "bytes-padded",
-        "bytes-defined", "bytes-trailing-pad", "space-then-sharp-s",
+        "y-diaeresis", "micro", "space-then-sharp-s",
         "tab", "line-feed", "vertical-tab", "form-feed", "carriage-return",
         "fs", "gs", "rs", "us", "next-line", "nbsp", "em-space",
         "ideographic-space-lead", "padded-lower-crlf", "leading-tab",
         "tab-both-ends", "tab-then-lower", "tab-then-pad", "tab-then-space",
-        "two-tabs", "nbsp-then-tab", "bytes-tab", "sharp-s-line-feed",
+        "two-tabs", "nbsp-then-tab", "sharp-s-line-feed",
         "only-a-tab", "only-spaces"])
 def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
                                                             changes):
@@ -1700,16 +1701,12 @@ def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
     `MONOCHROMESS`, `'\\tMONOCHROME2'` "its leading spaces removed" for a
     tab, and `'RGB\\t'` no note at all. Whitespace that is not a space is
     named by code point and by end, in code point order, each once, and
-    no character outside printable ASCII is written into the note. An
-    ASCII `bytes` label is read as its text; before, it was handed to
-    pydicom raw, which wrote `b'rgb'` as `rgb` with a `UserWarning` and no
-    note.
+    no character outside printable ASCII is written into the note.
 
     Killing mutations: (s1) Python's own upper-casing (`sharp-s`; under it
     `y-diaeresis` and `micro` become labels no file can hold); (s2) the
     space alone stripped, or ASCII whitespace alone (`tab` to
-    `ideographic-space-lead`); (s4) `bytes` left raw (the `bytes-` rows);
-    (s6) the upper-case clause tested with Unicode's predicate
+    `ideographic-space-lead`); (s6) the upper-case clause tested with Unicode's predicate
     (`space-then-sharp-s`); (w1) the space counted as whitespace that is
     not one (`tab-then-pad`, `tab-then-space`, `only-spaces`); (w2) the
     two ends swapped or merged (`leading-tab`, `tab-both-ends`); (w3) the
@@ -1740,18 +1737,24 @@ def test_a_label_is_respelled_on_the_code_string_repertoire(declared, written,
 
 @pytest.mark.parametrize("declared", [
     "MONO\tCHROME2", "RGB\xa0X", "RG\xdf", "RGB\xff", b"rg\xdf",
-    b"RG\xdf ", _FULLWIDTH, 7],
+    b"RG\xdf ", b"rgb", b" rgb ", b"RGB\t", b"RGB", b"monochrome2",
+    _FULLWIDTH, 7],
     ids=["tab-inside", "nbsp-inside", "sharp-s-upper", "y-diaeresis-upper",
-         "bytes-not-ascii", "bytes-not-ascii-padded", "fullwidth", "number"])
+         "bytes-not-ascii", "bytes-not-ascii-padded", "bytes-lower",
+         "bytes-padded", "bytes-tab", "bytes-defined", "bytes-monochrome",
+         "fullwidth", "number"])
 def test_a_character_outside_the_repertoire_is_left_where_it_is(declared):
     """Nothing to respell: written as held, no note, judged as held (#612).
 
     Whitespace inside a label is not at an end, and a letter outside
-    `a`-`z` has no Code String upper case. A `bytes` label that is not
-    ASCII is not text this library can read, so it is left as held and
-    judged as held: before, it was judged as the text of its `repr`,
-    upper-cased (`"B'RG\\\\XDF'"`). Fullwidth capitals are their own
+    `a`-`z` has no Code String upper case. A `bytes` label, ASCII or not,
+    is not text: it is not respelled, the writer is handed it as held,
+    and it is judged as the text of its `str`, all three as before #612
+    (owner ruling, 2026-10-11; a file that states a binary VR for
+    (0028,0004) brings one in). Fullwidth capitals are their own
     fallback: nothing to respell, and no file can hold them, as before.
+    Killing mutation (b1, b2): a `bytes` label respelled as its text by
+    the writer, or judged as its text.
     """
     from isocenter.io_handlers import (_cs_quoted, _label_as_written,
                                        _label_fallback_warning)
@@ -1763,13 +1766,12 @@ def test_a_character_outside_the_repertoire_is_left_where_it_is(declared):
     assert note is None
     assert _label_fallback_warning(attributes) is None
     judged = _written_photometric(declared)
-    assert judged == (declared if isinstance(declared, (str, bytes))
-                      else str(declared))
+    assert judged == (declared if isinstance(declared, str)
+                      else str(declared).upper())
     sentence = _photometric_warning(judged, IMPLICIT_VR_LE, has_pixels=True)
     assert sentence.startswith(
         f"PhotometricInterpretation {_cs_quoted(judged)} is not")
     assert _is_printable_ascii(sentence), sentence
-    assert "B'" not in _cs_quoted(judged)
 
 
 def test_a_label_is_quoted_in_ascii():
@@ -1794,31 +1796,34 @@ def test_a_label_is_quoted_in_ascii():
 
 
 def test_a_multi_valued_label_is_respelled_value_by_value():
-    """Each value by its own kind: text, ASCII `bytes`, `bytes` that is not."""
+    """Each text value is respelled; `bytes` and a number are left as held."""
     from isocenter.io_handlers import _label_as_written
 
     declared = [" rgb", b"ybr_full\n", b"x\xdf", "\x0cRG\xdf\t", 5]
     copy, note = _label_as_written({"0028,0004": declared})
 
-    assert copy["0028,0004"] == ["RGB", "YBR_FULL", b"x\xdf", "RG\xdf", 5]
-    # One clause for the element: the code points of every value, by end.
+    assert copy["0028,0004"] == ["RGB", b"ybr_full\n", b"x\xdf", "RG\xdf", 5]
+    # One clause for the element: the code points of every text value, by
+    # end. The line feed is the `bytes` value's, which is not respelled.
     assert note == _NOTE.format(
         "' rgb', b'ybr_full\\n', b'x\\xdf', '\\x0cRG\\xdf\\t', 5",
-        "'RGB', 'YBR_FULL', b'x\\xdf', 'RG\\xdf', 5",
+        "'RGB', b'ybr_full\\n', b'x\\xdf', 'RG\\xdf', 5",
         f"{_UPPER} and {_LEAD} and {_WS}its start (U+000C) and its end "
-        f"(U+0009, U+000A)")
+        f"(U+0009)")
     assert declared == [" rgb", b"ybr_full\n", b"x\xdf", "\x0cRG\xdf\t", 5]
 
-    # No `str` among them: `bytes` alone is enough for the writer to look.
-    copy, note = _label_as_written({"0028,0004": [b"rgb", b"RGB "]})
-    assert copy["0028,0004"] == ["RGB", "RGB"]
-    assert note == _NOTE.format("b'rgb', b'RGB '", "'RGB', 'RGB'", _UPPER)
+    # No `str` among them: nothing to respell, and the mapping is the
+    # caller's own.
+    held = {"0028,0004": [b"rgb", b"RGB "]}
+    copy, note = _label_as_written(held)
+    assert copy is held
+    assert note is None
 
 
 @pytest.mark.parametrize("label, judged", [
-    ("   ", None), ("", None), (None, None), (b"  ", None),
-    ("\t", None), (b"\t ", None), (" \r\n", None), ("\xa0", None),
-    ("\u3000 ", None), (" rgb ", "RGB"), (b" rgb ", "RGB"),
+    ("   ", None), ("", None), (None, None), (b"  ", "B'  '"),
+    ("\t", None), (b"", "B''"), (" \r\n", None), ("\xa0", None),
+    ("\u3000 ", None), (" rgb ", "RGB"), (b" rgb ", "B' RGB '"),
     ("RGB\t", "RGB"), ("RGB\xa0", "RGB")])
 def test_a_label_of_spaces_is_no_label(label, judged):
     assert _written_photometric(label) == judged
@@ -1842,7 +1847,10 @@ def test_the_resolver_the_writer_and_the_judge_spell_a_label_one_way(label):
     alone" about `'MONOCHROME2\\t'`, which the writer then wrote with its
     tab: a file pydicom and this library's own ingest refuse. Killing
     mutation (r1): `_declared_str` back on `str(raw).strip().upper()`
-    (`rg\\xdf`, `rgb\\xff`, the two `bytes` rows).
+    (`rg\\xdf`, `rgb\\xff`). A `bytes` label is not text to any of the
+    three: the resolver and the judgement read the text of its `str`,
+    which names no label, and the writer leaves it as held (b3: the
+    resolver reading ASCII `bytes` as its text).
     """
     from isocenter.io_handlers import _label_as_written
     from isocenter.pixel_geometry import (TAG_PHOTOMETRIC_INTERPRETATION,
@@ -1851,30 +1859,32 @@ def test_the_resolver_the_writer_and_the_judge_spell_a_label_one_way(label):
     attributes = {"0028,0004": label}
     resolved = _declared_str(attributes, TAG_PHOTOMETRIC_INTERPRETATION)
     judged = _written_photometric(label)
-    if isinstance(judged, bytes):
-        # `bytes` that are not ASCII: the judgement quotes the value as
-        # held; the resolver, which only compares with defined terms,
-        # reads the text of it. Neither is a term.
-        assert resolved == str(judged).strip().upper()
-    else:
-        assert resolved == judged
-    if isinstance(label, (str, bytes)) and isinstance(judged, str):
-        copy, _note = _label_as_written(attributes)
+    assert resolved == judged
+    copy, _note = _label_as_written(attributes)
+    if isinstance(label, str) and judged is not None:
         assert copy["0028,0004"] == judged
+    elif isinstance(label, bytes):
+        assert copy is attributes
+        assert judged == str(label).upper()
 
 
-@pytest.mark.parametrize("declared, written, held", [
-    ("monochrome2\u0131", "MONOCHROME2I", "U+0131"),
-    ("MONOCHROME2\u0131", "MONOCHROME2I", "U+0131"),
-    ("rgb\u017f", "RGBS", "U+017F"),
-    ("rg\xdf\u0131", "RGSSI", "U+0131"),
-    (" rgb\u017f\t", "RGBS", "U+017F"),
-    ("\u017frgb\u0131\u017f", "SRGBIS", "U+0131, U+017F"),
-    ("ybr_\u0131ct", "YBR_ICT", "U+0131"),
+@pytest.mark.parametrize("declared, written, held, stripped", [
+    ("monochrome2\u0131", "MONOCHROME2I", "U+0131", None),
+    ("MONOCHROME2\u0131", "MONOCHROME2I", "U+0131", None),
+    ("rgb\u017f", "RGBS", "U+017F", None),
+    ("rg\xdf\u0131", "RGSSI", "U+0131", None),
+    (" rgb\u017f ", "RGBS", "U+017F", None),
+    (" rgb\u017f\t", "RGBS", "U+017F", "its end (U+0009)"),
+    ("\tmonochrome2\u0131\n", "MONOCHROME2I", "U+0131",
+     "its start (U+0009) and its end (U+000A)"),
+    ("\xa0 ybr_\u0131ct", "YBR_ICT", "U+0131", "its start (U+00A0)"),
+    ("\u017frgb\u0131\u017f", "SRGBIS", "U+0131, U+017F", None),
+    ("ybr_\u0131ct", "YBR_ICT", "U+0131", None),
 ], ids=["dotless-i", "dotless-i-upper", "long-s", "sharp-s-and-dotless-i",
-        "padded-long-s", "two-kinds", "spells-a-defined-term"])
+        "padded-long-s", "long-s-tab", "tab-dotless-i-line-feed",
+        "nbsp-then-defined-term", "two-kinds", "spells-a-defined-term"])
 def test_a_label_the_file_cannot_hold_is_written_as_before_and_said(
-        declared, written, held):
+        declared, written, held, stripped):
     """(c): the fallback is the spelling before #612, under a WARNING.
 
     A character above U+00FF cannot be encoded in a Code String, so the
@@ -1884,10 +1894,15 @@ def test_a_label_the_file_cannot_hold_is_written_as_before_and_said(
     at all. The fallback writes what was written, the whole label by
     Unicode's rules (so the `ß` beside a dotless `ı` is `SS` again), and
     says so; the INFO note, which says "the same label", is not written.
+    So the WARNING is where rule (a) is met for such a label: whitespace
+    other than the space that went from its ends is named there, by end
+    and by code point (review of ec12e5cf, finding 2), and spaces alone
+    are not (`padded-long-s`).
 
     Killing mutations: (u1) no fallback; (u2) the fallback's WARNING not
     raised; (u3) the INFO note raised beside it; (u4) the characters
-    named unsorted or twice (`two-kinds`).
+    named unsorted or twice (`two-kinds`); (u14) the stripping not said
+    in the WARNING, or said for spaces.
     """
     from isocenter.io_handlers import (_label_as_written,
                                        _label_fallback_warning)
@@ -1898,8 +1913,12 @@ def test_a_label_the_file_cannot_hold_is_written_as_before_and_said(
     assert copy["0028,0004"] == written
     assert note is None
     sentence = _label_fallback_warning(attributes)
-    assert sentence == _FELL_BACK.format(ascii(declared), held,
-                                         ascii(written))
+    if stripped is None:
+        assert sentence == _FELL_BACK.format(ascii(declared), held,
+                                             ascii(written))
+    else:
+        assert sentence == _FELL_BACK_STRIPPED.format(
+            ascii(declared), held, ascii(written), stripped)
     assert _is_printable_ascii(sentence), sentence
     assert _written_photometric(declared) == written
     assert _label_fallback_warning(copy) is None
@@ -1962,12 +1981,32 @@ def test_a_multi_valued_label_says_which_value_fell_back():
     copy, note = _label_as_written(attributes)
 
     assert copy["0028,0004"] == ["RGB", "RGBS", b"x\xdf", 5]
-    # The note speaks for the value that is the same label respelled.
+    # The note speaks for the value that is the same label respelled, and
+    # quotes neither the fallback value nor what it was written as: that
+    # one is not "the same label" (review of ec12e5cf, finding 3; u15).
     assert note == _NOTE.format(
-        "' rgb', 'rgb\\u017f', b'x\\xdf', 5", "'RGB', 'RGBS', b'x\\xdf', 5",
+        "' rgb', b'x\\xdf', 5", "'RGB', b'x\\xdf', 5",
         f"{_UPPER} and {_LEAD}")
     assert _label_fallback_warning(attributes) == _FELL_BACK.format(
         "'rgb\\u017f'", "U+017F", "'RGBS'")
+
+    # The review's shape: the fallback value first, then one that loses
+    # a tab. The tab is the second value's and is named in the note; the
+    # WARNING is the first value's alone.
+    mixed = {"0028,0004": ["rgb" + chr(0x17F), " rgb\t"]}
+    copy, note = _label_as_written(mixed)
+    assert copy["0028,0004"] == ["RGBS", "RGB"]
+    assert note == _NOTE.format(
+        "' rgb\\t'", "'RGB'",
+        f"{_UPPER} and {_LEAD} and {_WS}its end (U+0009)")
+    assert _label_fallback_warning(mixed) == _FELL_BACK.format(
+        "'rgb\\u017f'", "U+017F", "'RGBS'")
+
+    # Nothing but fallback values and a conformant one: no note at all.
+    only = {"0028,0004": ["rgb" + chr(0x17F), "RGB"]}
+    copy, note = _label_as_written(only)
+    assert copy["0028,0004"] == ["RGBS", "RGB"]
+    assert note is None
 
     # Two such values: a sentence each, in the element's order.
     two = {"0028,0004": ["rgb" + chr(0x17F), "RGB", "mono" + chr(0x131)]}
@@ -2306,28 +2345,100 @@ def test_an_icon_label_ending_in_a_tab_is_written_without_it_and_said(
         f"{_UPPER} and {_WS}its end (U+0009, U+00A0)")), notes
 
 
-def test_an_ascii_bytes_icon_label_is_written_as_its_text(tmp_path,
-                                                          monkeypatch):
-    """`b'rgb'` on an icon is written `RGB`, and pydicom is handed text.
+def _binary_label_source(folder, door):
+    """A file that states the VR `OB` for (0028,0004), holding `rgb `.
 
-    Measured before: written `rgb` with pydicom's `UserWarning: Invalid
-    value for VR CS` on the worker's stderr and no note, and re-ingesting
-    the file dropped the icon's pixels. Threads, so the worker's warning
-    would reach `catch_warnings`.
+    `nopix`: an Encapsulated PDF with no pixel element. `icon`: a
+    Secondary Capture whose Icon Image Sequence item states it. Nothing
+    is set by hand afterwards: the label reaches the graph as `bytes`.
     """
-    import warnings as _warnings
+    import os
+    from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    sop_class = "1.2.840.10008.5.1.4.1.1.104.1" if door == "nopix" \
+        else SC_STORAGE
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = sop_class
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
+    ds.SOPInstanceUID, ds.SOPClassUID = meta.MediaStorageSOPInstanceUID, \
+        sop_class
+    ds.SeriesNumber, ds.InstanceNumber = 1, 1
+    ds.StudyDate, ds.StudyTime = "20230101", "120000"
+    if door == "nopix":
+        ds.Modality = "DOC"
+        ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+        ds.EncapsulatedDocument = b"%PDF-1.4\n" + b"x" * 191
+        ds.add_new(0x00280004, "OB", b"rgb ")
+    else:
+        ds.Modality, ds.ConversionType = "OT", "WSD"
+        ds.Rows = ds.Columns = 8
+        ds.BitsAllocated = ds.BitsStored = 8
+        ds.HighBit, ds.PixelRepresentation = 7, 0
+        ds.SamplesPerPixel = 1
+        ds.PhotometricInterpretation = "MONOCHROME2"
+        ds.PixelData = np.zeros((8, 8), np.uint8).tobytes()
+        icon = Dataset()
+        icon.Rows = icon.Columns = 4
+        icon.SamplesPerPixel, icon.PlanarConfiguration = 3, 0
+        icon.BitsAllocated = icon.BitsStored = 8
+        icon.HighBit, icon.PixelRepresentation = 7, 0
+        icon.add_new(0x00280004, "OB", b"rgb ")
+        icon.add_new(0x7FE00010, "OB", bytes(range(48)))
+        ds.IconImageSequence = Sequence([icon])
+    ds.save_as(os.path.join(folder, "one.dcm"), enforce_file_format=True)
+
+
+@pytest.mark.parametrize("door", ["nopix", "icon"])
+def test_a_files_own_bytes_label_is_exported_as_held(tmp_path, monkeypatch,
+                                                     caplog, door):
+    """A `bytes` label is not respelled, from a file or from a hand
+    (owner ruling, 2026-10-11; review of ec12e5cf, the blocking finding).
+
+    A file can state a binary VR for (0028,0004), and then ingest holds
+    the label as `bytes`, with nothing set by hand. Measured on eed7099d
+    for `OB` holding `rgb ` on a pixel-less Encapsulated PDF and in an
+    icon item: exported `rgb `, with no note. At ec12e5cf the writer read
+    ASCII `bytes` as its text and exported `RGB ` with the respelling
+    note: a source's own label changed. It is `rgb ` again, the four
+    bytes the source held, and nothing is said.
+
+    Threads, so the worker's notes would reach `caplog`. Killing
+    mutation (b1): the writer respelling a `bytes` label as its text.
+    """
     for name in _LEVERS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    src = tmp_path / "src"
+    src.mkdir()
+    _binary_label_source(str(src), door)
 
-    with _warnings.catch_warnings(record=True) as caught:
-        _warnings.simplefilter("always")
-        rows, exported, _grade_line, _summary = _icon_image(tmp_path, b"rgb")
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        with DicomSession(str(tmp_path / "ob.db")) as session:
+            session.ingest(str(src))
+            inst = session.store.patients[0].studies[0].series[0].instances[0]
+            holder = inst if door == "nopix" else \
+                inst.sequences["0088,0200"].items[0]
+            # The premise: no hand in it, and the graph holds `bytes`.
+            assert holder.attributes["0028,0004"] == b"rgb "
+            assert type(holder.attributes["0028,0004"]) is bytes
+            session.export(str(tmp_path / "out"), show_progress=False)
 
-    assert exported.IconImageSequence[0].PhotometricInterpretation == "RGB"
-    assert rows == [], rows
-    assert [str(w.message) for w in caught
-            if "Invalid value for VR CS" in str(w.message)] == []
+    written = list((tmp_path / "out").rglob("*.dcm"))
+    assert len(written) == 1, written
+    exported = pydicom.dcmread(str(written[0]))
+    item = exported if door == "nopix" else exported.IconImageSequence[0]
+    assert item.get_item(0x00280004).value in ("rgb", "rgb ", b"rgb ")
+    raw = written[0].read_bytes()
+    assert raw.count(b"rgb ") == 1 and b"RGB " not in raw
+    assert [r.getMessage() for r in caplog.records
+            if "is not a defined Code String spelling" in r.getMessage()] \
+        == []
 
 
 def test_a_bytes_label_that_is_not_ascii_does_not_reach_the_file(tmp_path):
