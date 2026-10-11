@@ -368,7 +368,12 @@ def test_a_tag_a_pass_emptied_on_one_study_is_refused(tmp_path):
     """The blanked check per value-set: study 2's Accession Number was
     emptied by a pass (its record says so), study 1's is an original. On
     e418d3d the first instance held a value, so the lock was accepted and
-    study 2's token held study 1's. Kills M5 on the blanked check."""
+    study 2's token held study 1's. Kills M5 on the blanked check.
+
+    Since #594 the sentence counts: until then it read "this patient holds
+    no value in 0008,0050, which anonymize() emptied or removed, so there
+    is no original left to stash", which is false of study 1.
+    `test_a_mixed_patients_lock_refusal_counts.py` holds the rest."""
     with _session(tmp_path) as session:
         _, by_study = _patient(session, [[{"0008_0050": ACC_ONE}],
                                          [{"0008_0050": ACC_TWO}]])
@@ -378,12 +383,17 @@ def test_a_tag_a_pass_emptied_on_one_study_is_refused(tmp_path):
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities(PID, tags_to_lock=TAGS + [ACC])
         assert str(raised.value) == (
-            "lock_identities: this patient holds no value in 0008,0050, which "
-            "anonymize() emptied or removed, so there is no original left to "
-            "stash. To lock this patient without it, call lock_identities(<its "
-            "Patient ID>, tags_to_lock=['0010,0010', '0010,0020']); the token "
-            "this call would have written is unchanged.")
+            "lock_identities: anonymize() emptied or removed 0008,0050 on 1 of "
+            "this patient's 2 instances, and it still holds a value on 1, so the "
+            "lock would stash an original for some instances and none for "
+            "others. To lock this patient without it, call lock_identities(<its "
+            "Patient ID>, tags_to_lock=['0010,0010', '0010,0020']), which "
+            "stashes it for no instance: a value it still holds would be in no "
+            "token, and could not be recovered if a later anonymize() empties or "
+            "removes it there too; the token this call would have written is "
+            "unchanged.")
         assert all(SEQ not in i.sequences for i in _all(by_study))
+        _value_free(str(raised.value))
 
 
 def test_a_blank_name_on_a_later_study_is_refused_under_a_rule_that_blanks_it(tmp_path):
