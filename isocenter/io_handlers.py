@@ -137,7 +137,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
-                                  signed_codestream_refusal)
+                                  refusal_before_decode)
 from .parallel import (run_parallel, _resolve_strategy,
                        resolve_worker_initializer)
 from .validation import IODValidator
@@ -2830,9 +2830,12 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         RuntimeError: A signed JPEG 2000 codestream under
             PixelRepresentation 0 (refused before pydicom is asked);
             encapsulated fragments with no frame boundary; or any decode
-            neither pydicom nor the fallback accepts.
-        ValueError: A header pydicom's validation refuses, or a pydicom
-            `ValueError` for a syntax with no fallback.
+            neither pydicom nor the fallback accepts, where pydicom's own
+            failure was a `RuntimeError`.
+        ValueError: A header pydicom's validation refuses; a pydicom
+            `ValueError` for a syntax with no fallback; or one the
+            fallback could not read either, which keeps pydicom's class
+            (#683).
     """
     # Read as an attribute, outside the `try`, never with a default: a
     # `force=True` read with no file meta must raise `AttributeError` into
@@ -2840,12 +2843,19 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     # default would decode it under Explicit VR LE -- garbage geometry and
     # no row at all.
     ts = ds.file_meta.TransferSyntaxUID
-    # Before pydicom: Pillow decodes a signed codestream under
-    # PixelRepresentation 0 at monochrome depths and 8-bit colour with the
-    # samples shifted by 2^(bits-1), and no error. Isocenter's own exports
-    # never carry that shape (the writer derives PixelRepresentation and
-    # the codestream's sign from one dtype), so the readback never trips it.
-    refusal = signed_codestream_refusal(ds)
+    # Before pydicom, three refusals on what the file holds
+    # (`refusal_before_decode`): a signed JPEG 2000 codestream under
+    # PixelRepresentation 0, which Pillow decodes at monochrome depths and
+    # 8-bit colour with the samples shifted by 2^(bits-1) and no error; a
+    # native 1-bit frame that is not a whole number of bytes under more
+    # bytes than its declared frames, which pydicom slices by a `float`
+    # and fails on in CPython's words for a slice (#669); and an Extended
+    # Offset Table pydicom walks by that is no whole number of 8-byte
+    # offsets, which pydicom unpacks and fails on in `struct`'s words
+    # (#621; `offset_table_frame_count` offers no count for it, so every
+    # door arrives here). Here rather than at each door, so ingest, the
+    # Instance door, the readback and an icon refuse each in one sentence.
+    refusal = refusal_before_decode(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
@@ -2998,25 +3008,60 @@ def _no_frame_boundary_words(ds) -> str:
     Returns:
         str: One sentence for the `RuntimeError` `_decode_pixels` raises.
     """
-    # The words must carry none of the three substrings
-    # `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
-    # "decompress", "missing dependencies" -- so the read door raises them
-    # as they stand rather than turning them into a codecs-missing message.
+    # The words must not carry the substring `Instance.get_pixel_data`'s
+    # file arm routes on -- "no pixel data", which it turns into `return
+    # None` -- so the read door raises them as they stand. (Its
+    # codecs-missing message is decided from state since #623, not from
+    # "decompress" or "missing dependencies" in a message.)
     #
-    # "with no offset table" is unconditional and true only because of a
-    # guard upstream: a file whose Basic or Extended Offset Table names a
-    # frame count is refused by `imagecodecs_handler.offset_table_frame_count`
-    # before any decode, so a table that disagrees with the fragments never
+    # "with no offset table" is true of a Basic Offset Table only because
+    # of a guard upstream: a file whose Basic Offset Table names a frame
+    # count is refused by `imagecodecs_handler.offset_table_frame_count`
+    # before any decode, so one that disagrees with the fragments never
     # gets here. If that guard stops answering first, the clause becomes
-    # false. The `except` branch says nothing about the table, because it
-    # has parsed nothing to say it from.
+    # false.
+    #
+    # **It is not true of an Extended Offset Table**: one pydicom drops
+    # (its Lengths element is another length) is counted as the same
+    # file without it unless it names more frames than declared (#621),
+    # and one naming more is decoded to the declared frames, so a
+    # dataset holding a table arrives here. The clause then says what is
+    # true: none that pydicom walks by. Before #621 a dropped table that
+    # agreed or named more got "with no offset table", over a dataset
+    # holding one.
+    #
+    # **"pydicom walks by" is said only of a table it does not walk by**
+    # (`extended_offsets(ds) is None`), never of every dataset holding
+    # the element. A table of equal Lengths naming fewer frames than
+    # declared runs out the same way, and at every door the count
+    # refuses it first; a direct call of the decode gets here, and keeps
+    # the words it had before #621 rather than a clause that is false of
+    # it.
+    #
+    # **The Basic Offset Table guard above has one hole**, measured: a
+    # dropped Extended Offset Table naming *more* frames than declared is
+    # counted from that table, so a populated Basic Offset Table naming
+    # fewer is not asked, and the file arrives here saying "with no
+    # offset table" over one pydicom walks by. Not fixed (it is the
+    # excess arm's, which #621 did not change); the clause is not
+    # lengthened for it, because the longer one would be false too.
+    #
+    # The `except` branch says nothing about the table, because it has
+    # parsed nothing to say it from.
     declared = declared_frame_count(ds)
+    table = "no offset table"
     try:
         buf = BytesIO(ds.PixelData)
-        parse_basic_offsets(buf)
+        # Only over an empty Basic Offset Table: pydicom walks by a
+        # populated one, so the longer clause would be false there. That
+        # shape is reached under a dropped Extended Offset Table naming
+        # more frames than declared, and keeps the words it had.
+        if (not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable")
+                and extended_offsets(ds) is None):
+            table += " pydicom walks by"
         fragments, _offsets = parse_fragments(buf)
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
-                f"with no offset table")
+                f"with {table}")
     except Exception:  # pylint: disable=broad-except
         held = "holds fragments pydicom could not count"
     return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
@@ -3142,20 +3187,34 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
 
     Raises:
         RuntimeError: `<pydicom's words>; imagecodecs could not decode it
-            either: <why>`, for every refusal above and any decoder error.
+            either: <why>`, for every refusal above and any decoder error,
+            where pydicom's failure was a `RuntimeError`.
+        ValueError: The same words, where pydicom's failure was a
+            `ValueError` (#683).
     """
     # pydicom's reason stays first so the ingest row still reads
     # `Decompression Failed: <pydicom's words>`.
     def refused(why):
-        """The refusal, pydicom's reason first.
+        """The refusal, pydicom's reason first and in pydicom's class.
 
         Args:
             why (str): Why imagecodecs' decode is refused.
 
         Returns:
-            RuntimeError: The exception to raise.
+            Exception: The exception to raise: exactly `ValueError` where
+            pydicom's failure is one, exactly `RuntimeError` otherwise.
         """
-        return RuntimeError(
+        # The row a user reads begins with this class, and the words
+        # after it are pydicom's: `Decompression Failed: RuntimeError:
+        # could not broadcast ...` named a class pydicom never raised
+        # (#683). One of two exact classes, never `type(pydicom_error)`:
+        # a subclass need not take one string (`UnicodeDecodeError` takes
+        # five arguments), and the sentence is not that class's own.
+        # `_decode_pixels` catches `(RuntimeError, ValueError)` before it
+        # calls this, so no other family arrives.
+        kind = (ValueError if isinstance(pydicom_error, ValueError)
+                else RuntimeError)
+        return kind(
             f"{pydicom_error}; imagecodecs could not decode it either: {why}")
 
     ts = ds.file_meta.TransferSyntaxUID

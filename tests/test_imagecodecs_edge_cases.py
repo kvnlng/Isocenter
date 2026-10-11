@@ -228,22 +228,29 @@ _BROKEN_IMPORT = ImportError(
     "libjpeg.so.8: cannot open shared object file: No such file or directory")
 
 
-def test_unavailable_imagecodecs_names_why(monkeypatch, mock_dataset):
-    """I1: the raise site carries the import failure, and chains it (#444).
+def test_unavailable_imagecodecs_names_the_class_and_not_the_words(
+        monkeypatch, mock_dataset, capsys):
+    """I1: the raise site names the import failure's class, and nothing of its message.
 
-    Each raised a bare "imagecodecs is not available", and the cause
-    reached only a stderr print in `is_available()`, which a worker, a
-    notebook or a log-only deployment may never show.
+    #444 put the import failure's own words here and chained it, because
+    the stderr print in `is_available()` may never be shown. Reversed in
+    the review of #1062: those words are the loader's, a failed `dlopen`
+    names the shared object by its absolute path, and this text is
+    stored in the ingest row and the report. The class stays; the words
+    are on stderr, and the read door's advice names the command that
+    shows them.
     """
     monkeypatch.setattr(imagecodecs_handler, "imagecodecs", None)
     monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", _BROKEN_IMPORT)
     with pytest.raises(RuntimeError) as exc:
         imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
-    msg = str(exc.value)
-    assert "imagecodecs is not available" in msg, msg
-    assert "ImportError" in msg, msg
-    assert "libjpeg.so.8" in msg, msg
-    assert exc.value.__cause__ is _BROKEN_IMPORT
+    assert str(exc.value) == (
+        "imagecodecs is not available: its import raised ImportError")
+    # Not chained: `describe_exception` would quote a cause into every
+    # row this reaches.
+    assert exc.value.__cause__ is None
+    assert exc.value.__suppress_context__ is True
+    assert "libjpeg.so.8" in capsys.readouterr().err
 
 
 def test_the_unavailable_print_names_a_message_less_import_error(
@@ -273,31 +280,40 @@ def test_the_unavailable_print_names_a_message_less_import_error(
         f"is unavailable without saying why: {line!r}")
 
 
-def test_the_unavailable_message_carries_the_import_errors_own_words(
-        monkeypatch, mock_dataset):
-    """`_unavailable()` spells its cause as `describe_exception` does (#519).
+@pytest.mark.parametrize("error, words", [
+    (ImportError(), "its import raised ImportError"),
+    (ModuleNotFoundError("No module named 'imagecodecs'", name="imagecodecs"),
+     "its import raised ModuleNotFoundError for module imagecodecs"),
+    (ImportError("dlopen(/Users/someone/venv/lib/python3.12/site-packages/"
+                 "imagecodecs/_jpeg2k.so, 0x0002): Library not loaded",
+                 name="imagecodecs._jpeg2k",
+                 path="/Users/someone/venv/lib/python3.12/site-packages/"
+                      "imagecodecs/_jpeg2k.so"),
+     "its import raised ImportError for module imagecodecs._jpeg2k"),
+    # `name` is whatever the raiser passed: anything but a dotted module
+    # name is left out.
+    (ImportError("x", name="/Users/someone/venv/imagecodecs/_jpeg2k.so"),
+     "its import raised ImportError"),
+    (ImportError("x", name="imagecodecs _jpeg2k"),
+     "its import raised ImportError"),
+    (ImportError("x", name=""), "its import raised ImportError"),
+    (ImportError("x", name=7), "its import raised ImportError"),
+], ids=["bare", "module-not-found", "dlopen", "name-is-a-path",
+        "name-has-a-space", "name-empty", "name-not-text"])
+def test_the_unavailable_message_is_the_class_and_the_module(
+        monkeypatch, mock_dataset, error, words):
+    """`_unavailable()` says which class and which module, whole.
 
-    The raise site hand-spelled `f"{type(e).__name__}: {e}"` -- one
-    behaviour, two spellings -- and the two differ exactly where the
-    helper exists to differ: a message-less `ImportError()` rendered as
-    `ImportError: ` with nothing after the colon. That is the case
-    asserted first, because a `ModuleNotFoundError` with a message reads
-    the same either way and would kill nothing.
+    It quoted the import failure as `describe_exception` spells it (#519)
+    until the review of #1062. The module comes from `ImportError.name`
+    and only when it is a dotted module name.
     """
     monkeypatch.setattr(imagecodecs_handler, "imagecodecs", None)
-    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", ImportError())
+    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", error)
     with pytest.raises(RuntimeError) as exc:
         imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
-    assert str(exc.value) == "imagecodecs is not available: ImportError", (
-        str(exc.value))
-
-    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR",
-                        ModuleNotFoundError("No module named 'imagecodecs'"))
-    with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
-    assert str(exc.value) == ("imagecodecs is not available: "
-                              "ModuleNotFoundError: No module named "
-                              "'imagecodecs'"), str(exc.value)
+    assert str(exc.value) == f"imagecodecs is not available: {words}"
+    assert "/" not in str(exc.value)
 
 
 def test_the_unavailable_print_survives_an_unrecorded_import_error(

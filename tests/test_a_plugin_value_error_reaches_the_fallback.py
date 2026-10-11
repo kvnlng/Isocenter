@@ -252,23 +252,25 @@ def test_a_plugin_value_error_the_fallback_cannot_decode_keeps_both_reasons(
         broadcast_failure, ts):
     """A stream *wider* than its container: refused, with pydicom's reason first.
 
-    The refusal's class is `RuntimeError`, not `ValueError`:
-    `_decode_with_imagecodecs.refused` interpolates pydicom's *message*
-    into a `RuntimeError` of its own, so the wrapped class is dropped.
-    Measured here rather than assumed -- the row a user reads carries no
-    `ValueError:` token at all. That the class is lost is #683.
+    The refusal is raised as pydicom's class (#683). It was a
+    `RuntimeError` built around pydicom's *message*, so the row a user
+    read began `Decompression Failed: RuntimeError: could not broadcast
+    ...` for an error that was a `ValueError`. Exactly `ValueError`, never
+    a subclass of pydicom's own: the message is this library's.
     """
     broadcast_failure["words"] = WIDE_WORDS
     ds = _file(ts, _ljpeg(IMG12, 12), bits_allocated=8, bits_stored=8)
 
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(ValueError) as caught:
         _decode_pixels(ds)
 
     assert str(caught.value) == (
         f"{WIDE_WORDS}; imagecodecs could not decode it either: it decoded "
         f"to uint16, where BitsAllocated 8 and PixelRepresentation 0 "
         f"declare uint8")
-    assert not isinstance(caught.value, ValueError)
+    assert type(caught.value) is ValueError
+    assert type(caught.value.__cause__) is ValueError
+    assert str(caught.value.__cause__) == WIDE_WORDS
 
 
 def test_the_wide_shape_is_refused_at_ingest_with_both_reasons(
@@ -280,10 +282,130 @@ def test_the_wide_shape_is_refused_at_ingest_with_both_reasons(
 
     assert len(got["failures"]) == 1, got["failures"]
     assert got["failures"][0][1] == (
-        f"Decompression Failed: RuntimeError: {WIDE_WORDS}; imagecodecs "
+        f"Decompression Failed: ValueError: {WIDE_WORDS}; imagecodecs "
         f"could not decode it either: it decoded to uint16, where "
         f"BitsAllocated 8 and PixelRepresentation 0 declare uint8 "
         f"(caused by ValueError: {WIDE_WORDS})")
+
+
+# ---------------------------------------------------------------------------
+# #683: the refusal's class is pydicom's, on every arm of the fallback
+# ---------------------------------------------------------------------------
+
+#: Begins as a JPEG 2000 codestream (SOC, SIZ marker) and holds nothing
+#: a decoder can read.
+CORRUPT_J2K = b"\xff\x4f\xff\x51" + b"\x00" * 60
+
+
+def _imagecodecs_words(stream):
+    """imagecodecs' own failure for `stream`, as a row spells it."""
+    with pytest.raises(Exception) as caught:  # pylint: disable=broad-except
+        imagecodecs.jpeg2k_decode(stream)
+    return f"{type(caught.value).__name__}: {caught.value}"
+
+
+def _pydicom_raises(monkeypatch, error):
+    """pydicom's decoder raises `error` for JPEG 2000 Lossless, in this process."""
+    calls = []
+
+    def raises(self, src, **kwargs):  # pylint: disable=unused-argument
+        calls.append(str(self.UID))
+        raise error
+
+    monkeypatch.setattr(Decoder, "as_array", raises)
+    return calls
+
+
+@pytest.mark.parametrize("error, first_class", [
+    (ValueError(WIDE_WORDS), "ValueError"),
+    (RuntimeError("Unable to decode as exceptions were raised by all "
+                  "available plugins"), "RuntimeError"),
+], ids=["pydicom-ValueError", "pydicom-RuntimeError"])
+def test_a_decoder_error_in_the_fallback_keeps_pydicoms_class(
+        tmp_path, monkeypatch, error, first_class):
+    """The arm where imagecodecs' own decoder raises too.
+
+    There the refusal is chained from the decoder's error, so on 067982ec
+    the row for a pydicom `ValueError` held no `ValueError` anywhere:
+    `Decompression Failed: RuntimeError: could not broadcast ...;
+    imagecodecs could not decode it either: Jpeg2kError: ... (caused by
+    Jpeg2kError: ...)`. The first class is asserted, and by the row
+    whole: `"ValueError" in row` would pass on the tail of any other arm.
+
+    The `RuntimeError` half is the shape of the one golden-cohort file
+    that holds such a row (`JPEG2000-embedded-sequence-delimiter.dcm`),
+    which must stay as it is, byte for byte.
+    """
+    from isocenter.io_handlers import ingest_worker  # pylint: disable=import-outside-toplevel
+    theirs = _imagecodecs_words(CORRUPT_J2K)
+    ds = _file(J2K_LOSSLESS, CORRUPT_J2K, bits_allocated=8, bits_stored=8)
+    path = write(tmp_path, ds)
+    calls = _pydicom_raises(monkeypatch, error)
+
+    with pytest.raises((RuntimeError, ValueError)) as caught:
+        _decode_pixels(pydicom.dcmread(path))
+    reason = ingest_worker(path)[-1]
+
+    assert calls == [J2K_LOSSLESS, J2K_LOSSLESS]
+    assert type(caught.value).__name__ == first_class
+    assert reason == (
+        f"Decompression Failed: {first_class}: {error}; imagecodecs could "
+        f"not decode it either: {theirs} (caused by {theirs})")
+
+
+def test_a_refusal_never_takes_the_class_of_a_pydicom_subclass(monkeypatch):
+    """A subclass of `ValueError` reads as `ValueError`.
+
+    The refusal is not built as `type(pydicom_error)(...)`: a subclass
+    need not take one string (`UnicodeDecodeError` takes five arguments),
+    and the message is not that class's own.
+    """
+    error = UnicodeDecodeError("ascii", b"\xff", 0, 1, "ordinal not in range")
+    ds = _file(J2K_LOSSLESS, CORRUPT_J2K, bits_allocated=8, bits_stored=8)
+    _pydicom_raises(monkeypatch, error)
+
+    with pytest.raises(ValueError) as caught:
+        _decode_pixels(ds)
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value).startswith(
+        f"{error}; imagecodecs could not decode it either: ")
+
+
+FEWER = ("Unable to generate frames from the encapsulated pixel data as "
+         "there are fewer fragments than frames; the dataset may be corrupt "
+         "or the number of frames may be incorrect")
+
+
+@pytest.mark.parametrize("ts, encode", [
+    (J2K_LOSSLESS,
+     lambda a: imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K")),
+    ("1.2.840.10008.1.2.4.50", imagecodecs.jpeg8_encode),
+], ids=["j2k-lossless", "jpeg-baseline"])
+def test_a_real_file_pydicom_refuses_with_a_value_error_keeps_the_class_in_its_row(
+        tmp_path, ts, encode):
+    """Two fragments under NumberOfFrames 3, an empty Basic Offset Table.
+
+    No plugin is patched and none is missing: pydicom has a decoder for
+    both syntaxes, and its own frame walk raises this `ValueError`. So
+    #683 moves the row of a file anyone can hold. The whole row, as
+    `ingest_worker` writes it; on `main` it began `Decompression Failed:
+    RuntimeError:` and was otherwise the same (review of #1062, finding
+    6). JPEG-LS and `.70` do not move: pydicom's "missing dependencies"
+    `RuntimeError` comes first for them.
+    """
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    from isocenter.io_handlers import ingest_worker  # pylint: disable=import-outside-toplevel
+    frame = (np.arange(64, dtype=np.uint8)).reshape(8, 8)
+    streams = [bytes(encode(frame)), bytes(encode(frame + 60))]
+    ds = dataset(ts, streams, rows=8, cols=8, bits_allocated=8, frames=3)
+    ds.PixelData = encapsulate(streams, has_bot=False)
+    ds["PixelData"].is_undefined_length = True
+
+    assert ingest_worker(write(tmp_path, ds))[-1] == (
+        f"Decompression Failed: ValueError: {FEWER}; imagecodecs could not "
+        f"decode it either: ValueError: {FEWER} (caused by ValueError: "
+        f"{FEWER})")
 
 
 # ---------------------------------------------------------------------------

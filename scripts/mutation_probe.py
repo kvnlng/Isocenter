@@ -559,6 +559,8 @@ TARGETS = {
                                   "tests/test_nested_phi_audit.py",
                                   "tests/test_nested_pixel_carriage.py",
                                   "tests/test_offset_table_frame_count.py",
+                                  "tests/test_extended_offset_table_edges.py",  # #621
+                                  "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
                                   "tests/test_one_value_per_owned_tag.py",
                                   "tests/test_patient_level_remediation_reaches_instances.py",
                                   "tests/test_pixel_dtype_roundtrip.py",
@@ -908,6 +910,8 @@ TARGETS = {
                               "tests/test_ocr_unavailable_refuses.py",
                               "tests/test_ocr_workers_use_the_callers_tesseract.py",
                               "tests/test_offset_table_frame_count.py",
+                              "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669: the icon arm ingests through a Session
+                              "tests/test_extended_offset_table_edges.py",  # #621: the twin tests ingest and export through one
                               "tests/test_one_value_per_owned_tag.py",
                               "tests/test_optimization.py",
                               "tests/test_packaging_contract.py",
@@ -1175,6 +1179,8 @@ TARGETS = {
                                "tests/test_ocr_unavailable_refuses.py",
                                "tests/test_ocr_workers_use_the_callers_tesseract.py",
                                "tests/test_offset_table_frame_count.py",
+                               "tests/test_extended_offset_table_edges.py",  # #621
+                               "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
                                "tests/test_one_value_per_owned_tag.py",
                                "tests/test_optimization.py",
                                "tests/test_parallel_contract.py",
@@ -1335,6 +1341,10 @@ TARGETS = {
                                           "tests/test_ingest_imagecodecs_fallback.py",
                                           "tests/test_j2k_signedness_against_pixel_representation.py",
                                           "tests/test_offset_table_frame_count.py",
+                                          "tests/test_extended_offset_table_edges.py",  # #621
+                                          "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
+                                          "tests/test_compression_deps.py",  # #623: `ImagecodecsUnavailable`
+                                          "tests/test_export_failure_text_carries_no_path.py",  # #623: the same
                                           "tests/test_signed_lossless_jpeg_decode.py",
                                           "tests/test_single_frame_encapsulated_decode.py",
                                           "tests/test_ybr_jpegls_read_doors.py",
