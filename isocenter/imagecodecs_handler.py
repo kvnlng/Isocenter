@@ -770,6 +770,17 @@ def _pydicom_refuses_the_header(ds) -> bool:
     Configuration, Samples per Pixel or Photometric Interpretation, each
     in a sentence naming the element. Never raises.
 
+    **Not quite silent.** For a dataset whose Extended Offset Table and
+    Lengths element differ in length, `_validate_options` drops the
+    table and says so: one `UserWarning` ("the extended offset table
+    will be ignored") and pydicom's log records for it, here as well as
+    in the decode. A native 1-bit file carrying two such elements is the
+    one shape of this helper's callers that reaches it (a ragged table
+    is asked about only when the two are the same length). Nothing else
+    measured emits anything, and nothing is suppressed here: a filter
+    wide enough to hide that warning would hide whatever else pydicom
+    came to say.
+
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
 
@@ -778,10 +789,14 @@ def _pydicom_refuses_the_header(ds) -> bool:
         not be asked**, so a refusal of this library's own is withheld
         rather than said over a header nobody checked.
     """
-    # `_validate_options` is pydicom's private name (3.0.2), and nothing
-    # public validates the header without the buffer: `validate()` goes
-    # on to `_validate_buffer`, which warns and logs about the very bytes
-    # the caller is about to refuse. If the name goes, this answers True
+    # **`_validate_options`, the private name, and not the public
+    # `validate()`** (owner ruling 2026-10-11, under `setup.py`'s
+    # `pydicom<4.0` cap). `validate()` is a drop-in for the answer, and
+    # `io_handlers._validate_like_pydicom` calls it; but it goes on to
+    # `_validate_buffer`, which emits pydicom's excess-padding or
+    # excess-frames warning and a log line for the very bytes the caller
+    # is about to refuse, for every 1-bit file refused here before any
+    # decode. If the name goes, this answers True
     # for every dataset, the 1-bit sentence is never said, and its tests
     # go red: that is the signal, and it is why the `except` is broad.
     # Written out rather than mirrored element by element, because a
@@ -825,7 +840,9 @@ def bit_packed_excess_words(ds) -> Optional[str]:
         syntax, any other BitsAllocated, a frame that is a whole number
         of bytes (`_native_excess` counts it), bytes that hold no more
         frames than declared (pydicom reads those as padding), a
-        NumberOfFrames pydicom refuses (negative, or empty),
+        NumberOfFrames pydicom refuses (negative, or `''` set in memory;
+        one holding no value in a file is read as 1), a header pydicom
+        refuses (`_pydicom_refuses_the_header`),
         `YBR_FULL_422` (pydicom refuses or pads it before it counts
         frames), or anything
         this cannot read, which the decode that follows refuses.
@@ -844,10 +861,17 @@ def bit_packed_excess_words(ds) -> Optional[str]:
             return None
         rows, cols = int(ds.Rows), int(ds.Columns)
         samples = int(ds.SamplesPerPixel)
-        # A negative or empty NumberOfFrames is refused by pydicom's
-        # validation in words that name the element; this sentence would
-        # replace them. Absent and 0 are read as 1, as pydicom reads them.
-        if "NumberOfFrames" in ds and int(ds.NumberOfFrames) < 0:
+        # A negative NumberOfFrames is refused by pydicom's validation in
+        # words that name the element; this sentence would replace them.
+        # Absent, 0 and **holding no value** are read as 1, as pydicom
+        # reads them. A zero-length (0028,0008) is `None` when it comes
+        # from a file, and `int(None)` raises: asked that way the helper
+        # declined, and the file kept CPython's words for a slice (review
+        # of #1062, round 3). `''` set in memory is another thing: pydicom
+        # takes `int('')` of it and raises `ValueError`, which `int()`
+        # raises here too, and the `except` below leaves to it.
+        frames = ds.get("NumberOfFrames")
+        if frames is not None and int(frames) < 0:
             return None
         # pydicom's excess-frames arithmetic is the `elif` of its
         # `YBR_FULL_422` test, so under that label it never slices by a

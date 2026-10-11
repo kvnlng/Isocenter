@@ -280,6 +280,52 @@ def test_an_absent_or_zero_number_of_frames_is_read_as_one(number_of_frames,
     assert bit_packed_excess_words(ds) == _sentence(3, 3, read_as, 4)
 
 
+@pytest.mark.parametrize("rows, cols, have, samples", [
+    (3, 3, 4, 1), (3, 3, 6, 1), (2, 2, 4, 1), (3, 3, 10, 3)])
+def test_a_number_of_frames_holding_no_value_is_read_as_one(
+        tmp_path, rows, cols, have, samples):
+    """A zero-length (0028,0008), from a file: pydicom reads it as one frame.
+
+    And slices by a fraction as it does for an absent one. Until the
+    fourth build of this change `int()` of the element's `None` made the
+    helper decline, so these files kept CPython's words at ingest and at
+    the read door, on `main` and here, under an entry that said an empty
+    NumberOfFrames was pydicom's to name (review of #1062, round 3).
+    """
+    ds = _file(rows, cols, 1, have, samples=samples)
+    ds.NumberOfFrames = None
+    path = write(tmp_path, ds)
+    on_disk = pydicom.dcmread(path)
+    assert "NumberOfFrames" in on_disk and on_disk.NumberOfFrames is None
+    theirs = _pydicom(on_disk)
+    assert isinstance(theirs, TypeError) and CPYTHON_WORDS in str(theirs)
+    want = _sentence(rows, cols, 1, have, samples)
+    assert "NumberOfFrames is read as 1 and it needs" in want
+
+    assert bit_packed_excess_words(pydicom.dcmread(path)) == want
+    assert ingest_worker(path)[-1] == (
+        f"Decompression Failed: RuntimeError: {want}")
+    inst = Instance(ds.SOPInstanceUID, SOP_CLASS, 1, file_path=path)
+    with pytest.raises(RuntimeError) as read:
+        inst.get_pixel_data()
+    assert str(read.value) == (
+        f"Lazy load failed for instance {inst.sop_instance_uid}: "
+        f"RuntimeError: {want}")
+
+
+def test_a_number_of_frames_holding_no_value_over_whole_frames_is_read(
+        tmp_path):
+    """The control: no bytes beyond one frame and its pad, so nothing to refuse."""
+    ds = _file(3, 3, 1, 2)
+    ds.NumberOfFrames = None
+    path = write(tmp_path, ds)
+    theirs = _pydicom(pydicom.dcmread(path))
+    assert theirs == (3, 3), theirs
+
+    assert bit_packed_excess_words(pydicom.dcmread(path)) is None
+    assert ingest_worker(path)[-1] is None
+
+
 @pytest.mark.parametrize("number_of_frames, pydicom_says", [
     (-1, "must be greater than or equal to 1"),
     ("", "invalid literal for int()"),

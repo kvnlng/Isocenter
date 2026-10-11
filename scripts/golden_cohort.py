@@ -770,14 +770,23 @@ def one_bit_excess(out: Path):
     decodes that many, a count that is not a whole number of bytes each,
     and fails in CPython's words for a slice, so the row read
     `Decompression Failed: TypeError: slice indices must be integers ...`.
-    It is refused in a sentence naming the bytes held and needed. No other
-    input holds a native 1-bit frame."""
+    It is refused in a sentence naming the bytes held and needed.
+
+    A fourth file, of a fourth patient: the same four bytes under a
+    NumberOfFrames `(0028,0008)` that is present and holds no value.
+    pydicom reads that as one frame, so the four bytes have room for
+    three, and it fails the same way. It is refused in the same sentence,
+    which says `NumberOfFrames is read as 1`.
+
+    No other input holds a native 1-bit frame."""
     write(ct("one_bit_excess", study=1, pid="GOLD-one_bit_excess-good"),
           out / "one_bit_excess-good.dcm")
-    for n, (held, label) in enumerate(((4, "padded"), (6, "beyond")), start=2):
+    for n, (held, frames, label) in enumerate(
+            ((4, 2, "padded"), (6, 2, "beyond"), (4, None, "no-frames-value")),
+            start=2):
         ds = ct("one_bit_excess", study=n, pid=f"GOLD-one_bit_excess-{label}")
         ds.Rows = ds.Columns = 3
-        ds.NumberOfFrames = 2
+        ds.NumberOfFrames = frames
         ds.BitsAllocated, ds.BitsStored, ds.HighBit = 1, 1, 0
         ds[0x7FE00010] = pydicom.DataElement(
             0x7FE00010, "OB", bytes([0b10110010, 0b01001101, 0b00000011,
@@ -835,6 +844,14 @@ def offset_table_edges(out: Path):
       refused as above. It is refused as holding one fragment `with no
       offset table pydicom walks by`.
 
+    And one more, of one more patient, `ragged-bad-header`: the 12 beside
+    12 table again, under a Bits Stored of 17 beside Bits Allocated 8.
+    pydicom refuses that header before it unpacks the table, and names
+    the element. It was refused as `Extended Offset Table names 1 frames;
+    NumberOfFrames declares 2`, and is refused in pydicom's sentence
+    about Bits Stored: the ragged sentence is for a header pydicom
+    accepts.
+
     No other input holds an Extended Offset Table."""
     write(ct("offset_table_edges", study=1, pid="GOLD-offset_table_edges-good"),
           out / "offset_table_edges-good.dcm")
@@ -846,9 +863,12 @@ def offset_table_edges(out: Path):
             ("agreeing", (one, two), 1, 8, 4, j2k, True),
             ("agreeing-rle", _RLE_FRAMES, 1, 8, 4, rle, False),
             ("fewer-excess", (one, two, one), 2, 8, 4, j2k, False),
-            ("clause", (one,), 2, 8, 4, j2k, False)), start=2):
+            ("clause", (one,), 2, 8, 4, j2k, False),
+            ("ragged-bad-header", (one, two), 2, 12, 12, j2k, False)), start=2):
         ds = _encapsulated("offset_table_edges", n, label, frames, declared,
                            syntax, has_bot)
+        if label == "ragged-bad-header":
+            ds.BitsStored = 17
         ds.add_new(0x7FE00001, "OV", _true_offsets(frames)[:table])
         ds.add_new(0x7FE00002, "OV", struct.pack(
             f"<{len(frames)}Q", *(len(frame) for frame in frames))[:sizes])
