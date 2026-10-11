@@ -374,6 +374,20 @@ def test_a_late_series_of_a_passed_study_is_counted(tmp_path):
     assert _originals(late) == sorted(
         [ACC_B, "19610917", "Xanthippe", "Oberholtzer", "STID-88231", ROOT])
     assert (0x0012, 0x0062) not in late
+    # `ROOT` above only says a source UID is somewhere in the file. Which:
+    # the Study Instance UID is the study's replacement, stamped like the
+    # name; the Series and SOP Instance UIDs are the source's. Read whole,
+    # the owners' four stamps are the only top-level elements that differ
+    # from the file ingested (review of #1066, delta).
+    source = pydicom.dcmread(str(tmp_path / "b" / "b.dcm"))
+    assert late.StudyInstanceUID.startswith("2.25.")
+    assert late.SeriesInstanceUID == source.SeriesInstanceUID == f"{ROOT}.1.9"
+    assert late.SOPInstanceUID == source.SOPInstanceUID == f"{ROOT}.1.9.1"
+    differing = sorted(
+        f"{elem.tag.group:04x},{elem.tag.element:04x}" for elem in source
+        if elem.tag not in late or late[elem.tag].value != elem.value)
+    assert differing == ["0008,0020", "0010,0010", "0010,0020", "0020,000d"]
+    assert [elem.tag for elem in late if elem.tag not in source] == []
     assert not [r for r in after_audit if _is_line_9(r)], after_audit
     assert len(after_audit) == 1 and _is_line_7(after_audit[0]), after_audit
 
