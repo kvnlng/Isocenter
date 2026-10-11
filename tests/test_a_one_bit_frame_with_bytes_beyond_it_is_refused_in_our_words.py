@@ -382,6 +382,92 @@ def test_under_ybr_full_the_sentence_is_said_as_under_rgb(
         f"Decompression Failed: RuntimeError: {want}")
 
 
+def _without(keyword):
+    def edit(ds):
+        delattr(ds, keyword)
+    return edit
+
+
+def _with(keyword, value):
+    def edit(ds):
+        setattr(ds, keyword, value)
+    return edit
+
+
+def _labelled(text):
+    def edit(ds):
+        ds.add_new(0x00280004, "CS", text)
+    return edit
+
+
+#: One header element changed on a file the sentence is otherwise for:
+#: `(id, edit, the class of pydicom's refusal, words it holds)`. Each is
+#: refused by pydicom's validation of the header, before it looks at the
+#: bytes, in a sentence that names the element.
+HEADER_REFUSALS = [
+    ("no-bits-stored", _without("BitsStored"), AttributeError,
+     "(0028,0101) 'Bits Stored'"),
+    ("bits-stored-0", _with("BitsStored", 0), ValueError,
+     "(0028,0101) 'Bits Stored' value of '0' is invalid"),
+    ("bits-stored-8", _with("BitsStored", 8), ValueError,
+     "(0028,0101) 'Bits Stored' value of '8' is invalid"),
+    ("no-pixel-representation", _without("PixelRepresentation"),
+     AttributeError, "(0028,0103) 'Pixel Representation'"),
+    ("pixel-representation-2", _with("PixelRepresentation", 2), ValueError,
+     "(0028,0103) 'Pixel Representation' value of '2' is invalid"),
+    ("no-planar-configuration", _without("PlanarConfiguration"),
+     AttributeError, "(0028,0006) 'Planar Configuration'"),
+    ("planar-configuration-2", _with("PlanarConfiguration", 2), ValueError,
+     "(0028,0006) 'Planar Configuration' value of '2' is invalid"),
+    ("samples-2", _with("SamplesPerPixel", 2), ValueError,
+     "(0028,0002) 'Samples per Pixel' value of '2' is invalid"),
+    ("no-label", _without("PhotometricInterpretation"), AttributeError,
+     "(0028,0004) 'Photometric Interpretation'"),
+    ("label-lower-case", _labelled("rgb"), ValueError,
+     "Unknown (0028,0004) 'Photometric Interpretation' value 'rgb'"),
+    ("label-leading-space", _labelled(" RGB"), ValueError,
+     "Unknown (0028,0004) 'Photometric Interpretation' value ' RGB'"),
+    ("label-tab", _labelled("RGB\t"), ValueError,
+     "Unknown (0028,0004) 'Photometric Interpretation' value 'RGB\t'"),
+    ("label-lower-422", _labelled("ybr_full_422"), ValueError,
+     "Unknown (0028,0004) 'Photometric Interpretation' value "
+     "'ybr_full_422'"),
+    ("label-empty", _labelled(""), ValueError,
+     "Unknown (0028,0004) 'Photometric Interpretation' value ''"),
+    # Its words are the interpreter's and differ on 3.12 and 3.14t (#942):
+    # `main`'s row, which this sentence is not to replace either.
+    ("label-two-values", _labelled(["RGB", "RGB"]), TypeError, "MultiValue"),
+]
+
+
+@pytest.mark.parametrize(
+    "edit, kind, holds", [case[1:] for case in HEADER_REFUSALS],
+    ids=[case[0] for case in HEADER_REFUSALS])
+def test_a_header_pydicom_refuses_is_refused_in_pydicoms_words(
+        tmp_path, edit, kind, holds):
+    """The sentence is for a header pydicom accepts, and for no other.
+
+    3x3, three samples, four declared frames, eighteen bytes: the file
+    the sentence is said of under RGB. With one header element missing
+    or invalid pydicom refuses the header and names the element, and
+    that is the row on `main`. Until the third build of this change the
+    1-bit sentence answered first for every one of these, because it is
+    made before pydicom is asked.
+    """
+    ds = _file(3, 3, 4, 18, samples=3)
+    assert bit_packed_excess_words(ds) == _sentence(3, 3, 4, 18, samples=3)
+    edit(ds)
+    path = write(tmp_path, ds)
+    theirs = _pydicom(pydicom.dcmread(path))
+    assert type(theirs) is kind and holds in str(theirs), theirs
+    assert CPYTHON_WORDS not in str(theirs)
+
+    assert bit_packed_excess_words(pydicom.dcmread(path)) is None
+    row = ingest_worker(path)[-1]
+    assert row.startswith(f"Decompression Failed: {kind.__name__}: "), row
+    assert holds in row and "Pixel Data holds" not in row
+
+
 def test_a_short_buffer_is_left_to_pydicom():
     ds = _file(3, 3, 2, 2)
 

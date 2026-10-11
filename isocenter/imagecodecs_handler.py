@@ -339,6 +339,12 @@ def ragged_offset_table_words(ds) -> Optional[str]:
         return None
     if walked_by is None or len(walked_by[0]) % 8 == 0:
         return None
+    # pydicom validates the header before it unpacks the table, and names
+    # the element it refuses; this is made before pydicom is asked, so it
+    # must not answer first for such a header (`bit_packed_excess_words`
+    # asks the same, for the same reason).
+    if _pydicom_refuses_the_header(ds):
+        return None
     # A length only: no byte of the table, and none of the two substrings
     # `Instance.get_pixel_data` once routed on.
     length = len(walked_by[0])
@@ -752,6 +758,46 @@ def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     return None
 
 
+def _pydicom_refuses_the_header(ds) -> bool:
+    """Would pydicom's decoder refuse this dataset before it reads a byte?
+
+    Its own validation of the header, asked of its own runner the way
+    `Decoder.as_array` builds one: `set_source` reads the dataset's
+    elements (and raises for a transfer syntax that is not the
+    decoder's, for no pixel element, and `TypeError` for two values in
+    Photometric Interpretation), and `_validate_options` refuses a
+    missing or invalid Bits Stored, Pixel Representation, Planar
+    Configuration, Samples per Pixel or Photometric Interpretation, each
+    in a sentence naming the element. Never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        bool: True when pydicom refuses the header, **and when it could
+        not be asked**, so a refusal of this library's own is withheld
+        rather than said over a header nobody checked.
+    """
+    # `_validate_options` is pydicom's private name (3.0.2), and nothing
+    # public validates the header without the buffer: `validate()` goes
+    # on to `_validate_buffer`, which warns and logs about the very bytes
+    # the caller is about to refuse. If the name goes, this answers True
+    # for every dataset, the 1-bit sentence is never said, and its tests
+    # go red: that is the signal, and it is why the `except` is broad.
+    # Written out rather than mirrored element by element, because a
+    # copy of pydicom's rules is a second answer to "what does pydicom
+    # refuse" (the first build of #669 judged a label pydicom does not
+    # take, and the second every header it does not).
+    try:
+        from pydicom.pixels.decoders.base import DecodeRunner  # pylint: disable=import-outside-toplevel
+        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(ds)
+        runner._validate_options()  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        return True
+    return False
+
+
 def bit_packed_excess_words(ds) -> Optional[str]:
     """The refusal for a native 1-bit frame pydicom would slice by a fraction.
 
@@ -822,6 +868,13 @@ def bit_packed_excess_words(ds) -> Optional[str]:
     need = -(-frame_bits * declared // 8)
     room = held * 8 // frame_bits
     if held <= need + need % 2 or room <= declared:
+        return None
+    # Last, and only for a file the sentence would otherwise be said of:
+    # pydicom validates the header before it looks at the bytes, and
+    # refuses a missing or invalid element in words that name it. This
+    # refusal is made before pydicom is asked, so without the question it
+    # answers first for every one of those and the row loses the name.
+    if _pydicom_refuses_the_header(ds):
         return None
     of = (f"{rows}x{cols}" if samples == 1
           else f"{rows}x{cols} with {samples} samples per pixel")

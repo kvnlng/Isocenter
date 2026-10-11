@@ -54,6 +54,7 @@ file holds, except the count grid, which says so. Names
 `isocenter.entities`.
 """
 import os
+import struct
 
 import imagecodecs
 import numpy as np
@@ -245,6 +246,52 @@ def test_a_native_file_carrying_a_ragged_table_is_not_refused_for_it(
     assert ragged_offset_table_words(read) is None
     assert _decode_pixels(read)[0].tolist() == FRAMES[0].tolist()
     assert ingest_worker(path)[-1] is None
+
+
+def _mono(ds):
+    ds.add_new(0x00280004, "CS", "mono")
+
+
+def _no_bits_stored_value(ds):
+    ds.BitsStored = 0
+
+
+def _no_pixel_representation(ds):
+    del ds.PixelRepresentation
+
+
+@pytest.mark.parametrize("number_of_frames", [1, 2])
+@pytest.mark.parametrize("edit, row", [
+    (_mono, "Decompression Failed: ValueError: Unknown (0028,0004) "
+            "'Photometric Interpretation' value 'mono'"),
+    (_no_bits_stored_value,
+     "Decompression Failed: ValueError: A (0028,0101) 'Bits Stored' value "
+     "of '0' is invalid, it must be in the range (1, 64) and no greater "
+     "than the (0028,0100) 'Bits Allocated' value of '8'"),
+    (_no_pixel_representation,
+     "Decompression Failed: AttributeError: Missing required element: "
+     "(0028,0103) 'Pixel Representation'"),
+], ids=["label", "bits-stored", "pixel-representation"])
+def test_a_ragged_table_under_a_header_pydicom_refuses_keeps_pydicoms_words(
+        tmp_path, edit, row, number_of_frames):
+    """The ragged sentence is for a header pydicom accepts.
+
+    pydicom validates the header before it unpacks the table, and names
+    the element it refuses. Under NumberOfFrames 1 that was the row on
+    `main`; under NumberOfFrames 2 `main` counted the table first
+    (`Extended Offset Table names 1 frames; ...`). Until the third build
+    of this change the ragged sentence answered first under either,
+    because it is made before pydicom is asked.
+    """
+    ds = _table(2, number_of_frames, 12, 12)
+    edit(ds)
+    path, ds = _on_disk(tmp_path, ds)
+    theirs = _pydicom(path)
+    assert isinstance(theirs, (ValueError, AttributeError)), theirs
+    assert not isinstance(theirs, struct.error)
+
+    assert ragged_offset_table_words(ds) is None
+    assert ingest_worker(path)[-1] == row
 
 
 def test_a_dataset_the_helper_cannot_read_is_none():
