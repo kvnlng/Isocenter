@@ -1038,7 +1038,7 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
     return _PhotometricRefusal(
         f"PhotometricInterpretation (0028,0004) is a single value; "
         f"this instance declares {len(written)} "
-        f"({', '.join(repr(str(v)) for v in written)}). A file "
+        f"({', '.join(_cs_quoted(str(v)) for v in written)}). A file "
         f"carrying more than one cannot be read back by this library "
         f"at all -- ingest refuses it before any label is examined -- "
         f"so no output here would be honest, which is why this one "

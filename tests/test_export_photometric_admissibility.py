@@ -525,6 +525,29 @@ def test_a_multi_valued_label_is_refused_on_both_syntaxes(
         (tmp_path / "out").glob("*.dcm"))
 
 
+@pytest.mark.parametrize("label, quoted", [
+    (["rgb", "rg\xdf"], "('RGB', 'RG\\xdf')"),
+    ([b"rgb", "rgb\xe9"], "('rgb', 'RGB\\xe9')"),
+    (["RGB", "ABCDEFGHIJKLMNOPQ"],
+     "('RGB', 'ABCDEFGHIJKLMNOP' (cut at 16 characters))"),
+], ids=["sharp-s", "bytes-beside-e-acute", "seventeen"])
+def test_the_refusal_quotes_each_value_in_ascii(tmp_path, label, quoted):
+    """The refusal quotes a label as every other sentence does (#612).
+
+    It quoted each value with `repr`, which leaves `ß` as it is: measured
+    at 5d2c0821, `[b'rgb', 'rgß']` over three samples put the raw
+    character in the `ERROR` row, where the same label on a pixel-less
+    instance and on an icon was quoted `'RG\\xdf'`. Killing mutation
+    (q1): `repr` again.
+    """
+    outcome = _export(tmp_path, _image(label), compression=None)
+
+    assert isinstance(outcome.error, _PhotometricRefusal), outcome.error
+    message = str(outcome.error)
+    assert message.isascii(), ascii(message)
+    assert f"this instance declares 2 {quoted}. A file" in message, message
+
+
 def test_session_export_audits_the_refusal_and_grades_it(tmp_path):
     """The refusal fails one instance and is recorded (#502).
 
