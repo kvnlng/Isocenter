@@ -296,13 +296,29 @@ def _source_instance(tmp_path):
     return Instance(ds.SOPInstanceUID, CT_STORAGE, 1, file_path=str(path))
 
 
+def _caused_by_a_missing_imagecodecs(error):
+    """`error`, chained from the refusal that selects the codecs arm (#623).
+
+    The arm is chosen by an `ImagecodecsUnavailable` in the cause chain,
+    no longer by "decompress" in the message.
+    """
+    from isocenter.imagecodecs_handler import ImagecodecsUnavailable
+    error.__cause__ = ImagecodecsUnavailable("imagecodecs is not available")
+    return error
+
+
 @pytest.mark.parametrize("raised, words", [
-    # "decompress" in the message is what selects the codecs arm.
-    (RuntimeError("Unable to decompress 'JPEG 2000' pixel data"),
+    (_caused_by_a_missing_imagecodecs(
+        RuntimeError("Unable to decompress 'JPEG 2000' pixel data")),
      "Failed to decompress pixel data for instance"),
     # ... and its `Underlying Error:` line spells the exception again.
-    (OSError(5, "could not decompress frame 0", f"/src/{PATIENT_NAMED}/x.dcm"),
+    (_caused_by_a_missing_imagecodecs(
+        OSError(5, "could not decompress frame 0",
+                f"/src/{PATIENT_NAMED}/x.dcm")),
      "Failed to decompress pixel data for instance"),
+    # "decompress" in a message selects nothing since #623.
+    (RuntimeError("Unable to decompress 'JPEG 2000' pixel data"),
+     "Lazy load failed for instance"),
     (ValueError("The pixel data is truncated"), "Lazy load failed for instance"),
     # An `OSError` from the read repeats the path in its own `str()`.
     (PermissionError(13, "Permission denied", f"/src/{PATIENT_NAMED}/x.dcm"),

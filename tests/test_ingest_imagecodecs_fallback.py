@@ -697,8 +697,10 @@ def test_a_colour_jpeg_ls_file_ingests_bit_exactly(ingest, ts, want):
 
 
 # ---------------------------------------------------------------------------
-# #444 -- an unavailable imagecodecs says why, at both doors
+# #444 -- an unavailable imagecodecs says so, at both doors; since the
+# review of #1062, by class and module and never in the loader's words
 # ---------------------------------------------------------------------------
+from support.decode_doors import pydicom_cannot  # noqa: E402,F401  pylint: disable=wrong-import-position,unused-import
 
 #: A broken wheel's shape: installed, with a shared library missing.
 _BROKEN_IMPORT = ImportError(
@@ -711,8 +713,14 @@ def _without_imagecodecs(monkeypatch):
     monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", _BROKEN_IMPORT)
 
 
-def test_ingest_names_why_imagecodecs_is_unavailable(tmp_path, monkeypatch):
-    """I2: the ingest row carries the import failure's own words.
+def test_ingest_says_imagecodecs_did_not_import_and_not_in_whose_words(
+        tmp_path, monkeypatch):
+    """I2: the ingest row names the refusal and the import failure's class.
+
+    #444 put the import failure's own words in the row. They are the
+    loader's, and can hold an install path, so since the review of #1062
+    the row holds the class alone, once in the reason and once in
+    `caused by`, and never the message.
 
     In-process through `ingest_worker`, the function that writes the
     row: a Session hands ingest to its own process pool, which a
@@ -724,9 +732,76 @@ def test_ingest_names_why_imagecodecs_is_unavailable(tmp_path, monkeypatch):
     _assert_pydicom_cannot(path)
     _without_imagecodecs(monkeypatch)
     reason = ingest_worker(path)[-1]
-    assert reason.startswith("Decompression Failed:"), reason
-    assert "imagecodecs is not available: ImportError" in reason, reason
-    assert "libjpeg.so.8" in reason, reason
+    assert reason.startswith("Decompression Failed: RuntimeError: Unable to "
+                             "decompress"), reason
+    # The refusal's class is in the row, and is its own since #623.
+    said = ("ImagecodecsUnavailable: imagecodecs is not available: its "
+            "import raised ImportError")
+    assert reason.endswith(
+        f"; imagecodecs could not decode it either: {said} (caused by "
+        f"{said})"), reason
+    assert "libjpeg.so.8" not in reason and "shared object" not in reason
+
+
+#: What a failed `dlopen` says on macOS, with an install path made up
+#: for this test: the loader names the shared object it could not load.
+_DLOPEN = ImportError(
+    "dlopen(/Users/someone/venv/lib/python3.12/site-packages/imagecodecs/"
+    "_jpeg2k.cpython-312-darwin.so, 0x0002): Library not loaded: "
+    "@rpath/libopenjp2.7.dylib\n  Referenced from: /Users/someone/venv/lib/"
+    "python3.12/site-packages/imagecodecs/_jpeg2k.cpython-312-darwin.so",
+    name="imagecodecs._jpeg2k",
+    path="/Users/someone/venv/lib/python3.12/site-packages/imagecodecs/"
+         "_jpeg2k.cpython-312-darwin.so")
+_OF_THE_PATH = ("someone", "venv", "site-packages", "cpython-312", ".so",
+                "dlopen", "libopenjp2", "dylib", "Referenced from")
+
+
+def test_an_import_failures_install_path_reaches_no_stored_text(
+        tmp_path, monkeypatch, pydicom_cannot):  # pylint: disable=redefined-outer-name
+    """The row, `IngestSummary.failures`, the report and the read door.
+
+    Red at 32696465, where each held the `ImportError`'s message whole,
+    three times over (the reason and two `caused by` tails). The ingest
+    here is a real `Session.ingest()`, on the fixture's in-process pool
+    so the patched module is the one that answers.
+    """
+    from isocenter import imagecodecs_handler
+    from isocenter.entities import Instance
+    monkeypatch.setattr(imagecodecs_handler, "imagecodecs", None)
+    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", _DLOPEN)
+    src = tmp_path / "src"
+    src.mkdir()
+    path = _write(str(src), _dataset(LJPEG_SV1, [MONO16],
+                                     photometric="MONOCHROME2"))
+    db = str(tmp_path / "s.db")
+    report = tmp_path / "report.md"
+
+    with DicomSession(persistence_file=db) as session:
+        summary = session.ingest(str(src))
+        session.generate_report(str(report))
+    assert pydicom_cannot["ingests"] == 1 and pydicom_cannot["n"] > 0
+    assert len(summary.failures) == 1
+    reason = summary.failures[0][1]
+    with sqlite3.connect(db) as conn:
+        rows = [details for (details,) in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type = 'ERROR'")]
+    inst = Instance(generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
+                    file_path=path)
+    with pytest.raises(RuntimeError) as exc:
+        inst.get_pixel_data()
+    door = str(exc.value)
+
+    said = ("imagecodecs is not available: its import raised ImportError "
+            "for module imagecodecs._jpeg2k")
+    assert said in reason, reason
+    assert len(rows) == 1 and said in rows[0], rows
+    assert said in door, door
+    assert door.splitlines()[-1].startswith(
+        "Missing image codecs: imagecodecs did not import.")
+    for text in (reason, rows[0], report.read_text(encoding="utf-8"), door):
+        for piece in _OF_THE_PATH:
+            assert piece not in text, (piece, text)
 
 
 def test_the_lazy_load_error_carries_the_true_reason(tmp_path):
@@ -787,7 +862,16 @@ def test_the_read_door_names_why_imagecodecs_is_unavailable(tmp_path,
     # `_decode_pixels`, whose refusal carries the handler's words as the
     # reason imagecodecs could not decode the file either. It read
     # `imagecodecs fallback: ...` when the door asked the handler itself.
-    assert ("imagecodecs could not decode it either: RuntimeError: "
-            "imagecodecs is not available: ImportError") in msg, msg
-    assert "libjpeg.so.8" in msg, msg
-    assert "Missing image codecs" in msg, msg
+    # The class is `ImagecodecsUnavailable` since #623: the advice is
+    # chosen by it, and no longer by "decompress" in pydicom's words.
+    assert ("imagecodecs could not decode it either: ImagecodecsUnavailable: "
+            "imagecodecs is not available: its import raised ImportError"
+            ) in msg, msg
+    # Not the import failure's own words (they can hold an install path):
+    # the last line names the command that shows them.
+    assert "libjpeg.so.8" not in msg, msg
+    assert msg.splitlines()[-1] == (
+        "Missing image codecs: imagecodecs did not import. This library "
+        "installs it and reads this transfer syntax with it where pydicom "
+        "cannot; reinstall imagecodecs. Running `python -c \"import "
+        "imagecodecs\"` shows the import's own error."), msg
