@@ -206,7 +206,8 @@ TARGETS = {
     # 99 sites; budget 30 is a stride of 3, 33 mutants: all 33
     # killed. Seven files, 75.6s per pass -- the slowest of the #439 rows,
     # measured with other suites on the machine.
-    "isocenter/pixel_geometry.py": (["tests/test_automation.py",
+    "isocenter/pixel_geometry.py": (["tests/test_export_photometric_admissibility.py",
+                                    "tests/test_automation.py",
                                     "tests/test_descriptor_edit_with_pixels_unloaded.py",
                                     "tests/test_float_pixel_data_export.py",
                                     "tests/test_pixel_dtype_roundtrip.py",

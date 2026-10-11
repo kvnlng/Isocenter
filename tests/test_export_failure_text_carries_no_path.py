@@ -349,15 +349,14 @@ TRACEBACK_WORDS = ("Traceback", "site-packages", 'File "', ".py", "line ")
 
 
 def _refused_by_pydicoms_writer(ds):
-    """The exception `ds` raises from pydicom's writer."""
+    """The exception `ds` raises from pydicom's writer, written the way
+    the exporter writes an uncompressed file: implicit VR, little endian."""
     import io
     import pydicom
-    from pydicom.uid import ImplicitVRLittleEndian
 
     with pytest.raises(Exception) as raised:
         pydicom.dcmwrite(io.BytesIO(), ds, implicit_vr=True,
                          little_endian=True)
-    assert ImplicitVRLittleEndian  # the syntax the exporter writes
     return raised.value
 
 
@@ -569,10 +568,14 @@ def test_no_error_row_and_no_export_error_carries_a_traceback(
         assert word not in text, word
 
 
-def test_a_lost_workers_row_carries_no_traceback():
-    """A bare exception in the results is spelled by the same helper.
+def test_a_bare_exception_in_the_results_is_spelled_by_the_same_helper():
+    """The arm for a result that is an exception, not an outcome.
 
-    Killing mutation (t8): the lost-worker arm left on
+    That arm is where a lost worker's exception arrives, but this is not
+    one: a lost worker arrives as a `BrokenProcessPool`, whose message
+    holds no traceback. The test hands the arm an exception that does,
+    pydicom's, which is the only way to see which helper spells it.
+    Killing mutation (t8): the arm left on
     `describe_exception_without_paths`.
     """
     from isocenter.io_handlers import DicomExporter

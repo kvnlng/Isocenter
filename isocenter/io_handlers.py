@@ -118,6 +118,10 @@ from .pixel_geometry import (
     PIXEL_DTYPE_ATTR,
     TAG_DOUBLE_FLOAT_PIXEL_DATA,
     TAG_FLOAT_PIXEL_DATA,
+    _CS_UPPER,
+    _cs_spelling,
+    _cs_text,
+    _cs_unencodable,
     declared_int,
     resolve_photometric_interpretation,
     resolve_pixel_geometry,
@@ -612,62 +616,43 @@ def _written_photometric(value) -> Union[str, bytes, None]:
 #: there, and a note must not become a vehicle for one.
 _CS_MAX_CHARS = 16
 
-#: A Code String's letters (PS3.5 6.2): `a`-`z` to `A`-`Z`, and nothing
-#: else. Python's own upper-casing is Unicode's, which rewrites `ß` as
-#: `SS` and a dotless `ı` as `I`: a different value, not a spelling of
-#: the same one (#612).
-_CS_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz",
-                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
-
-def _cs_text(value):
-    """`value` as text when it is text or ASCII `bytes`; else itself."""
-    # An ASCII `bytes` label is the label's text in the only encoding a
-    # Code String has, so it is read as that text: handed to pydicom raw
-    # it was written unrespelled, with pydicom's `UserWarning` and no
-    # note (#612). `bytes` that are not ASCII are not text this library
-    # can read, and are left as held.
-    if isinstance(value, bytes):
-        try:
-            return value.decode("ascii")
-        except UnicodeDecodeError:
-            return value
-    return value
-
-
-def _cs_spelling(value):
-    """`value` as a Code String is spelled, when it is text; else itself.
-
-    Defined on the Code String repertoire and on nothing else (PS3.5
-    6.2): the space character is removed from both ends and `a`-`z` are
-    upper-cased. Every other character stays where it is, so a tab, a
-    newline or a no-break space is not taken for padding and no letter
-    outside ASCII is rewritten. An ASCII `bytes` value is spelled as its
-    text.
+def _cs_removed(text: str) -> Tuple[str, str]:
+    """What `_cs_spelling` removes from the two ends of `text`.
 
     Args:
-        value: One value of a Code String element, as the graph holds it.
+        text (str): A declared value, as text.
 
     Returns:
-        The spelled `str`, or `value` itself when it is neither text nor
-        ASCII `bytes`.
+        Tuple[str, str]: The leading run and the trailing run removed.
     """
-    # The one spelling: the worker writes through it (`_label_as_written`)
-    # and the judgement reads through it (`_written_photometric`), so a
-    # sentence about a label quotes the label the file holds. Until #612
-    # both used Python's own strip and upper-casing, and `'rgß'` was
-    # written `RGSS` under a WARNING saying it was "written as declared".
-    text = _cs_text(value)
-    if not isinstance(text, str):
-        return value
-    return text.strip(" ").translate(_CS_UPPER)
+    # The spelling's own strip, Python's, so the note's clauses are about
+    # what was removed and cannot name anything else. The end first: a
+    # value that is nothing but whitespace has no start, and one that is
+    # nothing but spaces is respelled silently as any trailing pad is.
+    kept = text.rstrip()
+    body = kept.lstrip()
+    return kept[:len(kept) - len(body)], text[len(kept):]
+
+
+def _code_points(chars) -> str:
+    """`chars` named for a sentence: `U+0009, U+00A0`, sorted, each once."""
+    return ", ".join(f"U+{ord(char):04X}" for char in sorted(set(chars)))
 
 
 def _cs_quoted(value) -> str:
-    """`value` quoted for a note, at most a Code String's length of it."""
+    """`value` quoted for a note or a row, at most a Code String's length
+    of it, in ASCII: a character outside printable ASCII is written as
+    its escape (`'RGB\\t'`, `'RG\\xdf'`, `'MONOCHROME2\\u0131'`), never
+    raw."""
+    # `ascii`, not `repr`: `repr` leaves a printable character outside
+    # ASCII as it is, and a row is flattened on its way to the audit log,
+    # so a no-break space quoted raw reads there as a space and the row
+    # names a conformant spelling the file does not hold (#612).
     if isinstance(value, (str, bytes)) and len(value) > _CS_MAX_CHARS:
-        return f"{value[:_CS_MAX_CHARS]!r} (cut at {_CS_MAX_CHARS} characters)"
-    return repr(value)
+        return (f"{ascii(value[:_CS_MAX_CHARS])} "
+                f"(cut at {_CS_MAX_CHARS} characters)")
+    return ascii(value)
 
 
 def _full_sample_label(label, samples):
@@ -697,6 +682,24 @@ def _full_sample_label(label, samples):
     return label
 
 
+def _cs_falls_back(text: str) -> str:
+    """The characters that make `_cs_spelling` fall back for `text`: those
+    of its `a`-`z` spelling a file cannot hold. Empty when it does not."""
+    return _cs_unencodable(text.strip().translate(_CS_UPPER))
+
+
+def _label_values(attributes) -> list:
+    """The declared values of (0028,0004) that are text, as a list."""
+    # Not `bytes`: an ASCII `bytes` label holds no character a file
+    # cannot, and one that is not ASCII is not respelled at all.
+    value = attributes.get("0028,0004")
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, MultiValue)):
+        return list(value)
+    return []
+
+
 def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     """The attributes the worker writes from, with (0028,0004) spelled as a
     CS value is defined, and the correction note when that changed what a
@@ -705,13 +708,17 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     PS3.5 6.2 defines a Code String as upper case with insignificant
     leading and trailing spaces, so a declared `' rgb '` is written as
     `RGB`: the same label, spelled as defined, with the samples untouched.
-    The spelling is `_cs_spelling`'s: only the space character is padding
-    and only `a`-`z` are upper-cased, so a label holding a tab or a letter
-    outside ASCII keeps it (`'rgß'` is written `RGß`). An ASCII `bytes`
-    label is written as its text. A multi-valued declaration has each
-    such value respelled; anything else (`bytes` that are not ASCII, a
-    number) is left as it is. Only `0028,0004` is respelled; other Code
-    String elements are written as held.
+    The spelling is `_cs_spelling`'s: whitespace is removed from the ends
+    and only `a`-`z` are upper-cased, so a label holding a letter outside
+    ASCII keeps it (`'rgß'` is written `RGß`). Whitespace other than the
+    space that was removed (`'RGB\\t'` is written `RGB`) is named in the
+    note by code point. A label the file could not hold so spelled is
+    written by `_cs_spelling`'s fallback, and `_label_fallback_warning`
+    speaks for it, not this note. An ASCII `bytes` label is written as its
+    text. A multi-valued declaration has each such value respelled;
+    anything else (`bytes` that are not ASCII, a number) is left as it
+    is. Only `0028,0004` is respelled; other Code String elements are
+    written as held.
 
     Args:
         attributes (Mapping): An instance's or sequence item's attributes.
@@ -763,25 +770,39 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     copy["0028,0004"] = written_value
     written = [written_value] if isinstance(written_value, str) \
         else written_value
-    # Each declared value as the text it was read as, beside what was
-    # written for it; a value that is not text was not respelled and has
-    # nothing to say. The three predicates below are the spelling's own
-    # two operations -- the space character, `a`-`z` -- so a clause is
-    # said only where that operation changed something. With Python's
-    # own, a tab read as "its leading spaces removed" and `ß` as "its
-    # letters upper-cased" (#612).
-    texts = [(text, w) for text, w in zip(map(_cs_text, declared), written)
-             if isinstance(text, str)]
-    if all(text.rstrip(" ") == w for text, w in texts):
-        return copy, None
-    # One of the two is always true here: a value with no leading space
-    # and no `a`-`z` has a right-strip equal to its CS spelling, and
-    # returned above.
+    # Each declared value as the text it was read as; a value that is not
+    # text was not respelled and has nothing to say here, and neither has
+    # one written by the fallback, which is not "the same label" and has
+    # its own WARNING. The clauses are read off the spelling's own
+    # operations -- `a`-`z`, and what `_cs_removed` says was taken from
+    # each end -- so each is said only where that operation changed
+    # something. With Python's own predicates a tab read as "its leading
+    # spaces removed" and `ß` as "its letters upper-cased" (#612).
+    texts = [text for text in map(_cs_text, declared)
+             if isinstance(text, str) and not _cs_falls_back(text)]
+    removed = [_cs_removed(text) for text in texts]
     changes = []
-    if any(text.translate(_CS_UPPER) != text for text, _w in texts):
+    if any(text.translate(_CS_UPPER) != text for text in texts):
         changes.append("its letters upper-cased")
-    if any(text.lstrip(" ") != text for text, _w in texts):
+    if any(" " in lead for lead, _trail in removed):
         changes.append("its leading spaces removed")
+    # Whitespace that is not a space, at either end: removed as it was
+    # before #612, and said, which it was not (a trailing tab went with
+    # no note at all). Named by code point and by end, never written raw
+    # into a note.
+    ends = []
+    for name, runs in (("start", [lead for lead, _trail in removed]),
+                       ("end", [trail for _lead, trail in removed])):
+        others = set("".join(runs)) - {" "}
+        if others:
+            ends.append(f"its {name} ({_code_points(others)})")
+    if ends:
+        changes.append("the whitespace that is not a space removed from "
+                       + " and ".join(ends))
+    # Nothing to say: trailing spaces alone were removed, and the file
+    # pads with them anyway.
+    if not changes:
+        return copy, None
     spelled = ", ".join(_cs_quoted(d) for d in declared)
     as_written = ", ".join(_cs_quoted(w) for w in written)
     return copy, (
@@ -790,6 +811,51 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
         f"{' and '.join(changes)} "
         f"(PS3.5 6.2: a CS value is upper case, and its leading and "
         f"trailing spaces are not significant). The samples are unchanged.")
+
+
+def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
+    """The WARNING for a declared (0028,0004) the file cannot hold as
+    `a`-`z` spells it, or None.
+
+    A character above U+00FF cannot be written in a Code String, so such
+    a label is written by `_cs_spelling`'s fallback, Python's own
+    upper-casing, which is what releases before #612 wrote for it
+    (`'monochrome2ı'` as `MONOCHROME2I`). That is another value, not a
+    spelling of the declared one, so it is a WARNING and not the INFO
+    note; every later sentence about the label quotes it as written.
+
+    Args:
+        attributes (Mapping): An instance's or sequence item's attributes.
+        in_file (Optional[list]): The values of (0028,0004) the dataset
+            about to be written holds, when the caller can say. A value
+            whose fallback spelling is not among them is not spoken for:
+            something else was written. None for a caller that writes
+            the label as respelled and nothing after (a sequence item).
+
+    Returns:
+        Optional[str]: One sentence per such value, naming the characters
+        by code point and the label written; None when there is none, or
+        when the fallback cannot be encoded either (the file fails, with
+        its own row, as it did before #612).
+    """
+    said = []
+    for text in map(_cs_text, _label_values(attributes)):
+        if not isinstance(text, str):
+            continue
+        held = _cs_falls_back(text)
+        written = _cs_spelling(text)
+        if not held or _cs_unencodable(written):
+            continue
+        if in_file is not None and written not in map(
+                _written_photometric, in_file):
+            continue
+        said.append(
+            f"PhotometricInterpretation {_cs_quoted(text)} holds a "
+            f"character the file cannot hold ({_code_points(held)}); it "
+            f"was written as {_cs_quoted(written)}, its upper case by "
+            f"Unicode's rules, and that is the label any other row about "
+            f"this file quotes.")
+    return " ".join(said) or None
 
 
 def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
@@ -7465,7 +7531,7 @@ def _readback_label_mismatch(readback) -> Optional[str]:
         # the fault named here is the arity itself, which is true of either.
         return (f"PhotometricInterpretation (0028,0004) is VM 1; the "
                 f"written file reads back as {len(label)} values "
-                f"({', '.join(repr(str(v)) for v in label)})")
+                f"({', '.join(_cs_quoted(str(v)) for v in label)})")
     syntax = str(getattr(readback.file_meta, "TransferSyntaxUID", "") or "")
     normalized = _written_photometric(label)
     found = _label_inadmissibility(normalized, syntax)
@@ -7483,7 +7549,11 @@ def _readback_label_mismatch(readback) -> Optional[str]:
         # too; the warning's door passes the same remedy (review of #900,
         # F4). Read off the file alone, as everything here is.
         remedy = _PHOTOMETRIC_J2K_FALLBACK
-    return (f"PhotometricInterpretation reads back as '{normalized}', "
+    # Quoted as the write-side WARNING quotes it, in ASCII. Raw, a label
+    # ending in a no-break space reached the row as `'RGB '`: the report
+    # flattens whitespace, and the row named a conformant spelling.
+    return (f"PhotometricInterpretation reads back as "
+            f"{_cs_quoted(normalized)}, "
             f"which the transfer syntax the file was written under does "
             f"not admit ({syntax}): {clause} {remedy}")
 
@@ -9049,6 +9119,19 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             warning = _pixel_less_label_warning(ds)
             if warning is not None:
                 warnings.append(warning)
+
+        # The fallback's WARNING for the top-level label, here and not
+        # where the label was respelled: it says what the file holds, and
+        # over pixels the resolver may have written another label since
+        # (one sample is `MONOCHROME2` whatever was declared), so it is
+        # read against `ds` as it now stands.
+        label = ds.get("PhotometricInterpretation")
+        fell_back = _label_fallback_warning(
+            inst.attributes,
+            in_file=[] if label is None
+            else list(label) if isinstance(label, MultiValue) else [label])
+        if fell_back is not None:
+            warnings.append(fell_back)
 
         # Encapsulated Document Length follows the document this file
         # carries (#757). After every merge and the finalize, so it reads
@@ -13412,6 +13495,9 @@ class DicomExporter:
                 attributes, respelled = _label_as_written(item.attributes)
                 if respelled is not None and corrections is not None:
                     corrections.append(f"{path} item {index}: {respelled}")
+                fell_back = _label_fallback_warning(item.attributes)
+                if fell_back is not None and warnings is not None:
+                    warnings.append(f"{path} item {index}: {fell_back}")
                 DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
                                      revrs=revrs, within=path,
