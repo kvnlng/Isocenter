@@ -84,9 +84,9 @@ def _sentence(rows, cols, frames, have, samples=1):
     return (f"Pixel Data holds {have} bytes, room for {room} frames of {of} "
             f"at one bit per sample, where NumberOfFrames is read as "
             f"{frames} and {'it needs' if frames == 1 else 'they need'} "
-            f"{need}: a frame here is {bits} bits, not a whole number of "
-            f"bytes, so the bytes beyond the declared frames cannot be read "
-            f"as frames.")
+            f"{need}: a frame here is {bits} bit{'' if bits == 1 else 's'}, "
+            f"not a whole number of bytes, so the bytes beyond the declared "
+            f"frames cannot be read as frames.")
 
 
 #: The 60 measured cells (six geometries, NumberOfFrames 1 and 2, zero to
@@ -294,6 +294,71 @@ def test_a_number_of_frames_pydicom_refuses_is_left_to_pydicom(
     with pytest.raises(ValueError) as caught:
         _decode_pixels(ds)
     assert pydicom_says in str(caught.value)
+
+
+def test_a_one_by_one_frame_is_one_bit(tmp_path):
+    """Singular, from a file: four bytes under one 1x1 frame."""
+    path = write(tmp_path, _file(1, 1, 1, 4))
+
+    assert ingest_worker(path)[-1] == (
+        "Decompression Failed: RuntimeError: Pixel Data holds 4 bytes, room "
+        "for 32 frames of 1x1 at one bit per sample, where NumberOfFrames "
+        "is read as 1 and it needs 1: a frame here is 1 bit, not a whole "
+        "number of bytes, so the bytes beyond the declared frames cannot be "
+        "read as frames.")
+
+
+def _ybr_422(rows, cols, frames, have):
+    ds = _file(rows, cols, frames, have, samples=3)
+    ds.PhotometricInterpretation = "YBR_FULL_422"
+    return ds
+
+
+def test_a_ybr_full_422_file_keeps_pydicoms_own_refusal(tmp_path):
+    """pydicom never slices this one by a fraction: it names (0028,0004).
+
+    Its excess-frames arithmetic is the `elif` of its `YBR_FULL_422`
+    test (`DecodeRunner._validate_buffer`, 3.0.2), so a buffer a third
+    larger than expected is refused in a `ValueError` about the label.
+    That row is `main`'s, whole. At 32696465 this file got the 1-bit
+    sentence instead (review of #1062): the same geometry under RGB,
+    below, is the one that sentence is for.
+    """
+    ds = _ybr_422(3, 3, 4, 18)
+    path = write(tmp_path, ds)
+    theirs = _pydicom(pydicom.dcmread(path))
+    assert isinstance(theirs, ValueError), theirs
+
+    assert bit_packed_excess_words(pydicom.dcmread(path)) is None
+    assert ingest_worker(path)[-1] == (
+        "Decompression Failed: ValueError: The number of bytes of pixel "
+        "data is a third larger than expected (18 vs 8 bytes) which "
+        "indicates the set (0028,0004) 'Photometric Interpretation' value "
+        "of 'YBR_FULL_422' is incorrect and may need to be changed to "
+        "either 'RGB' or 'YBR_FULL'")
+
+    rgb = _file(3, 3, 4, 18, samples=3)
+    assert isinstance(_pydicom(rgb), TypeError)
+    assert bit_packed_excess_words(rgb) == _sentence(3, 3, 4, 18, samples=3)
+
+
+@pytest.mark.parametrize("rows, cols, frames, have", [
+    (3, 3, 1, 4), (3, 3, 1, 6), (3, 3, 1, 12), (3, 3, 2, 8), (3, 3, 2, 14),
+    (5, 3, 1, 8), (5, 3, 1, 16), (2, 2, 1, 4), (2, 2, 2, 6), (2, 2, 2, 12)])
+def test_under_ybr_full_422_the_helper_never_answers(rows, cols, frames, have):
+    """Whatever pydicom makes of the cell, it is not the slice `TypeError`."""
+    ds = _ybr_422(rows, cols, frames, have)
+    theirs = _pydicom(ds)
+    assert not (isinstance(theirs, TypeError)
+                and CPYTHON_WORDS in str(theirs)), theirs
+
+    assert bit_packed_excess_words(ds) is None
+    if isinstance(theirs, Exception):
+        with pytest.raises(type(theirs)) as caught:
+            _decode_pixels(ds)
+        assert str(caught.value) == str(theirs)
+    else:
+        assert _decode_pixels(ds)[0].shape == theirs
 
 
 def test_a_short_buffer_is_left_to_pydicom():

@@ -26,21 +26,42 @@ Offsets 8 bytes, Lengths 4, NumberOfFrames 2, two fragments: pydicom
 reads both frames from the fragments, and ingest refused the file because
 the dropped table "names 1 frames". The count exists for the other
 direction (under NumberOfFrames 1 pydicom's walk returns frame 0 and
-never mentions frame 1, so a dropped table is still counted and the
-excess gets its row). In the shortfall direction nothing needs it: a
-dropped table that names fewer is not counted, and the file is read as
-pydicom reads it (owner ruling Q4 A).
+never mentions frame 1, so a dropped table naming more is still counted
+and the excess gets its row). A dropped table that names fewer is not
+counted, and the file is read as pydicom reads it (owner ruling Q4 A).
+
+**The invariant: a file whose table pydicom drops, naming no more frames
+than declared, is counted exactly as its twin without the two
+elements.** The first build returned pydicom's walk for the shortfall,
+on the premise that a shortfall needs two declared frames. It does not
+(a 4-byte table names 0 frames under NumberOfFrames 1), and the walk
+skips the two counts a table-less file gets first: its Basic Offset
+Table, and an RLE buffer's fragments. Measured at 32696465 (review of
+#1062), 4 bytes beside 8 under NumberOfFrames 1:
+
+    RLE, two fragments        ingested, 1 frame, no row
+    JPEG 2000, a Basic        ingested, no row, two frames' samples
+    Offset Table of two       under a one-frame header: the loader's
+                              Integrity Error, export 0 of 1
+
+where the twin gets a `DATA_LOSS` row and keeps frame 0. The agreeing
+table (8 beside 4 under NumberOfFrames 1) had the same two outcomes on
+`main`, by the same skip, and is the same fix.
 
 Every dataset here is written and read back, so the elements are what a
-file holds. Names `isocenter.io_handlers`, `isocenter.imagecodecs_handler`
-and `isocenter.entities`.
+file holds, except the count grid, which says so. Names
+`isocenter.io_handlers`, `isocenter.imagecodecs_handler` and
+`isocenter.entities`.
 """
+import os
+
 import imagecodecs
 import numpy as np
 import pydicom
 import pytest
-from pydicom.encaps import encapsulate
+from pydicom.encaps import encapsulate, generate_frames
 from pydicom.pixels import get_decoder
+from pydicom.uid import RLELossless as RLE_LOSSLESS
 
 from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
@@ -49,8 +70,9 @@ from isocenter.imagecodecs_handler import (frame_count_mismatch,
                                            ragged_offset_table_words)
 from isocenter.io_handlers import _decode_pixels, ingest_worker
 from support.decode_doors import (EXPLICIT_LE, J2K_LOSSLESS, SOP_CLASS,
-                                  at_ingest, dataset, through_the_fallback,
-                                  write)
+                                  at_ingest, dataset, pydicom_answer,
+                                  pydicom_cannot,  # noqa: F401  pylint: disable=unused-import
+                                  through_the_fallback, write)
 
 #: Three distinguishable 8x8 8-bit frames.
 FRAMES = [(np.arange(64, dtype=np.uint8) + 60 * i).reshape(8, 8)
@@ -62,18 +84,40 @@ NO_BOUNDARY = (", and NumberOfFrames declares 2: pydicom found no frame "
                "boundary in them, so the declared frames cannot be read")
 
 
-def _table(fragments, number_of_frames, offsets_bytes, lengths_bytes):
-    """A JPEG 2000 file: `fragments` fragments, an empty Basic Offset Table.
+def _rle_streams():
+    """The three frames as RLE Lossless frames, one fragment each."""
+    ds = dataset(EXPLICIT_LE, rows=8, cols=8, bits_allocated=8, frames=3,
+                 native=b"".join(frame.tobytes() for frame in FRAMES))
+    ds.compress(RLE_LOSSLESS, encoding_plugin="pydicom")
+    return [bytes(frame) for frame in generate_frames(
+        ds.PixelData, number_of_frames=3)]
 
-    The true offsets and lengths of the fragments, each cut (or
-    zero-padded) to the size asked; `None` leaves the element absent.
+
+RLE_STREAMS = _rle_streams()
+
+
+def _table(fragments, number_of_frames, offsets_bytes, lengths_bytes, *,
+           ts=J2K_LOSSLESS, bot="empty"):
+    """An encapsulated file of `fragments` fragments, one frame in each.
+
+    JPEG 2000 with an empty Basic Offset Table unless told otherwise;
+    `bot` is "empty", "true" (an offset per fragment) or "one" (a single
+    offset, 0). The Extended Offset Table and its Lengths hold the true
+    offsets and lengths of the fragments, each cut (or zero-padded) to
+    the size asked; `None` leaves the element absent, as does a
+    NumberOfFrames of `None`.
     """
-    ds = dataset(J2K_LOSSLESS, STREAMS[:fragments], rows=8, cols=8,
-                 bits_allocated=8, frames=number_of_frames)
-    ds.PixelData = encapsulate(STREAMS[:fragments], has_bot=False)
+    streams = (RLE_STREAMS if ts == RLE_LOSSLESS else STREAMS)[:fragments]
+    ds = dataset(ts, streams, rows=8, cols=8, bits_allocated=8,
+                 frames=number_of_frames)
+    ds.PixelData = encapsulate(streams, has_bot=bot == "true")
+    if bot == "one":
+        assert ds.PixelData[:8] == b"\xfe\xff\x00\xe0\x00\x00\x00\x00"
+        ds.PixelData = (b"\xfe\xff\x00\xe0\x04\x00\x00\x00" + b"\0" * 4
+                        + ds.PixelData[8:])
     ds["PixelData"].is_undefined_length = True
     offsets, lengths, at = [], [], 0
-    for stream in STREAMS[:fragments]:
+    for stream in streams:
         offsets.append(at)
         lengths.append(len(stream))
         at += 8 + len(stream) + len(stream) % 2
@@ -303,11 +347,17 @@ def test_a_dropped_table_naming_more_is_named_as_the_table_under_two_frames(
         3, 2, 2, "Extended Offset Table")
 
 
-def test_a_dropped_table_agreeing_with_the_header_is_as_before(tmp_path):
-    """16/8 under NumberOfFrames 2: the equal case, read with no row."""
+def test_a_dropped_table_agreeing_with_the_header_is_read_with_no_row(
+        tmp_path):
+    """16/8 under NumberOfFrames 2: read with no row, as its twin is.
+
+    The count offers nothing of its own for it (it returned the table's
+    own agreeing count until the review of #1062, which no caller could
+    tell from None).
+    """
     path, ds = _on_disk(tmp_path, _table(2, 2, 16, 8))
 
-    assert offset_table_frame_count(ds) == (2, 2, 2, "Extended Offset Table")
+    assert offset_table_frame_count(ds) is None
     result = ingest_worker(path)
     assert result[-1] is None and "offset_table_excess" not in result[0]
 
@@ -377,3 +427,266 @@ def test_a_table_pydicom_does_not_drop_is_still_counted(tmp_path, lengths):
     assert offset_table_frame_count(ds) == (1, 2, 2, "Extended Offset Table")
     assert ingest_worker(path)[-1] == (
         "Extended Offset Table names 1 frames; NumberOfFrames declares 2")
+
+
+@pytest.mark.parametrize("lengths", [0, None], ids=["empty", "absent"])
+def test_a_table_pydicom_does_not_drop_naming_fewer_is_not_asked_of_the_walk(
+        tmp_path, lengths):
+    """Three fragments under it: the walk would find an excess, and is not asked.
+
+    pydicom fails on this file whatever the fragments hold, so the
+    table's shortfall is the refusal, in this library's sentence. Asked
+    of the walk first, the file would be sent on to the decoder as an
+    excess of three and refused in pydicom's `TypeError`.
+    """
+    path, ds = _on_disk(tmp_path, _table(3, 2, 8, lengths))
+    assert isinstance(_pydicom(path), (TypeError, AttributeError))
+
+    assert offset_table_frame_count(ds) == (1, 2, 2, "Extended Offset Table")
+    assert ingest_worker(path)[-1] == (
+        "Extended Offset Table names 1 frames; NumberOfFrames declares 2")
+
+
+# ---------------------------------------------------------------------------
+# The invariant: a dropped table naming no more than declared is counted
+# exactly as the same file without the two elements
+# ---------------------------------------------------------------------------
+
+def _twin(ds):
+    """The same dataset, UIDs and all, without the two elements."""
+    twin = pydicom.dcmread(_bytes(ds), force=True)
+    for tag in (0x7FE00001, 0x7FE00002):
+        if tag in twin:
+            del twin[tag]
+    return twin
+
+
+def _bytes(ds):
+    from io import BytesIO  # pylint: disable=import-outside-toplevel
+    buf = BytesIO()
+    ds.save_as(buf, enforce_file_format=False)
+    buf.seek(0)
+    return buf
+
+
+def test_a_dropped_table_naming_no_more_is_counted_as_its_twin_over_a_grid():
+    """Every cell's count equals its twin's; none of them is all None.
+
+    2 syntaxes x 1 to 3 fragments x 3 Basic Offset Tables x NumberOfFrames
+    absent, 1, 2, 3 x every pair of unequal lengths from 4 to 24 bytes
+    whose table names no more frames than declared. In memory, where the
+    element holds the same bytes a file's does (the files are the tests
+    below). Red at 32696465 in the cells under NumberOfFrames 1 or absent
+    with a 4-byte table, and on `main` in those with an 8-byte one too.
+    """
+    sizes = (4, 8, 12, 16, 20, 24)
+    cells, wrong, answers = 0, [], set()
+    for ts in (J2K_LOSSLESS, RLE_LOSSLESS):
+        for fragments in (1, 2, 3):
+            for bot in ("empty", "true", "one"):
+                for frames in (None, 1, 2, 3):
+                    declared = frames or 1
+                    twin = offset_table_frame_count(
+                        _table(fragments, frames, None, None, ts=ts, bot=bot))
+                    for offsets in sizes:
+                        if offsets // 8 > declared:
+                            continue
+                        for lengths in sizes:
+                            if lengths == offsets:
+                                continue
+                            cells += 1
+                            ds = _table(fragments, frames, offsets, lengths,
+                                        ts=ts, bot=bot)
+                            assert imagecodecs_handler.extended_offsets(
+                                ds) is None
+                            got = offset_table_frame_count(ds)
+                            answers.add(None if got is None else got[3])
+                            if got != twin:
+                                wrong.append((str(ts), fragments, bot, frames,
+                                              offsets, lengths, got, twin))
+    assert cells == 1530, cells
+    assert not wrong, f"{len(wrong)} of {cells}: {wrong[:5]}"
+    # The grid reaches every arm a table-less file is counted by.
+    assert answers == {None, "Basic Offset Table", "RLE fragments",
+                       "Pixel Data's fragments"}, answers
+
+
+def _session(tmp_path, ds, name):
+    """`ds` through `Session.ingest()` and `export()`: what each said.
+
+    `{"failure", "rows", "array", "exported"}`: `at_ingest`'s three, and
+    the Pixel Data arrays of the files the export wrote.
+    """
+    from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
+    home = tmp_path / name
+    home.mkdir()
+    path = write(home, ds)
+    got = at_ingest(home, path)
+    out = home / "out"
+    with DicomSession(persistence_file=str(home / "s.db")) as session:
+        try:
+            session.export(str(out))
+            got["export"] = None
+        except Exception as exc:  # pylint: disable=broad-except
+            got["export"] = exc
+    got["exported"] = []
+    for root, _dirs, files in os.walk(out):
+        for name_ in files:
+            written = os.path.join(root, name_)
+            if "PixelData" in pydicom.dcmread(written, force=True):
+                # pydicom's own decoder, whatever route the test is on.
+                got["exported"].append(pydicom_answer(written)[0].tolist())
+    return got
+
+
+#: Under NumberOfFrames 1 or absent: (transfer syntax, Basic Offset
+#: Table, the row a file with no Extended Offset Table gets).
+LOSES_A_FRAME = [
+    (RLE_LOSSLESS, "empty",
+     "Pixel Data's fragments hold 2 frames, one per fragment; "
+     "NumberOfFrames {declares}. Kept the first 1 and discarded 1."),
+    (J2K_LOSSLESS, "true",
+     "Basic Offset Table names 2 frames; NumberOfFrames {declares}. Kept "
+     "the first 1 and discarded 1."),
+]
+
+
+@pytest.mark.parametrize("frames, declares", [
+    (1, "declares 1"), (None, "is absent (read as 1)")],
+    ids=["one", "absent"])
+@pytest.mark.parametrize("offsets, lengths", [(4, 8), (8, 4)],
+                         ids=["fewer-4/8", "agreeing-8/4"])
+@pytest.mark.parametrize("ts, bot, row", LOSES_A_FRAME, ids=["rle", "j2k-bot"])
+def test_a_second_frame_under_one_declared_gets_its_twins_row(
+        tmp_path, ts, bot, row, offsets, lengths, frames, declares):
+    """Two frames, one declared, a dropped table naming 0 or 1.
+
+    The reviewer's two files and their agreeing-table siblings, through
+    `Session.ingest()` and `export()`. Red at 32696465 for 4/8: the RLE
+    file ingested with no row, and the JPEG 2000 one stored 128 samples
+    under a one-frame 8x8 header, which the loader refuses and the
+    export cannot write. Red on `main` for 8/4, the same two ways.
+    """
+    ds = _table(2, frames, offsets, lengths, ts=ts, bot=bot)
+    assert imagecodecs_handler.extended_offsets(ds) is None
+
+    got = _session(tmp_path, ds, "table")
+    twin = _session(tmp_path, _twin(ds), "twin")
+
+    assert got["failure"] is None and twin["failure"] is None
+    assert [action for action, _uid, _details in got["rows"]] == ["DATA_LOSS"]
+    assert row.format(declares=declares) in got["rows"][0][2], got["rows"]
+    assert got["rows"] == twin["rows"]
+    # Frame 0, stored and exported: the declared frame, and only it.
+    assert got["array"].tolist() == FRAMES[0].tolist()
+    assert twin["array"].tolist() == FRAMES[0].tolist()
+    assert got["export"] is None, got["export"]
+    assert got["exported"] == [FRAMES[0].tolist()] == twin["exported"]
+
+
+@pytest.mark.parametrize("offsets, lengths", [(4, 8), (8, 4)],
+                         ids=["fewer-4/8", "agreeing-8/4"])
+def test_the_fallback_route_gives_the_same_row(
+        tmp_path, pydicom_cannot, offsets, lengths):  # pylint: disable=redefined-outer-name
+    """With pydicom unable to decode, the JPEG 2000 file is its twin too.
+
+    Red at 32696465 for 4/8 and on `main` for 8/4: one frame stored and
+    no row, so what the file got depended on the route. (RLE Lossless has
+    no fallback.)
+    """
+    ds = _table(2, 1, offsets, lengths, ts=J2K_LOSSLESS, bot="true")
+
+    got = _session(tmp_path, ds, "table")
+    twin = _session(tmp_path, _twin(ds), "twin")
+
+    assert pydicom_cannot["n"] > 0
+    assert got["pydicom_calls"] > 0 and twin["pydicom_calls"] > 0
+    assert got["failure"] is None
+    assert [action for action, _uid, _details in got["rows"]] == ["DATA_LOSS"]
+    assert ("Basic Offset Table names 2 frames; NumberOfFrames declares 1. "
+            "Kept the first 1 and discarded 1.") in got["rows"][0][2]
+    assert got["rows"] == twin["rows"]
+    assert got["array"].tolist() == FRAMES[0].tolist()
+    assert got["exported"] == [FRAMES[0].tolist()] == twin["exported"]
+
+
+def test_an_agreeing_dropped_table_over_more_rle_fragments_is_read_as_its_twin(
+        tmp_path):
+    """16/4, three RLE fragments, NumberOfFrames 2: the declared two, and a row.
+
+    Refused on `main` (`Pixel Data holds 3 fragments with no offset
+    table, ...`: pydicom's walk finds no end marker in RLE), while the
+    same file without the table was read. The fragments are counted now.
+    """
+    ds = _table(3, 2, 16, 4, ts=RLE_LOSSLESS)
+
+    got = _session(tmp_path, ds, "table")
+    twin = _session(tmp_path, _twin(ds), "twin")
+
+    assert got["failure"] is None
+    assert got["rows"] == twin["rows"]
+    assert ("Pixel Data's fragments hold 3 frames, one per fragment; "
+            "NumberOfFrames declares 2. Kept the first 2 and discarded 1."
+            ) in got["rows"][0][2]
+    assert got["array"].tolist() == np.stack(FRAMES[:2]).tolist()
+
+
+@pytest.mark.parametrize("offsets, lengths", [(4, 8), (16, 4)],
+                         ids=["fewer", "agreeing"])
+def test_a_basic_offset_table_naming_fewer_answers_under_a_dropped_table(
+        tmp_path, offsets, lengths):
+    """One fragment, a Basic Offset Table of one offset, NumberOfFrames 2.
+
+    The twin's sentence, which names the table pydicom walks by. At
+    32696465 the 4/8 file said "with no offset table pydicom walks by"
+    over that table; on `main` the 16/4 one said "with no offset table".
+    """
+    path, ds = _on_disk(tmp_path, _table(1, 2, offsets, lengths, bot="one"))
+
+    assert offset_table_frame_count(ds) == (1, 2, 2, "Basic Offset Table")
+    assert ingest_worker(path)[-1] == (
+        "Basic Offset Table names 1 frames; NumberOfFrames declares 2")
+
+
+def test_one_fragment_under_an_agreeing_dropped_table_gains_the_clause(
+        tmp_path):
+    """16/4 over one fragment, NumberOfFrames 2, an empty Basic Offset Table.
+
+    Refused on `main` too, as "with no offset table" over a dataset that
+    holds one. Named in the CHANGELOG's Output line.
+    """
+    path, _ds = _on_disk(tmp_path, _table(1, 2, 16, 4))
+
+    assert ingest_worker(path)[-1] == (
+        "Decompression Failed: RuntimeError: Pixel Data holds 1 fragment "
+        "with no offset table pydicom walks by" + NO_BOUNDARY
+        + " (caused by StopIteration)")
+
+
+def test_the_clause_is_not_lengthened_over_a_populated_basic_offset_table(
+        tmp_path):
+    """24/4 (names more), a Basic Offset Table of one offset, one fragment.
+
+    Counted from the dropped table, so the Basic Offset Table is not
+    asked and the decode runs out of frames: `main`'s outcome and
+    `main`'s words, which are false of this file (pydicom walks by the
+    Basic Offset Table) and are not this change's. "pydicom walks by"
+    would be false of it as well, so it is not added.
+    """
+    path, ds = _on_disk(tmp_path, _table(1, 2, 24, 4, bot="one"))
+    assert offset_table_frame_count(ds) == (3, 2, 2, "Extended Offset Table")
+
+    assert ingest_worker(path)[-1] == (
+        "Decompression Failed: RuntimeError: Pixel Data holds 1 fragment "
+        "with no offset table" + NO_BOUNDARY + " (caused by StopIteration)")
+
+
+def test_a_one_byte_table_is_a_byte_long():
+    """In memory only: pydicom pads a 1-byte value to 2 when it writes."""
+    ds = _table(2, 2, 16, 16)
+    ds.ExtendedOffsetTable = b"\0"
+    ds.ExtendedOffsetTableLengths = b"\0"
+
+    assert ragged_offset_table_words(ds) == (
+        "Extended Offset Table is 1 byte long, which is not a whole number "
+        "of 8-byte offsets, so it names no whole number of frames.")

@@ -59,7 +59,8 @@ BROKEN_IMPORT = ImportError(
 
 ARM_1 = ("Missing image codecs: imagecodecs did not import. This library "
          "installs it and reads this transfer syntax with it where pydicom "
-         "cannot; reinstall imagecodecs.")
+         "cannot; reinstall imagecodecs. Running `python -c \"import "
+         "imagecodecs\"` shows the import's own error.")
 
 
 def _door(tmp_path, ds, name="one"):
@@ -127,9 +128,13 @@ def test_an_unimportable_imagecodecs_gets_advice_that_names_it(
     assert lines[1].startswith("Underlying Error: RuntimeError: "), lines[1]
     assert lines[-1] == ARM_1
     whole = str(error)
-    # The import's own reason is in the underlying error, once.
+    # The import failure's class is in the underlying error; its words
+    # are not (they can hold an install path), and the advice line names
+    # the command that shows them.
     assert ("imagecodecs could not decode it either: ImagecodecsUnavailable: "
-            "imagecodecs is not available: ImportError: libjpeg.so.8") in whole
+            "imagecodecs is not available: its import raised ImportError "
+            "(caused by ") in whole
+    assert "libjpeg.so.8" not in whole
     assert "Active pydicom handlers" not in whole
     assert "gdcm' are installed" not in whole
     assert str(tmp_path) not in whole
@@ -291,6 +296,29 @@ def test_a_refusal_made_before_any_decoder_is_asked_gets_no_advice(
         f"Lazy load failed for instance {inst.sop_instance_uid}: "
         f"RuntimeError: Basic Offset Table names 1 frames; NumberOfFrames "
         f"declares 2")
+
+
+def test_a_refusal_the_decode_door_makes_before_pydicom_gets_no_advice(
+        tmp_path, rle_has_no_plugin):
+    """A 12-byte Extended Offset Table beside 12 of Lengths, with no RLE plugin.
+
+    `_decode_pixels` refuses the table before it asks pydicom anything,
+    and that is past the point where the read door notes a decoder is
+    about to be asked. At 32696465 this file got arm 2's advice under
+    its own refusal (review of #1062, finding 4): told to install a
+    plugin for a file no plugin reads.
+    """
+    ds = _rle()
+    ds.add_new(0x7FE00001, "OV", b"\0" * 12)
+    ds.add_new(0x7FE00002, "OV", b"\0" * 12)
+    inst, error = _door(tmp_path, ds)
+
+    assert rle_has_no_plugin["asked"] == 0
+    assert str(error) == (
+        f"Lazy load failed for instance {inst.sop_instance_uid}: "
+        f"RuntimeError: Extended Offset Table is 12 bytes long, which is "
+        f"not a whole number of 8-byte offsets, so it names no whole number "
+        f"of frames.")
 
 
 def test_a_fallback_syntax_refused_on_its_content_gets_no_advice(tmp_path):

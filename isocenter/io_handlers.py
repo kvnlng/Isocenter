@@ -128,15 +128,13 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
-                                  bit_packed_excess_words,
                                   colour_conversion, convert_colour,
                                   declared_frame_count,
                                   decode_declared_frames, extended_offsets,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
-                                  ragged_offset_table_words,
-                                  signed_codestream_refusal)
+                                  refusal_before_decode)
 from .parallel import (run_parallel, _resolve_strategy,
                        resolve_worker_initializer)
 from .validation import IODValidator
@@ -2658,27 +2656,19 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     # default would decode it under Explicit VR LE -- garbage geometry and
     # no row at all.
     ts = ds.file_meta.TransferSyntaxUID
-    # Before pydicom: Pillow decodes a signed codestream under
-    # PixelRepresentation 0 at monochrome depths and 8-bit colour with the
-    # samples shifted by 2^(bits-1), and no error. Isocenter's own exports
-    # never carry that shape (the writer derives PixelRepresentation and
-    # the codestream's sign from one dtype), so the readback never trips it.
-    refusal = signed_codestream_refusal(ds)
-    if refusal is not None:
-        raise RuntimeError(refusal)
-    # Before pydicom too: a native 1-bit frame that is not a whole number
-    # of bytes, under more bytes than its declared frames, is one pydicom
-    # slices by a `float` and fails in CPython's words for a slice (#669).
-    # Here rather than at each door, so ingest, the Instance door, the
-    # readback and an icon refuse it in one sentence.
-    refusal = bit_packed_excess_words(ds)
-    if refusal is not None:
-        raise RuntimeError(refusal)
-    # And an Extended Offset Table pydicom walks by that is no whole
-    # number of 8-byte offsets, which pydicom unpacks and fails on in
-    # `struct`'s words (#621). `offset_table_frame_count` offers no count
-    # for it, so every door arrives here and says this.
-    refusal = ragged_offset_table_words(ds)
+    # Before pydicom, three refusals on what the file holds
+    # (`refusal_before_decode`): a signed JPEG 2000 codestream under
+    # PixelRepresentation 0, which Pillow decodes at monochrome depths and
+    # 8-bit colour with the samples shifted by 2^(bits-1) and no error; a
+    # native 1-bit frame that is not a whole number of bytes under more
+    # bytes than its declared frames, which pydicom slices by a `float`
+    # and fails on in CPython's words for a slice (#669); and an Extended
+    # Offset Table pydicom walks by that is no whole number of 8-byte
+    # offsets, which pydicom unpacks and fails on in `struct`'s words
+    # (#621; `offset_table_frame_count` offers no count for it, so every
+    # door arrives here). Here rather than at each door, so ingest, the
+    # Instance door, the readback and an icon refuse each in one sentence.
+    refusal = refusal_before_decode(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
@@ -2844,22 +2834,36 @@ def _no_frame_boundary_words(ds) -> str:
     # gets here. If that guard stops answering first, the clause becomes
     # false.
     #
-    # **It is not true of an Extended Offset Table**, since #621: one
-    # pydicom drops (its Lengths element is another length) that names
-    # fewer frames than declared is no longer counted, so a dataset
-    # holding a table arrives here. The clause then says what is true:
-    # none that pydicom walks by. (One it does walk by never raises the
-    # `StopIteration` this words: the count refuses it first.)
+    # **It is not true of an Extended Offset Table**: one pydicom drops
+    # (its Lengths element is another length) is counted as the same
+    # file without it unless it names more frames than declared (#621),
+    # and one naming more is decoded to the declared frames, so a
+    # dataset holding a table arrives here. The clause then says what is
+    # true: none that pydicom walks by. (One it does walk by never raises
+    # the `StopIteration` this words: the count refuses it first.) Before
+    # #621 a dropped table that agreed or named more got "with no offset
+    # table", over a dataset holding one.
+    #
+    # **The Basic Offset Table guard above has one hole**, measured: a
+    # dropped Extended Offset Table naming *more* frames than declared is
+    # counted from that table, so a populated Basic Offset Table naming
+    # fewer is not asked, and the file arrives here saying "with no
+    # offset table" over one pydicom walks by. Not fixed (it is the
+    # excess arm's, which #621 did not change); the clause is not
+    # lengthened for it, because the longer one would be false too.
     #
     # The `except` branch says nothing about the table, because it has
     # parsed nothing to say it from.
     declared = declared_frame_count(ds)
     table = "no offset table"
-    if ds.get("ExtendedOffsetTable"):
-        table += " pydicom walks by"
     try:
         buf = BytesIO(ds.PixelData)
-        parse_basic_offsets(buf)
+        # Only over an empty Basic Offset Table: pydicom walks by a
+        # populated one, so the longer clause would be false there. That
+        # shape is reached under a dropped Extended Offset Table naming
+        # more frames than declared, and keeps the words it had.
+        if not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable"):
+            table += " pydicom walks by"
         fragments, _offsets = parse_fragments(buf)
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
                 f"with {table}")

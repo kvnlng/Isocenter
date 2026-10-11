@@ -959,9 +959,13 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
     cause, seen = error, set()
     while cause is not None and id(cause) not in seen:
         if isinstance(cause, h.ImagecodecsUnavailable):
+            # No word of the import failure here: its message can hold
+            # an install path (`imagecodecs_handler._unavailable`). The
+            # command is how a user reads it.
             return ("imagecodecs did not import. This library installs it "
                     "and reads this transfer syntax with it where pydicom "
-                    "cannot; reinstall imagecodecs.")
+                    "cannot; reinstall imagecodecs. Running `python -c "
+                    "\"import imagecodecs\"` shows the import's own error.")
         seen.add(id(cause))
         cause = cause.__cause__
     if not isinstance(error, RuntimeError) or ds is None:
@@ -981,6 +985,12 @@ def _missing_decoder_words(error, ds) -> Optional[str]:
             return None
         decoder = get_decoder(tsyntax)
         if decoder.is_available:
+            return None
+        # `_decode_pixels` refuses three shapes before it asks pydicom
+        # anything, and the caller's `decoder_asked` is set before that
+        # call, so it does not tell them apart. Such a file is refused on
+        # what it holds whatever is installed.
+        if h.refusal_before_decode(ds) is not None:
             return None
         listed = "; ".join(str(item) for item in decoder.missing_dependencies)
     except Exception:  # pylint: disable=broad-except

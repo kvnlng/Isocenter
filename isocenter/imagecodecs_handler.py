@@ -120,30 +120,45 @@ class ImagecodecsUnavailable(RuntimeError):
     missing decoder from a file no decoder reads by what was raised, not
     by words in a message (#623). Its name is spelled in the row a user
     reads (`... could not decode it either: ImagecodecsUnavailable:
-    imagecodecs is not available: ...`). At module level, so it pickles.
+    imagecodecs is not available: its import raised ImportError ...`).
+    At module level, so it pickles.
     """
 
 
 def _unavailable() -> ImagecodecsUnavailable:
-    """The one refusal both decoders raise when imagecodecs did not import.
+    """The one refusal the fallback raises when imagecodecs did not import.
 
-    Callers raise it `from IMPORT_ERROR`, so the cause is chained as well
-    as quoted.
+    Callers raise it `from None`: neither the message nor the chain
+    carries the import failure's own words.
 
     Returns:
-        ImagecodecsUnavailable: A `RuntimeError` carrying the import
-        failure's own words (`describe_exception`), or only "imagecodecs
-        is not available" with no recorded import error.
+        ImagecodecsUnavailable: A `RuntimeError` naming the import
+        failure's class, and the module it was importing where the
+        failure says so (`ImportError.name`); or only "imagecodecs is not
+        available" with no recorded import error.
     """
-    # The words matter because the stderr print in `is_available()` may
-    # never be shown by a worker, a notebook or a log-only deployment, and
-    # a message such as "libjpeg.so.8: cannot open shared object file" is
-    # the whole clue to the fix. Read at call time, so the module global is
-    # what it describes.
+    # **Never the `ImportError`'s message, and never chained from it.**
+    # That message is the loader's: a failed `dlopen` names the shared
+    # object by its absolute path, under the user's home and environment
+    # directory. This text is stored: it reaches the ingest `ERROR` row,
+    # `IngestSummary.failures`, the report, and an export's row through
+    # the read door, and `describe_exception` would quote a chained cause
+    # into each of them again (`(caused by ImportError: ...)`). The class
+    # and the module name say what failed; why is on stderr, where
+    # `is_available()` prints it, and in `IMPORT_ERROR` -- and
+    # `Instance.get_pixel_data`'s advice names the command that shows it.
+    # Read at call time, so the module global is what it describes.
     if IMPORT_ERROR is None:
         return ImagecodecsUnavailable("imagecodecs is not available")
-    return ImagecodecsUnavailable(
-        f"imagecodecs is not available: {describe_exception(IMPORT_ERROR)}")
+    words = f"its import raised {type(IMPORT_ERROR).__name__}"
+    # A dotted module name and nothing else: `name` is whatever the
+    # raiser passed, and only this shape is known to hold no path. (An
+    # empty name has one empty part, which is no identifier.)
+    module = getattr(IMPORT_ERROR, "name", None)
+    if isinstance(module, str) and all(
+            part.isidentifier() for part in module.split(".")):
+        words += f" for module {module}"
+    return ImagecodecsUnavailable(f"imagecodecs is not available: {words}")
 
 
 # UID Constants
@@ -326,7 +341,9 @@ def ragged_offset_table_words(ds) -> Optional[str]:
         return None
     # A length only: no byte of the table, and none of the two substrings
     # `Instance.get_pixel_data` once routed on.
-    return (f"Extended Offset Table is {len(walked_by[0])} bytes long, "
+    length = len(walked_by[0])
+    return (f"Extended Offset Table is {length} "
+            f"{'byte' if length == 1 else 'bytes'} long, "
             f"which is not a whole number of 8-byte offsets, so it names no "
             f"whole number of frames.")
 
@@ -345,9 +362,10 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         NumberOfFrames is not an integer, there is no `PixelData`, the
         table does not parse, an Extended Offset Table pydicom walks by
         is no whole number of 8-byte offsets (`ragged_offset_table_words`
-        refuses it), or there is no table to count by -- none, or an
-        Extended Offset Table pydicom drops that names fewer frames than
-        declared -- and neither
+        refuses it), or there is no table to count by -- none, or only
+        an Extended Offset Table pydicom drops that names no more frames
+        than declared, which is counted as the same file without it --
+        and neither
         pydicom's walk of the fragments (`_walked_excess`) nor, for native
         data, the element's length (`_native_excess`) holds more frames
         than declared. Those two report an excess only, never fewer, and
@@ -421,24 +439,29 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # row would go and frame 1 would be lost in silence. The count decides
     # whether to report; it walks nothing.
     #
-    # **A table whose count equals the declared one is not the last word
-    # when pydicom drops it.** Its offsets then say nothing about
-    # the frames the decoder reads: pydicom walks the fragments, and the
-    # walk can find more. So that one shape -- a table pydicom will not
-    # walk by, agreeing with NumberOfFrames -- is asked of the walk too.
+    # **A table pydicom drops that names no more frames than declared is
+    # not counted: the file is counted exactly as its twin without the
+    # two elements** (#621). The split above exists for the excess
+    # direction only. Where the dropped table names fewer, or the same,
+    # its offsets say nothing about the frames the decoder reads, and
+    # what does is what a file with no Extended Offset Table is counted
+    # by, in the same order: the Basic Offset Table, an RLE buffer's
+    # fragments, pydicom's walk. So this arm falls through to those and
+    # returns nothing of its own. It once returned `_walked_excess(...)`
+    # here, which skips the first two, on the premise that a shortfall
+    # needs two declared frames. It does not: a 4-byte table names 0
+    # frames under NumberOfFrames 1, and an RLE file of two fragments
+    # then lost its second frame with no row, while a JPEG 2000 file
+    # whose Basic Offset Table names two was stored as two frames under
+    # a one-frame header. The agreeing table (8 bytes beside 4 under
+    # NumberOfFrames 1) had the same two outcomes for the same reason.
     # A table that names *more* is reported from the table, as above; one
     # pydicom walks by names every frame it reads.
     #
-    # **A table pydicom drops that names fewer is not counted** (#621).
-    # The split above exists for the excess direction only. A shortfall
-    # needs at least two declared frames, and pydicom's walk then returns
-    # exactly those (read, no row), more (`_walked_excess` reports them),
-    # or fewer (its own refusal, or the bare `StopIteration`
-    # `io_handlers._decode_pixels` words). Counting the dropped table
-    # refused a file pydicom reads whole. "Drops" is `_drops_the_table`,
-    # not `extended_offsets(ds) is None`: pydicom *fails* on a Lengths
-    # element that is empty or absent, so those are still counted and
-    # refused here in this sentence rather than in pydicom's `TypeError`.
+    # "Drops" is `_drops_the_table`, not `extended_offsets(ds) is None`:
+    # pydicom *fails* on a Lengths element that is empty or absent, so a
+    # table beside one is still counted here, and a shortfall is refused
+    # in this sentence rather than in pydicom's `TypeError`.
     #
     # **A table pydicom walks by whose length is not a multiple of 8
     # names no whole number of frames**, so no count is offered:
@@ -454,11 +477,10 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
                    "Extended Offset Table")
         if walked_by or counted[0] > declared:
             return counted
-        if counted[0] < declared:
-            if _drops_the_table(ds):
-                return _walked_excess(ds, declared, declared_raw)
-            return counted
-        return _walked_excess(ds, declared, declared_raw) or counted
+        if not _drops_the_table(ds):
+            if counted[0] < declared:
+                return counted
+            return _walked_excess(ds, declared, declared_raw) or counted
 
     try:
         offsets = parse_basic_offsets(ds.PixelData)
@@ -742,6 +764,12 @@ def bit_packed_excess_words(ds) -> Optional[str]:
     nothing in the file (#669). `_native_excess` declines the same shape,
     so nothing reports it either. Never raises.
 
+    That is pydicom's default call. With `allow_excess_frames=False`
+    pydicom reads the declared frames of such a file, and this refuses
+    it all the same: the refusal does not read the keyword. No door
+    passes it for these files, because `_native_excess` reports no
+    excess for them and only a reported excess sets it.
+
     Args:
         ds (pydicom.Dataset): The dataset about to be decoded.
 
@@ -751,7 +779,9 @@ def bit_packed_excess_words(ds) -> Optional[str]:
         syntax, any other BitsAllocated, a frame that is a whole number
         of bytes (`_native_excess` counts it), bytes that hold no more
         frames than declared (pydicom reads those as padding), a
-        NumberOfFrames pydicom refuses (negative, or empty), or anything
+        NumberOfFrames pydicom refuses (negative, or empty),
+        `YBR_FULL_422` (pydicom refuses or pads it before it counts
+        frames), or anything
         this cannot read, which the decode that follows refuses.
     """
     # **pydicom's own rule** (`DecodeRunner._validate_buffer`, 3.0.2), not
@@ -772,6 +802,13 @@ def bit_packed_excess_words(ds) -> Optional[str]:
         # validation in words that name the element; this sentence would
         # replace them. Absent and 0 are read as 1, as pydicom reads them.
         if "NumberOfFrames" in ds and int(ds.NumberOfFrames) < 0:
+            return None
+        # pydicom's excess-frames arithmetic is the `elif` of its
+        # `YBR_FULL_422` test, so under that label it never slices by a
+        # fraction: it refuses a buffer a third larger than expected in a
+        # `ValueError` naming (0028,0004), and reads anything shorter as
+        # padding. Both are pydicom's to say.
+        if str(ds.get("PhotometricInterpretation", "")) == "YBR_FULL_422":
             return None
         held = len(ds.PixelData)
     except Exception:  # pylint: disable=broad-except
@@ -794,9 +831,37 @@ def bit_packed_excess_words(ds) -> Optional[str]:
     return (f"Pixel Data holds {held} bytes, room for {room} frames of {of} "
             f"at one bit per sample, where NumberOfFrames is read as "
             f"{declared} and {'it needs' if declared == 1 else 'they need'} "
-            f"{need}: a frame here is {frame_bits} bits, not a whole number "
+            f"{need}: a frame here is {frame_bits} "
+            f"{'bit' if frame_bits == 1 else 'bits'}, not a whole number "
             f"of bytes, so the bytes beyond the declared frames cannot be "
             f"read as frames.")
+
+
+def refusal_before_decode(ds) -> Optional[str]:
+    """The refusal `io_handlers._decode_pixels` makes before any decoder is asked.
+
+    One function, so the door that raises it and the reader that must
+    not mistake it for a missing decoder
+    (`entities._missing_decoder_words`) ask the same question. Each of
+    the three is about what the file holds, and never raises.
+
+    Args:
+        ds (pydicom.Dataset): The dataset about to be decoded.
+
+    Returns:
+        Optional[str]: The first of `signed_codestream_refusal`,
+        `bit_packed_excess_words` and `ragged_offset_table_words` that
+        answers, or None.
+    """
+    # Signedness first, as it was when `_decode_pixels` asked the three
+    # in turn: Pillow decodes a signed codestream under
+    # PixelRepresentation 0 with the samples shifted and no error, so
+    # that file must never reach pydicom. Isocenter's own exports never
+    # carry that shape (the writer derives PixelRepresentation and the
+    # codestream's sign from one dtype), so the readback never trips it.
+    return (signed_codestream_refusal(ds)
+            or bit_packed_excess_words(ds)
+            or ragged_offset_table_words(ds))
 
 
 def frame_count_mismatch(ds) -> Optional[str]:
@@ -1727,8 +1792,9 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
 
     Raises:
         RuntimeError: When imagecodecs did not import (`_unavailable`,
-            chained from the import error), besides what `_decode_frame`
-            raises.
+            raised `from None`, so the import error's words are in
+            neither the message nor the chain), besides what
+            `_decode_frame` raises.
     """
     # A mismatch check here would refuse an excess ingest means to
     # truncate, rejecting a file it means to keep. The refusal of a
@@ -1739,7 +1805,7 @@ def decode_declared_frames(ds, number_of_frames, beyond=None):
     # populated Basic Offset Table names, not one: without it an excess
     # would be decoded whole.
     if not is_available():
-        raise _unavailable() from IMPORT_ERROR
+        raise _unavailable() from None
     transfer_syntax = ds.file_meta.TransferSyntaxUID
     frames = [_decode_frame(transfer_syntax, bitstream, ds, beyond)
               for bitstream in islice(

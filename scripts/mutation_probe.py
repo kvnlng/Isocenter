@@ -909,6 +909,7 @@ TARGETS = {
                               "tests/test_ocr_workers_use_the_callers_tesseract.py",
                               "tests/test_offset_table_frame_count.py",
                               "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669: the icon arm ingests through a Session
+                              "tests/test_extended_offset_table_edges.py",  # #621: the twin tests ingest and export through one
                               "tests/test_one_value_per_owned_tag.py",
                               "tests/test_optimization.py",
                               "tests/test_packaging_contract.py",

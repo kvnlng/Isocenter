@@ -372,6 +372,42 @@ def test_a_refusal_never_takes_the_class_of_a_pydicom_subclass(monkeypatch):
         f"{error}; imagecodecs could not decode it either: ")
 
 
+FEWER = ("Unable to generate frames from the encapsulated pixel data as "
+         "there are fewer fragments than frames; the dataset may be corrupt "
+         "or the number of frames may be incorrect")
+
+
+@pytest.mark.parametrize("ts, encode", [
+    (J2K_LOSSLESS,
+     lambda a: imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K")),
+    ("1.2.840.10008.1.2.4.50", imagecodecs.jpeg8_encode),
+], ids=["j2k-lossless", "jpeg-baseline"])
+def test_a_real_file_pydicom_refuses_with_a_value_error_keeps_the_class_in_its_row(
+        tmp_path, ts, encode):
+    """Two fragments under NumberOfFrames 3, an empty Basic Offset Table.
+
+    No plugin is patched and none is missing: pydicom has a decoder for
+    both syntaxes, and its own frame walk raises this `ValueError`. So
+    #683 moves the row of a file anyone can hold. The whole row, as
+    `ingest_worker` writes it; on `main` it began `Decompression Failed:
+    RuntimeError:` and was otherwise the same (review of #1062, finding
+    6). JPEG-LS and `.70` do not move: pydicom's "missing dependencies"
+    `RuntimeError` comes first for them.
+    """
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    from isocenter.io_handlers import ingest_worker  # pylint: disable=import-outside-toplevel
+    frame = (np.arange(64, dtype=np.uint8)).reshape(8, 8)
+    streams = [bytes(encode(frame)), bytes(encode(frame + 60))]
+    ds = dataset(ts, streams, rows=8, cols=8, bits_allocated=8, frames=3)
+    ds.PixelData = encapsulate(streams, has_bot=False)
+    ds["PixelData"].is_undefined_length = True
+
+    assert ingest_worker(write(tmp_path, ds))[-1] == (
+        f"Decompression Failed: ValueError: {FEWER}; imagecodecs could not "
+        f"decode it either: ValueError: {FEWER} (caused by ValueError: "
+        f"{FEWER})")
+
+
 # ---------------------------------------------------------------------------
 # The gate on the widened catch
 # ---------------------------------------------------------------------------
