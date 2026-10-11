@@ -8126,8 +8126,14 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # shaped `decoded` by. No note, because the top level writes
         # none. Until #646 the label reached the file as declared, and
         # this library's own re-ingest dropped that icon's pixels.
+        #
+        # Not for a label the graph holds as `bytes`: that is written as
+        # held (#612, owner ruling of 2026-10-11), and pydicom hands the
+        # item's value back as text, so the helper cannot tell.
         label = item.get("PhotometricInterpretation")
-        folded = _full_sample_label(label, samples)
+        folded = label if isinstance(
+            graph_item.attributes.get("0028,0004"), bytes) \
+            else _full_sample_label(label, samples)
         if folded is not label:
             item.PhotometricInterpretation = label = folded
         at = _item_path_words(path)

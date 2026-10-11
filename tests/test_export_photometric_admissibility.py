@@ -1543,6 +1543,25 @@ def test_a_one_sample_icon_labelled_ybr_full_422_is_not_folded(tmp_path):
         0].PhotometricInterpretation == "YBR_FULL_422"
 
 
+@pytest.mark.parametrize("declared, in_file", [
+    (b"YBR_FULL_422", "YBR_FULL_422"), (b"ybr_full_422", "ybr_full_422")])
+def test_an_icon_label_held_as_bytes_is_not_folded(tmp_path, declared,
+                                                   in_file):
+    """A `bytes` label is written as held, the fold included (#612, owner
+    ruling of 2026-10-11).
+
+    Measured on 7325ff3a for both: written as held over three full
+    samples. pydicom hands the item's value back as text once it is on
+    the dataset, so the fold asks the graph item what it holds; without
+    that, both were folded to `YBR_FULL`. Killing mutation (b6): the fold
+    applied whatever the graph holds.
+    """
+    _rows_, exported, _grade_line, _summary = _icon_image(tmp_path, declared)
+
+    assert exported.IconImageSequence[
+        0].PhotometricInterpretation == in_file
+
+
 @pytest.mark.parametrize("threads", [False, True])
 def test_the_icon_fold_leaves_the_graph_item_alone(tmp_path, monkeypatch,
                                                    threads):
