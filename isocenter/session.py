@@ -1502,6 +1502,28 @@ def _edited_since_its_status(entity) -> bool:
     return (status is not None and status is not PhiStatus.UNSCANNED
             and recorded_at != entity._revision)
 
+
+def _holds_no_recorded_status(entity) -> bool:
+    """Whether no PHI status was ever recorded on `entity` (grade condition 9).
+
+    Args:
+        entity (TrackedEntity): A `Patient`, `Study` or `Instance`; never a
+            Series or a nested item.
+
+    Returns:
+        bool: True when its raw status is unset. False for a status of any
+            value, a stale one included.
+    """
+    # The raw record again, for `_edited_since_its_status`'s reason, and
+    # the two are disjoint: that one is a status set and left behind, this
+    # one no status at all. A stale status is still a recorded one, and it
+    # is what the store keeps (`phi_status_edited`), so a reopened store
+    # answers as the session that scanned did. A status recorded and never
+    # saved is not in the store, and reads unset after a reopen.
+    # `io_handlers._its_key_is_in_use` holds the inverse as a local
+    # function, for the #584 re-key gate.
+    return entity._phi_status in (None, PhiStatus.UNSCANNED)
+
 class DicomSession:
     """
     The session: an indexed store of DICOM files and the de-identification
@@ -3841,7 +3863,8 @@ class DicomSession:
     @staticmethod
     def _review_reasons(*, audit_summary, exceptions, graded_losses,
                         open_gaps, declined_remediations,
-                        unattested, unacted, edited) -> List[str]:
+                        unattested, unacted, edited, never_scanned,
+                        status_recorded) -> List[str]:
         """Why a run is not PASS, one entry per grade condition that holds.
 
         `generate_report` grades PASS exactly when the list is empty, and
@@ -3860,6 +3883,11 @@ class DicomSession:
             edited (Dict[str, int]): Per level (`patients`, `studies`,
                 `instances`), the count of entities edited after their
                 status was recorded.
+            never_scanned (Dict[str, int]): Per level (`patients`,
+                `studies`, `instances`), the count of entities on which no
+                status was ever recorded.
+            status_recorded (bool): Whether any patient, study or instance
+                in the store holds a recorded status, stale or not.
 
         Returns:
             List[str]: One sentence per condition that keeps the run from PASS.
@@ -3908,7 +3936,7 @@ class DicomSession:
                 f"studies {unacted['studies']}, "
                 f"instances {unacted['instances']})")
         # Condition 8. A status an edit made stale, not the absence
-        # of one: an entity never scanned is UNSCANNED and does not grade.
+        # of one: an entity never scanned is condition 9's, below.
         # Every edit made after a scan costs the PASS until a scan
         # reads it (instances, nested items and series fields included).
         # Its own line, not folded into condition 7's:
@@ -3924,6 +3952,25 @@ class DicomSession:
                 f"(patients {edited['patients']}, "
                 f"studies {edited['studies']}, "
                 f"instances {edited['instances']})")
+        # Condition 9 (#1064). No status at all, in a store that holds
+        # one: a file ingested after a pass was exported as ingested under
+        # a PASS. Gated on `status_recorded` by owner ruling: a store
+        # nobody ever audited still grades PASS (Q3 on #573), so a plain
+        # ingest -> export conversion is not REVIEW_REQUIRED. The wording
+        # claims only what the record shows -- "no status is recorded",
+        # not "no scan ran": a scan whose statuses were never saved leaves
+        # the same record in a reopened store.
+        n_never = sum(never_scanned.values())
+        if status_recorded and n_never:
+            noun = "entity" if n_never == 1 else "entities"
+            review_reasons.append(
+                f"{n_never} {noun} never scanned, in a store that holds a "
+                "recorded PHI status: no PHI status is recorded on it, by a "
+                "scan or by a pass, so nothing says what the policy names "
+                "was looked for in it; `audit()` reads it "
+                f"(patients {never_scanned['patients']}, "
+                f"studies {never_scanned['studies']}, "
+                f"instances {never_scanned['instances']})")
         return review_reasons
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -4156,7 +4203,8 @@ class DicomSession:
         # grades as the one that scanned did, like every store-wide term.
         # IDENTIFIED only. UNSCANNED -- never scanned, or edited since --
         # is the absence of a measurement, not a finding: it is
-        # counted for section 5 and does not grade. Series are left out
+        # counted for section 5, and grades under conditions 8 and 9
+        # below, never here. Series are left out
         # for the reason `phi_status_summary` gives: nothing scans one.
         unacted = {"patients": 0, "studies": 0, "instances": 0}
         unscanned_instances = 0
@@ -4170,18 +4218,37 @@ class DicomSession:
         # marks every instance of the series changed -- and an edit of a
         # nested item moves its instance the same way.
         edited = {"patients": 0, "studies": 0, "instances": 0}
+        # Condition 9 (#1064): an entity no status was ever recorded on,
+        # counted at the same three levels, and whether the store holds a
+        # recorded status at all, which gates it. **Not series, for either
+        # half**: a pass leaves a raw status on a Series in memory and the
+        # store has no column for it, so a rule that read one would grade
+        # a store differently from its own reopened self. An unscanned
+        # instance is in exactly one of `edited` and `never_scanned`, so
+        # with the gate open every instance section 5 counts is graded.
+        never_scanned = {"patients": 0, "studies": 0, "instances": 0}
+        walked = 0
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
             edited["patients"] += _edited_since_its_status(patient)
+            never_scanned["patients"] += _holds_no_recorded_status(patient)
+            walked += 1
             for study in patient.studies:
                 unacted["studies"] += study.phi_status is PhiStatus.IDENTIFIED
                 edited["studies"] += _edited_since_its_status(study)
+                never_scanned["studies"] += _holds_no_recorded_status(study)
+                walked += 1
                 for series in study.series:
                     for instance in series.instances:
                         status = instance.phi_status
                         unacted["instances"] += status is PhiStatus.IDENTIFIED
                         unscanned_instances += status is PhiStatus.UNSCANNED
                         edited["instances"] += _edited_since_its_status(instance)
+                        never_scanned["instances"] += (
+                            _holds_no_recorded_status(instance))
+                        walked += 1
+        # At least one of the entities walked holds a recorded status.
+        status_recorded = sum(never_scanned.values()) < walked
 
         # The grade IS this list: PASS exactly when it is empty. See
         # `_review_reasons` for why it is a list and not a boolean.
@@ -4192,7 +4259,8 @@ class DicomSession:
             audit_summary=audit_summary, exceptions=exceptions,
             graded_losses=graded_losses, open_gaps=open_gaps,
             declined_remediations=declined_remediations,
-            unattested=unattested, unacted=unacted, edited=edited)
+            unattested=unattested, unacted=unacted, edited=edited,
+            never_scanned=never_scanned, status_recorded=status_recorded)
 
         # 5. Build Report DTO
         report = ComplianceReport(
@@ -4224,6 +4292,8 @@ class DicomSession:
             pixel_scans=list(self._pixel_scans),
             unacted_findings=unacted,
             unscanned_instances=unscanned_instances,
+            never_scanned=never_scanned,
+            phi_status_recorded=status_recorded,
         )
 
         renderer.render(report, output_path)

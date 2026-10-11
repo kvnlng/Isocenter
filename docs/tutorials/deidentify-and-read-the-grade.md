@@ -393,7 +393,12 @@ second_visit = next(
 ```
 
 (`anonymize()` with no argument audits and then acts on every finding.
-That is the shortcut when you are holding nothing back.) The second
+That is the shortcut when you are holding nothing back.) Do not skip
+that call for a later batch. Until a scan reads the new file the store
+holds it as ingested and an export writes it that way, and because the
+rest of this store has been scanned, the report grades
+`REVIEW_REQUIRED` for it
+([condition 9](../analytics.md#how-the-grade-is-decided)). The second
 visit gets the first visit's pseudonym, and its date moves by the same
 offset, so the 42 days between the two scans survive:
 

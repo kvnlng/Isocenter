@@ -118,7 +118,7 @@ def _metadata_line(report: "ComplianceReport") -> str:
 def _phi_scan_line(report: "ComplianceReport") -> str:
     """How many instances no PHI scan has seen at their current revision.
 
-    Said on every report; never graded.
+    Said on every report, with whether the instances it counts are graded.
 
     Args:
         report (ComplianceReport): The report being rendered.
@@ -126,17 +126,27 @@ def _phi_scan_line(report: "ComplianceReport") -> str:
     Returns:
         str: The PHI Scan bullet.
     """
-    # Not a grade term: an unscanned instance is the absence of a
-    # measurement, and grading it would make every ingest -> export
-    # conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
-    # no scan has read cannot pass for a PASS over data one cleared.
+    # The count is not a grade term of its own. Said on every report, so a
+    # PASS over data no scan has read cannot pass for a PASS over data one
+    # cleared. Whether those instances grade is one question with one
+    # answer for all of them (#1064). In a store that holds a recorded
+    # status, each is either stale (condition 8) or was never given a
+    # status (condition 9), so every one is in the Grade Basis. In a store
+    # that holds none, none of them is: no status means none is stale, and
+    # condition 9 is gated on a recorded status so that a plain ingest ->
+    # export conversion is not REVIEW_REQUIRED (Q3 on #573).
     line = (f"*   **PHI Scan (`audit()`):** {report.unscanned_instances} of "
             f"{report.total_instances} instance(s) have no PHI scan at their "
             "current revision.")
-    if report.unscanned_instances:
-        line += (" They were never scanned, or were edited after their scan, "
-                 "and are not graded: the grade counts what a scan found, and "
-                 "no scan has looked at them.")
+    if report.unscanned_instances and report.phi_status_recorded:
+        line += (" Each was never scanned (grade condition 9) or was edited "
+                 "after its scan (condition 8), and the Grade Basis counts "
+                 "it.")
+    elif report.unscanned_instances:
+        line += (" No PHI status is recorded on any patient, study or "
+                 "instance in this store, so they are not graded: an entity "
+                 "never scanned costs the PASS only in a store that holds a "
+                 "recorded status (grade condition 9).")
     return line + "\n"
 
 
@@ -251,7 +261,16 @@ class ComplianceReport:
             non-zero count grades the run `REVIEW_REQUIRED`.
         unscanned_instances (int): Instances with no PHI scan at their
             current revision -- never scanned, or edited since. Rendered
-            in section 5 against `total_instances`; never graded.
+            in section 5 against `total_instances`. Not a grade term
+            itself: grade conditions 8 and 9 count such an instance.
+        never_scanned (Dict[str, int]): Patients, studies and instances on
+            which no PHI status was ever recorded, keyed "patients",
+            "studies", "instances". With `phi_status_recorded`, any
+            non-zero count grades the run `REVIEW_REQUIRED` (condition 9);
+            without it the counts are held and do not grade.
+        phi_status_recorded (bool): Whether any patient, study or instance
+            in the store held a recorded PHI status, stale or not, when
+            the report was assembled.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
@@ -337,10 +356,17 @@ class ComplianceReport:
     # reading IDENTIFIED, per level. Its reason line in `review_reasons`
     # is the rendering; this is the count behind it.
     unacted_findings: Dict[str, int] = field(default_factory=dict)
-    # Instances with no PHI scan at their current revision.
-    # Not graded; section 5 says how many, so a PASS over data no scan
-    # has seen does not read as a PASS over data a scan cleared.
+    # Instances with no PHI scan at their current revision. Section 5
+    # says how many, so a PASS over data no scan has seen does not read
+    # as a PASS over data a scan cleared.
     unscanned_instances: int = 0
+    # Condition 9 of the grade (#1064): patients, studies and instances
+    # with no recorded PHI status, per level, and the gate it grades
+    # under -- whether the store holds a recorded status at all. Both
+    # are kept, not one gated count: section 5's PHI Scan line needs the
+    # gate to say whether the instances it counts are graded.
+    never_scanned: Dict[str, int] = field(default_factory=dict)
+    phi_status_recorded: bool = False
 
 
 class ReportRenderer(Protocol):
