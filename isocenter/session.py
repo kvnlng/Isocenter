@@ -4444,8 +4444,11 @@ class DicomSession:
 
         - a value the lock would capture was written by a remediation
           (`ANONYMIZED`, `ANON_...`, a rule's `value:`, a shifted date);
-        - a tag it names was emptied or removed by `anonymize()`; the
-          message names the `tags_to_lock` that works without it;
+        - a tag it names was emptied or removed by `anonymize()` on any of
+          its instances; the message names the `tags_to_lock` that works
+          without it. Where other instances still hold a value there (a
+          study or series ingested after the pass), the message counts
+          both, and that lock stashes the tag for none of them;
         - a re-lock would lose a value the existing token holds;
         - the patient carries an identity token this library wrote that the
           key at the path given to `enable_reversible_anonymization()` does
@@ -5153,7 +5156,70 @@ class DicomSession:
             # kept nothing. The record names the
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
+            #
+            # **A patient part of which a pass wrote is counted (#594).**
+            # A study or series ingested after `anonymize()` still holds
+            # the originals beside instances the pass blanked, and "this
+            # patient holds no value" is then true of some instances
+            # only; the advised lock goes through and stashes the tag for
+            # none, so the originals that are still there are in no
+            # token. Still refused (owner ruling Q5 A; stashing them is
+            # #1054), in a sentence that counts both and says what the
+            # advice leaves out. Per instance, never per value-set: a
+            # source's own blank shares a record with a pass's blank and
+            # is neither a pass's doing nor a value held, so it is in
+            # neither count and the two need not add up to the total.
+            # `holding` reads the blanked tags only, since those are what
+            # the advice drops, and reads what the lock would stash, so
+            # a name the patient holds for an instance with no copy is a
+            # value held. Counts and tags; no value. With nothing held,
+            # the sentence is the one it has been, byte for byte.
+            #
+            # **Whether the patient is refused and how many instances a
+            # pass reached are two questions.** `blanked_tags()` answers
+            # the first, and for a name or ID an instance has no copy of
+            # it asks every instance of the patient (`patient_vouched`):
+            # the value is the patient's, and any instance the patient's
+            # write reached vouches for it. `left` answers the second
+            # from the instance's own record alone. Asked through
+            # `written_by_a_pass`, a file that never carried a Patient's
+            # Name was counted as one a pass emptied because another
+            # instance's record said so (review of #1061). Do not fold
+            # the two back into one predicate.
             blanked = blanked_tags()
+            holding = sum(len(members) for record, members in groups
+                          if any(str(record.get(tag) or "").strip() for tag in blanked))
+            if holding:
+                left = sum(any(not str(record.get(tag) or "").strip()
+                               and vouches(inst, tag, inst.attributes.get(tag), True)
+                               for tag in blanked)
+                           for record, members in groups for inst in members)
+                rest = [tag for tag in tags_to_lock if tag not in blanked]
+                one = len(blanked) == 1
+                named = blanked[0] if one else "one or more of " + ", ".join(blanked)
+                # With one tag, some instance holds it and some does not.
+                # With several that is true per tag and not per instance
+                # (each instance may hold one of them), so the clause
+                # says only what holds in every shape.
+                uneven = ("so the lock would stash an original for some instances "
+                          "and none for others" if one else
+                          "so the lock would not stash an original in each of them "
+                          "for every instance")
+                advice = (f"To lock this patient without {'it' if one else 'them'}, "
+                          f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r}), "
+                          f"which stashes {'it' if one else 'them'} for no instance: a "
+                          f"value {'it still holds' if one else 'they still hold'} would "
+                          "be in no token, and could not be recovered if a later "
+                          "anonymize() empties or removes it there too"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: anonymize() emptied or removed {named} on "
+                    f"{left} of this patient's {len(instances)} instances, and "
+                    f"{'it' if one else 'one or more of them'} still holds a value "
+                    f"on {holding}, {uneven}. "
+                    f"{advice}; the token this call would have written is unchanged.")
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
