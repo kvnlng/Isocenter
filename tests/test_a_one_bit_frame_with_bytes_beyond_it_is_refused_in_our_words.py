@@ -361,6 +361,27 @@ def test_under_ybr_full_422_the_helper_never_answers(rows, cols, frames, have):
         assert _decode_pixels(ds)[0].shape == theirs
 
 
+@pytest.mark.parametrize("rows, cols, frames, have", [
+    (3, 3, 1, 8), (3, 3, 4, 18), (5, 3, 1, 12), (2, 2, 2, 6)])
+def test_under_ybr_full_the_sentence_is_said_as_under_rgb(
+        tmp_path, rows, cols, frames, have):
+    """`YBR_FULL` is not `YBR_FULL_422`: pydicom slices it by a fraction.
+
+    Only the one label takes pydicom's other branch. An exemption for
+    every label beginning `YBR_FULL` would hand these files back to
+    CPython's words for a slice (review of #1062, round 2).
+    """
+    ds = _file(rows, cols, frames, have, samples=3)
+    ds.PhotometricInterpretation = "YBR_FULL"
+    theirs = _pydicom(ds)
+    assert isinstance(theirs, TypeError) and CPYTHON_WORDS in str(theirs)
+    want = _sentence(rows, cols, frames, have, samples=3)
+
+    assert bit_packed_excess_words(ds) == want
+    assert ingest_worker(write(tmp_path, ds))[-1] == (
+        f"Decompression Failed: RuntimeError: {want}")
+
+
 def test_a_short_buffer_is_left_to_pydicom():
     ds = _file(3, 3, 2, 2)
 

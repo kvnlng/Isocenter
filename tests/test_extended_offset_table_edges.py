@@ -681,6 +681,32 @@ def test_the_clause_is_not_lengthened_over_a_populated_basic_offset_table(
         "with no offset table" + NO_BOUNDARY + " (caused by StopIteration)")
 
 
+@pytest.mark.parametrize("fragments, declared, size", [
+    (1, 2, 8), (2, 2, 8), (2, 3, 16)])
+def test_the_clause_is_not_said_of_a_table_pydicom_walks_by(
+        tmp_path, fragments, declared, size):
+    """A direct `_decode_pixels` call on a table of equal Lengths, naming fewer.
+
+    No door gets this far (the count refuses the file first, below), so
+    the sentence is reached only by a caller of the decode itself. It
+    keeps `main`'s words. "pydicom walks by" was said of it at fe439a55
+    (review of #1062, round 2), over a table pydicom does walk by.
+    """
+    path, ds = _on_disk(tmp_path, _table(fragments, declared, size, size))
+    assert imagecodecs_handler.extended_offsets(ds) is not None
+
+    with pytest.raises(RuntimeError) as caught:
+        _decode_pixels(ds)
+    assert str(caught.value) == (
+        f"Pixel Data holds {fragments} fragment"
+        f"{'' if fragments == 1 else 's'} with no offset table, and "
+        f"NumberOfFrames declares {declared}: pydicom found no frame "
+        f"boundary in them, so the declared frames cannot be read")
+    assert ingest_worker(path)[-1] == (
+        f"Extended Offset Table names {size // 8} frames; NumberOfFrames "
+        f"declares {declared}")
+
+
 def test_a_one_byte_table_is_a_byte_long():
     """In memory only: pydicom pads a 1-byte value to 2 when it writes."""
     ds = _table(2, 2, 16, 16)

@@ -744,26 +744,95 @@ def offset_table_edges(out: Path):
     declares 2`, and is refused in a sentence naming the table's length.
     The other is 8 bytes beside 4 bytes of Lengths: pydicom drops such a
     table and reads both frames from the fragments. It was refused in
-    that same sentence, and is ingested and exported. No other input
-    holds an Extended Offset Table."""
-    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    that same sentence, and is ingested and exported.
+
+    Four more files, of four more patients, each with a table of 8 bytes
+    beside 4 bytes of Lengths, which pydicom drops. Such a table naming
+    no more frames than declared is counted exactly as the same file
+    without it (owner ruling 2026-10-11), and each file reaches one row
+    of that:
+
+    - `agreeing`: two JPEG 2000 frames under a Basic Offset Table of two
+      offsets and NumberOfFrames 1. The table agreed with the header, so
+      both frames were stored under a one-frame header, which `export()`
+      cannot write. One `DATA_LOSS` row naming the Basic Offset Table,
+      and frame 0.
+    - `agreeing-rle`: two RLE Lossless fragments under NumberOfFrames 1.
+      It was ingested as one frame with no row. One `DATA_LOSS` row
+      naming the fragments.
+    - `fewer-excess`: three JPEG 2000 fragments under NumberOfFrames 2.
+      It was refused as `Extended Offset Table names 1 frames`. The two
+      declared frames, and one `DATA_LOSS` row naming the walk's three.
+    - `clause`: one JPEG 2000 fragment under NumberOfFrames 2. It was
+      refused as above. It is refused as holding one fragment `with no
+      offset table pydicom walks by`.
+
+    No other input holds an Extended Offset Table."""
     write(ct("offset_table_edges", study=1, pid="GOLD-offset_table_edges-good"),
           out / "offset_table_edges-good.dcm")
-    offsets = struct.pack("<2Q", 0, 8 + len(_J2K_FRAMES[0]) + len(_J2K_FRAMES[0]) % 2)
-    lengths = struct.pack("<2Q", *(len(frame) for frame in _J2K_FRAMES))
-    for n, (table, sizes, label) in enumerate(
-            ((12, 12, "ragged"), (8, 4, "dropped")), start=2):
-        ds = ct("offset_table_edges", study=n, rows=4, cols=4,
-                pid=f"GOLD-offset_table_edges-{label}",
-                syntax="1.2.840.10008.1.2.4.90")
-        ds.NumberOfFrames = 2
-        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
-        ds.add_new(0x7FE00001, "OV", offsets[:table])
-        ds.add_new(0x7FE00002, "OV", lengths[:sizes])
-        ds[0x7FE00010] = pydicom.DataElement(
-            0x7FE00010, "OB", encapsulate(list(_J2K_FRAMES), has_bot=False))
-        ds[0x7FE00010].is_undefined_length = True
+    j2k, rle = "1.2.840.10008.1.2.4.90", "1.2.840.10008.1.2.5"
+    one, two = _J2K_FRAMES
+    for n, (label, frames, declared, table, sizes, syntax, has_bot) in enumerate((
+            ("ragged", (one, two), 2, 12, 12, j2k, False),
+            ("dropped", (one, two), 2, 8, 4, j2k, False),
+            ("agreeing", (one, two), 1, 8, 4, j2k, True),
+            ("agreeing-rle", _RLE_FRAMES, 1, 8, 4, rle, False),
+            ("fewer-excess", (one, two, one), 2, 8, 4, j2k, False),
+            ("clause", (one,), 2, 8, 4, j2k, False)), start=2):
+        ds = _encapsulated("offset_table_edges", n, label, frames, declared,
+                           syntax, has_bot)
+        ds.add_new(0x7FE00001, "OV", _true_offsets(frames)[:table])
+        ds.add_new(0x7FE00002, "OV", struct.pack(
+            f"<{len(frames)}Q", *(len(frame) for frame in frames))[:sizes])
         write(ds, out / f"offset_table_edges-{label}.dcm")
+
+
+#: Two 4x4, 8-bit RLE Lossless frames of the same samples as
+#: `_J2K_FRAMES`: the 64-byte header naming one segment at byte 64, then
+#: one literal run of 16 bytes and a pad. Written out here, not encoded.
+_RLE_FRAMES = tuple(
+    struct.pack("<16L", 1, 64, *[0] * 14) + bytes([15])
+    + bytes((13 * i + add) % 256 for i in range(16)) + b"\0"
+    for add in (0, 100))
+
+
+def _true_offsets(frames) -> bytes:
+    """The fragments' offsets from the first, as an Extended Offset Table."""
+    offsets, at = [], 0
+    for frame in frames:
+        offsets.append(at)
+        at += 8 + len(frame) + len(frame) % 2
+    return struct.pack(f"<{len(offsets)}Q", *offsets)
+
+
+def _encapsulated(member, study, label, frames, declared, syntax, has_bot):
+    """A 4x4, 8-bit CT of its own patient: one fragment per frame given."""
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    ds = ct(member, study=study, rows=4, cols=4,
+            pid=f"GOLD-{member}-{label}", syntax=syntax)
+    ds.NumberOfFrames = declared
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+    ds[0x7FE00010] = pydicom.DataElement(
+        0x7FE00010, "OB", encapsulate(list(frames), has_bot=has_bot))
+    ds[0x7FE00010].is_undefined_length = True
+    return ds
+
+
+def fewer_fragments_than_frames(out: Path):
+    """An ordinary CT and one JPEG 2000 Lossless file of another patient:
+    two frames in two fragments under NumberOfFrames 3, an empty Basic
+    Offset Table and no Extended Offset Table (#683). pydicom refuses it
+    with a `ValueError`, which the fallback is now tried for, so the
+    row's class is pydicom's and it says what imagecodecs made of the
+    file too. It read `Decompression Failed: RuntimeError: Unable to
+    generate frames ...`. No other input holds fewer fragments than its
+    header declares frames."""
+    member = "fewer_fragments_than_frames"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    write(_encapsulated(member, 2, "short", _J2K_FRAMES, 3,
+                        "1.2.840.10008.1.2.4.90", False),
+          out / f"{member}-short.dcm")
 
 
 MEMBERS = {f.__name__: f for f in (
@@ -775,7 +844,8 @@ MEMBERS = {f.__name__: f for f in (
     ecg_lead_codes, number_vr_on_a_date_or_time,
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
     source_says_unmodified, linkage_key_not_text,
-    sop_classes_in_the_file_meta, one_bit_excess, offset_table_edges)}
+    sop_classes_in_the_file_meta, one_bit_excess, offset_table_edges,
+    fewer_fragments_than_frames)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

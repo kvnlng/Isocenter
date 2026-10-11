@@ -2839,10 +2839,17 @@ def _no_frame_boundary_words(ds) -> str:
     # file without it unless it names more frames than declared (#621),
     # and one naming more is decoded to the declared frames, so a
     # dataset holding a table arrives here. The clause then says what is
-    # true: none that pydicom walks by. (One it does walk by never raises
-    # the `StopIteration` this words: the count refuses it first.) Before
-    # #621 a dropped table that agreed or named more got "with no offset
-    # table", over a dataset holding one.
+    # true: none that pydicom walks by. Before #621 a dropped table that
+    # agreed or named more got "with no offset table", over a dataset
+    # holding one.
+    #
+    # **"pydicom walks by" is said only of a table it does not walk by**
+    # (`extended_offsets(ds) is None`), never of every dataset holding
+    # the element. A table of equal Lengths naming fewer frames than
+    # declared runs out the same way, and at every door the count
+    # refuses it first; a direct call of the decode gets here, and keeps
+    # the words it had before #621 rather than a clause that is false of
+    # it.
     #
     # **The Basic Offset Table guard above has one hole**, measured: a
     # dropped Extended Offset Table naming *more* frames than declared is
@@ -2862,7 +2869,8 @@ def _no_frame_boundary_words(ds) -> str:
         # populated one, so the longer clause would be false there. That
         # shape is reached under a dropped Extended Offset Table naming
         # more frames than declared, and keeps the words it had.
-        if not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable"):
+        if (not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable")
+                and extended_offsets(ds) is None):
             table += " pydicom walks by"
         fragments, _offsets = parse_fragments(buf)
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
