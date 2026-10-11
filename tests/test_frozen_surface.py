@@ -243,6 +243,12 @@ FROZEN_GRADE_CONDITIONS = [
     ("edited after its PHI status was recorded",
      "tests/test_an_edit_below_or_beside_an_instance_is_seen.py::"
      "test_an_instance_attribute_edited_after_the_pass_is_not_pass"),
+    # Added by #1064, after the measurement above. Measured at its own
+    # commit: red under condition 9's deletion, and each of the eight
+    # tests above green under it.
+    ("never scanned, in a store that holds a recorded status",
+     "tests/test_the_grade_counts_entities_never_scanned.py::"
+     "test_a_file_ingested_after_the_pass_grades_review_required"),
 ]
 
 #: The `Instance` fields that are frozen (`pixel_array` and
