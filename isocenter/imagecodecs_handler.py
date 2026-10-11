@@ -861,18 +861,16 @@ def bit_packed_excess_words(ds) -> Optional[str]:
             return None
         rows, cols = int(ds.Rows), int(ds.Columns)
         samples = int(ds.SamplesPerPixel)
-        # A negative NumberOfFrames is refused by pydicom's validation in
-        # words that name the element; this sentence would replace them.
-        # Absent, 0 and **holding no value** are read as 1, as pydicom
-        # reads them. A zero-length (0028,0008) is `None` when it comes
-        # from a file, and `int(None)` raises: asked that way the helper
-        # declined, and the file kept CPython's words for a slice (review
-        # of #1062, round 3). `''` set in memory is another thing: pydicom
-        # takes `int('')` of it and raises `ValueError`, which `int()`
-        # raises here too, and the `except` below leaves to it.
-        frames = ds.get("NumberOfFrames")
-        if frames is not None and int(frames) < 0:
-            return None
+        # **NumberOfFrames is not read here**, only by
+        # `declared_frame_count` below: absent, 0 and present with no
+        # value are read as 1, as pydicom reads them. A zero-length
+        # (0028,0008) is `None` when it comes from a file; this once took
+        # `int()` of it, which raises, so the helper declined and the
+        # file kept CPython's words for a slice (review of #1062, round
+        # 3). A negative one, and `''` set in memory, pydicom refuses in
+        # its own words (`... value of '-1' is invalid`, `invalid literal
+        # for int()`), and `_pydicom_refuses_the_header` at the end is
+        # what leaves those to it; a second test for them here was dead.
         # pydicom's excess-frames arithmetic is the `elif` of its
         # `YBR_FULL_422` test, so under that label it never slices by a
         # fraction: it refuses a buffer a third larger than expected in a
