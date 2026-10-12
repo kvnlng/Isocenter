@@ -64,8 +64,8 @@ def _write(path, sop_uid, vr="UI"):
     """CT_small in one fixed patient, study and series, under `sop_uid`
     exactly as given: pydicom's own check of a UI value is switched off,
     as a file from anywhere else is not held to it. `vr` is the VR the
-    file states for `(0008,0018)`; under `OB` ingest holds the value as
-    `bytes`."""
+    file states for `(0008,0018)`; under `OB` pydicom reads the value as
+    `bytes`, and since #1022 ingest refuses the file."""
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
     ds.PatientID = "PAT-7"
     ds.StudyInstanceUID = f"{ROOT}.1"
@@ -422,11 +422,14 @@ def test_a_uid_assigned_by_the_caller_is_refused_the_same_way(tmp_path):
 # A UID that is not text, at both doors
 # --------------------------------------------------------------------------
 #
-# A source file reaches this: `(0008,0018)` stated `OB` or `OW` is held as
-# `bytes`. `session.export()` never met one after #721, because its
-# leading save refuses a UID that is not a `str`; `write_tree()` has no
-# save. Measured at 215cc152 on 3.12.14 and 3.14.7t, each `write_tree`
-# case below returned normally with the file outside the export folder.
+# A source file reached this until #1022: `(0008,0018)` stated `OB` or
+# `OW` was held as `bytes`. `session.export()` never met one after #721,
+# because its leading save refuses a UID that is not a `str`;
+# `write_tree()` has no save. Measured at 215cc152 on 3.12.14 and 3.14.7t,
+# each `write_tree` case below returned normally with the file outside
+# the export folder. Since #1022 ingest refuses such a file by the VR it
+# states, so the first two tests pin that no source file arrives here,
+# and the third pins the serializer's refusal for a UID assigned by hand.
 
 def _instances(store):
     return [i for p in store.patients for st in p.studies
@@ -443,36 +446,52 @@ def _assert_write_tree_refuses_one(store, work, out, tmp_path):
     _assert_only_the_sibling_is_on_disk(work, out)
 
 
-def test_write_tree_refuses_a_source_uid_held_as_bytes(tmp_path):
-    """The session route: `ingest()` raises #721's `ValueError` and leaves
-    the instance in `session.store`; a caller who goes on to the
-    serializer got a file outside the folder and no error."""
+def _not_text(vr):
+    return (f"ValueError: SOP Instance UID (0008,0018) is written as {vr}, "
+            f"not as text; the file is linked by it, and no text is chosen "
+            f"for it.")
+
+
+def test_a_source_uid_stated_ob_no_longer_reaches_the_serializer(tmp_path):
+    """The session route. Until #1022 `ingest()` raised #721's `ValueError`
+    and left the instance in `session.store` holding `bytes`, and at
+    215cc152 a caller who went on to the serializer got a file outside
+    the folder and no error. Since #1022 the worker refuses that file by
+    the VR it states, so no source file puts `bytes` in this key: the
+    store holds the sibling alone and the serializer writes it. The
+    serializer's own refusal of `bytes` is pinned below by a UID the
+    caller assigns, which is now the only way one arrives."""
     work, out = _layout(tmp_path)
     _write(tmp_path / "in" / "a.dcm", ESCAPING_BYTES, vr="OB")
     _write(tmp_path / "in" / "b.dcm", GOOD)
 
     with DicomSession(str(tmp_path / "s.db")) as session:
-        with pytest.raises(ValueError):
-            session.ingest(str(tmp_path / "in"))
-        assert sorted(type(i.sop_instance_uid).__name__
-                      for i in _instances(session.store)) == ["UID", "bytes"]
-        _assert_write_tree_refuses_one(session.store, work, out, tmp_path)
+        summary = session.ingest(str(tmp_path / "in"))
+        assert summary.ingested == 1
+        assert summary.failures == [(str(tmp_path / "in" / "a.dcm"), _not_text("OB"))]
+        assert [i.sop_instance_uid for i in _instances(session.store)] == [GOOD]
+        (patient,) = session.store.patients
+        DicomExporter.write_tree(patient, str(out), show_progress=False)
+    _assert_only_the_sibling_is_on_disk(work, out)
 
 
 @pytest.mark.parametrize("vr", ["OB", "OW"])
-def test_write_tree_refuses_it_with_no_session_at_all(tmp_path, vr):
+def test_it_does_not_reach_the_serializer_with_no_session_at_all(tmp_path, vr):
     """The importer into a bare store, then the serializer: no save, so
-    no exception anywhere before the write. This is what the fixture
-    generators in `scripts/` do."""
+    until #1022 no exception anywhere before the write, and the file
+    landed outside the folder. This is what the fixture generators in
+    `scripts/` do. The importer's worker now refuses the file too."""
     work, out = _layout(tmp_path)
     _write(tmp_path / "in" / "a.dcm", ESCAPING_BYTES, vr=vr)
     _write(tmp_path / "in" / "b.dcm", GOOD)
 
     store = io_handlers.DicomStore()
-    io_handlers.DicomImporter.import_files([str(tmp_path / "in")], store)
-    assert sorted(type(i.sop_instance_uid).__name__
-                  for i in _instances(store)) == ["UID", "bytes"]
-    _assert_write_tree_refuses_one(store, work, out, tmp_path)
+    summary = io_handlers.DicomImporter.import_files([str(tmp_path / "in")], store)
+    assert summary.failures == [(str(tmp_path / "in" / "a.dcm"), _not_text(vr))]
+    assert [i.sop_instance_uid for i in _instances(store)] == [GOOD]
+    (patient,) = store.patients
+    DicomExporter.write_tree(patient, str(out), show_progress=False)
+    _assert_only_the_sibling_is_on_disk(work, out)
 
 
 @pytest.mark.parametrize("assigned", [

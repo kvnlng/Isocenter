@@ -87,8 +87,11 @@ the very reason the row exists. Each test asserts the fallback actually
 answered (`got["pydicom_calls"]`), so a patch that failed to reach the
 ingest cannot pass for a measurement.
 
-**Only T.81 lossless can be built with this shape** -- see
-`test_the_shape_is_only_constructible_for_t81`.
+**Only T.81 lossless decodes to this shape** (a J2K codestream can hold it;
+openjpeg clamps it) -- see `test_the_shape_only_decodes_for_t81`. For
+JPEG-LS no stream found holds it, from imagecodecs or from DCMTK, and
+CharLS refuses a stream rewritten to state it, or decodes it inside the
+precision it states (#684): the three tests after that one.
 """
 import logging
 import os
@@ -109,7 +112,8 @@ from isocenter.io_handlers import (_beyond_precision_words,
                                    _samples_beyond_stream_precision)
 from isocenter.session import DicomSession
 from support.decode_doors import (J2K_LOSSLESS, JPEGLS, LJPEG,  # noqa: F401
-                                  LJPEG_SV1, dataset, pydicom_cannot, write)
+                                  LJPEG_SV1, dataset, pydicom_cannot,
+                                  through_the_fallback, write)
 
 _YY, _XX = np.mgrid[0:8, 0:8]
 
@@ -742,8 +746,18 @@ def test_a_native_file_has_no_stream_precision_to_exceed():
     assert _samples_beyond_stream_precision(ds, FILED) is None
 
 
-def test_the_shape_is_only_constructible_for_t81():
-    """Why `.80` and `.90` are gated but untested (#684).
+#: The JPEG-LS frame DCMTK's `dcmcjpls +pc` 3.7.0 wrote for a native file
+#: of `FILED` under BitsAllocated 16, BitsStored 12 (2026-10-12): 82
+#: bytes, precision 12, no LSE. Bytes, because no runner has DCMTK.
+DCMCJPLS_COOKED = bytes.fromhex(
+    "ffd8fff7000b0c0008000801011100ffda0008010100000000800001dc00001dcdd4"
+    "dcd5c55bc00001dea54a585d4e054a96558b5182952b5a94be0c30a5292b6175d555"
+    "55c2cb2aaaa9855555555e18ffd9")
+
+
+def test_the_shape_only_decodes_for_t81():
+    """Why `.80` and `.90` are gated and no decode reaches them in the shape
+    (#684).
 
     What is pinned is the premise, not an encoder's signature: **no
     JPEG-LS or JPEG 2000 stream imagecodecs writes for `FILED` decodes to
@@ -751,6 +765,10 @@ def test_the_shape_is_only_constructible_for_t81():
     written codec-agnostically because the precision it compares against
     is read the same way for all three families; only the evidence is
     T.81.
+
+    This test is what an encoder writes when asked. What CharLS does with
+    a JPEG-LS stream *rewritten* to declare less than it holds is the two
+    tests below this one.
 
     JPEG-LS has two arms, chosen by what the encoder does when asked for
     precision 12, never by a version number. As measured on 3.12 and
@@ -770,18 +788,34 @@ def test_the_shape_is_only_constructible_for_t81():
       read 4095. A precision is under-declared now, and still no sample
       is beyond it.
 
-    `jpeg2k_encode(..., bitspersample=12)` **clamps at encode time** on
-    both (openjpeg 2.5.4): 4970 reads 4095.
+    An encoder outside imagecodecs was asked as well: DCMTK's `dcmcjpls`
+    3.7.0 (its own CharLS, "1.0 (modified)"), over a native file of
+    `FILED` with BitsAllocated 16 and BitsStored 12, measured 2026-10-12.
+    No runner has DCMTK, so it is not run here; what it wrote is.
 
-    **What makes this red.** An encoder that writes 4970 into a stream
-    declaring precision 12 fails the bound, and that day #684's gap can
-    be closed for `.80` with a product test. A `TypeError` that does not
-    name the keyword fails the first arm, so a refusal for some other
-    reason is not taken for the old signature. The second arm asserts
-    that `FILED` exceeds the limit it is compared with, so the bound
-    cannot be met by a stream that was never asked to under-declare, nor
-    loosened without that line going red. A stream whose precision the
-    reader cannot find fails before either.
+    * `+pr` (raw) writes precision 16, the same 110 bytes as imagecodecs'
+      own precision-16 stream (2026.8.16 puts a SPIFF header in front of
+      them), and decodes to `FILED`.
+    * `+pc` (cooked) writes precision 12 and masks at encode. Its 82
+      bytes are `DCMCJPLS_COOKED`, decoded below on either arm, and they
+      are the second arm's stream byte for byte.
+
+    `jpeg2k_encode(..., bitspersample=12)` writes 4970 under precision 12
+    on both (openjpeg 2.5.4), and **`jpeg2k_decode` clamps**: it reads 4095.
+
+    **What makes this red.** A JPEG-LS stream declaring precision 12 that
+    decodes to 4970 fails the bound, and that day `.80` gets a product
+    test (#684 was closed on these measurements, with the shape not
+    found). A `TypeError` that does not name the keyword fails the first
+    arm, so a refusal for some other reason is not taken for the old
+    signature. The second arm asserts that `FILED` exceeds the limit it
+    is compared with, so the bound cannot be met by a stream that was
+    never asked to under-declare, nor loosened without that line going
+    red. A stream whose precision the reader cannot find fails before
+    either. DCMTK's stream is held to the same bound and to the mask, on
+    whichever imagecodecs is installed; that it is the second arm's
+    stream byte for byte was measured on 2026.10.10 and is not asserted,
+    because an encoder's bytes are not the premise.
     """
     refused = None
     stream = None
@@ -813,9 +847,283 @@ def test_the_shape_is_only_constructible_for_t81():
     # The premise, on either arm.
     assert int(decoded.max()) <= limit
 
+    # What DCMTK's cooked encode wrote for FILED: under-declared, masked.
+    assert _jpegls_precision(DCMCJPLS_COOKED) == 12
+    cooked = imagecodecs.jpegls_decode(DCMCJPLS_COOKED)
+    assert cooked.tolist() == (FILED & 4095).tolist()
+    assert int(cooked[7, 7]) == 874 and int(cooked.max()) == 3570
+    assert int(cooked.max()) <= 4095 < int(FILED.max())
+
     codestream = imagecodecs.jpeg2k_encode(FILED, level=0, codecformat="J2K",
                                            bitspersample=12)
     assert int(imagecodecs.jpeg2k_decode(codestream).max()) == 4095
+
+
+#: The LSE (preset parameters) segment both imagecodecs versions, and
+#: `dcmcjpls +pr`, write into a 16-bit JPEG-LS stream: marker, length 13,
+#: id 1, then MAXVAL 65535, T1 18, T2 67, T3 276, RESET 64. An 8-bit
+#: stream gets none: without one a decoder takes MAXVAL as 2^P - 1.
+_LSE_OF_A_16_BIT_STREAM = bytes.fromhex("fff8000d01ffff0012004301140040")
+
+
+def _lse(maxval):
+    """An LSE stating `maxval`, its thresholds and RESET 0: the defaults."""
+    return b"\xff\xf8\x00\x0d\x01" + maxval.to_bytes(2, "big") + bytes(8)
+
+
+def _restated(stream, precision, lse=None):
+    """`stream` with its SOF55 precision byte rewritten, and its LSE as asked.
+
+    `lse` None keeps the stream's segments as written; `b""` takes the
+    encoder's LSE out; anything else replaces it, placed where the
+    encoder puts its own, between the frame header and the scan header.
+    Asserts the product's own reader finds the rewritten precision, so a
+    marker pair found somewhere else cannot pass for the header.
+    """
+    stream = bytes(stream)
+    if lse is not None:
+        stream = stream.replace(_LSE_OF_A_16_BIT_STREAM, b"")
+    at = stream.index(b"\xff\xf7")
+    end = at + 2 + int.from_bytes(stream[at + 2:at + 4], "big")
+    if lse is not None:
+        assert stream[end:end + 2] == b"\xff\xda", "an LSE was left in"
+    out = (stream[:at + 4] + bytes([precision]) + stream[at + 5:end]
+           + (lse or b"") + stream[end:])
+    assert _jpegls_precision(out) == precision
+    return out
+
+
+def test_charls_refuses_a_jpegls_stream_restated_below_what_it_holds():
+    """A 16-bit JPEG-LS stream of `FILED`, rewritten to declare 12 (#684).
+
+    No encoder found writes a JPEG-LS stream holding a sample beyond its
+    declared precision (the test above), so the header was rewritten by
+    hand: the stream is imagecodecs' precision-16, lossless encode of
+    `FILED` (0..4970), and only bytes of its headers change. Every
+    variant is refused by `imagecodecs.jpegls_decode`, which is CharLS,
+    the only JPEG-LS decoder the fallback has. Measured identical on
+    imagecodecs 2026.8.16 and 2026.10.10 (CharLS 2.4.4 in both), 3.12.14
+    and 3.14.7t.
+
+    **Why the plain rewrite fails on "preset parameters".** The encoder
+    writes an LSE segment into a 16-bit stream stating MAXVAL 65535, and
+    rewriting the precision byte leaves it there. CharLS refuses the
+    pair: an LSE of MAXVAL 4096 under precision 12 is refused in the
+    same words and one of 4095 is not, so the bound it applies is
+    `2^P - 1`, exactly the one the shape would have to cross. A stream
+    cannot both declare precision P and tell CharLS of a sample range
+    past it.
+
+    **And with nothing stating a wider range**, the LSE taken out or
+    stating 4095, the header is accepted and *this array's* scan is not:
+    CharLS does not read it back under a 12-bit range. That refusal is
+    the scan's ("general structural problem" as measured), so only its
+    class and "Invalid JPEG-LS stream" are asserted, and that it is
+    *not* the preset parameters refusal, which is what tells the two
+    cases apart. **It is the data's doing, not the width's**: whether a
+    scan reads back under the smaller range depends on what was encoded,
+    and a 16-bit stream of one row of 4970 does decode with its LSE out
+    (the review of #1099 found it; the last test of this group pins it).
+
+    Rewriting this array's stream to every other precision from 2 to 15,
+    in each of these ways, is refused too. So were all 28,000 rewritten
+    16-bit streams of a sweep per version (random samples, constants and
+    ramps of five rows or more, near-lossless included), which is a fact
+    about those arrays; the loop here runs the one.
+
+    **What makes this red.** A CharLS that decodes any of these:
+    `refusal` holds the array to the stated precision, so a decode
+    beyond it fails there by name (the shape, found), and one inside it
+    fails the `pytest.raises` it sits in. An encoder
+    that stops writing its LSE fails the `count` line first, before the
+    first case can turn into the second unnoticed. The control proves
+    the LSE is not what makes the stream decodable: with it out and the
+    precision left at 16 the stream still decodes to `FILED`.
+    """
+    plain = imagecodecs.jpegls_encode(FILED)
+    assert _jpegls_precision(plain) == 16
+    assert plain.count(_LSE_OF_A_16_BIT_STREAM) == 1
+    # Controls: with its LSE out, or restated, the stream is still FILED.
+    for lse in (b"", _lse(65535)):
+        assert imagecodecs.jpegls_decode(
+            _restated(plain, 16, lse)).tolist() == FILED.tolist()
+
+    def refusal(stream):
+        with pytest.raises(imagecodecs.JpeglsError) as caught:
+            decoded = imagecodecs.jpegls_decode(stream)
+            precision = _jpegls_precision(stream)
+            assert int(decoded.max()) <= (1 << precision) - 1, \
+                "the shape: a JPEG-LS decode beyond the stream's precision"
+        assert "Invalid JPEG-LS stream" in str(caught.value)
+        return str(caught.value)
+
+    # A stated range past the precision: refused as a preset parameter.
+    for lse in (None, _lse(65535), _lse(4096)):
+        assert "preset parameters" in refusal(_restated(plain, 12, lse)), lse
+    # No range past it stated: the header passes and the scan does not.
+    for lse in (b"", _lse(4095)):
+        assert "preset parameters" not in refusal(
+            _restated(plain, 12, lse)), lse
+    # Every other precision below 16, each way.
+    for precision in range(2, 16):
+        limit = (1 << precision) - 1
+        for lse in (None, _lse(65535), _lse(limit + 1)):
+            assert "preset parameters" in refusal(
+                _restated(plain, precision, lse)), (precision, lse)
+        for lse in (b"", _lse(limit)):
+            assert "preset parameters" not in refusal(
+                _restated(plain, precision, lse)), (precision, lse)
+
+
+def test_a_restated_jpegls_stream_that_decodes_stays_inside_its_precision(
+        tmp_path, pydicom_cannot):
+    """A rewrite CharLS decodes, and what the check makes of it (#684).
+
+    An 8-bit JPEG-LS stream carries no LSE, so rewriting its precision
+    byte states nothing past the new precision, and some of those
+    streams decode (so do some 16-bit ones once their LSE is out: the
+    test below). This one holds samples up to 245 and is rewritten to
+    declare 7: CharLS reads it without complaint as `0..127`, values
+    that are not the source's and not the source's masked or clamped
+    (1 cell of 64 agrees with any of the three). **Wrong, and inside the
+    precision.** Every decode measured was: the sweep behind this (2,400
+    rewritten 8-bit streams for each way of stating the range, on
+    imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t) decoded
+    781 of them with no LSE and 781 with an LSE stating exactly
+    `2^P - 1`, none beyond its precision, and none at all with an LSE
+    stating more. Why CharLS keeps inside the range was not read from
+    its source; what is pinned is that it did.
+
+    So #671's check is *reached* for `.80` (this stream is decoded by
+    the fallback and handed to it) and answers None, correctly: nothing
+    is beyond the stated precision. The whole run at the end says the
+    same from outside: stored as decoded, no row, `PASS`. That the
+    samples are not the ones encoded is what a rewritten header does; no
+    decoder here can tell, and nothing reports it.
+
+    The last assertions are the gate itself, which until now returned
+    its facts for `.80` in no test: handed an array that does hold a
+    sample past 127, it reads this stream's precision and returns them,
+    in JPEG-LS's words. The gate is live; what is missing is a decode
+    that hands it such an array.
+
+    **What makes this red.** A CharLS that returns a sample above 127
+    here is the shape, and fails the bound by name; from then on `.80`
+    has a row to test. One that refuses the stream fails the decode,
+    and the docs' "decodes inside the precision" has lost its witness.
+    The exact wrong values are CharLS's business and are not pinned.
+    """
+    samples = (_XX * 30 + _YY * 5).astype(np.uint8)
+    plain = imagecodecs.jpegls_encode(samples)
+    assert _jpegls_precision(plain) == 8
+    assert b"\xff\xf8" not in plain, "an 8-bit stream now carries an LSE"
+    stream = _restated(plain, 7)
+    limit = (1 << 7) - 1
+    # Under-declared: the stream was written from samples the limit excludes.
+    assert int(samples.max()) == 245 and int(samples.max()) > limit
+
+    decoded = imagecodecs.jpegls_decode(stream)
+    assert decoded.shape == samples.shape and decoded.dtype == samples.dtype
+    # The container could hold 255; nothing in it is past the precision.
+    assert int(decoded.max()) <= limit, \
+        "the shape: a JPEG-LS decode beyond the stream's precision"
+    assert decoded.tolist() != samples.tolist()
+    assert decoded.tolist() != (samples & limit).tolist()
+
+    # The fallback's door returns that array, and the check has no facts.
+    for bits_stored in (7, 8):
+        ds = dataset(JPEGLS, [stream], rows=8, cols=8, bits_allocated=8,
+                     bits_stored=bits_stored)
+        arr, _label = through_the_fallback(ds)
+        assert arr.tolist() == decoded.tolist()
+        assert _samples_beyond_stream_precision(ds, arr) is None
+        # The gate, handed what no decode found hands it.
+        beyond = np.full((8, 8), 200, dtype=np.uint8)
+        assert _samples_beyond_stream_precision(ds, beyond) == {
+            "precision": 7, "stream": "JPEG-LS stream", "sample": 200,
+            "limit": 127}
+
+    # And the whole run, on the fallback: stored as decoded, no row, PASS.
+    got = _run(tmp_path, dataset(JPEGLS, [stream], rows=8, cols=8,
+                                 bits_allocated=8, bits_stored=8),
+               pydicom_cannot)
+    assert got["stored"].tolist() == decoded.tolist()
+    assert not got["rows"], got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"], \
+        got["grade"]
+
+
+def test_a_restated_16_bit_jpegls_stream_that_decodes_stays_inside_it_too(
+        tmp_path, pydicom_cannot):
+    """The same in a 16-bit container, where a sample past it would fit (#684).
+
+    The review of #1099 found this stream, and it corrects what the
+    first draft of these tests implied: that a rewritten 16-bit stream
+    is always refused. One row of 64 samples, every one 4970, encoded
+    lossless at precision 16 and rewritten to declare 12. With the
+    encoder's LSE (MAXVAL 65535) left in, or one stating 4096, CharLS
+    refuses it as it refuses `FILED`'s. With the LSE out, or stating
+    4095, **it decodes**: `uint16`, `31..4031` as measured, no cell
+    equal to the source or to the source masked. Identical on
+    imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t.
+
+    This is the witness the 8-bit test cannot be. There the precision is
+    7 in an 8-bit array, one bit of room; here the array is `uint16` and
+    the source holds 4970, so a decoder that returned what was encoded
+    would return a sample 875 past the limit, and the row would be
+    written. CharLS returns other samples, all inside 12 bits, the check
+    answers None, and the whole run stores them with no row.
+
+    **What makes this red.** A CharLS that returns a sample above 4095
+    here is the shape, in the container #671 was filed on, and fails
+    the bound by name. One that refuses the stream fails the decode. The
+    two refusals fail if CharLS stops bounding the stated range at
+    `2^P - 1`. The last assertion hands the check the *source* samples
+    under this file's header: it returns the facts, `sample` 4970, so
+    the gate is shown live on the very file it stays silent for.
+    """
+    samples = np.full((1, 64), 4970, dtype=np.uint16)
+    plain = imagecodecs.jpegls_encode(samples)
+    assert _jpegls_precision(plain) == 16
+    assert plain.count(_LSE_OF_A_16_BIT_STREAM) == 1
+    limit = (1 << 12) - 1
+    assert int(samples.max()) > limit
+
+    for lse in (None, _lse(limit + 1)):
+        with pytest.raises(imagecodecs.JpeglsError) as caught:
+            imagecodecs.jpegls_decode(_restated(plain, 12, lse))
+        assert "preset parameters" in str(caught.value), lse
+
+    stream = _restated(plain, 12, b"")
+    decoded = imagecodecs.jpegls_decode(stream)
+    assert decoded.shape == samples.shape and decoded.dtype == samples.dtype
+    # uint16 could hold the 4970 that was encoded; nothing is past 4095.
+    assert int(decoded.max()) <= limit, \
+        "the shape: a JPEG-LS decode beyond the stream's precision"
+    assert decoded.tolist() != samples.tolist()
+    assert decoded.tolist() != (samples & limit).tolist()
+    # Stating exactly 2^P - 1 is the same as stating nothing.
+    assert imagecodecs.jpegls_decode(
+        _restated(plain, 12, _lse(limit))).tolist() == decoded.tolist()
+
+    def file():
+        return dataset(JPEGLS, [stream], rows=1, cols=64, bits_allocated=16,
+                       bits_stored=12)
+
+    ds = file()
+    arr, _label = through_the_fallback(ds)
+    assert arr.tolist() == decoded.tolist()
+    assert _samples_beyond_stream_precision(ds, arr) is None
+    # The gate, handed the samples the stream was written from.
+    assert _samples_beyond_stream_precision(ds, samples) == {
+        "precision": 12, "stream": "JPEG-LS stream", "sample": 4970,
+        "limit": 4095}
+
+    got = _run(tmp_path, file(), pydicom_cannot)
+    assert got["stored"].tolist() == decoded.tolist()
+    assert not got["rows"], got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"], \
+        got["grade"]
 
 
 @pytest.mark.parametrize("pr, facts", [

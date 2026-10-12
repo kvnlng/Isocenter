@@ -180,16 +180,100 @@ def declared_int(attributes: Any, tag: str) -> Optional[int]:
         return None
 
 
+#: A Code String's letters (PS3.5 6.2): `a`-`z` to `A`-`Z`, and nothing
+#: else. Python's own upper-casing is Unicode's, which rewrites `ß` as
+#: `SS`: a different value, not a spelling of the same one (#612).
+_CS_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz",
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+#: The encoding pydicom's writer gives a Code String, whatever the
+#: dataset's Specific Character Set says: its `default_encoding`, ISO
+#: 8859-1, one byte for each of U+0000 to U+00FF and nothing for anything
+#: above. Written here and not imported, because this module imports
+#: nothing heavy (`test_module_imports_nothing_heavy`);
+#: `test_a_code_string_is_encoded_as_pydicom_encodes_it` holds the two
+#: together.
+_CS_ENCODING = "iso8859"
+
+
+def _cs_unencodable(text: str) -> str:
+    """The characters of `text` a file cannot hold in a Code String."""
+    held = []
+    for char in text:
+        try:
+            char.encode(_CS_ENCODING)
+        except UnicodeEncodeError:
+            held.append(char)
+    return "".join(held)
+
+
+def _cs_spelling(value):
+    """`value` as this library spells a Code String, when it is text.
+
+    The one spelling of a declared Photometric Interpretation: the
+    resolver reads through it (`_declared_str`), the export worker writes
+    through it and the judgement of the written label reads through it
+    (both in `io_handlers`), so no two of them can take one declaration
+    for two labels.
+
+    - Whitespace is removed from both ends, everything Python's own strip
+      removes: the space, the ASCII control characters U+0009 to U+000D
+      and U+001C to U+001F, U+0085, a no-break space and the Unicode
+      spaces. Over pixel data a file holding one of them at an end of
+      the label is one pydicom refuses to decode, and so does this
+      library's own ingest; with no pixel element, or on an icon item
+      whose pixels are not carried, such a file is ingested and the
+      label reaches here as the file held it.
+    - `a`-`z` are upper-cased and no other letter is touched: `'rgß'` is
+      `RGß`, not Unicode's `RGSS`.
+    - **Unless the file cannot hold that spelling.** A character above
+      U+00FF cannot be encoded in a Code String, and the instance would
+      not be exported at all. Then the spelling is the one releases
+      before #612 wrote, Python's own upper-casing (a dotless `ı` is `I`,
+      a long `ſ` is `S`), which for those labels is one the file can
+      hold; the export says so with a WARNING. Where that spelling
+      cannot be encoded either (fullwidth letters) it is still what is
+      returned, and the file fails, as it did.
+
+    Text only. A `bytes` value is not spelled: it is returned as held,
+    ASCII or not, and written as held, which is what releases before
+    #612 did with it (owner ruling, 2026-10-11). A file can bring one
+    in by stating a binary VR for (0028,0004), so respelling it would
+    change what a source's own label exports as.
+
+    Args:
+        value: One value of a Code String element, as the graph holds it.
+
+    Returns:
+        The spelled `str`, or `value` itself when it is not a `str`.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    spelled = text.translate(_CS_UPPER)
+    if _cs_unencodable(spelled):
+        return text.upper()
+    return spelled
+
+
 def _declared_str(attributes: Any, tag: str) -> Optional[str]:
-    """Read one declared descriptor as a stripped, upper-cased string."""
+    """Read one declared label, spelled as `_cs_spelling` spells it."""
     try:
         raw = attributes.get(tag)
     except Exception:  # pylint: disable=broad-except
         return None
     if raw is None or raw == "":
         return None
+    # Not Python's own strip and upper-casing, which this was until #612:
+    # the worker writes the label by `_cs_spelling`, and a resolver that
+    # spelled it otherwise answered "leave it alone" about a label the
+    # worker then wrote as a different one. A value that is not text
+    # (`bytes`, a number) is read as the text of its `str`, as it always
+    # was: that names no label, so the resolver leaves it to the writer,
+    # which writes it as held.
     try:
-        text = str(raw).strip().upper()
+        text = _cs_spelling(raw if isinstance(raw, str) else str(raw))
     except Exception:  # pylint: disable=broad-except
         return None
     return text or None

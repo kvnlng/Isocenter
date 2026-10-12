@@ -56,10 +56,10 @@ def _refused_everywhere(tmp_path, ds, words, counter):
     assert words in str(decoded), str(decoded)
     read = at_instance(path)
     assert isinstance(read, RuntimeError), read
-    # Either of the door's two raises: a reason that carries pydicom's
-    # "missing dependencies" takes the codecs-missing one. Both name the
-    # instance and never the file, whose folder may be named for the
-    # patient.
+    # Either of the door's two raises (the codecs-missing one is chosen
+    # from state since #623, and none of these files reaches it). Both
+    # name the instance and never the file, whose folder may be named for
+    # the patient.
     assert str(read).startswith(("Lazy load failed for instance ",
                                  "Failed to decompress pixel data for "
                                  "instance ")), str(read)
@@ -479,10 +479,11 @@ def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
 
     Since #663 a `ValueError` reaches the imagecodecs fallback too, and
     imagecodecs cannot parse this buffer either, so the refusal is the
-    fallback's `RuntimeError` with **pydicom's reason first** and
-    imagecodecs' after it -- the shape `_decode_with_imagecodecs.refused`
-    has always built. The words are what this test is about; the class
-    the wrapper carries is #683's question.
+    fallback's, with **pydicom's reason first** and imagecodecs' after
+    it -- the shape `_decode_with_imagecodecs.refused` has always built.
+    Since #683 it is exactly `ValueError`, the class pydicom raised: this
+    is a file, with no plugin and no patch, whose decode pydicom refuses
+    with a `ValueError`, and it was a `RuntimeError` until then.
     """
     from isocenter import imagecodecs_handler  # pylint: disable=import-outside-toplevel
     codestream = _j2k(SIGNED16)
@@ -493,7 +494,7 @@ def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
     ds["PixelData"].is_undefined_length = True
     assert imagecodecs_handler.signed_codestream_refusal(ds) is None
     decoded = at_decode_pixels(write(tmp_path, ds))
-    assert isinstance(decoded, RuntimeError), decoded
+    assert type(decoded) is ValueError, decoded  # pylint: disable=unidiomatic-typecheck
     assert str(decoded).startswith(
         "Unexpected tag '(0000,0000)' at offset 8 when parsing the "
         "encapsulated pixel data fragment items; imagecodecs could not "

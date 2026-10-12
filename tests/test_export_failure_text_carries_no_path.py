@@ -296,13 +296,29 @@ def _source_instance(tmp_path):
     return Instance(ds.SOPInstanceUID, CT_STORAGE, 1, file_path=str(path))
 
 
+def _caused_by_a_missing_imagecodecs(error):
+    """`error`, chained from the refusal that selects the codecs arm (#623).
+
+    The arm is chosen by an `ImagecodecsUnavailable` in the cause chain,
+    no longer by "decompress" in the message.
+    """
+    from isocenter.imagecodecs_handler import ImagecodecsUnavailable
+    error.__cause__ = ImagecodecsUnavailable("imagecodecs is not available")
+    return error
+
+
 @pytest.mark.parametrize("raised, words", [
-    # "decompress" in the message is what selects the codecs arm.
-    (RuntimeError("Unable to decompress 'JPEG 2000' pixel data"),
+    (_caused_by_a_missing_imagecodecs(
+        RuntimeError("Unable to decompress 'JPEG 2000' pixel data")),
      "Failed to decompress pixel data for instance"),
     # ... and its `Underlying Error:` line spells the exception again.
-    (OSError(5, "could not decompress frame 0", f"/src/{PATIENT_NAMED}/x.dcm"),
+    (_caused_by_a_missing_imagecodecs(
+        OSError(5, "could not decompress frame 0",
+                f"/src/{PATIENT_NAMED}/x.dcm")),
      "Failed to decompress pixel data for instance"),
+    # "decompress" in a message selects nothing since #623.
+    (RuntimeError("Unable to decompress 'JPEG 2000' pixel data"),
+     "Lazy load failed for instance"),
     (ValueError("The pixel data is truncated"), "Lazy load failed for instance"),
     # An `OSError` from the read repeats the path in its own `str()`.
     (PermissionError(13, "Permission denied", f"/src/{PATIENT_NAMED}/x.dcm"),
@@ -324,3 +340,298 @@ def test_a_source_read_failure_names_the_instance_not_the_file(
     message = str(caught.value)
     assert message.startswith(f"{words} {inst.sop_instance_uid}"), message
     assert PATIENT_NAMED not in message, message
+
+
+# --- pydicom's writer: a traceback inside the message (#1053) -------------
+#
+# pydicom 3.0.2 writes each element inside `tag_in_exception`, which
+# re-raises whatever the element's writer raised as the same class with the
+# message `With tag (gggg,eeee) got exception: <message>\n<the whole
+# formatted traceback>`. The export's `ERROR` row, `ExportError`'s message,
+# the worker's console line and `write_tree()`'s `RuntimeError` all quoted
+# that message whole, so each carried a Python traceback, and with it the
+# absolute path of the install (`.../site-packages/pydicom/tag.py`), which
+# names the home directory. Measured on 067982ec, 3.12 and 3.14t, for
+# every refusal whose class pydicom can rebuild from one string (a
+# `TypeError` for `str` under OB) and for every refusal inside a sequence
+# item (the issue's case: an icon label the file cannot encode). No
+# patient data is in a traceback; the path is.
+#
+# `_export_failure_reason` is the one spelling of a worker's failure now:
+# pydicom's sentence, which names the element, up to where the traceback
+# starts.
+
+TRACEBACK_WORDS = ("Traceback", "site-packages", 'File "', ".py", "line ")
+
+
+def _refused_by_pydicoms_writer(ds):
+    """The exception `ds` raises from pydicom's writer, written the way
+    the exporter writes an uncompressed file: implicit VR, little endian."""
+    import io
+    import pydicom
+
+    with pytest.raises(Exception) as raised:
+        pydicom.dcmwrite(io.BytesIO(), ds, implicit_vr=True,
+                         little_endian=True)
+    return raised.value
+
+
+def _text_under_ob(nested=False):
+    """A dataset holding `str` under OB, at the top level or in an icon."""
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    holder = Dataset()
+    holder.add_new(0x00420011, "OB", "not bytes")
+    if not nested:
+        return holder
+    ds = Dataset()
+    ds.IconImageSequence = Sequence([holder])
+    return ds
+
+
+def _root_words(exc):
+    """The innermost exception's own message: the interpreter's words."""
+    while exc.__cause__ is not None:
+        exc = exc.__cause__
+    return str(exc)
+
+
+def test_the_premise_pydicoms_writer_puts_a_traceback_in_the_message():
+    """If pydicom stops doing this, the tests below pin nothing: say so."""
+    exc = _refused_by_pydicoms_writer(_text_under_ob())
+
+    assert type(exc) is TypeError
+    assert str(exc).startswith(
+        f"With tag (0042,0011) got exception: {_root_words(exc)}\n"
+        f"Traceback (most recent call last):\n"), str(exc)
+    assert "site-packages" in str(exc) or "pydicom" in str(exc)
+
+
+@pytest.mark.parametrize("nested, sentence", [
+    (False, "With tag (0042,0011) got exception: "),
+    (True, "With tag (0088,0200) got exception: "
+           "With tag (0042,0011) got exception: ")],
+    ids=["top-level", "in-a-sequence-item"])
+def test_a_writer_refusal_is_spelled_without_its_traceback(nested, sentence):
+    """The class, pydicom's sentence naming each element, and the reason.
+
+    In a sequence item the exception's cause is the item's own re-raise,
+    whose message holds a traceback too, so cutting the message alone
+    would leave one in a `(caused by ...)` tail. There is no tail: the
+    cause is the exception the message already quotes. That also makes
+    the text the same whether the exception crossed a process boundary
+    (which drops `__cause__`) or not. Killing mutations: (t1) the cut
+    removed; (t2) the cause appended as `describe_exception` appends it.
+    """
+    from isocenter.io_handlers import _export_failure_reason
+
+    exc = _refused_by_pydicoms_writer(_text_under_ob(nested))
+    assert exc.__cause__ is not None
+    reason = _export_failure_reason(exc)
+
+    assert reason == f"TypeError: {sentence}{_root_words(exc)}"
+    for word in TRACEBACK_WORDS + ("caused by",):
+        assert word not in reason, reason
+
+
+def test_a_traceback_in_the_cause_alone_is_cut_there():
+    """Our own sentence raised `from` a writer refusal keeps its cause.
+
+    Killing mutation (t3): only the exception's own message is cut.
+    """
+    from isocenter.io_handlers import _export_failure_reason
+
+    inner = _refused_by_pydicoms_writer(_text_under_ob())
+    try:
+        raise RuntimeError("the file could not be written") from inner
+    except RuntimeError as exc:
+        reason = _export_failure_reason(exc)
+
+    assert reason == (
+        "RuntimeError: the file could not be written (caused by TypeError: "
+        f"With tag (0042,0011) got exception: {_root_words(inner)})")
+
+
+@pytest.mark.parametrize("exc", [
+    TypeError("a bytes-like object is required, not 'str'"),
+    RuntimeError("Compression failed: Traceback is a word here too"),
+    KeyError(),
+    PermissionError(13, "Permission denied", "/out/Subject_P1/1.2.dcm"),
+    OSError("cannot open /out/Subject_P1/r.dat")])
+def test_a_reason_with_no_traceback_is_spelled_as_before(exc):
+    """A no-op wherever pydicom embedded nothing: no existing row moves.
+
+    Killing mutation (t4): the cut made at the bare word `Traceback`.
+    """
+    from isocenter.io_handlers import _export_failure_reason
+    from isocenter.logger import describe_exception_without_paths
+
+    assert _export_failure_reason(exc) == describe_exception_without_paths(exc)
+
+
+def test_a_chained_reason_with_no_traceback_is_spelled_as_before():
+    from isocenter.io_handlers import _export_failure_reason
+
+    try:
+        try:
+            raise KeyError("x")
+        except KeyError as inner:
+            raise RuntimeError("channel table is malformed") from inner
+    except RuntimeError as exc:
+        assert _export_failure_reason(exc) == (
+            "RuntimeError: channel table is malformed (caused by KeyError: 'x')")
+
+
+def test_the_workers_console_line_carries_no_traceback(tmp_path, capfd):
+    """The worker's stderr line is spelled by the same helper.
+
+    Killing mutation (t5): the console line left on
+    `describe_exception_without_paths`.
+    """
+    uid = "1.2.826.0.1.1053"
+    inst = _ct_instance(uid)
+    inst.set_attr("0042,0011", "not bytes")
+    capfd.readouterr()
+
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst, output_path=str(tmp_path / "out" / f"{uid}.dcm"),
+        patient_attributes={"0010,0010": "ANON", "0010,0020": "P123"},
+        study_attributes={"0020,000d": "1.2.826.0.2.1053"},
+        series_attributes={"0020,000e": "1.2.826.0.3.1053"}))
+    err = capfd.readouterr().err
+
+    assert outcome.ok is False and type(outcome.error) is TypeError, outcome
+    lines = [line for line in err.splitlines() if "Export failed" in line]
+    assert lines == [
+        f"ERROR: Export failed for instance {uid}: TypeError: With tag "
+        f"(0042,0011) got exception: {_root_words(outcome.error)}"], err
+    for word in TRACEBACK_WORDS:
+        assert word not in err, err
+
+
+def _icon_session(tmp_path, edit):
+    """A session over one CT with an icon, `edit` applied to the instance."""
+    from isocenter.session import DicomSession
+    from tests.test_export_photometric_admissibility import _icon_source
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=3)
+    session = DicomSession(str(tmp_path / "s.db"))
+    session.ingest(str(src))
+    inst = session.store.patients[0].studies[0].series[0].instances[0]
+    edit(inst)
+    return session, inst.sop_instance_uid
+
+
+@pytest.mark.parametrize("edit, sentence, reason", [
+    # The issue's case: a label the file's character set cannot encode.
+    # pydicom cannot rebuild the `UnicodeEncodeError` from one string, so
+    # the reason is the interpreter's `TypeError` for that; its words are
+    # not pinned (they are CPython's), the absence of a traceback is.
+    (lambda inst: inst.sequences["0088,0200"].items[0].set_attr(
+        "0028,0004", "ＲＧＢ"),
+     "TypeError: With tag (0088,0200) got exception: ", None),
+    (lambda inst: inst.set_attr("0042,0011", "not bytes"),
+     "TypeError: With tag (0042,0011) got exception: ", "words"),
+    (lambda inst: inst.sequences["0088,0200"].items[0].set_attr(
+        "0042,0011", "not bytes"),
+     "TypeError: With tag (0088,0200) got exception: "
+     "With tag (0042,0011) got exception: ", "words")],
+    ids=["icon-label-not-encodable", "text-under-ob", "text-under-ob-nested"])
+def test_no_error_row_and_no_export_error_carries_a_traceback(
+        tmp_path, edit, sentence, reason):
+    """The row as stored, `ExportError`, its failures and the report (#1053).
+
+    Measured before, for each of the three: the row, `ExportError`'s
+    message and the report held `Traceback (most recent call last): File
+    "/Users/.../site-packages/pydicom/tag.py", line 29, in
+    tag_in_exception ...` through to the last frame. Killing mutation
+    (t6): `_report_export_failures` left on
+    `describe_exception_without_paths`.
+    """
+    session, uid = _icon_session(tmp_path, edit)
+    out = tmp_path / "out"
+    report = tmp_path / "report.md"
+    try:
+        with pytest.raises(ExportError) as raised:
+            session.export(str(out), show_progress=False)
+        rows = _rows(session, "ERROR")
+        session.generate_report(str(report))
+    finally:
+        session.close()
+
+    assert [u for u, _d in rows] == [uid], rows
+    detail = rows[0][1]
+    opening = f"Export failed for instance {uid}: {sentence}"
+    assert detail.startswith(opening), detail
+    if reason is not None:
+        words = _root_words(_refused_by_pydicoms_writer(_text_under_ob()))
+        assert detail == opening + words, detail
+    assert raised.value.failures == [(uid, detail)]
+    message = str(raised.value).replace(str(out), "<folder>")
+    assert message == (
+        f"Export to <folder> wrote 0 of 1 planned instances; 1 failed and "
+        f"none is reported as written. First: {uid}: {detail}. See the "
+        f"audit log for the rest."), message
+    text = report.read_text(encoding="utf-8")
+    assert detail in text, "the ERROR row did not reach the report"
+    for word in TRACEBACK_WORDS + ("/",):
+        assert word not in detail, (word, detail)
+        assert word not in message, (word, message)
+    for word in ("Traceback", "site-packages", "tag_in_exception"):
+        assert word not in text, word
+
+
+def test_a_bare_exception_in_the_results_is_spelled_by_the_same_helper():
+    """The arm for a result that is an exception, not an outcome.
+
+    That arm is where a lost worker's exception arrives, but this is not
+    one: a lost worker arrives as a `BrokenProcessPool`, whose message
+    holds no traceback. The test hands the arm an exception that does,
+    pydicom's, which is the only way to see which helper spells it.
+    Killing mutation (t8): the arm left on
+    `describe_exception_without_paths`.
+    """
+    from isocenter.io_handlers import DicomExporter
+
+    lost = _refused_by_pydicoms_writer(_text_under_ob())
+    failures = DicomExporter._report_export_failures([lost])
+
+    assert failures == [("UNKNOWN", (
+        "Export worker failed: TypeError: With tag (0042,0011) got "
+        f"exception: {_root_words(lost)}"))]
+
+
+def test_write_trees_error_carries_no_traceback(tmp_path):
+    """`write_tree()` raises on the first failure, quoting its message.
+
+    The serializer's `RuntimeError` is no row and no `ExportError`, and it
+    quoted the same message whole. Its text is otherwise as before (the
+    message with no class); only the traceback is cut. Killing mutation
+    (t7): `First error:` left quoting the message whole.
+    """
+    from datetime import date
+
+    from isocenter.entities import Patient, Series, Study
+    from isocenter.io_handlers import DicomExporter
+
+    inst = _ct_instance("1.2.826.0.1.1053.2")
+    inst.set_attr("0042,0011", "not bytes")
+    patient = Patient("PAT1", "Original Name")
+    study = Study("1.2.826.0.2.1053", date(2023, 1, 1))
+    study.study_time = "120000"
+    series = Series("1.2.826.0.3.1053", "CT", 1)
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+
+    with pytest.raises(RuntimeError) as raised:
+        DicomExporter.write_tree(patient, str(tmp_path / "out"),
+                                 compression=None, show_progress=False)
+
+    words = _root_words(_refused_by_pydicoms_writer(_text_under_ob()))
+    assert str(raised.value) == (
+        "Export incomplete. 1 failed. First error: With tag (0042,0011) "
+        f"got exception: {words}")

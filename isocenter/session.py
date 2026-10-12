@@ -22,6 +22,7 @@ from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
 import numpy as np
+import pydicom
 import yaml
 from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
@@ -750,6 +751,59 @@ def _date_state(value, vr: str, vouched: bool) -> str:
     return "shifted" if vouched else "found"
 
 
+#: `_longitudinal_temporal_marker`'s third answer: write nothing, and do not
+#: carry a source's `UNMODIFIED` either (#1011). Never a value of
+#: `(0028,0303)`: the planner turns it into `DeidMarkers.withdraw_unmodified`
+#: and it reaches no file.
+_SOURCE_CLAIM_WITHDRAWN = "WITHDRAWN"
+
+
+def _a_date_this_store_took(instance, stamps) -> bool:
+    """Whether the file `instance` exports as lacks a top-level date because
+    this store's remediation emptied it, removed it, or wrote the VR's dummy
+    to it.
+
+    Read from the instance's own record (`Instance.record_remediation`), which
+    is stored, so the answer is the same from a reopened store. DA and DT
+    only, by the dictionary's VR: TM is not a date here, as it is not for the
+    stamp. Not seen: a date inside a sequence (a nested item keeps no record,
+    #991), a private date (the record holds one word for every odd-group tag),
+    and a date replaced by a value that is not the dummy.
+
+    Args:
+        instance (Instance): The instance being exported.
+        stamps (dict): What `export_stamp_attributes` writes over the
+            instance's own top-level attributes.
+
+    Returns:
+        bool: True when the record names at least one DA or DT tag and the
+            file will carry nothing, or the dummy, there.
+    """
+    # Two halves, and both are needed. The record says this store wrote
+    # there; the value says the date is still gone. The value is the one the
+    # file will carry, the owner stamp where there is one: a Study Date the
+    # pass removed is recorded on each instance's copy and written, empty,
+    # from the `Study`. So a date written back since, by hand or by a
+    # restore, stops counting with no invalidation pass, and
+    # `_date_state(..., False)` is what makes "replaced" mean the dummy: a
+    # rule's own non-dummy value is a date in the file, as the stamp reads
+    # it.
+    #
+    # A graph stand-in that is no `Instance`, and an instance from a store
+    # written before the record existed, have no record: nothing taken, and
+    # a source's value stays, which is what #978 left.
+    tags = set((getattr(instance, "_remediated_blank", None) or "").split())
+    tags |= set(getattr(instance, "_remediated_values", None) or {})
+    carried = {**instance.attributes, **stamps}
+    for tag in tags:
+        vr = _dictionary_vr(tag)
+        if vr not in ("DA", "DT"):
+            continue
+        if _date_state(carried.get(tag), vr, False) == "gone":
+            return True
+    return False
+
+
 def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
     """What Longitudinal Temporal Information Modified `(0028,0303)` says about
     the file `instance` exports as.
@@ -771,8 +825,11 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
         Optional[str]: `"MODIFIED"` when at least one date is shifted by this
             store, whatever the rest are (#978); `"REMOVED"` when every date
             is gone (or there is none); None when nothing is shifted and a
-            date is as found, and a source's value then stays. `UNMODIFIED`
-            is never returned.
+            date is as found, and a source's value then stays;
+            `_SOURCE_CLAIM_WITHDRAWN` in that last case when this store took
+            a top-level date out of the file (`_a_date_this_store_took`),
+            and a source's `UNMODIFIED` then does not stay (#1011).
+            `UNMODIFIED` is never returned.
     """
     # A shift this store wrote is always marked (owner ruling on #978).
     # Until then a date as found withheld the marker, so a policy that
@@ -810,7 +867,62 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
             found = found or state == "found"
     if shifted:
         return "MODIFIED"
-    return None if found else "REMOVED"
+    if not found:
+        return "REMOVED"
+    # Nothing shifted, a date as found: no enumerated value is true, so
+    # nothing is written. A source's own `UNMODIFIED` was left beside a
+    # date this run emptied, removed or dummied, in a file stamped
+    # `(0012,0062) YES` (#1011). It is withdrawn on this store's own record
+    # and on nothing else (owner ruling Q4 A): with no date of its doing
+    # gone from the file, the source's claim is the source's and stays.
+    return (_SOURCE_CLAIM_WITHDRAWN
+            if _a_date_this_store_took(instance, stamps) else None)
+
+
+def _delivered_file_identity(path: str) -> Optional[Tuple[int, int]]:
+    """Which file the volume says `path` is, for `_report_export_collisions`.
+
+    The one place the export asks the volume whether two names are one file
+    (#1020), and the seam its tests replace: never patch `os.stat`, which
+    every stat in the process goes through.
+
+    Args:
+        path (str): An output path a worker reported written.
+
+    Returns:
+        Optional[Tuple[int, int]]: `(st_dev, st_ino)`, equal for two paths
+            exactly when they are one file; None when the file cannot be
+            asked about, or the volume reports no inode (`st_ino == 0`, as
+            some network volumes do for every file), neither of which is
+            evidence that two names are one.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    if not stat.st_ino:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
+def _sop_instance_uid_in(path: str) -> Optional[str]:
+    """The SOP Instance UID `(0008,0018)` the file at `path` holds.
+
+    Args:
+        path (str): A written DICOM file.
+
+    Returns:
+        Optional[str]: The UID, or None when the file cannot be read or
+            holds none. Never raises: the caller is reporting on an export
+            that has already finished.
+    """
+    try:
+        ds = pydicom.dcmread(path, specific_tags=[0x00080018],
+                             stop_before_pixels=True)
+        value = ds.get(0x00080018)
+        return None if value is None else str(value.value)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
 
 
 def _is_private_tag(tag: str) -> bool:
@@ -1389,6 +1501,28 @@ def _edited_since_its_status(entity) -> bool:
     status, recorded_at = entity._phi_status, entity._phi_status_revision
     return (status is not None and status is not PhiStatus.UNSCANNED
             and recorded_at != entity._revision)
+
+
+def _holds_no_recorded_status(entity) -> bool:
+    """Whether no PHI status was ever recorded on `entity` (grade condition 9).
+
+    Args:
+        entity (TrackedEntity): A `Patient`, `Study` or `Instance`; never a
+            Series or a nested item.
+
+    Returns:
+        bool: True when its raw status is unset. False for a status of any
+            value, a stale one included.
+    """
+    # The raw record again, for `_edited_since_its_status`'s reason, and
+    # the two are disjoint: that one is a status set and left behind, this
+    # one no status at all. A stale status is still a recorded one, and it
+    # is what the store keeps (`phi_status_edited`), so a reopened store
+    # answers as the session that scanned did. A status recorded and never
+    # saved is not in the store, and reads unset after a reopen.
+    # `io_handlers._its_key_is_in_use` holds the inverse as a local
+    # function, for the #584 re-key gate.
+    return entity._phi_status in (None, PhiStatus.UNSCANNED)
 
 class DicomSession:
     """
@@ -2516,6 +2650,17 @@ class DicomSession:
         its pixels or waveform samples were read (`Linkage Failed`) may
         leave them in the sidecar as dead space until `compact()`, which
         reclaims them in a store that holds at least one instance (#943).
+
+        **A file linked by something that is not one text value.** A file
+        is linked by its SOP Instance UID, Study Instance UID, Series
+        Instance UID and Patient ID. One that holds two values in any of
+        them (#747), or that states a VR for one that is not text (`OB`,
+        `US`, `DS`, `SQ` and the like, in an Explicit VR file; #1022), is
+        rejected as above: that file only, with a reason naming the
+        element and the count or the VR, never a value, and nothing of it
+        in the sidecar. Until #1022 a SOP Instance UID or Patient ID
+        under such a VR made this call raise `ValueError` from its save
+        and store nothing.
 
         **Hidden files.** A file found walking `directory` whose name
         starts with `.` (`.DS_Store`, AppleDouble `._*`) is not read. It is
@@ -3718,7 +3863,8 @@ class DicomSession:
     @staticmethod
     def _review_reasons(*, audit_summary, exceptions, graded_losses,
                         open_gaps, declined_remediations,
-                        unattested, unacted, edited) -> List[str]:
+                        unattested, unacted, edited, never_scanned,
+                        status_recorded) -> List[str]:
         """Why a run is not PASS, one entry per grade condition that holds.
 
         `generate_report` grades PASS exactly when the list is empty, and
@@ -3737,6 +3883,11 @@ class DicomSession:
             edited (Dict[str, int]): Per level (`patients`, `studies`,
                 `instances`), the count of entities edited after their
                 status was recorded.
+            never_scanned (Dict[str, int]): Per level (`patients`,
+                `studies`, `instances`), the count of entities on which no
+                status was ever recorded.
+            status_recorded (bool): Whether any patient, study or instance
+                in the store holds a recorded status, stale or not.
 
         Returns:
             List[str]: One sentence per condition that keeps the run from PASS.
@@ -3785,7 +3936,7 @@ class DicomSession:
                 f"studies {unacted['studies']}, "
                 f"instances {unacted['instances']})")
         # Condition 8. A status an edit made stale, not the absence
-        # of one: an entity never scanned is UNSCANNED and does not grade.
+        # of one: an entity never scanned is condition 9's, below.
         # Every edit made after a scan costs the PASS until a scan
         # reads it (instances, nested items and series fields included).
         # Its own line, not folded into condition 7's:
@@ -3801,6 +3952,25 @@ class DicomSession:
                 f"(patients {edited['patients']}, "
                 f"studies {edited['studies']}, "
                 f"instances {edited['instances']})")
+        # Condition 9 (#1064). No status at all, in a store that holds
+        # one: a file ingested after a pass was exported as ingested under
+        # a PASS. Gated on `status_recorded` by owner ruling: a store
+        # nobody ever audited still grades PASS (Q3 on #573), so a plain
+        # ingest -> export conversion is not REVIEW_REQUIRED. The wording
+        # claims only what the record shows -- "no status is recorded",
+        # not "no scan ran": a scan whose statuses were never saved leaves
+        # the same record in a reopened store.
+        n_never = sum(never_scanned.values())
+        if status_recorded and n_never:
+            noun = "entity" if n_never == 1 else "entities"
+            review_reasons.append(
+                f"{n_never} {noun} never scanned, in a store that holds a "
+                "recorded PHI status: no PHI status is recorded on it, by a "
+                "scan or by a pass, so nothing says what the policy names "
+                "was looked for in it; `audit()` reads it "
+                f"(patients {never_scanned['patients']}, "
+                f"studies {never_scanned['studies']}, "
+                f"instances {never_scanned['instances']})")
         return review_reasons
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -4033,7 +4203,8 @@ class DicomSession:
         # grades as the one that scanned did, like every store-wide term.
         # IDENTIFIED only. UNSCANNED -- never scanned, or edited since --
         # is the absence of a measurement, not a finding: it is
-        # counted for section 5 and does not grade. Series are left out
+        # counted for section 5, and grades under conditions 8 and 9
+        # below, never here. Series are left out
         # for the reason `phi_status_summary` gives: nothing scans one.
         unacted = {"patients": 0, "studies": 0, "instances": 0}
         unscanned_instances = 0
@@ -4047,18 +4218,37 @@ class DicomSession:
         # marks every instance of the series changed -- and an edit of a
         # nested item moves its instance the same way.
         edited = {"patients": 0, "studies": 0, "instances": 0}
+        # Condition 9 (#1064): an entity no status was ever recorded on,
+        # counted at the same three levels, and whether the store holds a
+        # recorded status at all, which gates it. **Not series, for either
+        # half**: a pass leaves a raw status on a Series in memory and the
+        # store has no column for it, so a rule that read one would grade
+        # a store differently from its own reopened self. An unscanned
+        # instance is in exactly one of `edited` and `never_scanned`, so
+        # with the gate open every instance section 5 counts is graded.
+        never_scanned = {"patients": 0, "studies": 0, "instances": 0}
+        walked = 0
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
             edited["patients"] += _edited_since_its_status(patient)
+            never_scanned["patients"] += _holds_no_recorded_status(patient)
+            walked += 1
             for study in patient.studies:
                 unacted["studies"] += study.phi_status is PhiStatus.IDENTIFIED
                 edited["studies"] += _edited_since_its_status(study)
+                never_scanned["studies"] += _holds_no_recorded_status(study)
+                walked += 1
                 for series in study.series:
                     for instance in series.instances:
                         status = instance.phi_status
                         unacted["instances"] += status is PhiStatus.IDENTIFIED
                         unscanned_instances += status is PhiStatus.UNSCANNED
                         edited["instances"] += _edited_since_its_status(instance)
+                        never_scanned["instances"] += (
+                            _holds_no_recorded_status(instance))
+                        walked += 1
+        # At least one of the entities walked holds a recorded status.
+        status_recorded = sum(never_scanned.values()) < walked
 
         # The grade IS this list: PASS exactly when it is empty. See
         # `_review_reasons` for why it is a list and not a boolean.
@@ -4069,7 +4259,8 @@ class DicomSession:
             audit_summary=audit_summary, exceptions=exceptions,
             graded_losses=graded_losses, open_gaps=open_gaps,
             declined_remediations=declined_remediations,
-            unattested=unattested, unacted=unacted, edited=edited)
+            unattested=unattested, unacted=unacted, edited=edited,
+            never_scanned=never_scanned, status_recorded=status_recorded)
 
         # 5. Build Report DTO
         report = ComplianceReport(
@@ -4101,6 +4292,8 @@ class DicomSession:
             pixel_scans=list(self._pixel_scans),
             unacted_findings=unacted,
             unscanned_instances=unscanned_instances,
+            never_scanned=never_scanned,
+            phi_status_recorded=status_recorded,
         )
 
         renderer.render(report, output_path)
@@ -4251,8 +4444,11 @@ class DicomSession:
 
         - a value the lock would capture was written by a remediation
           (`ANONYMIZED`, `ANON_...`, a rule's `value:`, a shifted date);
-        - a tag it names was emptied or removed by `anonymize()`; the
-          message names the `tags_to_lock` that works without it;
+        - a tag it names was emptied or removed by `anonymize()` on any of
+          its instances; the message names the `tags_to_lock` that works
+          without it. Where other instances still hold a value there (a
+          study or series ingested after the pass), the message counts
+          both, and that lock stashes the tag for none of them;
         - a re-lock would lose a value the existing token holds;
         - the patient carries an identity token this library wrote that the
           key at the path given to `enable_reversible_anonymization()` does
@@ -4960,7 +5156,70 @@ class DicomSession:
             # kept nothing. The record names the
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
+            #
+            # **A patient part of which a pass wrote is counted (#594).**
+            # A study or series ingested after `anonymize()` still holds
+            # the originals beside instances the pass blanked, and "this
+            # patient holds no value" is then true of some instances
+            # only; the advised lock goes through and stashes the tag for
+            # none, so the originals that are still there are in no
+            # token. Still refused (owner ruling Q5 A; stashing them is
+            # #1054), in a sentence that counts both and says what the
+            # advice leaves out. Per instance, never per value-set: a
+            # source's own blank shares a record with a pass's blank and
+            # is neither a pass's doing nor a value held, so it is in
+            # neither count and the two need not add up to the total.
+            # `holding` reads the blanked tags only, since those are what
+            # the advice drops, and reads what the lock would stash, so
+            # a name the patient holds for an instance with no copy is a
+            # value held. Counts and tags; no value. With nothing held,
+            # the sentence is the one it has been, byte for byte.
+            #
+            # **Whether the patient is refused and how many instances a
+            # pass reached are two questions.** `blanked_tags()` answers
+            # the first, and for a name or ID an instance has no copy of
+            # it asks every instance of the patient (`patient_vouched`):
+            # the value is the patient's, and any instance the patient's
+            # write reached vouches for it. `left` answers the second
+            # from the instance's own record alone. Asked through
+            # `written_by_a_pass`, a file that never carried a Patient's
+            # Name was counted as one a pass emptied because another
+            # instance's record said so (review of #1061). Do not fold
+            # the two back into one predicate.
             blanked = blanked_tags()
+            holding = sum(len(members) for record, members in groups
+                          if any(str(record.get(tag) or "").strip() for tag in blanked))
+            if holding:
+                left = sum(any(not str(record.get(tag) or "").strip()
+                               and vouches(inst, tag, inst.attributes.get(tag), True)
+                               for tag in blanked)
+                           for record, members in groups for inst in members)
+                rest = [tag for tag in tags_to_lock if tag not in blanked]
+                one = len(blanked) == 1
+                named = blanked[0] if one else "one or more of " + ", ".join(blanked)
+                # With one tag, some instance holds it and some does not.
+                # With several that is true per tag and not per instance
+                # (each instance may hold one of them), so the clause
+                # says only what holds in every shape.
+                uneven = ("so the lock would stash an original for some instances "
+                          "and none for others" if one else
+                          "so the lock would not stash an original in each of them "
+                          "for every instance")
+                advice = (f"To lock this patient without {'it' if one else 'them'}, "
+                          f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r}), "
+                          f"which stashes {'it' if one else 'them'} for no instance: a "
+                          f"value {'it still holds' if one else 'they still hold'} would "
+                          "be in no token, and could not be recovered if a later "
+                          "anonymize() empties or removes it there too"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: anonymize() emptied or removed {named} on "
+                    f"{left} of this patient's {len(instances)} instances, and "
+                    f"{'it' if one else 'one or more of them'} still holds a value "
+                    f"on {holding}, {uneven}. "
+                    f"{advice}; the token this call would have written is unchanged.")
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
@@ -6848,7 +7107,13 @@ class DicomSession:
                 bytes-like, not iterable, or holds an element that is not a
                 `str`.
             ExportError: From either exporter, when zero of N
-                attempted instances reached disk and at least one failed.
+                attempted instances are reported written and at least one
+                failed. The folder then holds none of them, with one
+                exception (#1020): every planned instance was written
+                under file names the volume resolved to one file, and
+                that file could not be read back as any of them; the
+                folder holds that one file and the `ERROR` row keyed
+                `MULTIPLE` says so.
                 An empty plan (zero of zero) does not raise: a subset that
                 matched nothing is a fact about the run, and the `EXPORT`
                 audit row already carries it. Nor does a DICOM export whose
@@ -7189,13 +7454,17 @@ class DicomSession:
         summary = self._run_export_batch(tasks, show_progress,
                                          self.store_backend)
 
-        self._report_export_collisions(tasks, summary.written_uids)
+        # Edits `summary`: an instance whose file another instance's write
+        # replaced leaves `written_uids` for `failures` (#1020), so
+        # everything below counts what the folder holds.
+        replaced = self._report_export_collisions(tasks, summary)
 
         # After the batch, not before it. The disclosure is a statement
         # about files a recipient holds, so it has to be made from what
         # was written rather than from what was planned.
         if check_reversibility:
-            self._report_recoverable_identities(tasks, summary.written_uids)
+            self._report_recoverable_identities(tasks, summary.written_uids,
+                                                replaced)
 
         # Recorded for `generate_report`, so the report counts what was
         # written, not only the object graph.
@@ -7244,7 +7513,8 @@ class DicomSession:
 
         return summary
 
-    def _report_recoverable_identities(self, tasks, written_uids) -> int:
+    def _report_recoverable_identities(self, tasks, written_uids,
+                                       replaced=frozenset()) -> int:
         """Report delivered instances whose file still carries its originals.
 
         An instance carrying an Encrypted Attributes Sequence (0400,0500) from
@@ -7252,13 +7522,16 @@ class DicomSession:
         delivered instance carries one, logs a WARNING and writes one
         `REVERSIBLE_EXPORT` audit row; a token in the layout releases before
         1.0 wrote adds a `WARNING` row. An instance counts as delivered when a
-        worker wrote it or its planned file exists on disk.
+        worker wrote it or its planned file exists on disk, unless
+        `_report_export_collisions` found that file to hold another instance.
 
         Args:
             tasks (list): The export plan: each task's instance and output
                 path.
-            written_uids (Iterable[str]): The UID of every instance the workers
-                wrote.
+            written_uids (Iterable[str]): The UID of every instance whose
+                content a file holds, as `_report_export_collisions` left it.
+            replaced (Collection[int]): `id()` of each task whose file was
+                replaced by another instance's, as that method returned it.
 
         Returns:
             int: How many delivered instances carry recoverable identities; 0,
@@ -7275,9 +7548,18 @@ class DicomSession:
         # which get a re-identifiable file treated as safe; an over-claim costs
         # only a disclosure. Only instances not already known to be written are
         # stat-ed, so a clean export does no filesystem work here.
+        #
+        # A replaced task is the one exception to "a file is there" (#1020):
+        # its planned name exists because the volume resolves it to another
+        # instance's file, which was read back and does not hold this one, so
+        # its token is not in the folder. A replaced task never shares the
+        # survivor's UID (`_report_export_collisions`), so leaving it out
+        # of `delivered` leaves it out of `affected` below, unless another
+        # delivered instance holds its UID, which is counted as before.
         delivered = set(written_uids)
         delivered |= {task.instance.sop_instance_uid for task in tasks
                       if task.instance.sop_instance_uid not in delivered
+                      and id(task) not in replaced
                       and os.path.exists(task.output_path)}
         # A set, like `delivered`: the numerator and the denominator
         # must be counted over the same collection, or a duplicate SOP
@@ -7341,23 +7623,35 @@ class DicomSession:
                     details=sentence)
         return len(affected)
 
-    def _report_export_collisions(self, tasks, written_uids) -> int:
-        """Audit every output path that more than one instance was written to.
+    def _report_export_collisions(self, tasks, summary) -> Set[int]:
+        """Audit every file that more than one instance was written to.
 
-        Files are named by SOP Instance UID, so two delivered instances sharing
-        a path leave one file. Each such path gets one `ERROR` audit row, which
-        grades the run `REVIEW_REQUIRED`. Grouped by output path, not by UID; a
-        path every write to failed is not reported, since its failures carry
-        their own rows.
+        Files are named by SOP Instance UID. Two arms, one `ERROR` audit row
+        per file each, which grades the run `REVIEW_REQUIRED`:
+
+        - **One planned path for several instances** (they share a UID):
+          grouped by the exact output path. A path every write to failed is
+          not reported, since its failures carry their own rows. `summary` is
+          left as it is.
+        - **Different planned paths the volume resolves to one file** (#1020:
+          names differing only in letter case on a case-insensitive volume,
+          or in Unicode composition): asked of the volume, after the write,
+          over the tasks this run delivered. The file's `(0008,0018)` is read
+          back; the instance it names stays in `summary.written_uids` and
+          every other member moves to `summary.failures` under the row's
+          sentence. When the file cannot be read back as one of them, all of
+          them move.
 
         Args:
             tasks (list): The export plan: each task's instance and output
                 path.
-            written_uids (Iterable[str]): The UID of every instance the workers
-                wrote.
+            summary (ExportSummary): What the workers reported; edited in
+                place by the second arm.
 
         Returns:
-            int: How many colliding paths were reported.
+            Set[int]: `id()` of each task whose file is known to hold another
+                instance: the second arm's losers where the survivor was
+                read and has another UID. Empty when nothing collided.
         """
         # `ERROR`, not `DATA_LOSS`: the end state is a requested instance that
         # is not in the folder, which is what `_report_export_failures` files
@@ -7369,8 +7663,7 @@ class DicomSession:
         for task in tasks:
             by_path.setdefault(task.output_path, []).append(task)
 
-        written = set(written_uids)
-        collisions = 0
+        written = set(summary.written_uids)
         for path, group in by_path.items():
             if len(group) < 2:
                 continue
@@ -7389,13 +7682,96 @@ class DicomSession:
                 f"folder holds one file for all {len(group)} of "
                 f"them.".split()).replace("|", "\\|")
             get_logger().error("%s: %s", uid, detail)
-            collisions += 1
             if getattr(self, "store_backend", None) is not None:
                 # `log_audit`, not `log_audit_batch` -- see the note in
                 # `_report_export_losses`.
                 self.store_backend.log_audit(
                     action_type="ERROR", entity_uid=uid, details=detail)
-        return collisions
+
+        # Different planned paths, one file (#1020). The volume is asked, and
+        # no name is folded as text, because no text key is right on every
+        # volume: measured on APFS, `SOPa`/`SOPA` are one file where the
+        # volume ignores case and two where it does not, while U+212B and
+        # U+00C5 are one file on both; `lower()` misses the second pair and
+        # NFC + `casefold()` reports the first on a volume that wrote two
+        # files. Asked after the write, never before or by an exclusive
+        # create: re-exporting into a folder that holds an earlier export is
+        # allowed, and each write is a rename that gives its name a file of
+        # its own, so two paths of one inode *afterwards* are one directory
+        # entry (or one folder reached twice), whatever was linked there
+        # before.
+        #
+        # Over what this run delivered only: a task whose worker reported no
+        # write has its own `ERROR` row, and a file found under its name is
+        # an earlier export's. An identity of None (the file is gone, or the
+        # volume gives no inode) is no evidence of one file.
+        by_identity = {}
+        for path, group in by_path.items():
+            delivered = [task for task in group
+                         if task.instance.sop_instance_uid in written]
+            if not path or not delivered:
+                continue
+            identity = _delivered_file_identity(path)
+            if identity is not None:
+                by_identity.setdefault(identity, []).extend(delivered)
+
+        replaced = set()
+        for group in by_identity.values():
+            paths = {task.output_path for task in group}
+            if len(paths) < 2:
+                continue
+            # Which instance the file holds is read from the file: the last
+            # rename wins, and which was last varies by run. One read; every
+            # path of the group is that file.
+            held = _sop_instance_uid_in(group[0].output_path)
+            survivor = next((task for task in group
+                             if task.instance.sop_instance_uid == held), None)
+            uids = sorted(str(task.instance.sop_instance_uid) for task in group)
+            count = len(group)
+            opening = (
+                f"{count} exported instances ({', '.join(uids)}) were written "
+                f"under file names this volume resolves to one file: each "
+                f"successful write replaced the one before it, and the folder "
+                f"holds one file for all {count} of them.")
+            if survivor is None:
+                # Unreadable, or a UID none of them has. Nothing says whose
+                # file it is, so none is reported written, and none is
+                # reported replaced either: the disclosure that follows
+                # still counts every one of them as possibly in the folder.
+                key = "MULTIPLE"
+                closing = (f"Which of them that file carries could not be "
+                           f"read from it, so none of the {count} is reported "
+                           f"as written.")
+            else:
+                key = survivor.instance.sop_instance_uid
+                others = ("other was" if count == 2
+                          else f"other {count - 1} were")
+                closing = (f"That file carries {key}; the {others} not "
+                           f"delivered.")
+            # No path, and pipe-escaped, as the arm above. The sentence above
+            # is not reused: these instances do not share a UID.
+            detail = f"{opening} {closing}".replace("|", "\\|")
+            get_logger().error("%s: %s", key, detail)
+            for task in group:
+                if task is survivor:
+                    continue
+                # By task, one occurrence each: a loser may share the
+                # survivor's UID, which then stays in the list once.
+                if task.instance.sop_instance_uid in summary.written_uids:
+                    summary.written_uids.remove(task.instance.sop_instance_uid)
+                summary.failures.append(
+                    (task.instance.sop_instance_uid, detail))
+                # Known to be absent from the folder only when the file was
+                # read and names another UID. A loser sharing the
+                # survivor's UID may be the one the file holds: which of
+                # two instances of one UID was written last is not read.
+                if survivor is not None \
+                        and task.instance.sop_instance_uid != key:
+                    replaced.add(id(task))
+            if getattr(self, "store_backend", None) is not None:
+                self.store_backend.log_audit(
+                    action_type="ERROR", entity_uid=key, details=detail)
+        return replaced
 
     def _scan_before_export(self) -> Set[str]:
         """Scan for PHI and report what it found, before anything is written.
@@ -7653,8 +8029,12 @@ class DicomSession:
             temporal = None
             if _TEMPORAL_MODIFIED not in ruled:
                 temporal = _longitudinal_temporal_marker(study, instance, stamps)
+            # The third answer is an instruction, never a value (#1011).
+            withdraw = temporal == _SOURCE_CLAIM_WITHDRAWN
             return DeidMarkers(identity_removed=_IDENTITY_REMOVED not in ruled,
-                               method_value=method, temporal=temporal)
+                               method_value=method,
+                               temporal=None if withdraw else temporal,
+                               withdraw_unmodified=withdraw)
         return plan
 
     def _report_statuses_under_another_policy(self, triples, folder, fmt):

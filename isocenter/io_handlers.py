@@ -46,13 +46,14 @@ import os
 import pickle
 import sys
 import hashlib
+import threading
 import numbers
 import struct
 from decimal import Decimal
 from fractions import Fraction
 from math import ceil, isfinite
 from io import BytesIO
-from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet, Union
 from datetime import datetime, date
 from dataclasses import dataclass, field
 from concurrent.futures.process import BrokenProcessPool
@@ -109,7 +110,7 @@ from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
 from .uids import generated_uid
 from .reversibility import ReversibilityService
 from .logger import (describe_exception, describe_exception_without_paths,
-                     get_logger)
+                     get_logger, _type_and_reason)
 from .pixel_geometry import (
     FLOAT_DTYPE_BY_ELEMENT,
     SIDECAR_DTYPE_NAMES,
@@ -117,6 +118,9 @@ from .pixel_geometry import (
     PIXEL_DTYPE_ATTR,
     TAG_DOUBLE_FLOAT_PIXEL_DATA,
     TAG_FLOAT_PIXEL_DATA,
+    _CS_UPPER,
+    _cs_spelling,
+    _cs_unencodable,
     declared_int,
     resolve_photometric_interpretation,
     resolve_pixel_geometry,
@@ -133,7 +137,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
-                                  signed_codestream_refusal)
+                                  refusal_before_decode)
 from .parallel import (run_parallel, _resolve_strategy,
                        resolve_worker_initializer)
 from .validation import IODValidator
@@ -570,23 +574,21 @@ _PHOTOMETRIC_ICON = (
 def _written_photometric(value) -> Optional[str]:
     """One label, normalized for comparison against a syntax's row.
 
-    Stripped of surrounding spaces and upper-cased, which is what a
+    Spelled as a Code String is (`_cs_spelling`), which is what a
     conformant reader takes from the file: `' rgb '` compares as `RGB`.
-    A multi-valued value is not handled here; each caller checks for it
-    at its own call site.
+    The worker writes a declared label through the same helper, so the
+    label judged is the label the file holds. A multi-valued value is not
+    handled here; each caller checks for it at its own call site.
 
     Args:
         value: The Photometric Interpretation as held on `ds`, or None.
 
     Returns:
         Optional[str]: The normalized label, or None for an absent or
-        empty value (there is no claim to judge).
+        empty value (there is no claim to judge). A value that is not
+        text (`bytes`, a number) is read as the text of its `str`, as
+        it was before #612: no row admits that, which is the answer.
     """
-    # The two normalizations are named in words, not written as the dotted
-    # calls they are, in the docstring above: the package's documented-API
-    # check reads a dotted call inside any string in this package as a
-    # method the package promises, and `str`'s methods are not ours.
-    #
     # Deliberately not `declared_int`'s rule, which reads `[1]` as "not
     # declared": that answers what the graph declared, this answers what
     # the file will carry. No one-element unwrap either: pydicom unwraps a
@@ -596,8 +598,8 @@ def _written_photometric(value) -> Optional[str]:
     # (`_PhotometricRefusal`) and fails the readback.
     if value is None:
         return None
-    text = str(value).strip().upper()
-    return text or None
+    return _cs_spelling(value if isinstance(value, str) else str(value)) \
+        or None
 
 
 #: The longest value a Code String may hold (PS3.5 6.2), and how much of a
@@ -607,18 +609,120 @@ def _written_photometric(value) -> Optional[str]:
 _CS_MAX_CHARS = 16
 
 
-def _cs_spelling(value):
-    """`value` as a Code String is spelled, when it is text; else itself."""
-    return value.strip().upper() if isinstance(value, str) else value
+def _cs_removed(text: str) -> Tuple[str, str]:
+    """What `_cs_spelling` removes from the two ends of `text`.
+
+    Args:
+        text (str): A declared value, as text.
+
+    Returns:
+        Tuple[str, str]: The leading run and the trailing run removed.
+    """
+    # The spelling's own strip, Python's, so the note's clauses are about
+    # what was removed and cannot name anything else. The end first: a
+    # value that is nothing but whitespace has no start, and one that is
+    # nothing but spaces is respelled silently as any trailing pad is.
+    kept = text.rstrip()
+    body = kept.lstrip()
+    return kept[:len(kept) - len(body)], text[len(kept):]
+
+
+def _cs_ends_named(removed) -> Optional[str]:
+    """The whitespace that is not a space in `removed`, named by end and
+    by code point: `its start (U+0009) and its end (U+000A)`. None when
+    only spaces were removed, or nothing.
+
+    Args:
+        removed: `_cs_removed`'s answer for each value spoken for.
+    """
+    ends = []
+    for name, runs in (("start", [lead for lead, _trail in removed]),
+                       ("end", [trail for _lead, trail in removed])):
+        others = set("".join(runs)) - {" "}
+        if others:
+            ends.append(f"its {name} ({_code_points(others)})")
+    return " and ".join(ends) or None
+
+
+def _code_points(chars) -> str:
+    """`chars` named for a sentence: `U+0009, U+00A0`, sorted, each once."""
+    return ", ".join(f"U+{ord(char):04X}" for char in sorted(set(chars)))
 
 
 def _cs_quoted(value) -> str:
-    """`value` quoted for a note, at most a Code String's length of it."""
-    if not isinstance(value, str):
-        return repr(value)
-    if len(value) > _CS_MAX_CHARS:
-        return f"{value[:_CS_MAX_CHARS]!r} (cut at {_CS_MAX_CHARS} characters)"
-    return repr(value)
+    """`value` quoted for a note or a row, at most a Code String's length
+    of it, in ASCII: a character outside printable ASCII is written as
+    its escape (`'RGB\\t'`, `'RG\\xdf'`, `'MONOCHROME2\\u0131'`), never
+    raw."""
+    # `ascii`, not `repr`: `repr` leaves a printable character outside
+    # ASCII as it is, and a row is flattened on its way to the audit log,
+    # so a no-break space quoted raw reads there as a space and the row
+    # names a conformant spelling the file does not hold (#612).
+    if isinstance(value, (str, bytes)) and len(value) > _CS_MAX_CHARS:
+        return (f"{ascii(value[:_CS_MAX_CHARS])} "
+                f"(cut at {_CS_MAX_CHARS} characters)")
+    return ascii(value)
+
+
+def _full_sample_label(label, samples):
+    """`YBR_FULL` for `YBR_FULL_422` over three or more full samples.
+
+    `YBR_FULL_422` names a subsampled layout that an interleaved array of
+    full samples does not have; `YBR_FULL` names exactly those bytes and
+    keeps the declared colour space. One rule for the top level
+    (`_write_pixel_geometry`, #470) and an icon item
+    (`_write_back_nested_pixels`, #646).
+
+    Args:
+        label: The label about to be written, or None.
+        samples (int): Samples per pixel of the element just written.
+
+    Returns:
+        `"YBR_FULL"` when `label` spells `YBR_FULL_422` and `samples` is
+        three or more; otherwise `label` itself.
+    """
+    # Spelled by `_written_photometric`, as the judgement that follows it
+    # spells the label, so the two cannot disagree about which label this
+    # is. Below three samples it is not this rule's: at one the top
+    # level's resolver has already answered, and two is a shape no
+    # interpretation names.
+    if samples >= 3 and _written_photometric(label) == "YBR_FULL_422":
+        return "YBR_FULL"
+    return label
+
+
+def _holds_bytes(value) -> bool:
+    """Whether a graph value is `bytes`, or a list, tuple or `MultiValue`
+    directly holding one.
+
+    A `bytes` label is written as held (#612, owner ruling of 2026-10-11).
+    The question is put to the graph, never to the pydicom dataset:
+    pydicom hands a `bytes` Code String back as text, and a one-value
+    list of them as that one text value, so on the dataset the two cannot
+    be told from a label held as text.
+    """
+    if isinstance(value, bytes):
+        return True
+    return isinstance(value, (list, tuple, MultiValue)) and any(
+        isinstance(one, bytes) for one in value)
+
+
+def _cs_falls_back(text: str) -> str:
+    """The characters that make `_cs_spelling` fall back for `text`: those
+    of its `a`-`z` spelling a file cannot hold. Empty when it does not."""
+    return _cs_unencodable(text.strip().translate(_CS_UPPER))
+
+
+def _label_values(attributes) -> list:
+    """The declared values of (0028,0004), as a list, when the element
+    holds text or a list of values."""
+    # Not a lone `bytes`: it is not respelled at all.
+    value = attributes.get("0028,0004")
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, MultiValue)):
+        return list(value)
+    return []
 
 
 def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
@@ -629,10 +733,16 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     PS3.5 6.2 defines a Code String as upper case with insignificant
     leading and trailing spaces, so a declared `' rgb '` is written as
     `RGB`: the same label, spelled as defined, with the samples untouched.
-    A multi-valued declaration has each text value respelled; anything
-    that is not text (`bytes`, a number) is left as it is. Only
-    `0028,0004` is respelled; other Code String elements are written as
-    held.
+    The spelling is `_cs_spelling`'s: whitespace is removed from the ends
+    and only `a`-`z` are upper-cased, so a label holding a letter outside
+    ASCII keeps it (`'rgß'` is written `RGß`). Whitespace other than the
+    space that was removed (`'RGB\\t'` is written `RGB`) is named in the
+    note by code point. A label the file could not hold so spelled is
+    written by `_cs_spelling`'s fallback, and `_label_fallback_warning`
+    speaks for it, not this note. A multi-valued declaration has each
+    text value respelled; anything that is not text (`bytes`, a number)
+    is left as it is. Only `0028,0004` is respelled; other Code String
+    elements are written as held.
 
     Args:
         attributes (Mapping): An instance's or sequence item's attributes.
@@ -665,12 +775,14 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     # down (an icon labelled `' rgb'` is also dropped by this library's
     # own re-ingest); its note names the item.
     value = attributes.get("0028,0004")
+    # Text only. A `bytes` label is written as held (owner ruling,
+    # 2026-10-11): a file that states a binary VR for (0028,0004) brings
+    # one in, and a source's own label exports as it did before #612.
     if isinstance(value, str):
         declared = [value]
-        respelled = value.strip().upper()
-        if respelled == value:
+        written_value = _cs_spelling(value)
+        if written_value == value:
             return attributes, None
-        written_value = respelled
     elif isinstance(value, (list, tuple, MultiValue)) and any(
             isinstance(v, str) for v in value):
         declared = list(value)
@@ -683,25 +795,101 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     copy["0028,0004"] = written_value
     written = [written_value] if isinstance(written_value, str) \
         else written_value
-    if all(not isinstance(d, str) or d.rstrip() == w
-           for d, w in zip(declared, written)):
-        return copy, None
-    # One of the two is always true here: a value with no leading
-    # whitespace and no lower case has a right-strip equal to its CS
-    # spelling, and returned above.
+    # Each declared value as the text it was read as; a value that is not
+    # text was not respelled and has nothing to say here, and neither has
+    # one written by the fallback, which is not "the same label" and has
+    # its own WARNING. The clauses are read off the spelling's own
+    # operations -- `a`-`z`, and what `_cs_removed` says was taken from
+    # each end -- so each is said only where that operation changed
+    # something. With Python's own predicates a tab read as "its leading
+    # spaces removed" and `ß` as "its letters upper-cased" (#612).
+    fell_back = [isinstance(d, str) and bool(_cs_falls_back(d))
+                 for d in declared]
+    texts = [d for d, fallen in zip(declared, fell_back)
+             if isinstance(d, str) and not fallen]
+    removed = [_cs_removed(text) for text in texts]
     changes = []
-    if any(isinstance(d, str) and d.upper() != d for d in declared):
+    if any(text.translate(_CS_UPPER) != text for text in texts):
         changes.append("its letters upper-cased")
-    if any(isinstance(d, str) and d.lstrip() != d for d in declared):
+    if any(" " in lead for lead, _trail in removed):
         changes.append("its leading spaces removed")
-    spelled = ", ".join(_cs_quoted(d) for d in declared)
-    as_written = ", ".join(_cs_quoted(w) for w in written)
+    # Whitespace that is not a space, at either end: removed as it was
+    # before #612, and said, which it was not (a trailing tab went with
+    # no note at all). Named by code point and by end, never written raw
+    # into a note.
+    ends = _cs_ends_named(removed)
+    if ends:
+        changes.append(
+            f"the whitespace that is not a space removed from {ends}")
+    # Nothing to say: trailing spaces alone were removed, and the file
+    # pads with them anyway.
+    if not changes:
+        return copy, None
+    # Neither list quotes a value the fallback wrote: this sentence says
+    # "the same label", and that value is another one.
+    spelled = ", ".join(
+        _cs_quoted(d) for d, fallen in zip(declared, fell_back)
+        if not fallen)
+    as_written = ", ".join(
+        _cs_quoted(w) for w, fallen in zip(written, fell_back)
+        if not fallen)
     return copy, (
         f"PhotometricInterpretation {spelled} is not a defined Code String "
         f"spelling; written as {as_written}, the same label with "
         f"{' and '.join(changes)} "
         f"(PS3.5 6.2: a CS value is upper case, and its leading and "
         f"trailing spaces are not significant). The samples are unchanged.")
+
+
+def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
+    """The WARNING for a declared (0028,0004) the file cannot hold as
+    `a`-`z` spells it, or None.
+
+    A character above U+00FF cannot be written in a Code String, so such
+    a label is written by `_cs_spelling`'s fallback, Python's own
+    upper-casing, which is what releases before #612 wrote for it
+    (`'monochrome2ı'` as `MONOCHROME2I`). That is another value, not a
+    spelling of the declared one, so it is a WARNING and not the INFO
+    note; every later sentence about the label quotes it as written.
+
+    Args:
+        attributes (Mapping): An instance's or sequence item's attributes.
+        in_file (Optional[list]): The values of (0028,0004) the dataset
+            about to be written holds, when the caller can say. A value
+            whose fallback spelling is not among them is not spoken for:
+            something else was written. None for a caller that writes
+            the label as respelled and nothing after (a sequence item).
+
+    Returns:
+        Optional[str]: One sentence per such value, naming the characters
+        by code point and the label written, and any whitespace other
+        than the space that went from its ends (the INFO note, which
+        names that for every other label, is not written for this one);
+        None when there is none, or when the fallback cannot be encoded
+        either (the file fails, with its own row, as it did before
+        #612).
+    """
+    said = []
+    for text in _label_values(attributes):
+        if not isinstance(text, str):
+            continue
+        held = _cs_falls_back(text)
+        written = _cs_spelling(text)
+        if not held or _cs_unencodable(written):
+            continue
+        if in_file is not None and written not in map(
+                _written_photometric, in_file):
+            continue
+        ends = _cs_ends_named([_cs_removed(text)])
+        stripped = (f", with the whitespace that is not a space removed "
+                    f"from {ends}") if ends else ""
+        said.append(
+            f"PhotometricInterpretation {_cs_quoted(text)} holds a "
+            f"character the file cannot hold ({_code_points(held)}); it "
+            f"was written as {_cs_quoted(written)}, its upper case by "
+            f"Unicode's rules{stripped}, and that is the label any other "
+            f"row about this file quotes.")
+    return " ".join(said) or None
 
 
 def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
@@ -850,7 +1038,7 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
     return _PhotometricRefusal(
         f"PhotometricInterpretation (0028,0004) is a single value; "
         f"this instance declares {len(written)} "
-        f"({', '.join(repr(str(v)) for v in written)}). A file "
+        f"({', '.join(_cs_quoted(str(v)) for v in written)}). A file "
         f"carrying more than one cannot be read back by this library "
         f"at all -- ingest refuses it before any label is examined -- "
         f"so no output here would be honest, which is why this one "
@@ -2400,7 +2588,8 @@ def _source_text(value):
 
     For the four text elements `ingest_worker` hands the parent as fields
     of `Series` and `Equipment`: Modality, Manufacturer, Manufacturer's
-    Model Name and Device Serial Number.
+    Model Name and Device Serial Number. And, since #998, for the SOP
+    Class UID it hands on as `Instance.sop_class_uid`.
 
     Args:
         value: What pydicom read for the element, or the caller's default
@@ -2641,9 +2830,12 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
         RuntimeError: A signed JPEG 2000 codestream under
             PixelRepresentation 0 (refused before pydicom is asked);
             encapsulated fragments with no frame boundary; or any decode
-            neither pydicom nor the fallback accepts.
-        ValueError: A header pydicom's validation refuses, or a pydicom
-            `ValueError` for a syntax with no fallback.
+            neither pydicom nor the fallback accepts, where pydicom's own
+            failure was a `RuntimeError`.
+        ValueError: A header pydicom's validation refuses; a pydicom
+            `ValueError` for a syntax with no fallback; or one the
+            fallback could not read either, which keeps pydicom's class
+            (#683).
     """
     # Read as an attribute, outside the `try`, never with a default: a
     # `force=True` read with no file meta must raise `AttributeError` into
@@ -2651,12 +2843,19 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     # default would decode it under Explicit VR LE -- garbage geometry and
     # no row at all.
     ts = ds.file_meta.TransferSyntaxUID
-    # Before pydicom: Pillow decodes a signed codestream under
-    # PixelRepresentation 0 at monochrome depths and 8-bit colour with the
-    # samples shifted by 2^(bits-1), and no error. Isocenter's own exports
-    # never carry that shape (the writer derives PixelRepresentation and
-    # the codestream's sign from one dtype), so the readback never trips it.
-    refusal = signed_codestream_refusal(ds)
+    # Before pydicom, three refusals on what the file holds
+    # (`refusal_before_decode`): a signed JPEG 2000 codestream under
+    # PixelRepresentation 0, which Pillow decodes at monochrome depths and
+    # 8-bit colour with the samples shifted by 2^(bits-1) and no error; a
+    # native 1-bit frame that is not a whole number of bytes under more
+    # bytes than its declared frames, which pydicom slices by a `float`
+    # and fails on in CPython's words for a slice (#669); and an Extended
+    # Offset Table pydicom walks by that is no whole number of 8-byte
+    # offsets, which pydicom unpacks and fails on in `struct`'s words
+    # (#621; `offset_table_frame_count` offers no count for it, so every
+    # door arrives here). Here rather than at each door, so ingest, the
+    # Instance door, the readback and an icon refuse each in one sentence.
+    refusal = refusal_before_decode(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
     # Each keyword is forwarded only when given. On pydicom 3.0.2
@@ -2809,25 +3008,60 @@ def _no_frame_boundary_words(ds) -> str:
     Returns:
         str: One sentence for the `RuntimeError` `_decode_pixels` raises.
     """
-    # The words must carry none of the three substrings
-    # `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
-    # "decompress", "missing dependencies" -- so the read door raises them
-    # as they stand rather than turning them into a codecs-missing message.
+    # `Instance.get_pixel_data`'s file arm raises these words as they
+    # stand, and routes on none of them: "no pixels" is decided by asking
+    # the dataset since #1093 (not by "no pixel data" in a message), and
+    # its codecs-missing message from state since #623 (not by
+    # "decompress" or "missing dependencies").
     #
-    # "with no offset table" is unconditional and true only because of a
-    # guard upstream: a file whose Basic or Extended Offset Table names a
-    # frame count is refused by `imagecodecs_handler.offset_table_frame_count`
-    # before any decode, so a table that disagrees with the fragments never
+    # "with no offset table" is true of a Basic Offset Table only because
+    # of a guard upstream: a file whose Basic Offset Table names a frame
+    # count is refused by `imagecodecs_handler.offset_table_frame_count`
+    # before any decode, so one that disagrees with the fragments never
     # gets here. If that guard stops answering first, the clause becomes
-    # false. The `except` branch says nothing about the table, because it
-    # has parsed nothing to say it from.
+    # false.
+    #
+    # **It is not true of an Extended Offset Table**: one pydicom drops
+    # (its Lengths element is another length) is counted as the same
+    # file without it unless it names more frames than declared (#621),
+    # and one naming more is decoded to the declared frames, so a
+    # dataset holding a table arrives here. The clause then says what is
+    # true: none that pydicom walks by. Before #621 a dropped table that
+    # agreed or named more got "with no offset table", over a dataset
+    # holding one.
+    #
+    # **"pydicom walks by" is said only of a table it does not walk by**
+    # (`extended_offsets(ds) is None`), never of every dataset holding
+    # the element. A table of equal Lengths naming fewer frames than
+    # declared runs out the same way, and at every door the count
+    # refuses it first; a direct call of the decode gets here, and keeps
+    # the words it had before #621 rather than a clause that is false of
+    # it.
+    #
+    # **The Basic Offset Table guard above has one hole**, measured: a
+    # dropped Extended Offset Table naming *more* frames than declared is
+    # counted from that table, so a populated Basic Offset Table naming
+    # fewer is not asked, and the file arrives here saying "with no
+    # offset table" over one pydicom walks by. Not fixed (it is the
+    # excess arm's, which #621 did not change); the clause is not
+    # lengthened for it, because the longer one would be false too.
+    #
+    # The `except` branch says nothing about the table, because it has
+    # parsed nothing to say it from.
     declared = declared_frame_count(ds)
+    table = "no offset table"
     try:
         buf = BytesIO(ds.PixelData)
-        parse_basic_offsets(buf)
+        # Only over an empty Basic Offset Table: pydicom walks by a
+        # populated one, so the longer clause would be false there. That
+        # shape is reached under a dropped Extended Offset Table naming
+        # more frames than declared, and keeps the words it had.
+        if (not parse_basic_offsets(buf) and ds.get("ExtendedOffsetTable")
+                and extended_offsets(ds) is None):
+            table += " pydicom walks by"
         fragments, _offsets = parse_fragments(buf)
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
-                f"with no offset table")
+                f"with {table}")
     except Exception:  # pylint: disable=broad-except
         held = "holds fragments pydicom could not count"
     return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
@@ -2953,20 +3187,34 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
 
     Raises:
         RuntimeError: `<pydicom's words>; imagecodecs could not decode it
-            either: <why>`, for every refusal above and any decoder error.
+            either: <why>`, for every refusal above and any decoder error,
+            where pydicom's failure was a `RuntimeError`.
+        ValueError: The same words, where pydicom's failure was a
+            `ValueError` (#683).
     """
     # pydicom's reason stays first so the ingest row still reads
     # `Decompression Failed: <pydicom's words>`.
     def refused(why):
-        """The refusal, pydicom's reason first.
+        """The refusal, pydicom's reason first and in pydicom's class.
 
         Args:
             why (str): Why imagecodecs' decode is refused.
 
         Returns:
-            RuntimeError: The exception to raise.
+            Exception: The exception to raise: exactly `ValueError` where
+            pydicom's failure is one, exactly `RuntimeError` otherwise.
         """
-        return RuntimeError(
+        # The row a user reads begins with this class, and the words
+        # after it are pydicom's: `Decompression Failed: RuntimeError:
+        # could not broadcast ...` named a class pydicom never raised
+        # (#683). One of two exact classes, never `type(pydicom_error)`:
+        # a subclass need not take one string (`UnicodeDecodeError` takes
+        # five arguments), and the sentence is not that class's own.
+        # `_decode_pixels` catches `(RuntimeError, ValueError)` before it
+        # calls this, so no other family arrives.
+        kind = (ValueError if isinstance(pydicom_error, ValueError)
+                else RuntimeError)
+        return kind(
             f"{pydicom_error}; imagecodecs could not decode it either: {why}")
 
     ts = ds.file_meta.TransferSyntaxUID
@@ -3337,7 +3585,7 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     A lossless JPEG or a JPEG 2000 codestream states the sample precision
     every decoder reconstructs against (the SOFn `P` field
     `_jpeg_precision` reads, ITU-T T.81 B.2.2; the SIZ segment's for a
-    codestream). Decoders disagree, silently, about a stream whose decoded
+    codestream). Decoders disagree, silently, about a lossless JPEG whose
     samples exceed it: the imagecodecs fallback returns what the stream
     encodes, and pydicom with pylibjpeg-libjpeg saturates. Nothing is
     rewritten -- the samples are stored and exported as decoded -- and the
@@ -3364,8 +3612,8 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # saturating writes 4095 over the 4200 the stream encodes, altering
     # pixels to match another library's silent alteration, and masking
     # gives 104, which no door produces. Only T.81 lossless is known to
-    # produce the shape: `jpegls_encode` takes no precision argument and
-    # `jpeg2k_encode` clamps at encode time.
+    # reach here in the shape: `jpegls_encode` masks into a `bitspersample`
+    # (2026.10.10 on), and openjpeg's decode clamps what `jpeg2k_encode` wrote.
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
                           or ts in T81_SYNTAXES):
@@ -4676,6 +4924,126 @@ def _refuse_a_multi_valued_key(ds) -> None:
                 f"is linked by it, and none is chosen for it.")
 
 
+#: The VRs pydicom reads as a `str` (PS3.5 6.2), which is what a linkage
+#: key is held as. Not `PN` (a `PersonName`), and not `DS` or `IS`: pydicom
+#: reads those as numbers, and hands the text over as a `str` only when it
+#: cannot convert it. Not the exporter's `_TEXT_VRS`, which answers
+#: another question (what the text gate writes) and holds `PN`.
+_VRS_READ_AS_STR = frozenset({
+    "AE", "AS", "CS", "DA", "DT", "LO", "LT", "SH", "ST", "TM", "UC", "UI",
+    "UR", "UT"})
+
+
+#: pydicom reads a `UN` of a tag it knows under the dictionary's VR only
+#: while the value is shorter than this (`pydicom.hooks.raw_element_vr`:
+#: `len(raw.value) < 0xFFFF`); at or past it the value stays `bytes`.
+_UN_READ_AS_KNOWN_BELOW = 0xFFFF
+
+
+def _states_no_vr(raw) -> bool:
+    """Whether a raw element is the file declining to state a VR.
+
+    Args:
+        raw: The element as read, before any conversion.
+
+    Returns:
+        bool: True for a VR of None (an Implicit VR file) and for `UN`
+            while pydicom will read this `UN` under the dictionary's VR.
+    """
+    # `UN` is "unknown", not a claim about the value: three files of
+    # pydicom's own corpus state it for all four linkage keys
+    # (`rtdose_rle.dcm`, `rtdose_rle_1frame.dcm`, `explicit_VR-UN.dcm`),
+    # and pydicom reads each under the dictionary's `UI` and `LO`, as it
+    # does an Implicit VR file. The fingerprint found this: the rule as
+    # first written refused all three. With
+    # `pydicom.config.replace_un_with_known_vr` switched off pydicom hands
+    # such a key over as `bytes`, and `UN` is then refused like `OB`.
+    #
+    # So is a `UN` of 65,535 bytes or more, which pydicom leaves as `bytes`
+    # with the switch on (owner ruling on #1046, 2026-10-10). Decided by
+    # what pydicom will do, from the length the file states, never by
+    # converting the value to see. An element with no stated length here
+    # is not a raw one, and is not vouched for.
+    vr = raw.VR
+    if vr is None:
+        return True
+    return (vr == "UN" and bool(pydicom.config.replace_un_with_known_vr)
+            and getattr(raw, "length", _UN_READ_AS_KNOWN_BELOW)
+            < _UN_READ_AS_KNOWN_BELOW)
+
+
+def _vr_as_stated(vr) -> str:
+    """The words the refusal uses for the VR a file states.
+
+    Args:
+        vr: The two characters the file holds where a VR goes.
+
+    Returns:
+        str: `as XX` for two upper-case ASCII letters, and otherwise a
+            phrase that quotes nothing.
+    """
+    # pydicom takes any two bytes from `AA` to `ZZ` as an explicit VR, so
+    # the second is the file's to choose: `Z\n` put a newline in
+    # `IngestSummary.failures`. A row never carries bytes of the file that
+    # nothing has judged. Two upper-case letters is the shape of every VR
+    # PS3.5 defines, and of `ZZ`, which is named because it can be.
+    text = str(vr)
+    if len(text) == 2 and text.isascii() and text.isalpha() and text.isupper():
+        return f"as {text}"
+    return "under a VR the standard does not define"
+
+
+def _refuse_a_key_that_is_not_text(ds) -> None:
+    """Refuse a file that states a VR that is not text for a linkage key (#1022).
+
+    An Explicit VR file states a VR for each element, and nothing makes it
+    state the dictionary's. pydicom reads `(0008,0018)` written `OB` as
+    `bytes`, `US` as an `int`, `PN` as a `PersonName`, `SQ` as a
+    `Sequence`. Until #1022 a SOP Instance UID or Patient ID held that way
+    reached the save that ends `ingest()`, which refused the whole graph
+    (#721, #949), so one file cost the folder; a Study or Series Instance
+    UID was linked under `str()` of the value (`"b'1.2.3.4\\x00'"`, `'7'`,
+    `'[]'`) with no row; an `SQ` was refused in the interpreter's words,
+    which differ between 3.12 and 3.14t.
+
+    Raises:
+        ValueError: Naming the element and the VR the file states for it.
+    """
+    # The VR and not the value, for two reasons. A DS or IS whose text
+    # pydicom cannot convert (`abc`, `1.2.3.4`) is handed over as a `str`,
+    # so "is the value a `str`" would ingest `DS '1.2.3.4'` and refuse
+    # `DS '1.5'`. And reading the value converts it, which raises for some
+    # (`IS '1e400'`: `OverflowError`), in words that are pydicom's. The
+    # raw element's VR is the file's own statement. `keep_deferred=True`
+    # is what makes the read convert nothing: without it pydicom converts
+    # a zero-length element on the spot (#740's trap), and an empty key
+    # stated `ZZ` was refused as `NotImplementedError: Unknown Value
+    # Representation`. One shape is converted before anyone asks: a `UN`
+    # of undefined length is read by pydicom as a sequence while the file
+    # is parsed, so its VR here is `SQ` and it is refused as one.
+    #
+    # `pydicom.config.datetime_conversion` is the other switch of the
+    # `UN` one's kind: switched on, pydicom hands a key stated `DA`, `DT`
+    # or `TM` over as a date or time object. Nothing in the library sets
+    # it, and the rule does not read it (#1046, reported).
+    #
+    # A file that states no VR for the key (`_states_no_vr`) is read under
+    # the dictionary's `UI` and `LO`, and is not this rule's.
+    #
+    # Never a value in the message, as for #747's refusal above, and never
+    # the name of the Python type pydicom chose: that is pydicom's, and
+    # the VR is the file's. An empty element is refused like a full one:
+    # the rule is one sentence about the file, with no second question.
+    for keyword, name in _LINKAGE_KEY_NAMES:
+        if keyword not in ds:
+            continue
+        raw = ds.get_item(keyword, keep_deferred=True)
+        if not _states_no_vr(raw) and raw.VR not in _VRS_READ_AS_STR:
+            raise ValueError(
+                f"{name} is written {_vr_as_stated(raw.VR)}, not as text; "
+                f"the file is linked by it, and no text is chosen for it.")
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4701,10 +5069,31 @@ def ingest_worker(fp: str) -> Tuple:
         # Eager load (read pixels)
         ds = pydicom.dcmread(fp, stop_before_pixels=False, force=True)
 
-        # Determine SOP Class UID with fallback to File Meta
-        sop_class = str(ds.get("SOPClassUID", ""))
+        # Before anything reads a linkage key: `meta` below converts the
+        # SOP Instance UID, and a value pydicom cannot convert would be
+        # refused in pydicom's words. Here, in the worker, so the parent
+        # never appends this file's frame to the sidecar (#1022).
+        _refuse_a_key_that_is_not_text(ds)
+
+        # Determine SOP Class UID with fallback to File Meta.
+        # `_source_text` inside `str()`, on both reads: an element holding
+        # two values is a `MultiValue`, and `str()` of that is the text of
+        # a Python list, which the field, the store's column and the scan
+        # clone then held (#998). Joined, not refused (owner ruling Q6 A):
+        # nothing is linked by the SOP class. With `(0008,0016)` in the
+        # dataset no exported byte follows the field: the element is
+        # written from the instance's own, which `populate_attrs` holds
+        # with both values, and pydicom's writer copies that into
+        # `(0002,0002)`. On the fallback read below the instance has no
+        # element of its own, so the field IS what `(0008,0016)` and
+        # `(0002,0002)` are exported from: the list's text went out as one
+        # value there, and the joined text goes out as the source's two
+        # (review of #1046). The validator reads the field through the
+        # file meta, and takes two classes as a class it does not know
+        # (`IODValidator._modules_for`).
+        sop_class = str(_source_text(ds.get("SOPClassUID", "")))
         if not sop_class and "MediaStorageSOPClassUID" in ds.file_meta:
-            sop_class = str(ds.file_meta.MediaStorageSOPClassUID)
+            sop_class = str(_source_text(ds.file_meta.MediaStorageSOPClassUID))
 
         # Extract Linking Metadata
         meta = {
@@ -6330,6 +6719,11 @@ class DeidMarkers:
             `(0012,0063)`, after the source's, unless it is already last.
         temporal: Longitudinal Temporal Information Modified `(0028,0303)`,
             `REMOVED` or `MODIFIED`, replacing the source's.
+        withdraw_unmodified: Do not carry a source's `(0028,0303)
+            UNMODIFIED` into the file: this store took a date out of it
+            and shifted none (#1011). Nothing is written in its place, and
+            any other source value stays. Only ever set with `temporal`
+            None.
     """
     # Decided in the parent because the worker cannot: the statuses and
     # policies it rests on are not on the lightweight copy a process
@@ -6337,6 +6731,7 @@ class DeidMarkers:
     identity_removed: bool = False
     method_value: Optional[str] = None
     temporal: Optional[str] = None
+    withdraw_unmodified: bool = False
 
 
 def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
@@ -6352,7 +6747,9 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
     same policy and release is idempotent; a different policy or release
     appends, which is PS3.3's "successive de-identification steps".
     Patient Identity Removed is not written when `ds` says Burned In
-    Annotation `YES`.
+    Annotation `YES`. Under `markers.withdraw_unmodified`, a `(0028,0303)`
+    that says `UNMODIFIED` is deleted from `ds` and nothing is written
+    there.
 
     Args:
         ds: The pydicom dataset being written; edited in place.
@@ -6387,6 +6784,17 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
         ds.add_new(0x00120063, "LO", values)
     if markers.temporal:
         ds.add_new(0x00280303, "CS", markers.temporal)
+    elif markers.withdraw_unmodified:
+        # Only the one value, whoever wrote it: `MODIFIED` and `REMOVED`
+        # are a source's claims about an earlier step, and stay. Case and
+        # padding are ignored for the reason Burned In Annotation's are
+        # above. Two values are not the enumerated value: `str()` of them
+        # is no `UNMODIFIED`, and they are left as written. No row and no
+        # note: no marker has ever written either.
+        held = ds.get(0x00280303)
+        if held is not None \
+                and str(held.value).strip().upper() == "UNMODIFIED":
+            del ds[0x00280303]
 
 
 @dataclass
@@ -6511,9 +6919,15 @@ class ExportSummary:
         written_uids (List[str]): The SOP Instance UID of each instance
             that reached disk, and nothing else. An instance with no UID
             is not written and is in `failures`; so is one whose UID
-            cannot name a file (`export_file_name`), under that UID.
+            cannot name a file (`export_file_name`), under that UID. From
+            `session.export()`, an instance whose file another instance's
+            write replaced, because the volume resolves their two file
+            names to one file, is in `failures` too, and the instance the
+            file holds is here (#1020).
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
-            instance that did not reach disk, each with an audit row.
+            instance that did not reach disk, each with an audit row; the
+            instances of one replaced file share one row, which names
+            them all.
         written (int): Files that reached disk, counted over distinct
             UIDs: two instances sharing a UID write one file.
         failed (int): `len(failures)`.
@@ -6547,6 +6961,75 @@ class ExportSummary:
         return len(self.failures)
 
 
+#: The line Python's formatted traceback opens with. pydicom 3.0.2 writes
+#: every element inside `tag_in_exception`, which re-raises a writer's
+#: exception as the same class with the message `With tag (gggg,eeee) got
+#: exception: <message>`, a newline, and the whole formatted traceback.
+_TRACEBACK_OPENS = "Traceback (most recent call last):"
+
+
+def _without_traceback(text: str) -> str:
+    """`text` up to where a formatted Python traceback starts in it."""
+    cut = text.find(_TRACEBACK_OPENS)
+    return text if cut < 0 else text[:cut].rstrip()
+
+
+def _export_failure_reason(exc: BaseException) -> str:
+    """How an export worker's failure is spelled wherever it is recorded.
+
+    `describe_exception_without_paths`, and that exactly for every
+    exception whose text holds no formatted traceback. One that does (a
+    refusal by pydicom's writer) is spelled by its class and its message
+    up to where the traceback starts, which keeps pydicom's own sentence
+    naming the element: `TypeError: With tag (0042,0011) got exception: a
+    bytes-like object is required, not 'str'`. Its cause is then not
+    appended, because the message already quotes it. A cause that holds
+    a traceback under a message that does not is appended, cut the same
+    way.
+
+    The export's `ERROR` row, `ExportError`'s message and the worker's
+    console line are all spelled by this. Never raises.
+
+    Args:
+        exc (BaseException): The exception the worker caught, or the one
+            a lost worker arrived as.
+
+    Returns:
+        str: The one-line reason, with no traceback and no `OSError`
+        path in it.
+    """
+    # #1053. A traceback names every frame's file by its absolute path
+    # (`.../site-packages/pydicom/tag.py`), so the install's location and
+    # the home directory's name reached the audit trail, the compliance
+    # report and `ExportError`. Measured for every refusal whose class
+    # pydicom can rebuild from one string, and for every refusal inside
+    # a sequence item, where the item's own re-raise is the cause and
+    # holds a second traceback: hence both halves are cut.
+    #
+    # Here and not in `logger.describe_exception_without_paths`: that
+    # helper spells ingest, scan and redaction reasons too, none of which
+    # was measured to hold one, and this is the place a writer's refusal
+    # is turned into text.
+    #
+    # No cause after a cut message, for a second reason: `__cause__` does
+    # not survive the pickle that carries the exception out of a worker
+    # process, so with it the same failure would read differently under
+    # threads (`write_tree()` on a free-threaded build) and processes.
+    #
+    # Not covered: an exception that writes a path into its own message
+    # with no traceback (`describe_exception_without_paths` says the
+    # same of itself), and the words after `got exception:`, which are
+    # pydicom's or the interpreter's.
+    reason = describe_exception_without_paths(exc)
+    if _TRACEBACK_OPENS not in reason:
+        return reason
+    own = _type_and_reason(exc)
+    cause = exc.__cause__
+    if cause is None or _TRACEBACK_OPENS in own:
+        return _without_traceback(own)
+    return f"{own} (caused by {_without_traceback(_type_and_reason(cause))})"
+
+
 class ExportError(RuntimeError):
     """The export delivered nothing.
 
@@ -6556,6 +7039,12 @@ class ExportError(RuntimeError):
     The message says "instances" in both: a WFDB record is written from
     one waveform instance, and its failure is named by that instance's
     UID, as the DICOM one is. Not raised on a partial export.
+
+    One case leaves a file behind (#1020): every planned instance was
+    written under file names the volume resolved to one file, and that
+    file could not be read back as any of them. None is reported as
+    written, so this is raised, and the folder holds that one file; the
+    `ERROR` row keyed `MULTIPLE` says so.
 
     Raised **last**, after every record the run produces, so a caller who
     catches this still holds a correct graph, a complete audit trail and
@@ -6591,9 +7080,14 @@ class ExportError(RuntimeError):
         where = f" to {folder}" if folder else ""
         super().__init__(
             f"Export{where} wrote 0 of {attempted} planned instances; "
-            f"{len(self.failures)} failed and nothing reached disk. "
+            f"{len(self.failures)} failed and none is reported as written. "
             f"First: {first[0]}: {first[1]}. See the audit log for the "
             "rest.")
+        # "none is reported as written", where it said "nothing reached
+        # disk" until #1020: instances whose file names the volume resolved
+        # to one file, which then could not be read back as any of them,
+        # are all failures while one file is in the folder. The exception
+        # is not told which case it is, so it says what is true of both.
 
 
 def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
@@ -6766,10 +7260,9 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # `set_pixel_data()`, which writes no file; this one describes the
     # element just written. Only ever reached at three or more samples:
     # at one the resolver has already answered MONOCHROME2, and two is a
-    # shape no interpretation names, written as declared.
-    if (geom.samples >= 3 and photometric
-            and str(photometric).strip().upper() == "YBR_FULL_422"):
-        photometric = "YBR_FULL"
+    # shape no interpretation names, written as declared. The rule is
+    # `_full_sample_label`'s, shared with an icon item's pixel door (#646).
+    photometric = _full_sample_label(photometric, geom.samples)
     if photometric:
         ds.PhotometricInterpretation = photometric
 
@@ -7131,7 +7624,7 @@ def _readback_label_mismatch(readback) -> Optional[str]:
         # the fault named here is the arity itself, which is true of either.
         return (f"PhotometricInterpretation (0028,0004) is VM 1; the "
                 f"written file reads back as {len(label)} values "
-                f"({', '.join(repr(str(v)) for v in label)})")
+                f"({', '.join(_cs_quoted(str(v)) for v in label)})")
     syntax = str(getattr(readback.file_meta, "TransferSyntaxUID", "") or "")
     normalized = _written_photometric(label)
     found = _label_inadmissibility(normalized, syntax)
@@ -7149,7 +7642,11 @@ def _readback_label_mismatch(readback) -> Optional[str]:
         # too; the warning's door passes the same remedy (review of #900,
         # F4). Read off the file alone, as everything here is.
         remedy = _PHOTOMETRIC_J2K_FALLBACK
-    return (f"PhotometricInterpretation reads back as '{normalized}', "
+    # Quoted as the write-side WARNING quotes it, in ASCII. Raw, a label
+    # ending in a no-break space reached the row as `'RGB '`: the report
+    # flattens whitespace, and the row named a conformant spelling.
+    return (f"PhotometricInterpretation reads back as "
+            f"{_cs_quoted(normalized)}, "
             f"which the transfer syntax the file was written under does "
             f"not admit ({syntax}): {clause} {remedy}")
 
@@ -7251,7 +7748,7 @@ def _verify_readback(path: str, ds, written_pixels=None,
     try:
         readback = pydicom.dcmread(path)
     except Exception as exc:
-        # Without paths: `path` is `<output path>.<pid>.tmp`, under
+        # Without paths: `path` is `<output path>.<pid>.<thread id>.tmp`, under
         # `Subject_<Patient ID>/`, and this message becomes the export's
         # `ERROR` row, where the outer spelling cannot strip it.
         raise RuntimeError(
@@ -7531,8 +8028,11 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
 
     Each written icon gets BitsStored and HighBit by the top level's rule
     (`_stored_width`, HighBit = BitsStored - 1), with the `_width_notes`
-    prefixed by the item's path on `corrections`, and has its Photometric
-    Interpretation judged against the uncompressed row
+    prefixed by the item's path on `corrections`. A declared `YBR_FULL_422`
+    over three or more samples is written `YBR_FULL`, on the file's item
+    only, by the top level's rule (`_full_sample_label`, #646). The
+    Photometric Interpretation written is then judged against the
+    uncompressed row
     (`_icon_label_warning`, `_icon_label_arity_warning`): an inadmissible
     or multi-valued label is written as declared, with a WARNING on
     `warnings`. A removed item is not judged; it carries its own loss
@@ -7644,9 +8144,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             continue
 
         writes.append((path, graph_item, item, terminal_tag, decoded,
-                       geometry[4]))
+                       geometry[4], geometry[2]))
 
-    for path, graph_item, item, terminal_tag, decoded, bits in writes:
+    for path, graph_item, item, terminal_tag, decoded, bits, samples in writes:
         group, element = (int(x, 16) for x in terminal_tag.split(','))
         # PS3.5: `OW` above 8 bits allocated, `OB` at or below. Derived from
         # the item's own BitsAllocated rather than carried on the blob,
@@ -7690,7 +8190,28 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # The label, judged where the pixel element is written: this is the
         # icon's pixel door, as `_write_pixel_geometry` is the top level's.
         # The pydicom item carries `_merge_sequences`' respelling.
+        #
+        # First the top level's fold (#646): the bytes just written are
+        # full samples, interleaved, whatever the item declares, so a
+        # declared `YBR_FULL_422` over three of them is written
+        # `YBR_FULL`, as `_write_pixel_geometry` writes it. On the
+        # pydicom item only -- the graph keeps its declaration -- and
+        # before the judgement, which must read the label the file
+        # holds. The sample count is the item's own, the one the loader
+        # shaped `decoded` by. No note, because the top level writes
+        # none. Until #646 the label reached the file as declared, and
+        # this library's own re-ingest dropped that icon's pixels.
+        #
+        # Not for a label the graph holds as `bytes`, alone or in a list:
+        # that is written as held (#612, owner ruling of 2026-10-11), and
+        # pydicom hands the item's value back as text, a list of one as
+        # that one value, so the helper cannot tell.
         label = item.get("PhotometricInterpretation")
+        folded = label if _holds_bytes(
+            graph_item.attributes.get("0028,0004")) \
+            else _full_sample_label(label, samples)
+        if folded is not label:
+            item.PhotometricInterpretation = label = folded
         at = _item_path_words(path)
         if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
             warnings.append(_icon_label_arity_warning(label, at))
@@ -8699,6 +9220,19 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if warning is not None:
                 warnings.append(warning)
 
+        # The fallback's WARNING for the top-level label, here and not
+        # where the label was respelled: it says what the file holds, and
+        # over pixels the resolver may have written another label since
+        # (one sample is `MONOCHROME2` whatever was declared), so it is
+        # read against `ds` as it now stands.
+        label = ds.get("PhotometricInterpretation")
+        fell_back = _label_fallback_warning(
+            inst.attributes,
+            in_file=[] if label is None
+            else list(label) if isinstance(label, MultiValue) else [label])
+        if fell_back is not None:
+            warnings.append(fell_back)
+
         # Encapsulated Document Length follows the document this file
         # carries (#757). After every merge and the finalize, so it reads
         # the bytes that will be written.
@@ -8748,7 +9282,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # other's temp files. A worker killed outright can still orphan
         # one `.tmp`; that residue is what atomicity costs, and what
         # cannot exist is a partial under a name a recipient trusts.
-        tmp_path = f"{ctx.output_path}.{os.getpid()}.tmp"
+        #
+        # The thread's id beside the pid (#1020): `write_tree()`'s
+        # workers are threads of one process on a free-threaded build,
+        # and under `ISOCENTER_FORCE_THREADS`. With the pid alone, two
+        # instances sharing a UID had one temp name, and two whose names
+        # the volume folds (`SOPa`, `SOPA`) had one temp file: measured
+        # on 3.14t, the loser of the rename raised `ENOENT`. Two threads
+        # alive at once never share an id.
+        tmp_path = (f"{ctx.output_path}.{os.getpid()}."
+                    f"{threading.get_ident()}.tmp")
         try:
             ds.save_as(tmp_path, enforce_file_format=True)
             # Before the rename, so a file that fails verification is
@@ -8779,10 +9322,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # spells the exception without its path: the output path is
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it.
         # The parent's `ERROR` row, `_report_export_failures`', has the
-        # same shape.
+        # same shape, and both spell the reason with
+        # `_export_failure_reason`, which also leaves out the traceback
+        # pydicom's writer puts in its message (#1053).
         named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
-              f"{describe_exception_without_paths(e)}", file=sys.stderr)
+              f"{_export_failure_reason(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
@@ -10036,9 +10581,11 @@ def export_file_name(instance) -> str:
     # The type is judged before the text, because what is joined to the
     # folder is `f"{uid}.dcm"` and the text of a `bytes` or a list is its
     # repr: `b'../../x'.dcm` holds the separators the text clauses look
-    # for, in a value they were never shown. A file states `(0008,0018)`
-    # as `OB` and ingest holds `bytes`; `write_tree()` has no save in
-    # front of it to refuse that (#721 is `session.export()`'s).
+    # for, in a value they were never shown. Until #1022 a file that
+    # stated `(0008,0018)` as `OB` put `bytes` here; ingest refuses that
+    # file now, and a caller's assignment is what is left. `write_tree()`
+    # has no save in front of it to refuse that (#721 is
+    # `session.export()`'s).
     # `isinstance`, not `type(uid) is str`: ingest holds a UI value as
     # `pydicom.uid.UID`, a `str` subclass.
     uid = instance.sop_instance_uid
@@ -12171,8 +12718,11 @@ class DicomExporter:
                 # carried by `ExportError.failures`. The exception can
                 # repeat the path too -- an `OSError`'s `str()` appends
                 # its filename -- which is why the reason goes through
-                # `describe_exception_without_paths`. The same shape as
-                # the WFDB row and the worker's console line. The caller
+                # `describe_exception_without_paths`, inside
+                # `_export_failure_reason`, which also cuts the traceback
+                # pydicom's writer puts in its message: every frame of
+                # one names a file by its absolute path (#1053). The same
+                # shape as the WFDB row and the worker's console line. The caller
                 # already holds the folder; the `EXPORT` row records it,
                 # and nothing below it is the report's.
                 uid = r.sop_instance_uid or "UNKNOWN"
@@ -12184,7 +12734,7 @@ class DicomExporter:
                 # is kept as given: no worker writes one, and prose
                 # cannot be told apart from a path inside it.
                 if isinstance(r.error, BaseException):
-                    reason = describe_exception_without_paths(r.error)
+                    reason = _export_failure_reason(r.error)
                 else:
                     reason = r.error if r.error is not None else "unknown error"
                 detail = f"Export failed for {named}: {reason}"
@@ -12193,7 +12743,7 @@ class DicomExporter:
                 # dies before it can answer. There is no outcome to name
                 # the instance with, and the row still has to exist.
                 uid = "UNKNOWN"
-                died = (describe_exception_without_paths(r)
+                died = (_export_failure_reason(r)
                         if isinstance(r, BaseException) else r)
                 detail = f"Export worker failed: {died}"
 
@@ -12236,6 +12786,12 @@ class DicomExporter:
         as `session.export()` writes (`export_folder_names`), named by SOP
         Instance UID. Elements that could not be written are logged, and
         audited when `store_backend` is given.
+
+        Two instances written to one file are not reported here, whether
+        they share a UID or their file names differ only in a way the
+        volume ignores (letter case on a case-insensitive volume): the
+        later write replaces the earlier and the call returns.
+        `session.export()` writes an `ERROR` row for both cases.
 
         Args:
             patient (Patient): The patient root object.
@@ -12322,11 +12878,14 @@ class DicomExporter:
 
         if failures:
             # The serializer has no summary to return: any failure raises,
-            # naming the count and the first error.
+            # naming the count and the first error. That error's message
+            # as it is, less the traceback pydicom's writer puts in one
+            # (#1053): the text is otherwise unchanged, class-less as it
+            # always was, and an `OSError`'s still names its file.
             raise RuntimeError(
                 f"Export incomplete. {
                     len(failures)} failed. First error: {
-                    failures[0]}")
+                    _without_traceback(str(failures[0]))}")
 
     @staticmethod
     def export_batch(
@@ -13036,6 +13595,9 @@ class DicomExporter:
                 attributes, respelled = _label_as_written(item.attributes)
                 if respelled is not None and corrections is not None:
                     corrections.append(f"{path} item {index}: {respelled}")
+                fell_back = _label_fallback_warning(item.attributes)
+                if fell_back is not None and warnings is not None:
+                    warnings.append(f"{path} item {index}: {fell_back}")
                 DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
                                      revrs=revrs, within=path,

@@ -880,6 +880,61 @@ def _defer(notes, level, message, *args):
     notes.append((level, message, args))
 
 
+def _holds_a_pixel_element(ds) -> bool:
+    """Whether a dataset holds Pixel Data, Float or Double Float Pixel Data.
+
+    The one spelling of "does this file have pixels" at the read door
+    (#1093). Presence, never the value: a zero-length Pixel Data is a
+    pixel element that will not decode, which is a failure to report and
+    not an instance without pixels.
+
+    Args:
+        ds (pydicom.Dataset): The source file's dataset, as read.
+
+    Returns:
+        bool: True when (7FE0,0010), (7FE0,0008) or (7FE0,0009) is in it.
+    """
+    return any(tag in ds for tag in (0x7FE00010, 0x7FE00008, 0x7FE00009))
+
+
+#: The transfer syntaxes whose pixels are on a JPIP server and never in
+#: the file: JPIP Referenced and JPIP Referenced Deflate, and their HTJ2K
+#: twins. Written here, not read from pydicom, whose names for them
+#: differ between releases.
+_JPIP_REFERENCED_SYNTAXES = frozenset({
+    "1.2.840.10008.1.2.4.94", "1.2.840.10008.1.2.4.95",
+    "1.2.840.10008.1.2.4.204", "1.2.840.10008.1.2.4.205"})
+
+
+def _pixels_are_elsewhere(ds) -> bool:
+    """Whether a dataset says its pixels exist and are not in the file.
+
+    Two facts, either one enough: it holds Pixel Data Provider URL
+    (0028,7FE0) at the top level, or its file meta names a JPIP
+    Referenced transfer syntax. The top level only, by owner ruling of
+    2026-10-12: PS3.5 8.2 puts the URL in the top-level data set, and
+    `_holds_a_pixel_element` asks there too. A URL inside a sequence
+    item says nothing of this data set's pixels and is not looked for.
+
+    A file of which either is true has no pixel element and is not an
+    instance without pixels: read as one, it would be exported with the URL and
+    no pixels as though whole, and `redact()` would pass over an image
+    whose zones were never applied (owner ruling of 2026-10-12, review
+    of #1096).
+
+    Args:
+        ds (pydicom.Dataset): The source file's dataset, as read.
+
+    Returns:
+        bool: True for either fact. Presence of the element, never its
+        value: an empty URL still says the pixels are elsewhere.
+    """
+    if 0x00287FE0 in ds:
+        return True
+    tsyntax = (getattr(ds, "file_meta", None) or {}).get("TransferSyntaxUID")
+    return str(tsyntax) in _JPIP_REFERENCED_SYNTAXES
+
+
 def _decode_from_file(ds):
     """A file's pixels through ingest's own decode, and their colour space.
 
@@ -909,8 +964,8 @@ def _decode_from_file(ds):
             with no frame boundary, or a decode neither pydicom nor the
             imagecodecs fallback accepts.
         ValueError: Propagated from `_decode_pixels`: a header pydicom's
-            validation refuses, or a pydicom `ValueError` for a syntax with
-            no fallback.
+            validation refuses, a pydicom `ValueError` for a syntax with
+            no fallback, or one the fallback could not read either.
     """
     # Do not give this a decode path of its own: `_decode_pixels` is the
     # function ingest, the export readback and an icon decode go through.
@@ -928,6 +983,77 @@ def _decode_from_file(ds):
         return ds.pixel_array, None
     from .io_handlers import _decode_pixels  # pylint: disable=import-outside-toplevel
     return _decode_pixels(ds)
+
+
+def _missing_decoder_words(error, ds) -> Optional[str]:
+    """What is missing from this installation, when that is why a decode failed.
+
+    Decided from state, never from the failure's message (#623). Two
+    cases, and nothing else:
+
+    1. The imagecodecs fallback was asked and imagecodecs did not import:
+       an `imagecodecs_handler.ImagecodecsUnavailable` in the failure's
+       cause chain.
+    2. The failure is a `RuntimeError`, the file's transfer syntax is not
+       one the fallback reads, and pydicom's decoder for it reports no
+       usable plugin.
+
+    Args:
+        error (BaseException): The failure `_decode_from_file` raised.
+        ds: The dataset that was being decoded, or None.
+
+    Returns:
+        Optional[str]: One or two sentences naming what is missing and
+        the remedy, or None when nothing is known to be missing -- a
+        refusal on what the file holds, a `TypeError`, a transfer syntax
+        no decoder implements.
+    """
+    # The cause chain is walked in this process, between the raise and
+    # this read: `__cause__` does not survive a pickle, and no process
+    # boundary sits between `_decode_pixels` and `get_pixel_data`.
+    cause, seen = error, set()
+    while cause is not None and id(cause) not in seen:
+        if isinstance(cause, h.ImagecodecsUnavailable):
+            # No word of the import failure here: its message can hold
+            # an install path (`imagecodecs_handler._unavailable`). The
+            # command is how a user reads it.
+            return ("imagecodecs did not import. This library installs it "
+                    "and reads this transfer syntax with it where pydicom "
+                    "cannot; reinstall imagecodecs. Running `python -c "
+                    "\"import imagecodecs\"` shows the import's own error.")
+        seen.add(id(cause))
+        cause = cause.__cause__
+    if not isinstance(error, RuntimeError) or ds is None:
+        return None
+    # Imported at call time, because `io_handlers` imports this module.
+    from .io_handlers import _IMAGECODECS_FALLBACK_SYNTAXES  # pylint: disable=import-outside-toplevel
+    try:
+        # The lookup is inside the `try` because this runs in an `except`:
+        # `get_decoder` raises `NotImplementedError` for a syntax no
+        # decoder implements, and an exception escaping here would
+        # replace the failure being reported. That file is not this
+        # case's: no plugin would read it.
+        tsyntax = ds.file_meta.TransferSyntaxUID
+        if str(tsyntax) in _IMAGECODECS_FALLBACK_SYNTAXES:
+            # The fallback reads this syntax, and it was asked or would
+            # have been: a refusal here is on what the file holds.
+            return None
+        decoder = get_decoder(tsyntax)
+        if decoder.is_available:
+            return None
+        # `_decode_pixels` refuses three shapes before it asks pydicom
+        # anything, and the caller's `decoder_asked` is set before that
+        # call, so it does not tell them apart. Such a file is refused on
+        # what it holds whatever is installed.
+        if h.refusal_before_decode(ds) is not None:
+            return None
+        listed = "; ".join(str(item) for item in decoder.missing_dependencies)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    words = "no installed pydicom plugin reads this transfer syntax."
+    if listed:
+        words += f" pydicom lists: {listed}."
+    return words
 
 
 def _log_memory_only_refusal(uid):
@@ -1893,8 +2019,18 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-                when the instance carries no pixel element. A frame that
-                could not be decoded is not None: it raises.
+                when the instance carries no pixel element. From a file,
+                that is decided by the dataset alone: None when it was
+                read and holds none of Pixel Data (7FE0,0010), Float
+                Pixel Data (7FE0,0008) and Double Float Pixel Data
+                (7FE0,0009), whatever its transfer syntax, and never
+                because of what a failure's message says. A frame that
+                could not be decoded is not None: it raises. So does a
+                file with no pixel element whose pixels are elsewhere,
+                where pydicom has no decoder for its transfer syntax:
+                one that holds Pixel Data Provider URL (0028,7FE0)
+                at the top level, or
+                is under a JPIP Referenced syntax.
 
         Raises:
             RuntimeError: If loading fails due to transfer syntax issues,
@@ -2015,6 +2151,10 @@ class Instance(DicomItem):
             try:
                 # Read pixel data on demand
                 ds = None
+                # Whether a decoder was asked at all. A refusal this door
+                # makes before that is about the file, and gets no advice
+                # about a decoder (`_missing_decoder_words`).
+                decoder_asked = False
                 try:
                     # `force=True`, and it must stay: the eager read and
                     # this lazy re-read are two reads of the *same*
@@ -2029,7 +2169,7 @@ class Instance(DicomItem):
                     # The cost: if `file_path` has since been replaced by
                     # a file that is not DICOM at all, forcing parses it
                     # to a dataset with no pixel element, so the
-                    # `any(t in ds ...)` guard below returns None rather
+                    # `_holds_a_pixel_element` guard below returns None rather
                     # than raising -- no decode is ever attempted. That is
                     # the one exception to "could not decode is not None",
                     # for a population a forcing ingest had already
@@ -2044,15 +2184,13 @@ class Instance(DicomItem):
                     # a row. A read door has no row to write, so it
                     # refuses both directions here.
                     #
-                    # The wording trap. This rides the outer `except`
-                    # into "Lazy load failed for instance <uid>:
-                    # RuntimeError: ...", and on the
-                    # way it passes two message matches: "no pixel data"
-                    # (just below) turns into `return None`, a silent
-                    # nothing, and "decompress" / "missing dependencies"
-                    # turn into the codecs-missing message. The helper's
-                    # "<table> names N frames; NumberOfFrames declares M"
-                    # contains none of them. Do not reword it into one.
+                    # This rides the outer `except` into "Lazy load
+                    # failed for instance <uid>: RuntimeError: ...". No
+                    # word of it is load-bearing on the way: "no pixels"
+                    # is decided by asking the dataset since #1093, and
+                    # the codecs-missing message from state since #623, so
+                    # a refusal made here, before any decoder is asked,
+                    # never gets that advice.
                     mismatch = h.frame_count_mismatch(ds)
                     if mismatch is not None:
                         raise RuntimeError(mismatch)
@@ -2075,6 +2213,7 @@ class Instance(DicomItem):
                     # exists to catch, and a snapshot taken after would
                     # already contain it and never be tested.
                     snapshot = dict(self.attributes)
+                    decoder_asked = True
                     arr, decoded = _decode_from_file(ds)
                     relabel = (str(decoded) if decoded is not None
                                and str(decoded) != declared else None)
@@ -2157,25 +2296,57 @@ class Instance(DicomItem):
                     # RuntimeError raised here would either duplicate that
                     # message or bypass the codecs-missing message.
                     #
-                    # `ds is not None` sends `dcmread`'s own AttributeError
-                    # /TypeError to `return None` deliberately: that is a
-                    # different failure from a failed decode.
-                    #
-                    # The disable is about `ds`'s inferred type, not about
-                    # the membership test: pylint sees the `ds = None`
-                    # initialiser above the inner `try` and cannot narrow it
-                    # past the `is not None` guard. `Dataset` implements
-                    # `__contains__`.
-                    if ds is not None and any(
-                            t in ds  # pylint: disable=unsupported-membership-test
-                            for t in (0x7FE00010, 0x7FE00008, 0x7FE00009)):
+                    # **What this arm does that the next does not**, now
+                    # that both ask the dataset. With a dataset read, the
+                    # two differ in one thing: this one does not ask
+                    # `_pixels_are_elsewhere`, so a dataset with no pixel
+                    # element that names a Pixel Data Provider URL under a
+                    # syntax pydicom decodes reads as None here, as it did
+                    # before #1093 (kept as it was; not judged right).
+                    # With no dataset -- `dcmread` itself raised one of
+                    # these two classes -- this one returns None and the
+                    # next raises. That too is as it was, deliberately at
+                    # the time: a different failure from a failed decode.
+                    # No file is known to reach it; a patched `dcmread`
+                    # pins it.
+                    if ds is not None and _holds_a_pixel_element(ds):
                         raise
                     return None
-                except Exception as e:
-                    if "no pixel data" in str(e).lower():
+                except Exception:
+                    # The same question, for every other class (#1093). A
+                    # dataset that was read and holds no pixel element has
+                    # no pixels whatever was raised on the way to finding
+                    # that out: under a transfer syntax no decoder
+                    # implements pydicom raises `NotImplementedError`
+                    # before it looks for the element, and a report in
+                    # such a file failed its export over pixels it does
+                    # not hold.
+                    #
+                    # **Unless its pixels are elsewhere.** A JPIP
+                    # Referenced image has no pixel element either, and
+                    # pydicom has no decoder for its syntax, so it arrives
+                    # here looking like that report. It is refused as it
+                    # was before #1093, by two facts about the dataset
+                    # (`_pixels_are_elsewhere`): nothing about a file that
+                    # names a provider URL or a JPIP Referenced syntax
+                    # moved with this arm.
+                    #
+                    # Never the message. Until #1093 this arm returned None
+                    # for any failure whose text held "no pixel data", and
+                    # a file can write its own text there: pydicom quotes
+                    # the Photometric Interpretation and the Transfer
+                    # Syntax UID it refuses, and an `OSError` repeats the
+                    # path. A file holding Pixel Data that failed to decode
+                    # read as an instance without pixels.
+                    #
+                    # `ds is None` raises here, unlike the arm above: no
+                    # dataset was read, so there is nothing to ask, and a
+                    # source that is there and cannot be opened is a
+                    # failure the caller hears about.
+                    if (ds is not None and not _holds_a_pixel_element(ds)
+                            and not _pixels_are_elsewhere(ds)):
                         return None
-                    # Re-raise to be handled by outer except
-                    raise e
+                    raise
 
             except Exception as e:
                 # No second decoder here: a fallback at this point would
@@ -2189,40 +2360,24 @@ class Instance(DicomItem):
                 if ds is not None and hasattr(ds, "file_meta"):
                     ts_uid = getattr(ds.file_meta, "TransferSyntaxUID", "Unknown")
 
-                # The advice names a remedy for a codec that is missing,
-                # so it follows pydicom's "missing dependencies" or
-                # "decompress" words only when no codec decoded the file:
-                # not when imagecodecs was asked and refused it on what it
-                # holds ("imagecodecs could not decode it either: <why>"),
-                # where installing pillow, pylibjpeg or gdcm changes
-                # nothing -- unless the why is that imagecodecs is not
-                # available, which is a missing codec.
-                words = str(e)
-                if (("missing dependencies" in words or "decompress" in words)
-                        and ("imagecodecs could not decode it either: "
-                             not in words
-                             or "imagecodecs is not available" in words)):
-                    # Enhanced debug output
-                    handlers = []
-                    try:
-                        # pydicom is already imported globally
-                        handlers = [str(h) for h in pydicom.config.pixel_data_handlers]
-                    except AttributeError:
-                        # pydicom 4.0 removes pixel_data_handlers. This is
-                        # only decorating an error message, so an empty list
-                        # is fine -- but do not let it hide the real one.
-                        handlers = []
-
+                # The advice names a remedy for a decoder that is missing,
+                # so it is decided from what is missing and never from the
+                # failure's words (#623): a message that says "decompress"
+                # is not an installation with a decoder absent, and a file
+                # refused on what it holds is not helped by installing
+                # anything.
+                missing = (_missing_decoder_words(e, ds) if decoder_asked
+                           else None)
+                if missing is not None:
                     raise RuntimeError(
                         f"Failed to decompress pixel data for instance {self.sop_instance_uid} "
                         f"(Transfer Syntax: {ts_uid}).\n"
                         f"Underlying Error: {describe_exception_without_paths(e)}\n"
-                        f"Active pydicom handlers: {handlers}\n"
-                        "Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."
+                        f"Missing image codecs: {missing}"
                     ) from e
 
-                # If we just caught the re-raised "no pixel data" exception, it would be handled above,
-                # but if dcmread fails completely or something else happens:
+                # Everything that is left: `dcmread` failed, or a file
+                # holding a pixel element did not decode.
                 #
                 # Both messages here name the instance, never the source
                 # file, and spell `e` without paths. They reach the
