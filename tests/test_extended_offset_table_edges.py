@@ -201,7 +201,6 @@ def test_the_ragged_sentence_whole_and_what_it_does_not_hold(tmp_path):
         "Extended Offset Table is 12 bytes long, which is not a whole "
         "number of 8-byte offsets, so it names no whole number of frames.")
     assert "error:" not in words and "unpack" not in words
-    assert "no pixel data" not in words.lower()
 
 
 def test_a_well_formed_table_is_read_as_before(tmp_path):

@@ -396,14 +396,16 @@ def test_a_consistent_extended_offset_table_decodes_unchanged():
 # ---------------------------------------------------------------------------
 
 def test_a_file_backed_instance_refuses_the_mismatch_and_names_it(tmp_path):
-    """B1: the file_path arm, and the three wording traps on its way out.
+    """B1: the file_path arm, and what it once did to a refusal's words.
 
     Without a check ahead of the pydicom read, pydicom returned (2,4,4)
     for a one-frame header; and a refusal raised only by the handler is
     swallowed by the arm's fallback, which re-raises the *original* error.
-    The message must also avoid the phrases the arm rewrites: "no pixel
-    data" (turned into `return None`, a silent nothing) and "decompress"
-    / "missing dependencies" (turned into "Missing image codecs").
+    When this was written the message also had to avoid the phrases the
+    arm rewrote: "no pixel data" (turned into `return None`, a silent
+    nothing, until #1093) and "decompress" / "missing dependencies"
+    (turned into "Missing image codecs", until #623). Neither routes on
+    words now; the assertions stay as the outcome they were for.
     """
     path = _write(str(tmp_path), _dataset(2, 1))
     inst = Instance(generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
