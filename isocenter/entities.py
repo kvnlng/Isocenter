@@ -880,6 +880,23 @@ def _defer(notes, level, message, *args):
     notes.append((level, message, args))
 
 
+def _holds_a_pixel_element(ds) -> bool:
+    """Whether a dataset holds Pixel Data, Float or Double Float Pixel Data.
+
+    The one spelling of "does this file have pixels" at the read door
+    (#1093). Presence, never the value: a zero-length Pixel Data is a
+    pixel element that will not decode, which is a failure to report and
+    not an instance without pixels.
+
+    Args:
+        ds (pydicom.Dataset): The source file's dataset, as read.
+
+    Returns:
+        bool: True when (7FE0,0010), (7FE0,0008) or (7FE0,0009) is in it.
+    """
+    return any(tag in ds for tag in (0x7FE00010, 0x7FE00008, 0x7FE00009))
+
+
 def _decode_from_file(ds):
     """A file's pixels through ingest's own decode, and their colour space.
 
@@ -1964,7 +1981,12 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-                when the instance carries no pixel element. A frame that
+                when the instance carries no pixel element. From a file,
+                that is decided by the dataset alone: None when it was
+                read and holds none of Pixel Data (7FE0,0010), Float
+                Pixel Data (7FE0,0008) and Double Float Pixel Data
+                (7FE0,0009), whatever its transfer syntax, and never
+                because of what a failure's message says. A frame that
                 could not be decoded is not None: it raises.
 
         Raises:
@@ -2104,7 +2126,7 @@ class Instance(DicomItem):
                     # The cost: if `file_path` has since been replaced by
                     # a file that is not DICOM at all, forcing parses it
                     # to a dataset with no pixel element, so the
-                    # `any(t in ds ...)` guard below returns None rather
+                    # `_holds_a_pixel_element` guard below returns None rather
                     # than raising -- no decode is ever attempted. That is
                     # the one exception to "could not decode is not None",
                     # for a population a forcing ingest had already
@@ -2119,18 +2141,13 @@ class Instance(DicomItem):
                     # a row. A read door has no row to write, so it
                     # refuses both directions here.
                     #
-                    # The wording trap. This rides the outer `except`
-                    # into "Lazy load failed for instance <uid>:
-                    # RuntimeError: ...", and on the
-                    # way it passes one message match: "no pixel data"
-                    # (just below) turns into `return None`, a silent
-                    # nothing. The helper's
-                    # "<table> names N frames; NumberOfFrames declares M"
-                    # does not contain it. Do not reword it into one. (The
-                    # codecs-missing message was chosen by words too, until
-                    # #623; it is decided from state now, and a refusal
-                    # made here, before any decoder is asked, never gets
-                    # it.)
+                    # This rides the outer `except` into "Lazy load
+                    # failed for instance <uid>: RuntimeError: ...". No
+                    # word of it is load-bearing on the way: "no pixels"
+                    # is decided by asking the dataset since #1093, and
+                    # the codecs-missing message from state since #623, so
+                    # a refusal made here, before any decoder is asked,
+                    # never gets that advice.
                     mismatch = h.frame_count_mismatch(ds)
                     if mismatch is not None:
                         raise RuntimeError(mismatch)
@@ -2239,22 +2256,34 @@ class Instance(DicomItem):
                     # `ds is not None` sends `dcmread`'s own AttributeError
                     # /TypeError to `return None` deliberately: that is a
                     # different failure from a failed decode.
-                    #
-                    # The disable is about `ds`'s inferred type, not about
-                    # the membership test: pylint sees the `ds = None`
-                    # initialiser above the inner `try` and cannot narrow it
-                    # past the `is not None` guard. `Dataset` implements
-                    # `__contains__`.
-                    if ds is not None and any(
-                            t in ds  # pylint: disable=unsupported-membership-test
-                            for t in (0x7FE00010, 0x7FE00008, 0x7FE00009)):
+                    if ds is not None and _holds_a_pixel_element(ds):
                         raise
                     return None
-                except Exception as e:
-                    if "no pixel data" in str(e).lower():
+                except Exception:
+                    # The same question, for every other class (#1093). A
+                    # dataset that was read and holds no pixel element has
+                    # no pixels whatever was raised on the way to finding
+                    # that out: under a transfer syntax no decoder
+                    # implements pydicom raises `NotImplementedError`
+                    # before it looks for the element, and a report in
+                    # such a file failed its export over pixels it does
+                    # not hold.
+                    #
+                    # Never the message. Until #1093 this arm returned None
+                    # for any failure whose text held "no pixel data", and
+                    # a file can write its own text there: pydicom quotes
+                    # the Photometric Interpretation and the Transfer
+                    # Syntax UID it refuses, and an `OSError` repeats the
+                    # path. A file holding Pixel Data that failed to decode
+                    # read as an instance without pixels.
+                    #
+                    # `ds is None` raises here, unlike the arm above: no
+                    # dataset was read, so there is nothing to ask, and a
+                    # source that is there and cannot be opened is a
+                    # failure the caller hears about.
+                    if ds is not None and not _holds_a_pixel_element(ds):
                         return None
-                    # Re-raise to be handled by outer except
-                    raise e
+                    raise
 
             except Exception as e:
                 # No second decoder here: a fallback at this point would
@@ -2284,8 +2313,8 @@ class Instance(DicomItem):
                         f"Missing image codecs: {missing}"
                     ) from e
 
-                # If we just caught the re-raised "no pixel data" exception, it would be handled above,
-                # but if dcmread fails completely or something else happens:
+                # Everything that is left: `dcmread` failed, or a file
+                # holding a pixel element did not decode.
                 #
                 # Both messages here name the instance, never the source
                 # file, and spell `e` without paths. They reach the

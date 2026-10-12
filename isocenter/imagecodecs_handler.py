@@ -900,9 +900,8 @@ def bit_packed_excess_words(ds) -> Optional[str]:
         return None
     of = (f"{rows}x{cols}" if samples == 1
           else f"{rows}x{cols} with {samples} samples per pixel")
-    # The read door turns a message holding "no pixel data" into `return
-    # None`; "Pixel Data holds" is not that. Numbers only: no path, no
-    # byte of the file, nothing an interpreter worded.
+    # Numbers only: no path, no byte of the file, nothing an interpreter
+    # worded.
     return (f"Pixel Data holds {held} bytes, room for {room} frames of {of} "
             f"at one bit per sample, where NumberOfFrames is read as "
             f"{declared} and {'it needs' if declared == 1 else 'they need'} "
@@ -950,12 +949,11 @@ def frame_count_mismatch(ds) -> Optional[str]:
         when they agree or cannot be compared (see
         `offset_table_frame_count`).
     """
-    # The wording is load-bearing for `Instance.get_pixel_data`: its file
-    # arm turns a message containing "no pixel data" into `return None`.
-    # "names N frames; NumberOfFrames declares M" does not contain it;
-    # keep it that way. (The codecs-missing message was chosen by
-    # "decompress" or "missing dependencies" until #623, and is decided
-    # from state now.)
+    # No word here is load-bearing for `Instance.get_pixel_data`, which
+    # raises this from its file arm. That arm chose "no pixels" by "no
+    # pixel data" in a message until #1093, and the codecs-missing
+    # message by "decompress" or "missing dependencies" until #623; it
+    # asks the dataset for the first and the installation for the second.
     counted = offset_table_frame_count(ds)
     if counted is None or counted[0] == counted[1]:
         return None

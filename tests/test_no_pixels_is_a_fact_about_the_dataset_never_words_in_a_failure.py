@@ -50,8 +50,9 @@ from support.decode_doors import (  # pylint: disable=unused-import
 IMPLICIT_LE = "1.2.840.10008.1.2"
 JPEG_BASELINE = "1.2.840.10008.1.2.4.50"
 RLE = "1.2.840.10008.1.2.5"
-#: A transfer syntax no decoder implements, and no word of the predicate.
+#: Two transfer syntaxes no decoder implements, and no word of the predicate.
 PRIVATE_TS = "1.2.840.113619.5.2"
+MPEG2 = "1.2.840.10008.1.2.4.100"
 #: The words, in the two cases a header value can hold them.
 WORDS = ["NO PIXEL DATA", "no pixel data"]
 PIXEL_TAGS = (0x7FE00010, 0x7FE00008, 0x7FE00009)
@@ -145,6 +146,32 @@ def test_a_transfer_syntax_uid_holding_the_words_is_refused_as_any_unknown_one_i
     assert inst.pixel_array is None
 
 
+@pytest.mark.parametrize("keyword, value", [
+    ("PixelData", b""),
+    ("FloatPixelData", np.zeros(16, dtype=np.float32).tobytes()),
+    ("DoubleFloatPixelData", np.zeros(16, dtype=np.float64).tobytes()),
+], ids=["an-empty-pixel-data", "float-pixel-data", "double-float-pixel-data"])
+def test_each_of_the_three_elements_is_a_pixel_element_and_presence_is_what_counts(
+        tmp_path, keyword, value):
+    """A file holding any one of the three is refused, never read as None.
+
+    Under the private syntax, so the refusal arrives in the arm #1093
+    changed. An empty Pixel Data is still a pixel element: the question
+    is whether the file holds one, not whether it holds samples. Green
+    on e7c05a63; red if the question drops an element or asks the value.
+    """
+    ds = _image(ts=PRIVATE_TS, pixels=False)
+    setattr(ds, keyword, value)
+    path = _write(tmp_path, ds)
+    on_disk = pydicom.dcmread(path, force=True)
+    assert [tag in on_disk for tag in PIXEL_TAGS].count(True) == 1
+    uid, got, _inst = _read(path)
+    _refused(got, uid,
+             f"NotImplementedError: Unable to decode the pixel data as a "
+             f"(0002,0010) 'Transfer Syntax UID' value of '{PRIVATE_TS}' is "
+             f"not supported")
+
+
 @pytest.mark.parametrize("folder", ["No Pixel Data", "Other"])
 def test_a_path_holding_the_words_is_refused_as_any_unreadable_source_is(
         tmp_path, folder):
@@ -163,6 +190,35 @@ def test_a_path_holding_the_words_is_refused_as_any_unreadable_source_is(
     uid, got, _inst = _read(path)
     _refused(got, uid, "IsADirectoryError: Is a directory")
     assert folder not in str(got)
+
+
+@pytest.mark.parametrize("raised, reads_as_none", [
+    (AttributeError("no dataset"), True),
+    (TypeError("no dataset"), True),
+    (ValueError("no dataset"), False),
+    (ValueError("no pixel data"), False),
+])
+def test_a_read_that_fails_before_there_is_a_dataset_keeps_its_two_answers(
+        tmp_path, monkeypatch, raised, reads_as_none):
+    """`dcmread` itself failing: None for two classes, as before, by class.
+
+    The one case that is not the dataset's answer, kept as it was: an
+    `AttributeError` or `TypeError` out of `dcmread` reads as None. Every
+    other class raises, whatever its message says. Patched, because no
+    file is known to make `dcmread(force=True)` raise either class; the
+    real `OSError` is the directory test above.
+    """
+    path = _write(tmp_path, _image())
+
+    def _fails(*_args, **_kwargs):
+        raise raised
+
+    monkeypatch.setattr(pydicom, "dcmread", _fails)
+    uid, got, _inst = _read(path)
+    if reads_as_none:
+        assert got is None
+    else:
+        _refused(got, uid, f"ValueError: {raised}")
 
 
 def _export_after_the_source_became_unreadable(tmp_path, folder):
@@ -232,6 +288,68 @@ def test_a_file_with_no_pixel_element_reads_as_none_under_every_decoded_syntax(
     _uid, got, inst = _read(path)
     assert got is None
     assert inst.pixel_array is None
+
+
+@pytest.mark.parametrize("ts", [MPEG2, PRIVATE_TS, "NO PIXEL DATA"])
+def test_a_file_with_no_pixel_element_reads_as_none_under_a_syntax_no_decoder_reads(
+        tmp_path, ts):
+    """The dataset answers in the other arm too (owner ruling, option A).
+
+    Under a transfer syntax no decoder implements pydicom raises
+    `NotImplementedError`, not `AttributeError`, before it looks for the
+    element. On e7c05a63 that read raised `Lazy load failed ...: Unable
+    to decode the pixel data ...` about pixels the file does not hold --
+    red there for MPEG2 and the private syntax -- unless the UID spelled
+    the words, which returned None then and does now, by the dataset.
+    The control is the same syntax over a file that holds Pixel Data:
+    `test_a_transfer_syntax_uid_holding_the_words_is_refused_as_any_unknown_one_is`.
+    """
+    path = _write(tmp_path, _image(ts=ts, pixels=False))
+    assert not _holds_a_pixel_element(path)
+    with pytest.raises(NotImplementedError):
+        _ = pydicom.dcmread(path).pixel_array
+    _uid, got, inst = _read(path)
+    assert got is None
+    assert inst.pixel_array is None
+
+
+@pytest.mark.parametrize("compressed", [True, False])
+@pytest.mark.parametrize("ts", [MPEG2, PRIVATE_TS])
+def test_an_instance_with_no_pixels_exports_whatever_syntax_its_source_named(
+        tmp_path, ts, compressed):
+    """A report is not failed for a decoder its pixels would have needed.
+
+    Ingest admits the file: it holds nothing to decode. On e7c05a63 its
+    export then failed, `0 of 1`, with one `ERROR` row ending `Unable to
+    decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value
+    of '...' is not supported`. Red there. It is written as every file
+    with no pixels is, Implicit VR Little Endian, and what was written
+    is ingested again.
+    """
+    src = os.path.join(str(tmp_path), "src")
+    _write(src, _image(ts=ts, pixels=False))
+    db = os.path.join(str(tmp_path), "s.db")
+    out = os.path.join(str(tmp_path), "out")
+    with DicomSession(persistence_file=db) as session:
+        summary = session.ingest(src)
+        assert summary.ingested == 1 and not summary.failures
+        session.export(out, format="dicom", use_compression=compressed,
+                       show_progress=False)
+    written = [os.path.join(root, name)
+               for root, _dirs, names in os.walk(out) for name in names]
+    assert len(written) == 1, written
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT details FROM audit_log WHERE "
+                            "action_type = 'ERROR'").fetchall() == []
+    exported = pydicom.dcmread(written[0])
+    assert str(exported.file_meta.TransferSyntaxUID) == IMPLICIT_LE
+    assert not any(tag in exported for tag in PIXEL_TAGS)
+    assert exported.Modality == "OT"
+
+    with DicomSession(persistence_file=os.path.join(
+            str(tmp_path), "again.db")) as session:
+        summary = session.ingest(out)
+        assert summary.ingested == 1 and not summary.failures
 
 
 def test_the_same_file_with_its_pixel_element_reads_an_array(tmp_path):

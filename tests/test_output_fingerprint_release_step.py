@@ -195,6 +195,10 @@ COMMITTED = {
         "multi_valued_series_fields-series-number.dcm"],
     "no_patient_id": ["no_patient_id-s1-1.dcm", "no_patient_id-s2-1.dcm",
                       "no_patient_id-s3-1.dcm"],
+    "no_pixels_under_an_undecodable_syntax": [
+        "no_pixels_under_an_undecodable_syntax-good.dcm",
+        "no_pixels_under_an_undecodable_syntax-mpeg2.dcm",
+        "no_pixels_under_an_undecodable_syntax-private.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
     "number_vr_on_a_date_or_time": ["number_vr_on_a_date_or_time-1.dcm"],
     "offset_table_edges": ["offset_table_edges-agreeing-rle.dcm",

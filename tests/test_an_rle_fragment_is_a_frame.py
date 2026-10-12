@@ -308,7 +308,8 @@ def test_the_read_door_refuses_the_same_file_in_the_same_words(tmp_path):
         _read_door(path)
 
     assert ROW_WORDS_2 in str(caught.value), str(caught.value)
-    # Not routed into the "no codec" or "no pixel data" arms by its words.
+    # Not given the codecs-missing advice. (No words route there since
+    # #623, nor into `return None` since #1093.)
     assert "missing dependencies" not in str(caught.value)
 
 
