@@ -910,9 +910,14 @@ def _pixels_are_elsewhere(ds) -> bool:
     """Whether a dataset says its pixels exist and are not in the file.
 
     Two facts, either one enough: it holds Pixel Data Provider URL
-    (0028,7FE0), or its file meta names a JPIP Referenced transfer
-    syntax. Such a file has no pixel element and is not an instance
-    without pixels: read as one, it would be exported with the URL and
+    (0028,7FE0) at the top level, or its file meta names a JPIP
+    Referenced transfer syntax. The top level only, by owner ruling of
+    2026-10-12: PS3.5 8.2 puts the URL in the top-level data set, and
+    `_holds_a_pixel_element` asks there too. A URL inside a sequence
+    item says nothing of this data set's pixels and is not looked for.
+
+    A file of which either is true has no pixel element and is not an
+    instance without pixels: read as one, it would be exported with the URL and
     no pixels as though whole, and `redact()` would pass over an image
     whose zones were never applied (owner ruling of 2026-10-12, review
     of #1096).
@@ -2023,7 +2028,8 @@ class Instance(DicomItem):
                 could not be decoded is not None: it raises. So does a
                 file with no pixel element whose pixels are elsewhere,
                 where pydicom has no decoder for its transfer syntax:
-                one that holds Pixel Data Provider URL (0028,7FE0), or
+                one that holds Pixel Data Provider URL (0028,7FE0)
+                at the top level, or
                 is under a JPIP Referenced syntax.
 
         Raises:
@@ -2301,8 +2307,8 @@ class Instance(DicomItem):
                     # these two classes -- this one returns None and the
                     # next raises. That too is as it was, deliberately at
                     # the time: a different failure from a failed decode.
-                    # A damaged file can reach it, and such a file may
-                    # hold Pixel Data.
+                    # No file is known to reach it; a patched `dcmread`
+                    # pins it.
                     if ds is not None and _holds_a_pixel_element(ds):
                         raise
                     return None

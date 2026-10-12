@@ -206,12 +206,11 @@ def test_a_read_that_fails_before_there_is_a_dataset_keeps_its_two_answers(
     The one case that is not the dataset's answer, kept as it was: an
     `AttributeError` or `TypeError` out of `dcmread` reads as None. Every
     other class raises, whatever its message says. Patched, so that each
-    class is asked alone and by class. A damaged file can reach the
-    `TypeError` (the review of #1096 found one among mutated copies of
-    pydicom's bundled files), and such a file may hold Pixel Data: None
-    is not a fact about it. The case is kept as it was by the owner's
-    ruling, not judged right here. The real `OSError` is the directory
-    test above.
+    class is asked alone and by class: no file is known to make
+    `dcmread(force=True)` raise either class when read by its path
+    (18,548 damaged copies of pydicom's bundled files were read in the
+    review of #1096 and none did), so the case is pinned by this patch
+    only. The real `OSError` is the directory test above.
     """
     path = _write(tmp_path, _image())
 
@@ -528,6 +527,76 @@ def test_an_empty_provider_url_still_says_the_pixels_are_elsewhere(
     assert 0x00287FE0 in held and not held.PixelDataProviderURL
     uid, got, _inst = _read(path)
     _refused(got, uid, _not_supported(ts))
+
+
+def _url_in_an_item_only(ts):
+    """The header with no URL of its own and one inside a sequence item."""
+    ds = _elsewhere(ts, url=False)
+    item = Dataset()
+    item.ReferencedSOPClassUID = SOP_CLASS
+    item.ReferencedSOPInstanceUID = generate_uid()
+    item.PixelDataProviderURL = URL
+    ds.SourceImageSequence = [item]
+    return ds
+
+
+def test_a_url_inside_a_sequence_item_is_not_the_data_sets_own(tmp_path):
+    """The URL is asked for at the top level only (owner ruling, 2026-10-12).
+
+    PS3.5 8.2 puts the provider URL in the top-level data set, and the
+    three pixel elements are asked for there too. A URL inside an item
+    says nothing of this data set's pixels: under MPEG2 the file has no
+    pixels and is written, the item and its URL with it. It raised
+    before #1093, when every such file did. The controls: the same URL
+    at the top level is refused
+    (`test_a_file_whose_pixels_are_elsewhere_is_refused_as_it_was`), and
+    the same file under a JPIP Referenced syntax is refused by the
+    syntax.
+    """
+    path = _write(tmp_path, _url_in_an_item_only(MPEG2))
+    held = pydicom.dcmread(path, force=True)
+    assert 0x00287FE0 not in held
+    assert held.SourceImageSequence[0].PixelDataProviderURL == URL
+    _uid, got, _inst = _read(path)
+    assert got is None
+
+    src = os.path.join(str(tmp_path), "src")
+    _write(src, _url_in_an_item_only(MPEG2))
+    out = os.path.join(str(tmp_path), "out")
+    with DicomSession(persistence_file=os.path.join(str(tmp_path), "s.db")) as session:
+        assert session.ingest(src).ingested == 1
+        session.export(out, format="dicom", show_progress=False)
+    written = [os.path.join(root, name)
+               for root, _dirs, names in os.walk(out) for name in names
+               if name.endswith(".dcm")]
+    assert len(written) == 1
+    back = pydicom.dcmread(written[0])
+    assert 0x00287FE0 not in back and not _holds_a_pixel_element(written[0])
+    assert back.SourceImageSequence[0].PixelDataProviderURL == URL
+
+    jpip = _write(tmp_path, _url_in_an_item_only(JPIP[0]), "jpip.dcm")
+    uid, got, _inst = _read(jpip)
+    _refused(got, uid, _not_supported(JPIP[0]))
+
+
+def test_the_one_file_holding_the_url_that_moves_spelled_the_words(tmp_path):
+    """Transfer Syntax UID `NO PIXEL DATA`, the URL held, no pixel element.
+
+    The one shape holding (0028,7FE0) that is not as it was (accepted by
+    the owner, 2026-10-12). Before #1093 it read as None by the words in
+    pydicom's refusal of that UID, and was exported with its URL and no
+    pixels; it is refused now, as the same file is under any other UID no
+    decoder reads. The control is the same file without the URL, which
+    has no pixels and reads as None, before by the words and now by the
+    dataset.
+    """
+    words = "NO PIXEL DATA"
+    path = _write(tmp_path, _elsewhere(words))
+    uid, got, _inst = _read(path)
+    _refused(got, uid, _not_supported(words))
+    _uid, got, _inst = _read(
+        _write(tmp_path, _elsewhere(words, url=False), "control.dcm"))
+    assert got is None
 
 
 @pytest.mark.parametrize("ts", JPIP[:2] + [MPEG2])
