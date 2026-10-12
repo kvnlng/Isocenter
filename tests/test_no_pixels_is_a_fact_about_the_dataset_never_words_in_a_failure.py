@@ -208,8 +208,9 @@ def test_a_read_that_fails_before_there_is_a_dataset_keeps_its_two_answers(
     other class raises, whatever its message says. Patched, so that each
     class is asked alone and by class: no file is known to make
     `dcmread(force=True)` raise either class when read by its path
-    (18,548 damaged copies of pydicom's bundled files were read in the
-    review of #1096 and none did), so the case is pinned by this patch
+    (the review of #1096 read 18,548 single-byte changes to one of
+    pydicom's bundled files, `image_dfl.dcm`: each of its 4637 offsets
+    set to four values; none did), so the case is pinned by this patch
     only. The real `OSError` is the directory test above.
     """
     path = _write(tmp_path, _image())
