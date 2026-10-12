@@ -897,6 +897,39 @@ def _holds_a_pixel_element(ds) -> bool:
     return any(tag in ds for tag in (0x7FE00010, 0x7FE00008, 0x7FE00009))
 
 
+#: The transfer syntaxes whose pixels are on a JPIP server and never in
+#: the file: JPIP Referenced and JPIP Referenced Deflate, and their HTJ2K
+#: twins. Written here, not read from pydicom, whose names for them
+#: differ between releases.
+_JPIP_REFERENCED_SYNTAXES = frozenset({
+    "1.2.840.10008.1.2.4.94", "1.2.840.10008.1.2.4.95",
+    "1.2.840.10008.1.2.4.204", "1.2.840.10008.1.2.4.205"})
+
+
+def _pixels_are_elsewhere(ds) -> bool:
+    """Whether a dataset says its pixels exist and are not in the file.
+
+    Two facts, either one enough: it holds Pixel Data Provider URL
+    (0028,7FE0), or its file meta names a JPIP Referenced transfer
+    syntax. Such a file has no pixel element and is not an instance
+    without pixels: read as one, it would be exported with the URL and
+    no pixels as though whole, and `redact()` would pass over an image
+    whose zones were never applied (owner ruling of 2026-10-12, review
+    of #1096).
+
+    Args:
+        ds (pydicom.Dataset): The source file's dataset, as read.
+
+    Returns:
+        bool: True for either fact. Presence of the element, never its
+        value: an empty URL still says the pixels are elsewhere.
+    """
+    if 0x00287FE0 in ds:
+        return True
+    tsyntax = (getattr(ds, "file_meta", None) or {}).get("TransferSyntaxUID")
+    return str(tsyntax) in _JPIP_REFERENCED_SYNTAXES
+
+
 def _decode_from_file(ds):
     """A file's pixels through ingest's own decode, and their colour space.
 
@@ -1987,7 +2020,11 @@ class Instance(DicomItem):
                 Pixel Data (7FE0,0008) and Double Float Pixel Data
                 (7FE0,0009), whatever its transfer syntax, and never
                 because of what a failure's message says. A frame that
-                could not be decoded is not None: it raises.
+                could not be decoded is not None: it raises. So does a
+                file with no pixel element whose pixels are elsewhere,
+                where pydicom has no decoder for its transfer syntax:
+                one that holds Pixel Data Provider URL (0028,7FE0), or
+                is under a JPIP Referenced syntax.
 
         Raises:
             RuntimeError: If loading fails due to transfer syntax issues,
@@ -2253,9 +2290,19 @@ class Instance(DicomItem):
                     # RuntimeError raised here would either duplicate that
                     # message or bypass the codecs-missing message.
                     #
-                    # `ds is not None` sends `dcmread`'s own AttributeError
-                    # /TypeError to `return None` deliberately: that is a
-                    # different failure from a failed decode.
+                    # **What this arm does that the next does not**, now
+                    # that both ask the dataset. With a dataset read, the
+                    # two differ in one thing: this one does not ask
+                    # `_pixels_are_elsewhere`, so a dataset with no pixel
+                    # element that names a Pixel Data Provider URL under a
+                    # syntax pydicom decodes reads as None here, as it did
+                    # before #1093 (kept as it was; not judged right).
+                    # With no dataset -- `dcmread` itself raised one of
+                    # these two classes -- this one returns None and the
+                    # next raises. That too is as it was, deliberately at
+                    # the time: a different failure from a failed decode.
+                    # A damaged file can reach it, and such a file may
+                    # hold Pixel Data.
                     if ds is not None and _holds_a_pixel_element(ds):
                         raise
                     return None
@@ -2269,6 +2316,15 @@ class Instance(DicomItem):
                     # such a file failed its export over pixels it does
                     # not hold.
                     #
+                    # **Unless its pixels are elsewhere.** A JPIP
+                    # Referenced image has no pixel element either, and
+                    # pydicom has no decoder for its syntax, so it arrives
+                    # here looking like that report. It is refused as it
+                    # was before #1093, by two facts about the dataset
+                    # (`_pixels_are_elsewhere`): nothing about a file that
+                    # names a provider URL or a JPIP Referenced syntax
+                    # moved with this arm.
+                    #
                     # Never the message. Until #1093 this arm returned None
                     # for any failure whose text held "no pixel data", and
                     # a file can write its own text there: pydicom quotes
@@ -2281,7 +2337,8 @@ class Instance(DicomItem):
                     # dataset was read, so there is nothing to ask, and a
                     # source that is there and cannot be opened is a
                     # failure the caller hears about.
-                    if ds is not None and not _holds_a_pixel_element(ds):
+                    if (ds is not None and not _holds_a_pixel_element(ds)
+                            and not _pixels_are_elsewhere(ds)):
                         return None
                     raise
 

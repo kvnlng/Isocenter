@@ -197,6 +197,7 @@ COMMITTED = {
                       "no_patient_id-s3-1.dcm"],
     "no_pixels_under_an_undecodable_syntax": [
         "no_pixels_under_an_undecodable_syntax-good.dcm",
+        "no_pixels_under_an_undecodable_syntax-jpip.dcm",
         "no_pixels_under_an_undecodable_syntax-mpeg2.dcm",
         "no_pixels_under_an_undecodable_syntax-private.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],

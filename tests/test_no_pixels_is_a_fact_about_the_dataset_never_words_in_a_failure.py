@@ -42,6 +42,7 @@ from pydicom.uid import generate_uid
 
 from isocenter.entities import Instance
 from isocenter.io_handlers import ExportError
+from isocenter.services import RedactionError
 from isocenter.session import DicomSession
 from support.decode_doors import (  # pylint: disable=unused-import
     EXPLICIT_LE, J2K_LOSSLESS, JPEGLS, LJPEG_SV1, SOP_CLASS, dataset,
@@ -204,9 +205,13 @@ def test_a_read_that_fails_before_there_is_a_dataset_keeps_its_two_answers(
 
     The one case that is not the dataset's answer, kept as it was: an
     `AttributeError` or `TypeError` out of `dcmread` reads as None. Every
-    other class raises, whatever its message says. Patched, because no
-    file is known to make `dcmread(force=True)` raise either class; the
-    real `OSError` is the directory test above.
+    other class raises, whatever its message says. Patched, so that each
+    class is asked alone and by class. A damaged file can reach the
+    `TypeError` (the review of #1096 found one among mutated copies of
+    pydicom's bundled files), and such a file may hold Pixel Data: None
+    is not a fact about it. The case is kept as it was by the owner's
+    ruling, not judged right here. The real `OSError` is the directory
+    test above.
     """
     path = _write(tmp_path, _image())
 
@@ -447,3 +452,176 @@ def test_an_ingested_instance_with_no_pixel_element_reads_as_none_and_exports(
         report, image = _by_pixels(session)
         assert report.get_pixel_data() is None
         assert image.get_pixel_data().tolist() == SAMPLES.tolist()
+
+
+# ---------------------------------------------------------------------------
+# Pixels that are elsewhere are not "no pixels" (owner ruling, 2026-10-12)
+# ---------------------------------------------------------------------------
+#
+# A JPIP Referenced image holds no pixel element: its pixels are on a
+# server, named by (0028,7FE0) Pixel Data Provider URL. pydicom has no
+# decoder for its transfer syntax and raises `NotImplementedError`, which
+# is the arm #1093 opened. Read as "no pixels" the image would be
+# exported without its pixels, with the URL, graded PASS, and `redact()`
+# would return 0 over an image whose zones were never applied. It keeps
+# the refusal it had: no door, row, grade or byte moves for a dataset
+# that holds the URL or is under a JPIP Referenced syntax.
+
+JPIP = ["1.2.840.10008.1.2.4.94", "1.2.840.10008.1.2.4.95",
+        "1.2.840.10008.1.2.4.204", "1.2.840.10008.1.2.4.205"]
+URL = "http://jpip.example.test/server?target=T-1093&fsiz=4,4"
+SERIAL = "SN-1093"
+
+
+def _elsewhere(ts, url=True):
+    """A 4x4 image header with no pixel element, and the URL on request."""
+    ds = _image(ts=ts, pixels=False)
+    ds.Manufacturer, ds.ManufacturerModelName = "Acme", "Elsewhere"
+    ds.DeviceSerialNumber = SERIAL
+    if url:
+        ds.PixelDataProviderURL = URL
+    return ds
+
+
+def _not_supported(ts):
+    """pydicom's sentence for a transfer syntax it has no decoder for."""
+    return (f"NotImplementedError: Unable to decode the pixel data as a "
+            f"(0002,0010) 'Transfer Syntax UID' value of "
+            f"'{pydicom.uid.UID(ts).name}' is not supported")
+
+
+#: `(transfer syntax, URL held)`: each half of the condition alone, and both.
+ELSEWHERE = ([(ts, True) for ts in JPIP] + [(ts, False) for ts in JPIP]
+             + [(MPEG2, True), (PRIVATE_TS, True)])
+
+
+@pytest.mark.parametrize("ts, url", ELSEWHERE)
+def test_a_file_whose_pixels_are_elsewhere_is_refused_as_it_was(
+        tmp_path, ts, url):
+    """The URL alone, a JPIP Referenced syntax alone, and both.
+
+    Red on 0a5bc8ac, where every one of these read as None. The control
+    is the same header under MPEG2 or the private syntax with no URL,
+    which reads as None:
+    `test_a_file_with_no_pixel_element_reads_as_none_under_a_syntax_no_decoder_reads`.
+    """
+    path = _write(tmp_path, _elsewhere(ts, url))
+    assert not _holds_a_pixel_element(path)
+    uid, got, inst = _read(path)
+    _refused(got, uid, _not_supported(ts))
+    assert inst.pixel_array is None
+
+
+@pytest.mark.parametrize("ts", JPIP[:2] + [MPEG2])
+def test_an_image_whose_pixels_are_elsewhere_is_not_exported_without_them(
+        tmp_path, ts):
+    """`export()` fails the instance, with its row, and the grade says so.
+
+    Red on 0a5bc8ac: the file was written with the URL and no pixels,
+    `(0012,0062) YES`, no row, graded PASS. For MPEG2 it is the URL
+    that decides; the same file without it is written
+    (`test_an_instance_with_no_pixels_exports_whatever_syntax_its_source_named`).
+    """
+    src = os.path.join(str(tmp_path), "src")
+    _write(src, _elsewhere(ts))
+    db = os.path.join(str(tmp_path), "s.db")
+    out = os.path.join(str(tmp_path), "out")
+    report = os.path.join(str(tmp_path), "report.md")
+    with DicomSession(persistence_file=db) as session:
+        summary = session.ingest(src)
+        assert summary.ingested == 1 and not summary.failures
+        session.anonymize(session.audit())
+        with pytest.raises(ExportError):
+            session.export(out, format="dicom", show_progress=False)
+        session.generate_report(report)
+    assert [name for _r, _d, names in os.walk(out) for name in names
+            if name.endswith(".dcm")] == []
+    with sqlite3.connect(db) as conn:
+        errors = [row[0] for row in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type = 'ERROR'")]
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("Export failed for instance ")
+    assert errors[0].endswith(_not_supported(ts)), errors[0]
+    with open(report, encoding="utf-8") as handle:
+        assert "| **Validation Status** | **REVIEW_REQUIRED** |" in handle.read()
+
+
+@pytest.mark.parametrize("ts, raises", [(JPIP[0], True), (JPIP[1], True),
+                                        (MPEG2, False)])
+def test_redact_does_not_pass_over_an_image_whose_pixels_are_elsewhere(
+        tmp_path, ts, raises):
+    """A matching zone that was never applied is a failure, not a 0.
+
+    Red on 0a5bc8ac for the two JPIP syntaxes: `redact()` returned 0
+    with no row. The control is the MPEG2 header with no URL, which has
+    no pixels to redact and returns 0.
+    """
+    src = os.path.join(str(tmp_path), "src")
+    _write(src, _elsewhere(ts, url=raises))
+    db = os.path.join(str(tmp_path), "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert session.ingest(src).ingested == 1
+        # The rule below matches this machine: without that the control's
+        # 0 would be "no rule applied", not "nothing to redact".
+        assert [series.equipment.device_serial_number
+                for patient in session.store.patients
+                for study in patient.studies
+                for series in study.series] == [SERIAL]
+        session.configuration.rules = [
+            {"serial_number": SERIAL, "redaction_zones": [[0, 2, 0, 2]]}]
+        if raises:
+            with pytest.raises(RedactionError):
+                session.redact(show_progress=False)
+        else:
+            assert session.redact(show_progress=False) == 0
+    with sqlite3.connect(db) as conn:
+        errors = [row[0] for row in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type = 'ERROR'")]
+    assert len(errors) == (1 if raises else 0), errors
+    if raises:
+        assert _not_supported(ts) in errors[0], errors[0]
+
+
+def test_a_url_under_a_syntax_pydicom_decodes_reads_as_it_did(tmp_path):
+    """Not this change's: the arm above answers it, as on main.
+
+    Under Explicit VR Little Endian pydicom raises `AttributeError` for a
+    dataset with no pixel element whether or not it names a provider, and
+    that arm read it as None before #1093 and does now. Pinned so that
+    the exception above is not widened into it unnoticed; whether that
+    answer is right is another question, and not this file's.
+    """
+    path = _write(tmp_path, _elsewhere(EXPLICIT_LE))
+    with pytest.raises(AttributeError):
+        _ = pydicom.dcmread(path).pixel_array
+    _uid, got, _inst = _read(path)
+    assert got is None
+
+
+# ---------------------------------------------------------------------------
+# "Whatever the decode raised", for a class no file is known to reach
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raised", [ValueError("x"), RuntimeError("x"),
+                                    KeyError("x"), OSError("x")])
+def test_the_dataset_answers_whatever_class_the_decode_raised(
+        tmp_path, monkeypatch, raised):
+    """The rule is any class, and every real file arrives with one.
+
+    A file with no pixel element reaches the second arm only through
+    `NotImplementedError`, so a rule narrowed to that class would pass
+    every other test here. Patched for the rest: None for a dataset with
+    no pixel element, a raise for one whose pixels are elsewhere.
+    """
+    from isocenter import entities  # pylint: disable=import-outside-toplevel
+
+    def _fails(_ds):
+        raise raised
+
+    monkeypatch.setattr(entities, "_decode_from_file", _fails)
+    _uid, got, _inst = _read(_write(tmp_path, _image(pixels=False)))
+    assert got is None
+    uid, got, _inst = _read(_write(tmp_path, _elsewhere(EXPLICIT_LE), "u.dcm"))
+    assert isinstance(got, RuntimeError)
+    assert str(got).startswith(f"Lazy load failed for instance {uid}: "
+                               f"{type(raised).__name__}")

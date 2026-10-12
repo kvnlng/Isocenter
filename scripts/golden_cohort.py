@@ -938,7 +938,15 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     supported`. A dataset holding none of (7FE0,0010), (7FE0,0008) and
     (7FE0,0009) has no pixels whatever the decode raised, and both are
     written. No other input with no pixel element names a transfer
-    syntax pydicom has no decoder for."""
+    syntax pydicom has no decoder for.
+
+    A fourth file, of a fourth patient, is the shape that rule does not
+    reach: a CT header under JPIP Referenced `1.2.840.10008.1.2.4.94`
+    with no pixel element and a Pixel Data Provider URL `(0028,7FE0)`.
+    Its pixels are on a server, not absent, so it is not written without
+    them: its export fails with the same sentence, naming `JPIP
+    Referenced`, as it did before #1093 (owner ruling of 2026-10-12).
+    It is here so that a change to that is seen."""
     member = "no_pixels_under_an_undecodable_syntax"
     write(ct(member, study=1, pid=f"GOLD-{member}-good"),
           out / f"{member}-good.dcm")
@@ -963,6 +971,11 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
         ds.EncapsulatedDocument = head + b"x" * (1000 - len(head))
         ds.EncapsulatedDocumentLength = 1000
         write(ds, out / f"{member}-{label}.dcm")
+    ds = ct(member, study=4, pid=f"GOLD-{member}-jpip",
+            syntax="1.2.840.10008.1.2.4.94")
+    del ds.PixelData
+    ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-jpip"
+    write(ds, out / f"{member}-jpip.dcm")
 
 
 MEMBERS = {f.__name__: f for f in (
