@@ -972,7 +972,8 @@ def test_charls_refuses_a_jpegls_stream_restated_below_what_it_holds():
                 _restated(plain, precision, lse)), (precision, lse)
 
 
-def test_a_restated_jpegls_stream_that_decodes_stays_inside_its_precision():
+def test_a_restated_jpegls_stream_that_decodes_stays_inside_its_precision(
+        tmp_path, pydicom_cannot):
     """The one rewrite CharLS decodes, and what the check makes of it (#684).
 
     An 8-bit JPEG-LS stream carries no LSE, so rewriting its precision
@@ -991,9 +992,10 @@ def test_a_restated_jpegls_stream_that_decodes_stays_inside_its_precision():
 
     So #671's check is *reached* for `.80` (this stream is decoded by
     the fallback and handed to it) and answers None, correctly: nothing
-    is beyond the stated precision. That the samples are not the ones
-    encoded is what a rewritten header does; no decoder here can tell,
-    and nothing reports it.
+    is beyond the stated precision. The whole run at the end says the
+    same from outside: stored as decoded, no row, `PASS`. That the
+    samples are not the ones encoded is what a rewritten header does; no
+    decoder here can tell, and nothing reports it.
 
     The last assertions are the gate itself, which until now returned
     its facts for `.80` in no test: handed an array that does hold a
@@ -1036,6 +1038,15 @@ def test_a_restated_jpegls_stream_that_decodes_stays_inside_its_precision():
         assert _samples_beyond_stream_precision(ds, beyond) == {
             "precision": 7, "stream": "JPEG-LS stream", "sample": 200,
             "limit": 127}
+
+    # And the whole run, on the fallback: stored as decoded, no row, PASS.
+    got = _run(tmp_path, dataset(JPEGLS, [stream], rows=8, cols=8,
+                                 bits_allocated=8, bits_stored=8),
+               pydicom_cannot)
+    assert got["stored"].tolist() == decoded.tolist()
+    assert not got["rows"], got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"], \
+        got["grade"]
 
 
 @pytest.mark.parametrize("pr, facts", [
