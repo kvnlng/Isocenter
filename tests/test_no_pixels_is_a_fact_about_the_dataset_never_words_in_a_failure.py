@@ -512,6 +512,24 @@ def test_a_file_whose_pixels_are_elsewhere_is_refused_as_it_was(
     assert inst.pixel_array is None
 
 
+@pytest.mark.parametrize("ts", [MPEG2, PRIVATE_TS])
+def test_an_empty_provider_url_still_says_the_pixels_are_elsewhere(
+        tmp_path, ts):
+    """Presence of (0028,7FE0) is what is asked, never its value.
+
+    As for the pixel elements: a file that holds the element with
+    nothing in it is refused, as it was before #1093. Without this a
+    rule that asked for a URL that is not empty passed every test here.
+    """
+    ds = _elsewhere(ts, url=False)
+    ds.PixelDataProviderURL = ""
+    path = _write(tmp_path, ds)
+    held = pydicom.dcmread(path, force=True)
+    assert 0x00287FE0 in held and not held.PixelDataProviderURL
+    uid, got, _inst = _read(path)
+    _refused(got, uid, _not_supported(ts))
+
+
 @pytest.mark.parametrize("ts", JPIP[:2] + [MPEG2])
 def test_an_image_whose_pixels_are_elsewhere_is_not_exported_without_them(
         tmp_path, ts):
