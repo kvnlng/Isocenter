@@ -134236,23 +134236,44 @@
       ],
       "rows": [
        [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
         "EXPORT",
         "<out:A.dicom-j2k>",
-        "DICOM export to <out:A.dicom-j2k>: wrote 3 of 3 planned instances from 3 patients.",
+        "DICOM export to <out:A.dicom-j2k>: wrote 3 of 4 planned instances from 4 patients.",
         null,
         null
        ],
        [
         "EXPORT",
         "<out:A.dicom>",
-        "DICOM export to <out:A.dicom>: wrote 3 of 3 planned instances from 3 patients.",
+        "DICOM export to <out:A.dicom>: wrote 3 of 4 planned instances from 4 patients.",
         null,
         null
        ],
        [
         "EXPORT",
         "<out:A.reopened.dicom>",
-        "DICOM export to <out:A.reopened.dicom>: wrote 3 of 3 planned instances from 3 patients.",
+        "DICOM export to <out:A.reopened.dicom>: wrote 3 of 4 planned instances from 4 patients.",
         null,
         null
        ],
@@ -134400,7 +134421,12 @@
         }
        },
        "result": {
-        "failures": [],
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
         "written": 3
        }
       },
@@ -134538,7 +134564,12 @@
         }
        },
        "result": {
-        "failures": [],
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
         "written": 3
        }
       },
@@ -134676,7 +134707,12 @@
         }
        },
        "result": {
-        "failures": [],
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
         "written": 3
        }
       },
@@ -134693,7 +134729,7 @@
       "ingest": {
        "declined": 0,
        "failures": [],
-       "ingested": 3,
+       "ingested": 4,
        "skipped": 0
       },
       "load_config": "ok",
@@ -134711,16 +134747,30 @@
       ],
       "rows": [
        [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
         "EXPORT",
         "<out:B.dicom-j2k>",
-        "DICOM export to <out:B.dicom-j2k>: wrote 3 of 3 planned instances from 3 patients.",
+        "DICOM export to <out:B.dicom-j2k>: wrote 3 of 4 planned instances from 4 patients.",
         null,
         null
        ],
        [
         "EXPORT",
         "<out:B.dicom>",
-        "DICOM export to <out:B.dicom>: wrote 3 of 3 planned instances from 3 patients.",
+        "DICOM export to <out:B.dicom>: wrote 3 of 4 planned instances from 4 patients.",
         null,
         null
        ]
@@ -134861,7 +134911,12 @@
         }
        },
        "result": {
-        "failures": [],
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
         "written": 3
        }
       },
@@ -134999,7 +135054,12 @@
         }
        },
        "result": {
-        "failures": [],
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
         "written": 3
        }
       }
@@ -135010,7 +135070,7 @@
       "ingest": {
        "declined": 0,
        "failures": [],
-       "ingested": 3,
+       "ingested": 4,
        "skipped": 0
       },
       "load_config": "ok"
@@ -135019,6 +135079,7 @@
    },
    "inputs": {
     "no_pixels_under_an_undecodable_syntax-good.dcm": "sha256:0bb1739a471d5ec33a8d510f45962d2045038f6834c7634979750f2631a21ca8",
+    "no_pixels_under_an_undecodable_syntax-jpip.dcm": "sha256:4941b93c52ccf631c6f15522367bd0eda42a0ee21801f536acdbe3b0f2f0977b",
     "no_pixels_under_an_undecodable_syntax-mpeg2.dcm": "sha256:8a677f2fdaf3e38cf00535079d8aac6f30d42d76c9dc7b167d3bd814dd9aa041",
     "no_pixels_under_an_undecodable_syntax-private.dcm": "sha256:3d00d7b38076500ede6fc5a9e47a8094a5aa942813da93fac91b1e50157ddf22"
    }
@@ -142327,12 +142388,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "6c741f2e6d14098445862a47f011d5e0348479fd",
+  "git_sha": "a169ada1244ce217b3e01f6c8bb417d37054165c",
   "isocenter_version": "1.0.0rc17",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 595
+  "seconds": 744
  },
  "schema": 1,
  "toolchain": {
