@@ -561,6 +561,7 @@ TARGETS = {
                                   "tests/test_offset_table_frame_count.py",
                                   "tests/test_extended_offset_table_edges.py",  # #621
                                   "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
+                                  "tests/test_no_pixels_is_a_fact_about_the_dataset_never_words_in_a_failure.py",  # #1093
                                   "tests/test_one_value_per_owned_tag.py",
                                   "tests/test_patient_level_remediation_reaches_instances.py",
                                   "tests/test_pixel_dtype_roundtrip.py",
@@ -911,6 +912,7 @@ TARGETS = {
                               "tests/test_ocr_workers_use_the_callers_tesseract.py",
                               "tests/test_offset_table_frame_count.py",
                               "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669: the icon arm ingests through a Session
+                              "tests/test_no_pixels_is_a_fact_about_the_dataset_never_words_in_a_failure.py",  # #1093: the export pair ingests through one
                               "tests/test_extended_offset_table_edges.py",  # #621: the twin tests ingest and export through one
                               "tests/test_one_value_per_owned_tag.py",
                               "tests/test_optimization.py",
@@ -1181,6 +1183,7 @@ TARGETS = {
                                "tests/test_offset_table_frame_count.py",
                                "tests/test_extended_offset_table_edges.py",  # #621
                                "tests/test_a_one_bit_frame_with_bytes_beyond_it_is_refused_in_our_words.py",  # #669
+                               "tests/test_no_pixels_is_a_fact_about_the_dataset_never_words_in_a_failure.py",  # #1093
                                "tests/test_one_value_per_owned_tag.py",
                                "tests/test_optimization.py",
                                "tests/test_parallel_contract.py",

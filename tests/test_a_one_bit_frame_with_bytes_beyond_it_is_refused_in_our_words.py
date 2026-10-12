@@ -171,16 +171,17 @@ def test_the_sentence_whole_for_two_cells():
 @pytest.mark.parametrize("rows, cols, frames, have", REFUSED[:6])
 def test_the_refusal_quotes_no_interpreter_and_trips_no_substring(
         rows, cols, frames, have):
-    """Numbers only, and not the words the read door turns into `None`.
+    """Numbers only: nothing an interpreter worded, and no path.
 
-    `Instance.get_pixel_data` reads a failure whose message holds "no
-    pixel data" as a file with no pixels and returns `None`.
+    Until #1093 `Instance.get_pixel_data` read a failure whose message
+    held "no pixel data" as a file with no pixels, and this test kept
+    the sentence clear of those words. That door asks the dataset now,
+    so the words are no longer asserted absent.
     """
     words = bit_packed_excess_words(_file(rows, cols, frames, _held(have)))
 
     assert "TypeError" not in words and "slice indices" not in words
     assert "__index__" not in words
-    assert "no pixel data" not in words.lower()
     assert "/" not in words and "\\" not in words
 
 

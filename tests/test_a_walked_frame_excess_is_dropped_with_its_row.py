@@ -250,9 +250,9 @@ def test_the_instance_door_refuses_a_walked_excess(tmp_path):
     inst = Instance(generate_uid(), SOP_CLASS, 1, file_path=path)
     with pytest.raises(RuntimeError) as exc:
         inst.get_pixel_data()
-    # The type and the words: the door's outer handler turns a message
-    # holding "no pixel data" into None, and "decompress" into the
-    # codecs-missing message.
+    # The type and the words. The door routed on a message's words once
+    # ("no pixel data" into None until #1093, "decompress" into the
+    # codecs-missing message until #623); it routes on neither now.
     assert FRAGMENTS_WORDS in str(exc.value), str(exc.value)
 
 

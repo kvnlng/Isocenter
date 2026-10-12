@@ -923,6 +923,61 @@ def fewer_fragments_than_frames(out: Path):
           out / f"{member}-short.dcm")
 
 
+def no_pixels_under_an_undecodable_syntax(out: Path):
+    """An ordinary CT and two Encapsulated PDFs of two other patients,
+    each with no pixel element, whose file meta names a transfer syntax
+    no decoder implements (#1093): MPEG2 Main Profile / Main Level
+    `1.2.840.10008.1.2.4.100`, and the private `1.2.840.113619.5.2`.
+    Both are written as Explicit VR Little Endian bytes, which is how
+    pydicom reads a dataset under either. Ingest admits them: there is
+    nothing to decode. The export then asked the source for pixels,
+    pydicom refused the transfer syntax before it looked for a pixel
+    element, and each instance failed with `Lazy load failed for
+    instance <uid>: NotImplementedError: Unable to decode the pixel data
+    as a (0002,0010) 'Transfer Syntax UID' value of '...' is not
+    supported`. A dataset holding none of (7FE0,0010), (7FE0,0008) and
+    (7FE0,0009) has no pixels whatever the decode raised, and both are
+    written. No other input with no pixel element names a transfer
+    syntax pydicom has no decoder for.
+
+    A fourth file, of a fourth patient, is the shape that rule does not
+    reach: a CT header under JPIP Referenced `1.2.840.10008.1.2.4.94`
+    with no pixel element and a Pixel Data Provider URL `(0028,7FE0)`.
+    Its pixels are on a server, not absent, so it is not written without
+    them: its export fails with the same sentence, naming `JPIP
+    Referenced`, as it did before #1093 (owner ruling of 2026-10-12).
+    It is here so that a change to that is seen."""
+    member = "no_pixels_under_an_undecodable_syntax"
+    write(ct(member, study=1, pid=f"GOLD-{member}-good"),
+          out / f"{member}-good.dcm")
+    for n, (label, syntax) in enumerate(
+            (("mpeg2", "1.2.840.10008.1.2.4.100"),
+             ("private", "1.2.840.113619.5.2")), start=2):
+        sop = uid(member, n, 1, 1)
+        ds = FileDataset(None, {}, file_meta=_meta(ENCAPSULATED_PDF, sop, syntax),
+                         preamble=b"\0" * 128)
+        ds.PatientID, ds.PatientName = f"GOLD-{member}-{label}", "GOLDEN^PDF"
+        ds.StudyInstanceUID = uid(member, n)
+        ds.SeriesInstanceUID = uid(member, n, 1)
+        ds.SOPInstanceUID, ds.SOPClassUID = sop, ENCAPSULATED_PDF
+        ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "DOC", 1, 1
+        ds.StudyDate, ds.StudyTime = "20230101", "120000"
+        ds.ContentDate, ds.ContentTime = "20230101", "120000"
+        ds.ConversionType = "WSD"
+        ds.BurnedInAnnotation = "NO"
+        ds.DocumentTitle = "GOLD report"
+        ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+        head = b"%PDF-1.4\n% GOLDEN^PDF 1960-01-01\n"
+        ds.EncapsulatedDocument = head + b"x" * (1000 - len(head))
+        ds.EncapsulatedDocumentLength = 1000
+        write(ds, out / f"{member}-{label}.dcm")
+    ds = ct(member, study=4, pid=f"GOLD-{member}-jpip",
+            syntax="1.2.840.10008.1.2.4.94")
+    del ds.PixelData
+    ds.PixelDataProviderURL = "http://jpip.invalid/golden?target=GOLD-jpip"
+    write(ds, out / f"{member}-jpip.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -933,7 +988,8 @@ MEMBERS = {f.__name__: f for f in (
     binary_number_vr_on_a_text_tag, multi_valued_series_fields,
     source_says_unmodified, linkage_key_not_text,
     sop_classes_in_the_file_meta, label_spelling, one_bit_excess,
-    offset_table_edges, fewer_fragments_than_frames)}
+    offset_table_edges, fewer_fragments_than_frames,
+    no_pixels_under_an_undecodable_syntax)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

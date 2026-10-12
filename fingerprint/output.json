@@ -134223,6 +134223,867 @@
     "no_patient_id-s3-1.dcm": "sha256:5485f88d5c1e886cff567ebdafc7d9eea67043291d0f691774bf3566629c7d5d"
    }
   },
+  "synthetic:no_pixels_under_an_undecodable_syntax": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 3 of 4 planned instances from 4 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 3 of 4 planned instances from 4 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 3 of 4 planned instances from 4 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {
+        "Subject_ANON_5c3886a6aa51301950cd167c/Study_2022-08-11_Study_63035/Series_1_DOC_Series_52536/2.25.146514388450505662270254294812371753134.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.146514388450505662270254294812371753134'",
+          "0008,0020": "DA/implicit '20220811'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5c3886a6aa51301950cd167c'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.325222156761068607273134290725873463035'",
+          "0020,000e": "UI/implicit '2.25.148042703260331981808209834667071352536'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.146514388450505662270254294812371753134'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        },
+        "Subject_ANON_864e6374459505122ff80e49/Study_2022-06-22__58402/Series_1_CT__06362/2.25.280542127305553856206523073977481505273.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.280542127305553856206523073977481505273'",
+          "0008,0020": "DA/implicit '20220622'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_864e6374459505122ff80e49'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.200937885221447012687430174202743758402'",
+          "0020,000e": "UI/implicit '2.25.194465427956397478031579579085318706362'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.272254547078253118836612955794154574779'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.280542127305553856206523073977481505273'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_b7e01f5db32e04fd69c3414b/Study_2022-05-29_Study_37890/Series_1_DOC_Series_24792/2.25.338098377389049340697893762788193559791.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.338098377389049340697893762788193559791'",
+          "0008,0020": "DA/implicit '20220529'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_b7e01f5db32e04fd69c3414b'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.114164475424586477261267862397042237890'",
+          "0020,000e": "UI/implicit '2.25.202559285933495312113062818185810324792'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.338098377389049340697893762788193559791'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
+        "written": 3
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5c3886a6aa51301950cd167c/Study_2022-08-11_Study_63035/Series_1_DOC_Series_52536/2.25.146514388450505662270254294812371753134.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.146514388450505662270254294812371753134'",
+          "0008,0020": "DA/implicit '20220811'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5c3886a6aa51301950cd167c'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.325222156761068607273134290725873463035'",
+          "0020,000e": "UI/implicit '2.25.148042703260331981808209834667071352536'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.146514388450505662270254294812371753134'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        },
+        "Subject_ANON_864e6374459505122ff80e49/Study_2022-06-22__58402/Series_1_CT__06362/2.25.280542127305553856206523073977481505273.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.280542127305553856206523073977481505273'",
+          "0008,0020": "DA '20220622'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_864e6374459505122ff80e49'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.200937885221447012687430174202743758402'",
+          "0020,000e": "UI '2.25.194465427956397478031579579085318706362'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.272254547078253118836612955794154574779'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.280542127305553856206523073977481505273'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_b7e01f5db32e04fd69c3414b/Study_2022-05-29_Study_37890/Series_1_DOC_Series_24792/2.25.338098377389049340697893762788193559791.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.338098377389049340697893762788193559791'",
+          "0008,0020": "DA/implicit '20220529'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_b7e01f5db32e04fd69c3414b'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.114164475424586477261267862397042237890'",
+          "0020,000e": "UI/implicit '2.25.202559285933495312113062818185810324792'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.338098377389049340697893762788193559791'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
+        "written": 3
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_5c3886a6aa51301950cd167c/Study_2022-08-11_Study_63035/Series_1_DOC_Series_52536/2.25.146514388450505662270254294812371753134.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.146514388450505662270254294812371753134'",
+          "0008,0020": "DA/implicit '20220811'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5c3886a6aa51301950cd167c'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.325222156761068607273134290725873463035'",
+          "0020,000e": "UI/implicit '2.25.148042703260331981808209834667071352536'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.146514388450505662270254294812371753134'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        },
+        "Subject_ANON_864e6374459505122ff80e49/Study_2022-06-22__58402/Series_1_CT__06362/2.25.280542127305553856206523073977481505273.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.280542127305553856206523073977481505273'",
+          "0008,0020": "DA/implicit '20220622'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_864e6374459505122ff80e49'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.200937885221447012687430174202743758402'",
+          "0020,000e": "UI/implicit '2.25.194465427956397478031579579085318706362'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.272254547078253118836612955794154574779'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.280542127305553856206523073977481505273'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_b7e01f5db32e04fd69c3414b/Study_2022-05-29_Study_37890/Series_1_DOC_Series_24792/2.25.338098377389049340697893762788193559791.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.338098377389049340697893762788193559791'",
+          "0008,0020": "DA/implicit '20220529'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_b7e01f5db32e04fd69c3414b'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:729f4bbf'",
+          "0020,000d": "UI/implicit '2.25.114164475424586477261267862397042237890'",
+          "0020,000e": "UI/implicit '2.25.202559285933495312113062818185810324792'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.338098377389049340697893762788193559791'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
+        "written": 3
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 4,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "ERROR",
+        "2.25.332395733024097410868218343473359436309",
+        "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 3 of 4 planned instances from 4 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 3 of 4 planned instances from 4 patients.",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_5c3886a6aa51301950cd167c/Study_2022-08-11_Study_63035/Series_1_DOC_Series_52536/2.25.146514388450505662270254294812371753134.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.146514388450505662270254294812371753134'",
+          "0008,0020": "DA/implicit '20220811'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5c3886a6aa51301950cd167c'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.325222156761068607273134290725873463035'",
+          "0020,000e": "UI/implicit '2.25.148042703260331981808209834667071352536'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.146514388450505662270254294812371753134'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        },
+        "Subject_ANON_864e6374459505122ff80e49/Study_2022-06-22__58402/Series_1_CT__06362/2.25.280542127305553856206523073977481505273.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.280542127305553856206523073977481505273'",
+          "0008,0020": "DA/implicit '20220622'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_864e6374459505122ff80e49'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.200937885221447012687430174202743758402'",
+          "0020,000e": "UI/implicit '2.25.194465427956397478031579579085318706362'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.272254547078253118836612955794154574779'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.280542127305553856206523073977481505273'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_b7e01f5db32e04fd69c3414b/Study_2022-05-29_Study_37890/Series_1_DOC_Series_24792/2.25.338098377389049340697893762788193559791.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.338098377389049340697893762788193559791'",
+          "0008,0020": "DA/implicit '20220529'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_b7e01f5db32e04fd69c3414b'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.114164475424586477261267862397042237890'",
+          "0020,000e": "UI/implicit '2.25.202559285933495312113062818185810324792'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.338098377389049340697893762788193559791'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
+        "written": 3
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5c3886a6aa51301950cd167c/Study_2022-08-11_Study_63035/Series_1_DOC_Series_52536/2.25.146514388450505662270254294812371753134.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.146514388450505662270254294812371753134'",
+          "0008,0020": "DA/implicit '20220811'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5c3886a6aa51301950cd167c'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.325222156761068607273134290725873463035'",
+          "0020,000e": "UI/implicit '2.25.148042703260331981808209834667071352536'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.146514388450505662270254294812371753134'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        },
+        "Subject_ANON_864e6374459505122ff80e49/Study_2022-06-22__58402/Series_1_CT__06362/2.25.280542127305553856206523073977481505273.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.280542127305553856206523073977481505273'",
+          "0008,0020": "DA '20220622'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_864e6374459505122ff80e49'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0012,0062": "CS 'YES'",
+          "0012,0063": "LO 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.200937885221447012687430174202743758402'",
+          "0020,000e": "UI '2.25.194465427956397478031579579085318706362'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.272254547078253118836612955794154574779'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "0028,0303": "CS 'MODIFIED'",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.280542127305553856206523073977481505273'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        },
+        "Subject_ANON_b7e01f5db32e04fd69c3414b/Study_2022-05-29_Study_37890/Series_1_DOC_Series_24792/2.25.338098377389049340697893762788193559791.dcm": {
+         "elements": {
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0008,0018": "UI/implicit '2.25.338098377389049340697893762788193559791'",
+          "0008,0020": "DA/implicit '20220529'",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0033": "TM/implicit '000000'",
+          "0008,0060": "CS/implicit 'DOC'",
+          "0008,0064": "CS/implicit 'WSD'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_b7e01f5db32e04fd69c3414b'",
+          "0012,0062": "CS/implicit 'YES'",
+          "0012,0063": "LO/implicit 'isocenter/<isocenter-version>; basic@2026c; v1:9d04b00a'",
+          "0020,000d": "UI/implicit '2.25.114164475424586477261267862397042237890'",
+          "0020,000e": "UI/implicit '2.25.202559285933495312113062818185810324792'",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0301": "CS/implicit 'NO'",
+          "0028,0303": "CS/implicit 'MODIFIED'",
+          "0042,0010": "ST/implicit 'GOLD report'",
+          "0042,0011": "OB/implicit sha256:96a296d224f285c6 len=2",
+          "0042,0012": "LO/implicit 'application/pdf'",
+          "0042,0015": "UL/implicit [2]"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.104.1'",
+          "0002,0003": "UI '2.25.338098377389049340697893762788193559791'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         }
+        }
+       },
+       "result": {
+        "failures": [
+         [
+          "2.25.332395733024097410868218343473359436309",
+          "Export failed for instance 2.25.332395733024097410868218343473359436309: RuntimeError: Lazy load failed for instance 2.25.332395733024097410868218343473359436309: NotImplementedError: Unable to decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value of 'JPIP Referenced' is not supported"
+         ]
+        ],
+        "written": 3
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 4,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "no_pixels_under_an_undecodable_syntax-good.dcm": "sha256:0bb1739a471d5ec33a8d510f45962d2045038f6834c7634979750f2631a21ca8",
+    "no_pixels_under_an_undecodable_syntax-jpip.dcm": "sha256:4941b93c52ccf631c6f15522367bd0eda42a0ee21801f536acdbe3b0f2f0977b",
+    "no_pixels_under_an_undecodable_syntax-mpeg2.dcm": "sha256:8a677f2fdaf3e38cf00535079d8aac6f30d42d76c9dc7b167d3bd814dd9aa041",
+    "no_pixels_under_an_undecodable_syntax-private.dcm": "sha256:3d00d7b38076500ede6fc5a9e47a8094a5aa942813da93fac91b1e50157ddf22"
+   }
+  },
   "synthetic:no_study_date": {
    "configs": {
     "A": {
@@ -141527,12 +142388,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "1653fd72d6ea28b6cd3bf95db66baa9c375da529",
+  "git_sha": "a169ada1244ce217b3e01f6c8bb417d37054165c",
   "isocenter_version": "1.0.0rc17",
   "jobs": 4,
   "platform": "macOS-27.0.1-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 589
+  "seconds": 744
  },
  "schema": 1,
  "toolchain": {
