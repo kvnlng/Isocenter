@@ -20,7 +20,16 @@ The term reads `phi_status`, the per-entity result of the last scan, which
 is persisted per entity. So it holds in a store reopened by a session that
 never ran the scan, like every other store-wide term (owner ruling Q2,
 2026-09-21). An entity never scanned, or edited since, reads UNSCANNED and
-does not grade (Q3): section 5 counts those instances instead.
+is not counted under condition 7, which is what this file pins. Whether it
+grades is other conditions' business (#1075):
+
+- one edited after its status was recorded grades under condition 8
+  (#767);
+- one never scanned grades under condition 9 where the store holds a
+  recorded PHI status (#1064), and does not grade in a store that holds
+  none (Q3).
+
+Section 5 counts those instances either way.
 """
 import re
 
@@ -198,9 +207,12 @@ def test_a_full_pass_grades_pass(tmp_path):
 
 
 def test_an_export_nothing_scanned_grades_pass_and_says_so(tmp_path):
-    """T-A3, scenario (a), Q3: data no scan has seen is not a finding, so it
-    does not grade, and section 5 says how much of it there is. Kills M-A5
-    (UNSCANNED counted as not acted on)."""
+    """T-A3, scenario (a), Q3: in a store nobody audited, data no scan has
+    seen is not a finding, so it does not grade, and section 5 says how
+    much of it there is. That is true of this store only because it holds
+    no recorded PHI status: where one is recorded, an entity never scanned
+    grades under condition 9 (#1064). Kills M-A5 (UNSCANNED counted as not
+    acted on)."""
     with _ingested(tmp_path) as session:
         session.export(str(tmp_path / "out"), use_compression=False)
         section_5 = _section_5(session, tmp_path)
@@ -212,9 +224,12 @@ def test_an_export_nothing_scanned_grades_pass_and_says_so(tmp_path):
         "at their current revision."), section_5
 
 
-def test_an_entity_edited_after_its_scan_does_not_grade(tmp_path):
+def test_an_entity_edited_after_its_scan_is_not_counted_under_condition_7(tmp_path):
     """T-A4: the documented rule that an entity edited after its scan reads
-    UNSCANNED and does not grade under condition 7, pinned.
+    UNSCANNED and does not grade under condition 7, pinned. It grades
+    under condition 8 (#767), which this test does not read: its
+    assertions are about condition 7's line only. Named
+    `..._does_not_grade` until #1075.
 
     The instance is IDENTIFIED by the scan and then edited; its patient and
     study are not edited and still count. Kills M-A8 (the status read
