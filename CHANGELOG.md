@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc18] - 2026-10-13
+
 ### Breaking
 
 - **A report over a store that has been audited grades `REVIEW_REQUIRED` while the store holds a patient, study or instance no scan has read; it graded `PASS` (#1064, owner rulings of 2026-10-11).** This is a ninth grade condition. No call raises and no signature changes: `generate_report()` writes a different grade and one more Grade Basis line for the state below.
