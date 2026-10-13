@@ -2461,7 +2461,11 @@ a file named directly is read whatever its name.</p>
                 <p>The SOP Instance UID of each instance
 that reached disk, and nothing else. An instance with no UID
 is not written and is in <code>failures</code>; so is one whose UID
-cannot name a file (<code>export_file_name</code>), under that UID.</p>
+cannot name a file (<code>export_file_name</code>), under that UID. From
+<code>session.export()</code>, an instance whose file another instance's
+write replaced, because the volume resolves their two file
+names to one file, is in <code>failures</code> too, and the instance the
+file holds is here (#1020).</p>
               </div>
             </td>
           </tr>
@@ -2473,7 +2477,9 @@ cannot name a file (<code>export_file_name</code>), under that UID.</p>
             <td>
               <div class="doc-md-description">
                 <p><code>(entity_uid, details)</code> per
-instance that did not reach disk, each with an audit row.</p>
+instance that did not reach disk, each with an audit row; the
+instances of one replaced file share one row, which names
+them all.</p>
               </div>
             </td>
           </tr>
@@ -3263,6 +3269,11 @@ and <code>WfdbExporter.export</code>, where N is the waveform records attempted.
 The message says "instances" in both: a WFDB record is written from
 one waveform instance, and its failure is named by that instance's
 UID, as the DICOM one is. Not raised on a partial export.</p>
+<p>One case leaves a file behind (#1020): every planned instance was
+written under file names the volume resolved to one file, and that
+file could not be read back as any of them. None is reported as
+written, so this is raised, and the folder holds that one file; the
+<code>ERROR</code> row keyed <code>MULTIPLE</code> says so.</p>
 <p>Raised <strong>last</strong>, after every record the run produces, so a caller who
 catches this still holds a correct graph, a complete audit trail and
 a compliance report grading <code>REVIEW_REQUIRED</code>. The DICOM path raises

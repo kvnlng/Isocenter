@@ -2612,6 +2612,16 @@ run that rejected files completes normally. A file refused after
 its pixels or waveform samples were read (<code>Linkage Failed</code>) may
 leave them in the sidecar as dead space until <code>compact()</code>, which
 reclaims them in a store that holds at least one instance (#943).</p>
+<p><strong>A file linked by something that is not one text value.</strong> A file
+is linked by its SOP Instance UID, Study Instance UID, Series
+Instance UID and Patient ID. One that holds two values in any of
+them (#747), or that states a VR for one that is not text (<code>OB</code>,
+<code>US</code>, <code>DS</code>, <code>SQ</code> and the like, in an Explicit VR file; #1022), is
+rejected as above: that file only, with a reason naming the
+element and the count or the VR, never a value, and nothing of it
+in the sidecar. Until #1022 a SOP Instance UID or Patient ID
+under such a VR made this call raise <code>ValueError</code> from its save
+and store nothing.</p>
 <p><strong>Hidden files.</strong> A file found walking <code>directory</code> whose name
 starts with <code>.</code> (<code>.DS_Store</code>, AppleDouble <code>._*</code>) is not read. It is
 counted in <code>IngestSummary.hidden</code>, and the console summary prints
@@ -3545,8 +3555,11 @@ when the patient cannot be locked as asked:</p>
 <ul>
 <li>a value the lock would capture was written by a remediation
   (<code>ANONYMIZED</code>, <code>ANON_...</code>, a rule's <code>value:</code>, a shifted date);</li>
-<li>a tag it names was emptied or removed by <code>anonymize()</code>; the
-  message names the <code>tags_to_lock</code> that works without it;</li>
+<li>a tag it names was emptied or removed by <code>anonymize()</code> on any of
+  its instances; the message names the <code>tags_to_lock</code> that works
+  without it. Where other instances still hold a value there (a
+  study or series ingested after the pass), the message counts
+  both, and that lock stashes the tag for none of them;</li>
 <li>a re-lock would lose a value the existing token holds;</li>
 <li>the patient carries an identity token this library wrote that the
   key at the path given to <code>enable_reversible_anonymization()</code> does
@@ -5093,7 +5106,13 @@ bytes-like, not iterable, or holds an element that is not a
             <td>
               <div class="doc-md-description">
                 <p>From either exporter, when zero of N
-attempted instances reached disk and at least one failed.
+attempted instances are reported written and at least one
+failed. The folder then holds none of them, with one
+exception (#1020): every planned instance was written
+under file names the volume resolved to one file, and
+that file could not be read back as any of them; the
+folder holds that one file and the <code>ERROR</code> row keyed
+<code>MULTIPLE</code> says so.
 An empty plan (zero of zero) does not raise: a subset that
 matched nothing is a fact about the run, and the <code>EXPORT</code>
 audit row already carries it. Nor does a DICOM export whose

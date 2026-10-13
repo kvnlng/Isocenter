@@ -3019,7 +3019,18 @@ The file's own element is exported
 with the values the source wrote, where the policy keeps it, and no row is
 written. The series folder is named from one Modality and one number, so
 it reads <code>OT</code> for two Modalities and <code>0</code> for two Series Numbers
-(<a href="https://github.com/kvnlng/Isocenter/issues/985">#985</a>).</p>
+(<a href="https://github.com/kvnlng/Isocenter/issues/985">#985</a>). SOP Class UID
+<code>(0008,0016)</code> is held the same way: a file with two values in it is
+ingested, <code>Instance.sop_class_uid</code> holds the file's text
+(<code>1.2.840.10008.5.1.4.1.1.2\1.2.840.10008.5.1.4.1.1.4</code>), and the exported
+file carries the source's two values in <code>(0008,0016)</code> and in the file
+meta's <code>(0002,0002)</code>, with no row. That holds too for a file whose
+dataset has no <code>(0008,0016)</code> and whose file meta holds the two values;
+releases before this one exported that file with one value, the text of
+a Python list. Two SOP classes are not a class the
+export's <a href="../export-output/#what-the-export-changes-on-the-way-out">Type 1 check</a>
+knows, so such a file is not checked
+(<a href="https://github.com/kvnlng/Isocenter/issues/998">#998</a>).</p>
 <p><strong>One <code>UN</code> value is resolved rather than kept opaque.</strong> If a private
 <code>UN</code> value begins with the item tag <code>(FFFE,E000)</code> and re-encodes byte
 for byte as an implicit-VR sequence, it is ingested as a sequence -- the
@@ -3199,8 +3210,9 @@ section but does not change the grade.</p>
 <ul>
 <li><code>MODIFIED</code> when at least one date is a shift this store wrote, whatever the others are. It replaces the source's value, a source <code>UNMODIFIED</code> included. It says that a date in the file was modified, not that every date was: a date beside it may be as it was ingested.</li>
 <li><code>REMOVED</code> when no date is shifted and every date is empty or the dummy <code>19000101</code>.</li>
-<li>Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays.</li>
-<li>TM is not read: a time of day beside a shifted date does not place the patient in time.</li>
+<li>Nothing when no date is shifted and any date is as it was ingested; the source's value, if any, then stays, with one exception.</li>
+<li>A source's <code>UNMODIFIED</code> is not carried into such a file when this store's own record shows that it emptied, removed or wrote the dummy to a top-level date of that instance, and the file still lacks that date. The element is then absent: no enumerated value says "some removed, none shifted, some kept". A source's <code>MODIFIED</code> or <code>REMOVED</code> stays, and so does an <code>UNMODIFIED</code> in a file none of whose dates this store took. Three things the record does not show, beside each of which a source's <code>UNMODIFIED</code> still stays: a date removed inside a sequence, a private date removed by <code>remove_private_tags</code>, and a date a rule replaced with a value of its own that is not the dummy. A source that already says <code>UNMODIFIED</code> beside dates an earlier tool emptied is that tool's claim, and stays too. One limit runs the other way: the record does not say whether a removed element held a value, so a <code>REMOVE</code> rule on a top-level date the source left empty counts as a date this store took, and a source's <code>UNMODIFIED</code> is withdrawn although no date value changed. <code>EMPTY</code> and a value-less <code>REPLACE</code> on an empty date record nothing and leave it. These limits are <a href="https://github.com/kvnlng/Isocenter/issues/1044">#1044</a>.</li>
+<li>TM is not read: a time of day beside a shifted date does not place the patient in time. An emptied or removed time does not withdraw a source's <code>UNMODIFIED</code> either.</li>
 <li><code>UNMODIFIED</code> is never written, because a date kept on purpose cannot be told from one no rule named.</li>
 </ul>
 <p>Worked on a CT whose source holds Study Date, Series Date, Acquisition Date, Content Date, Instance Creation Date and an empty Birth Date:</p>
@@ -3248,7 +3260,7 @@ section but does not change the grade.</p>
 <td><code>basic@2026c</code> plus <code>0008,0021: KEEP</code></td>
 <td>empty</td>
 <td>Series Date as ingested, the rest empty or <code>19000101</code></td>
-<td>nothing; a source's value stays</td>
+<td>nothing; a source's <code>MODIFIED</code> or <code>REMOVED</code> stays, a source's <code>UNMODIFIED</code> does not</td>
 </tr>
 <tr>
 <td>* <strong>De-identification Method Code Sequence <code>(0012,0064)</code></strong>: no code is written (see the departures above). A source's items pass through.</td>

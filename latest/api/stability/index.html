@@ -2194,7 +2194,9 @@ on <a href="../ocr/">OCR API</a>).
 <code>ExportSummary(written_uids, failures)</code> plus <code>written</code>, <code>failed</code>;
 <code>written_uids</code> holds the SOP Instance UID of each written instance and
 nothing else: an instance with no UID is not written and is in
-<code>failures</code>;
+<code>failures</code>, and so is an instance whose file another instance's write
+replaced because the export volume treats their two file names as one
+(<a href="../../export-output/#where-files-land">Export output</a>);
 <code>PhiReport(findings, failures)</code> with <code>__len__</code>, <code>__iter__</code>, <code>__getitem__</code>,
 <code>to_dataframe()</code>; <code>PhiFinding(entity_uid, entity_type, field_name,
 value, reason, tag, patient_id, entity, remediation_proposal, metadata,
@@ -2335,7 +2337,10 @@ otherwise.</p>
   <code>.failures</code> (a list of <code>(entity_uid, details)</code>) and <code>.attempted</code>,
   raised after the whole pass.</li>
 <li><code>ExportError(failures, attempted, folder=None)</code>, a <code>RuntimeError</code>,
-  raised last and only when zero of N reached disk, by both formats.</li>
+  raised last and only when zero of N are reported written, by both
+  formats. (One file can be in the folder then: N instances written
+  under names the volume resolved to one file that could not be read
+  back, <a href="../../export-output/#where-files-land">Export output</a>.)</li>
 <li><code>compact()</code>: <code>RuntimeError</code> while a pass is open (below).</li>
 <li><code>save(sync=True)</code>, <code>compact()</code> and <code>export()</code> (both formats begin with
   a save): <code>TypeError</code> when an instance with unsaved changes holds an

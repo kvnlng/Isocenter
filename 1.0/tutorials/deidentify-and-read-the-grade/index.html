@@ -2232,7 +2232,12 @@ instead of 19 January.</p>
 <a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>    <span class="k">if</span> <span class="n">ds</span><span class="o">.</span><span class="n">Modality</span> <span class="o">==</span> <span class="s2">"CT"</span> <span class="ow">and</span> <span class="n">ds</span><span class="o">.</span><span class="n">StudyDate</span> <span class="o">!=</span> <span class="n">ct</span><span class="o">.</span><span class="n">StudyDate</span><span class="p">)</span>
 </code></pre></div>
 <p>(<code>anonymize()</code> with no argument audits and then acts on every finding.
-That is the shortcut when you are holding nothing back.) The second
+That is the shortcut when you are holding nothing back.) Do not skip
+that call for a later batch. Until a scan reads the new file the store
+holds it as ingested and an export writes it as the store holds it, and because the
+rest of this store has been scanned, the report grades
+<code>REVIEW_REQUIRED</code> for it
+(<a href="../../analytics/#how-the-grade-is-decided">condition 9</a>). The second
 visit gets the first visit's pseudonym, and its date moves by the same
 offset, so the 42 days between the two scans survive:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">batch</span>

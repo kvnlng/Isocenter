@@ -3512,8 +3512,18 @@ made only when the decode converted.</p>
             <td>
               <div class="doc-md-description">
                 <p>The pixel data as a numpy array, or None
-when the instance carries no pixel element. A frame that
-could not be decoded is not None: it raises.</p>
+when the instance carries no pixel element. From a file,
+that is decided by the dataset alone: None when it was
+read and holds none of Pixel Data (7FE0,0010), Float
+Pixel Data (7FE0,0008) and Double Float Pixel Data
+(7FE0,0009), whatever its transfer syntax, and never
+because of what a failure's message says. A frame that
+could not be decoded is not None: it raises. So does a
+file with no pixel element whose pixels are elsewhere,
+where pydicom has no decoder for its transfer syntax:
+one that holds Pixel Data Provider URL (0028,7FE0)
+at the top level, or
+is under a JPIP Referenced syntax.</p>
               </div>
             </td>
           </tr>
