@@ -112,16 +112,31 @@ jobs:
         # of room, or 360 s of suite, and that test is read at a refresh,
         # which is after a publish run. Cut into twelve the heaviest is
         # 470 s (31% of the step; 822 s, 55%, on a runner 1.75 times
-        # slower), and the test stays green until the file holds 9,000 s.
-        # That is a prediction from eight-shard recordings: no
-        # twelve-shard run had happened when this was written. One file,
-        # tests/test_the_exporter_writes_the_python_value.py, weighs
-        # 394 s: from fifteen shards on it is the heaviest shard by
+        # slower). The test then stays green until the file holds about
+        # 9,000 s if the growth is spread over the files, or until any
+        # one file passes 750 s, whichever comes first: a file cannot be
+        # cut, and
+        # tests/test_the_exporter_writes_the_python_value.py went from
+        # 345.38 s at the rc17 refresh to 394.19 s at rc18.
+        # The 470 s is a prediction from eight-shard recordings: no
+        # twelve-shard run had happened when this was written. From
+        # fifteen shards on that one file is the heaviest shard by
         # itself, and more shards than that buy nothing until it is
         # split.
         #
         # A release is now 48 test jobs (a dispatch of this file is 24).
-        # They queue as the 32 did.
+        # In publish run 38325308068 all 32 test jobs started in the
+        # same second, so the 32 did not queue there. Whether 48 queue
+        # depends on the plan's concurrency limit and is not known yet.
+        # Either way a job's and a step's timeout run from its own
+        # start.
+        #
+        # scripts/shard_timings.py reads the count from the tests.yml of
+        # the checkout it is run in. From this one it refuses a run of
+        # eight shards per version ("lacks shard 9 of 12") and writes
+        # nothing; RELEASING.md, "Cutting a release", step 8, says to
+        # leave the timings file alone then. Run from a checkout of the
+        # tag that made the run, it merges it.
         #
         # tests/shard_timings.json has held runner seconds since #935, one
         # number per file: the median of the four versions' `Run Tests`
