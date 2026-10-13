@@ -98,10 +98,30 @@ jobs:
         # predicted at 575 s (38%) on an ordinary runner and 1,006 s (67%)
         # on the slowest seen.
         #
-        # A release is now 32 test jobs (a dispatch of this file is 16),
+        # A release was then 32 test jobs (a dispatch of this file 16),
         # which is over the 20 the paragraph above was sized for. Over a
         # concurrency limit jobs queue; none fails, and a job's and a
         # step's timeout run from its own start, not from the dispatch.
+        #
+        # Twelve since #1104 (owner ruling of 2026-10-13). After the rc18
+        # refresh (#1103, publish run 38325308068) the timings file held
+        # 438 test files and 5,640 s, 475 s more than the rc17 refresh
+        # (430 files, 5,165 s). Cut into eight that is 705 s a shard
+        # against the 750 s at which
+        # test_the_heaviest_shard_fits_the_step_with_room goes red: 45 s
+        # of room, or 360 s of suite, and that test is read at a refresh,
+        # which is after a publish run. Cut into twelve the heaviest is
+        # 470 s (31% of the step; 822 s, 55%, on a runner 1.75 times
+        # slower), and the test stays green until the file holds 9,000 s.
+        # That is a prediction from eight-shard recordings: no
+        # twelve-shard run had happened when this was written. One file,
+        # tests/test_the_exporter_writes_the_python_value.py, weighs
+        # 394 s: from fifteen shards on it is the heaviest shard by
+        # itself, and more shards than that buy nothing until it is
+        # split.
+        #
+        # A release is now 48 test jobs (a dispatch of this file is 24).
+        # They queue as the 32 did.
         #
         # tests/shard_timings.json has held runner seconds since #935, one
         # number per file: the median of the four versions' `Run Tests`
@@ -125,7 +145,7 @@ jobs:
         # The concurrency group above needs no shard in it: it is declared
         # at workflow level, so it scopes the run, and matrix jobs inside
         # one run do not compete for it.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     # Backstop only, against what no step timeout covers -- it must exceed
     # the SUM of the step allowances below, or some step's own timeout
     # becomes unreachable and a hang there dies as 'cancelled' with no
@@ -320,11 +340,18 @@ jobs:
       # (67%), and at about 1,210 s (80%) on the slow runner after
       # another 20% of growth. Past that, add shards or raise this,
       # and if it is raised, raise the family with it as said above.
+      #
+      # Unchanged at 25 when the suite became twelve shards per version
+      # (#1104, owner ruling of 2026-10-13): shards were added, as the
+      # paragraph above says to. The step sum (38), the job cap (45) and
+      # the faulthandler relation stand. The matrix comment has the
+      # figures: eight had come to 705 s a shard by the rc18 timings,
+      # 47% of this, and twelve are predicted at 470 s (31%).
       timeout-minutes: 25
       # `--record-shard-timings` (an absolute path, outside the checkout)
       # writes what each of this shard's files took, for the upload below.
       run: |
-        pytest -v --shard=${{ matrix.shard }}/8 --record-shard-timings=${{ runner.temp }}/shard-timings.json
+        pytest -v --shard=${{ matrix.shard }}/12 --record-shard-timings=${{ runner.temp }}/shard-timings.json
       env:
         # Derived from the version rather than carried in a parallel
         # `include:` block, so adding a version to the matrix cannot
@@ -381,6 +408,6 @@ jobs:
       run: |
         outcome="${{ steps.suite.outcome }}"
         [ "$outcome" = "success" ] && mark="pass" || mark="**$outcome**"
-        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}) shard ${{ matrix.shard }}/8: $mark" \
+        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}) shard ${{ matrix.shard }}/12: $mark" \
           >> "$GITHUB_STEP_SUMMARY"
 
