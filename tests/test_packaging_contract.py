@@ -1796,6 +1796,14 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
 #: on an ordinary runner and 1,006 s (67%) on the slowest. So the
 #: figure in the message below, 751 s, is still the peak this floor was
 #: sized from; it is no longer the peak of a shard.
+#:
+#: Unchanged at 25 when the suite became twelve shards per version
+#: (#1104, owner ruling of 2026-10-13). By the rc18 timings
+#: (tests/shard_timings.json, 5,640 s over 438 test files) an eighth had
+#: come to 705 s, 45 s under the half of this that
+#: `test_the_heaviest_shard_fits_the_step_with_room` allows. A twelfth
+#: is predicted at 470 s (31% of this). The room was again made by the
+#: shard count.
 _RUN_TESTS_STEP_MINUTES_FLOOR = 25
 
 

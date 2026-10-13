@@ -189,8 +189,8 @@ def test_the_gate_workflow_runs_every_shard_it_divides_into():
         f"{listed}: every shard not listed is a part of the suite "
         "that no job runs, behind a green check")
     # The summary line is what names a red shard in the release matrix's
-    # table; one that omits the shard reports four lines per version
-    # nobody can tell apart.
+    # table; one that omits the shard reports a line per shard of a
+    # version, and nobody can tell them apart.
     summary = next(s for s in job["steps"]
                    if "GITHUB_STEP_SUMMARY" in s.get("run", ""))["run"]
     assert f"shard ${{{{ matrix.shard }}}}/{count}" in summary, summary
