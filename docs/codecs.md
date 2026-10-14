@@ -29,7 +29,7 @@ The library also has words for `imagecodecs` not having imported at all: `imagec
 
 The export writes two transfer syntaxes and no others:
 
-- Implicit VR Little Endian, with `use_compression=False`, and for every file with no pixel data, floating-point pixels, or 32- or 64-bit integer samples, which JPEG 2000 Lossless here cannot carry exactly (#771).
+- Explicit VR Little Endian (`1.2.840.10008.1.2.1`), with `use_compression=False`, and for every file with no pixel data, floating-point pixels, or 32- or 64-bit integer samples, which JPEG 2000 Lossless here cannot carry exactly (#771). It was Implicit VR Little Endian before #1107.
 - JPEG 2000 Lossless (`1.2.840.10008.1.2.4.90`), with `use_compression=True`, the default.
 
 A source in any other syntax is decoded at ingest and re-encoded into one of those two. Nothing writes High-Throughput JPEG 2000: an HTJ2K source exports uncompressed or as JPEG 2000. [What the export writes](export-output.md#compression) covers what compression does to colour images and lossy sources.

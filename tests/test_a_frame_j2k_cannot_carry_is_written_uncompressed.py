@@ -10,8 +10,9 @@ nothing under the default, with one `ERROR` row each, and an export whose
 instances were all such images raised `ExportError`. The same pixels were
 written exactly with `use_compression=False`.
 
-The owner's ruling (Q1): write such a frame uncompressed, Implicit VR Little
-Endian, with one INFO note on `ExportOutcome.corrections` and no audit row.
+The owner's ruling (Q1): write such a frame uncompressed, in the syntax
+`use_compression=False` writes (Implicit VR Little Endian until #1107,
+Explicit VR Little Endian since), with one INFO note on `ExportOutcome.corrections` and no audit row.
 The decision is per instance, from the frame, so a 16-bit instance beside it
 in the same export is still compressed. The guard inside `_compress_j2k` stays
 as the backstop for a direct caller, and both read one predicate,
@@ -36,7 +37,8 @@ from isocenter.io_handlers import ExportContext, _export_instance_worker
 from isocenter.session import DicomSession
 
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
-IMPLICIT = "1.2.840.10008.1.2"
+#: The uncompressed syntax, Explicit VR Little Endian since #1107.
+EXPLICIT = "1.2.840.10008.1.2.1"
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 
 _serial = itertools.count(1)
@@ -91,7 +93,7 @@ def test_a_wide_frame_is_written_uncompressed_under_the_default(tmp_path, dtype,
 
     assert outcome.ok, outcome.error
     ds = pydicom.dcmread(outcome.output_path)
-    assert str(ds.file_meta.TransferSyntaxUID) == IMPLICIT
+    assert str(ds.file_meta.TransferSyntaxUID) == EXPLICIT
     assert "PixelData" in ds
     bits = np.dtype(dtype).itemsize * 8
     assert int(ds.BitsAllocated) == bits
@@ -257,7 +259,7 @@ def test_one_export_writes_each_instance_in_its_own_syntax(tmp_path, caplog):
         syntaxes[int(ds.BitsAllocated)] = str(ds.file_meta.TransferSyntaxUID)
         want = wide if int(ds.BitsAllocated) == 32 else narrow
         assert ds.pixel_array.tolist() == want.tolist()
-    assert syntaxes == {32: IMPLICIT, 16: J2K_LOSSLESS}
+    assert syntaxes == {32: EXPLICIT, 16: J2K_LOSSLESS}
     lines = [r for r in caplog.records if "written uncompressed" in r.getMessage()]
     assert len(lines) == 1, [r.getMessage() for r in caplog.records]
     assert lines[0].levelno == logging.INFO

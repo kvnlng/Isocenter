@@ -65,6 +65,10 @@ from isocenter.session import DicomSession
 
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
 IMPLICIT_VR_LE = "1.2.840.10008.1.2"
+#: The native syntax the exporter writes, and the one its WARNING names:
+#: Explicit VR LE since #1107 (Implicit VR LE before). The three native rows
+#: are one set, so a direct judgement against `IMPLICIT_VR_LE` is unchanged.
+WRITTEN_NATIVE = "1.2.840.10008.1.2.1"
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 #: The four this issue is about, under a native syntax.
 INADMISSIBLE = ("YBR_ICT", "YBR_RCT", "YBR_PARTIAL_422", "YBR_PARTIAL_420")
@@ -138,7 +142,7 @@ def test_the_four_labels_are_written_as_declared_with_a_warning(
     assert outcome.ok, outcome.error
     ds = pydicom.dcmread(outcome.output_path)
     assert ds.PhotometricInterpretation == label
-    assert ds.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert ds.file_meta.TransferSyntaxUID == WRITTEN_NATIVE
     assert np.array_equal(
         np.frombuffer(ds.PixelData, np.uint8)[:3], np.array(YBR, np.uint8))
     assert len(outcome.warnings) == 1, outcome.warnings
@@ -146,7 +150,7 @@ def test_the_four_labels_are_written_as_declared_with_a_warning(
     assert warning.startswith(
         f"PhotometricInterpretation '{label}' is not a label the transfer "
         f"syntax this file was written under admits"), warning
-    assert IMPLICIT_VR_LE in warning, warning
+    assert WRITTEN_NATIVE in warning, warning
     assert ("The label was written as declared, over the samples the "
             "instance held, and neither was changed.") in warning, warning
     assert outcome.corrections == [], outcome.corrections
@@ -294,9 +298,9 @@ def test_the_label_is_judged_against_the_syntax_the_file_actually_carries(
 
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
-    assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert written.file_meta.TransferSyntaxUID == WRITTEN_NATIVE
     assert len(outcome.warnings) == 1, outcome.warnings
-    assert IMPLICIT_VR_LE in outcome.warnings[0], outcome.warnings
+    assert WRITTEN_NATIVE in outcome.warnings[0], outcome.warnings
 
 
 def test_a_compressed_rgb_export_is_relabelled_and_warns_about_nothing(
@@ -894,9 +898,9 @@ def test_a_pixel_less_label_is_judged_under_the_written_syntax(tmp_path):
 
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
-    assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert written.file_meta.TransferSyntaxUID == WRITTEN_NATIVE
     assert len(outcome.warnings) == 1, outcome.warnings
-    assert f"({IMPLICIT_VR_LE})" in outcome.warnings[0], outcome.warnings
+    assert f"({WRITTEN_NATIVE})" in outcome.warnings[0], outcome.warnings
 
 
 @pytest.mark.parametrize("declared, respelled", [
@@ -2240,7 +2244,7 @@ def test_a_pixel_less_label_outside_the_repertoire_is_written_as_held(
     assert outcome.warnings[0].startswith(
         f"PhotometricInterpretation {ascii(written)} is not a label the "
         f"transfer syntax this file was written under admits "
-        f"({IMPLICIT_VR_LE}): no value of that name is defined for it. The "
+        f"({WRITTEN_NATIVE}): no value of that name is defined for it. The "
         f"label was written as declared."), outcome.warnings
     assert _is_printable_ascii(outcome.warnings[0]), outcome.warnings
 

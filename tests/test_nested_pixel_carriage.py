@@ -1032,7 +1032,8 @@ def test_an_rle_encapsulated_icon_is_decoded_and_written_raw(tmp_path):
     """Decode at ingest, store raw, write raw -- one rule for both depths.
 
     Verbatim carriage of the element value is wrong and must not be
-    implemented: the export writes Implicit VR Little Endian, so 90 bytes of
+    implemented: the export writes a native syntax (Explicit VR Little
+    Endian since #1107, Implicit VR before), so 90 bytes of
     encapsulated fragments would produce an icon no reader can decode, under
     a transfer syntax that says there are no fragments. The top-level path
     already decodes at ingest for exactly this reason.
@@ -1066,7 +1067,7 @@ def test_an_rle_encapsulated_icon_is_decoded_and_written_raw(tmp_path):
     _export(db, out)
     exported = _exported(out)
 
-    assert exported.file_meta.TransferSyntaxUID == "1.2.840.10008.1.2"
+    assert exported.file_meta.TransferSyntaxUID == "1.2.840.10008.1.2.1"
     assert exported.IconImageSequence[0].PixelData == ICON_BYTES
 
 

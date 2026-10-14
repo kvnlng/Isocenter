@@ -362,10 +362,10 @@ answer: under implicit VR every private tag is held as `UN`, and a
 A kept binary value whose bytes are not a whole number of its VR's words
 -- an `OL` of six bytes, say -- is written `UN` instead, and the
 instance's export draws one `WARNING` row naming the tag, the VR it was
-read with and the one it was written under. The VR is
-visible only in an explicit-VR export -- the compressed export of an
-instance with pixels; an uncompressed export, and any export of an
-instance without pixels, is Implicit VR and carries no VR on the wire.
+read with and the one it was written under. Every export states the
+VR on the wire: the compressed export is JPEG 2000 and every other file
+is Explicit VR Little Endian
+([#1107](https://github.com/kvnlng/Isocenter/issues/1107)).
 **A private element is written under the VR its source stated, and
 `UN` when the source stated none.** A source states no VR for a private
 element in two ways: it is Implicit VR, which names none, or it is
@@ -384,9 +384,8 @@ removed the element. And a rule
 that needs to read the value -- a date shift on a private key -- cannot
 read `UN` bytes: the proposal is declined with a `REMEDIATION_DECLINED`
 row and the run grades `REVIEW_REQUIRED`; `REMOVE`, `EMPTY` and a valued
-`REPLACE` act on it as on any private value, and an explicit-VR export
-writes the replacement as `LO` and the emptied element as a zero-length
-`UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
+`REPLACE` act on it as on any private value, and the export writes the
+replacement as `LO` and the emptied element as a zero-length `UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
 row per such element at ingest, since the byte order of `UN` words is
 unknown. The private creator element itself is always read as `LO`.
 
@@ -401,10 +400,8 @@ two. A *private* `PN` holding several values, kept with
 source's values, and no audit row
 ([#951](https://github.com/kvnlng/Isocenter/issues/951)). One case is
 still written differently: a private `PN` holding a value of more than 64
-characters, which `PN` cannot carry. An export in an Explicit VR transfer
-syntax (`use_compression=True`) writes that element under `UT`, the same
-text; an Implicit VR export (`use_compression=False`) names no VR and
-carries the same text. Either way the export writes one `WARNING` row
+characters, which `PN` cannot carry. The export writes that element
+under `UT`, the same text, with or without compression, and one `WARNING` row
 naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
 ([#937](https://github.com/kvnlng/Isocenter/issues/937)).
 

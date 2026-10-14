@@ -17,6 +17,12 @@ at 7579d4df:
 
 The owner's rulings (Q4, Q5): an INFO note at export, and ingest decodes a
 standard `UN` under its dictionary VR, so the round trip holds.
+
+Since #1107 the uncompressed export is Explicit VR Little Endian too, so
+it relabels exactly as the compressed one does (owner ruling Q2,
+2026-10-14). pydicom 3 does not convert a `UN` of 0xFFFF bytes or more
+back to its dictionary VR, so a round trip that ends in an uncompressed
+file is read through this library's own ingest, which decodes it.
 """
 import logging
 import shutil
@@ -82,6 +88,14 @@ def _export(src, db, out, *, compress, mutate=None):
     return written, losses, rows
 
 
+def _held(src, db, tag):
+    """`tag` as this library's own ingest holds it from the one file in `src`."""
+    with DicomSession(str(db)) as s:
+        s.ingest(str(src))
+        (p,) = s.store.patients
+        return p.studies[0].series[0].instances[0].attributes[tag]
+
+
 def _notes(caplog):
     return [r.getMessage() for r in caplog.records if "is written as UN" in r.getMessage()]
 
@@ -98,9 +112,13 @@ def test_an_implicit_source_fd_list_round_trips_through_our_own_compressed_expor
                                     tmp_path / "out2", compress=False)
 
     assert not [r for r in losses if RWV_TEXT in r[2]], losses
-    ds = pydicom.dcmread(str(second))
-    assert ds[RWV].VR == "FD"
-    assert list(ds[RWV].value) == VALUES
+    # The second file is uncompressed, which states each VR since #1107:
+    # `UN` again, read back through our ingest (it was Implicit VR, and
+    # pydicom read `FD` from its dictionary).
+    assert pydicom.dcmread(str(second)).get_item(RWV).VR == "UN"
+    (tmp_path / "third").mkdir()
+    shutil.copy(second, tmp_path / "third" / "a.dcm")
+    assert list(_held(tmp_path / "third", tmp_path / "c.db", RWV_TEXT)) == VALUES
 
 
 def test_the_relabel_to_un_is_said(tmp_path, caplog):
@@ -114,15 +132,25 @@ def test_the_relabel_to_un_is_said(tmp_path, caplog):
     assert not [r for r in rows if "is written as UN" in r[2]], rows
 
 
-def test_an_implicit_export_writes_it_under_its_own_vr(tmp_path, caplog):
+def test_an_uncompressed_export_relabels_it_as_the_compressed_one_does(
+        tmp_path, caplog):
+    """Until #1107 the uncompressed export was Implicit VR, wrote the list
+    whole under `FD` (every Implicit VR length is 4 bytes) and said
+    nothing; this test held that. It is Explicit VR Little Endian now, and
+    the list is `UN` with the one note, as under compression (Q2 A)."""
     _source(tmp_path / "src", extra=_with_rwv)
     with caplog.at_level(logging.INFO, logger="isocenter"):
         written, _losses, _rows = _export(tmp_path / "src", tmp_path / "a.db",
                                           tmp_path / "out", compress=False)
     ds = pydicom.dcmread(str(written))
-    assert str(ds.file_meta.TransferSyntaxUID) == ImplicitVRLittleEndian
-    assert ds[RWV].VR == "FD"
-    assert _notes(caplog) == []
+    assert str(ds.file_meta.TransferSyntaxUID) == ExplicitVRLittleEndian
+    assert ds.get_item(RWV).VR == "UN"
+    notes = _notes(caplog)
+    assert len(notes) == 1, notes
+    assert RWV_TEXT in notes[0] and "72000" in notes[0]
+    (tmp_path / "again").mkdir()
+    shutil.copy(written, tmp_path / "again" / "a.dcm")
+    assert list(_held(tmp_path / "again", tmp_path / "b.db", RWV_TEXT)) == VALUES
 
 
 def test_a_short_value_is_not_relabelled(tmp_path, caplog):
@@ -202,7 +230,15 @@ def test_a_caller_us_list_is_said_and_round_trips(tmp_path, caplog):
     second, losses, _rows = _export(tmp_path / "again", tmp_path / "b.db",
                                     tmp_path / "out2", compress=False)
     assert not [r for r in losses if "0018,1310" in r[2]], losses
-    assert list(pydicom.dcmread(str(second))[0x00181310].value) == values
+    # The second file is uncompressed, Explicit VR since #1107, so it holds
+    # `UN` and pydicom 3 reads its raw bytes; the round trip is read the
+    # way this library reads it (owner ruling Q2 A). Until #1107 the file
+    # was Implicit VR and `pydicom.dcmread(second)` gave the list.
+    assert pydicom.dcmread(str(second)).get_item(0x00181310).VR == "UN"
+    (tmp_path / "third").mkdir()
+    shutil.copy(second, tmp_path / "third" / "a.dcm")
+    assert list(_held(tmp_path / "third", tmp_path / "c.db", "0018,1310")) \
+        == values
 
 
 def test_a_caller_lut_data_list_is_said_and_kept_on_re_ingest(tmp_path, caplog):
@@ -419,21 +455,28 @@ def test_a_standard_lo_over_the_limit_is_still_un(tmp_path, caplog):
     assert len([n for n in _notes(caplog) if "0018,1020" in n]) == 1
 
 
-def test_an_implicit_export_of_a_long_private_list_is_unchanged(tmp_path, caplog):
-    """Implicit VR names no VR on the wire, so there is nothing to relabel:
-    the value is the backslash-joined text, as before, and nothing is
-    said. Re-ingest of it still drops it (a follow-up)."""
+def test_an_uncompressed_export_of_a_long_private_list_is_uc(tmp_path, caplog):
+    """Until #1107 the uncompressed export was Implicit VR, named no VR,
+    and wrote the backslash-joined text unsaid; re-ingest dropped it. This
+    test held that. It is Explicit VR Little Endian now, so the list is
+    `UC` with #901's note, as under compression, and re-ingest keeps it.
+    The value's bytes are unchanged: the same joined text."""
     with caplog.at_level(logging.INFO, logger="isocenter"):
         _source(tmp_path / "src")
         written, _losses, _rows = _export(
             tmp_path / "src", tmp_path / "a.db", tmp_path / "out1",
             compress=False, mutate=_private_list)
     ds = pydicom.dcmread(str(written))
-    assert str(ds.file_meta.TransferSyntaxUID) == ImplicitVRLittleEndian
-    raw = ds.get_item(0x00091001).value
+    assert str(ds.file_meta.TransferSyntaxUID) == ExplicitVRLittleEndian
+    raw = ds.get_item(0x00091001)
+    assert raw.VR == "UC"
     joined = "\\".join(str(i) for i in range(40000)).encode()
-    assert raw == joined + b" " * (len(joined) % 2)
-    assert _uc_notes(caplog) == [] and _notes(caplog) == []
+    assert raw.value == joined + b" " * (len(joined) % 2)
+    assert len(_uc_notes(caplog)) == 1 and _notes(caplog) == []
+    (tmp_path / "again").mkdir()
+    shutil.copy(written, tmp_path / "again" / "a.dcm")
+    held = _held(tmp_path / "again", tmp_path / "b.db", "0009,1001")
+    assert [str(v) for v in held] == [str(i) for i in range(40000)]
 
 
 def _explicit_bytes(ds):
