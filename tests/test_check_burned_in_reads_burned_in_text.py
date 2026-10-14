@@ -30,7 +30,8 @@ from isocenter import entities, pixel_analysis, services
 from isocenter.session import DicomSession as Session
 
 from test_redact_blanks_burned_in_text import (
-    INK, INK_BOX, ONE, PADDED, TWO, FakeTesseract, _cohort, _config, audit_rows,
+    INK, INK_BOX, ONE, PADDED, PASS_LINE, REVIEW_LINE, TWO, FakeTesseract,
+    _cohort, _config, audit_rows,
     exported_files, pixels_of, write_sr)
 
 
@@ -282,3 +283,51 @@ def test_the_read_quotes_no_text(tmp_path, ocr, caplog):
     [path] = exported_files(tmp_path / "out")
     assert ocr.text.encode() not in open(path, "rb").read()
     assert ocr.text not in str(pydicom.dcmread(path))
+
+
+def _section_5_line(report):
+    [line] = [l for l in report.splitlines() if "Burned-in Text" in l]
+    return line
+
+
+def test_a_clean_read_grades_pass_and_section_5_says_it_ran(tmp_path, ocr):
+    """A read that found nothing leaves a trace in the report, as a
+    `redact()` pass does, and costs no PASS: no grade condition reads it
+    (coordinator's ruling on the review of #1110). Kills the summary not
+    recorded, and section 5 still saying no OCR checked anything."""
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (TWO, {})))
+        session.load_config(_config(tmp_path, "withhold"))
+        session.audit()
+        session.anonymize()
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 show_progress=False, check_burned_in=True)
+        session.generate_report(str(tmp_path / "r.md"))
+    assert summary.written == 1
+    report = (tmp_path / "r.md").read_text()
+    assert PASS_LINE in report, report
+    assert ("export(check_burned_in=True) under action withhold read 1 of 1 "
+            "planned instance(s) holding pixels (0 could not be read) and "
+            "found text on 0 (0 region(s)); 0 withheld, with a row."
+            ) in _section_5_line(report)
+    assert "does not say burned-in text was checked by OCR" not in report
+
+
+@pytest.mark.parametrize("action, done", [("report", "written"),
+                                          ("redact", "withheld")])
+def test_section_5_counts_what_the_read_found_and_never_says_redacted(
+        tmp_path, ocr, action, done):
+    """The export redacts nothing under any action, so its line says
+    withheld or written, never `redacted`."""
+    with _ready(tmp_path, action, (ONE, {"ink": [(0, *INK_BOX)]}),
+                (TWO, {"series_uid": "1.2.826.0.1.3680043.8.498.1108.9"})) as session:
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False, check_burned_in=True)
+        session.generate_report(str(tmp_path / "r.md"))
+    report = (tmp_path / "r.md").read_text()
+    assert REVIEW_LINE in report
+    line = _section_5_line(report)
+    assert (f"export(check_burned_in=True) under action {action} read 2 of 2 "
+            f"planned instance(s) holding pixels (0 could not be read) and "
+            f"found text on 1 (1 region(s)); 1 {done}, with a row.") in line
+    assert "redacted" not in line

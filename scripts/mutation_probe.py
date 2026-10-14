@@ -362,7 +362,7 @@ TARGETS = {
     # The survivor, the dataclass default `export_recorded: bool = False`
     # flipped to True, is equivalent: the one construction, in
     # `Session.generate_report`, passes `export_recorded=` explicitly.
-    "isocenter/reporting.py": (["tests/test_redact_blanks_burned_in_text.py", "tests/test_tutorials_run.py", "tests/test_data_loss_reporting.py",
+    "isocenter/reporting.py": (["tests/test_check_burned_in_reads_burned_in_text.py", "tests/test_redact_blanks_burned_in_text.py", "tests/test_tutorials_run.py", "tests/test_data_loss_reporting.py",
                                 "tests/test_private_sequence_implicit_vr.py",
                                 "tests/test_reporting.py",
                                 "tests/test_report_export_boundary.py",

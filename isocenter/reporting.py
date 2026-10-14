@@ -66,16 +66,27 @@ class BurnedInTextSummary:
     over a reopened store does not describe an earlier session's pass,
     whose `REDACTION` row section 2 still counts.
 
+    Also what one `export(check_burned_in=True)` read did (review of
+    #1110): that read records nothing and skips nothing, so its `skipped`
+    is 0, its `with_text` counts the instances it found text on, and its
+    `acted` the instances it wrote a row for, withheld under `redact` and
+    `withhold` and written under `report` (text found, or not read in
+    full).
+
     Attributes:
-        source (str): The call that ran it: `redact()`.
+        source (str): The call that ran it: `redact()`, or
+            `_EXPORT_READ_SOURCE`.
         action (str): `report`, `redact` or `withhold`.
-        attempted (int): Instances holding pixels.
+        attempted (int): Instances holding pixels (planned, for the
+            export's read).
         read (int): Of those, read in this pass.
         unread (int): Could not be read in full.
         skipped (int): Already checked under this policy, not read again.
-        with_text (int): Instances whose current record holds a box.
+        with_text (int): Instances whose current record holds a box, or
+            that the export's read found text on.
         regions (int): Boxes across them.
-        acted (int): Redacted, reported or to be withheld, by action.
+        acted (int): Redacted, reported or to be withheld, by action; for
+            the export's read, withheld or written with a row.
     """
     source: str
     action: str
@@ -197,7 +208,7 @@ def _pixel_scan_line(report: "ComplianceReport") -> str:
         # After a `burned_in_text` pass the old sentence would be false:
         # OCR did check burned-in text, by the line below (#1108).
         return (label + "No `scan_pixel_content()` ran in this session; the "
-                "`burned_in_text` pass below is what read burned-in text by "
+                "`burned_in_text` line below says what read burned-in text by "
                 "OCR.\n")
     if not report.pixel_scans:
         return (label + "No `scan_pixel_content()` ran in this session, so "
@@ -240,6 +251,11 @@ _BURNED_IN_TEXT_ACTED = {"redact": "redacted",
                          "report": "reported, not redacted",
                          "withhold": "to be withheld at export"}
 
+#: The `source` of an `export(check_burned_in=True)` read's summary. Its
+#: line says withheld or written, never `redacted`: the export redacts
+#: nothing, under any action.
+_EXPORT_READ_SOURCE = "export(check_burned_in=True)"
+
 
 def _burned_in_text_line(report: "ComplianceReport") -> str:
     """What the `burned_in_text` passes of this session did, one line, or
@@ -255,6 +271,15 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
         return ""
     runs = []
     for run in report.burned_in_text_passes:
+        if run.source == _EXPORT_READ_SOURCE:
+            done = "written" if run.action == "report" else "withheld"
+            runs.append(
+                f"{run.source} under action {run.action} read {run.read} of "
+                f"{run.attempted} planned instance(s) holding pixels "
+                f"({run.unread} could not be read) and found text on "
+                f"{run.with_text} ({run.regions} region(s)); {run.acted} "
+                f"{done}, with a row")
+            continue
         runs.append(
             f"{run.source} under action {run.action} read {run.read} of "
             f"{run.attempted} instance(s) holding pixels ({run.skipped} "

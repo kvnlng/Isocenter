@@ -50,7 +50,8 @@ from .privacy import (PhiInspector, PhiFinding, PhiReport,
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, BurnedInTextSummary,
                         get_renderer, GAP_REMOVED,
-                        GAP_RETAINED, GAP_UNRESOLVED)
+                        GAP_RETAINED, GAP_UNRESOLVED,
+                        _EXPORT_READ_SOURCE)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore, _network_filesystem_type
@@ -8891,6 +8892,18 @@ class DicomSession:
             gated.append((uid, detail, hold))
             if hold:
                 dropped.add(id(task))
+        # Section 5's line for this read (review of #1110), so a clean
+        # read leaves a trace in the report as a `redact()` pass does. No
+        # `REDACTION` row and no `_actions_performed`: the export redacted
+        # nothing.
+        found = [o for o in reads if o.failure is None and o.boxes]
+        self._burned_in_text_passes.append(BurnedInTextSummary(
+            source=_EXPORT_READ_SOURCE, action=action,
+            attempted=len(candidates),
+            read=sum(1 for o in reads if o.failure is None and o.read),
+            unread=sum(1 for o in reads if o.failure is not None),
+            skipped=0, with_text=len(found),
+            regions=sum(len(o.boxes) for o in found), acted=len(gated)))
         return [task for task in tasks if id(task) not in dropped], gated
 
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
