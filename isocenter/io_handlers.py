@@ -79,7 +79,7 @@ from imagecodecs import jpeg2k_encode
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.pixels import get_decoder
 from pydicom.pixels.decoders.base import DecodeRunner
-from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
+from pydicom.uid import ExplicitVRLittleEndian, JPEG2000Lossless
 from pydicom.tag import Tag
 from pydicom.datadict import dictionary_VR
 try:
@@ -466,9 +466,10 @@ _PHOTOMETRIC_ANY_SYNTAX = frozenset({
 })
 _ADMISSIBLE_PHOTOMETRICS = {
     # The three uncompressed syntaxes share a row. This exporter writes
-    # only Implicit VR LE (`_create_ds`), but the readback reads a file,
-    # and a hand-built one under Explicit VR LE or BE must be judged by
-    # the same rule rather than falling through the table.
+    # only Explicit VR LE (`_create_ds`, #1107), but the readback reads a
+    # file, and a hand-built one under Implicit VR LE or Explicit VR BE
+    # must be judged by the same rule rather than falling through the
+    # table.
     "1.2.840.10008.1.2": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.1": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.2": _PHOTOMETRIC_ANY_SYNTAX,
@@ -1049,8 +1050,9 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
 
 #: The uncompressed syntax an icon's label is judged against. Any
 #: of the three native rows would do -- they are one set -- and this is the
-#: one `_create_ds` writes.
-_ICON_WRITTEN_SYNTAX = "1.2.840.10008.1.2"
+#: one `_create_ds` writes (Explicit VR Little Endian since #1107). A key
+#: into `_ADMISSIBLE_PHOTOMETRICS`, never a write: no output follows it.
+_ICON_WRITTEN_SYNTAX = "1.2.840.10008.1.2.1"
 
 
 def _icon_label_warning(label, at) -> Optional[str]:
@@ -2635,7 +2637,8 @@ def _process_safe(value):
     """
     # pydicom 3.0.2 holds a LUT Descriptor -- Red, Green or Blue Palette
     # Color (0028,1101-1103) or LUT Descriptor (0028,3002) -- read under
-    # Implicit VR (what `export(use_compression=False)` writes) as a
+    # Implicit VR (what `export(use_compression=False)` wrote until #1107,
+    # and what other tools still write) as a
     # `MultiValue` whose item constructor is `_skip_conversion`, a closure
     # local to `DataElement._convert_value`. Stored as it is, it makes the
     # `Instance` unpicklable, and `ingest_worker`'s result is pickled by
@@ -6668,7 +6671,7 @@ class DicomImporter:
 #: The refusal every door raises for a `compression` it cannot write.
 #: One constant because the CHANGELOG quotes it.
 _COMPRESSION_REFUSAL = (
-    "compression must be None (Implicit VR Little Endian) or 'j2k' "
+    "compression must be None (Explicit VR Little Endian) or 'j2k' "
     "(JPEG 2000 Lossless); got {!r}")
 
 
@@ -8149,9 +8152,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
     for path, graph_item, item, terminal_tag, decoded, bits, samples in writes:
         group, element = (int(x, 16) for x in terminal_tag.split(','))
         # PS3.5: `OW` above 8 bits allocated, `OB` at or below. Derived from
-        # the item's own BitsAllocated rather than carried on the blob,
-        # because the export writes Implicit VR Little Endian and no VR
-        # reaches the file at all -- pydicom just needs one to encode with,
+        # the item's own BitsAllocated rather than carried on the blob:
+        # this VR reaches the file, since every file the export writes
+        # states each VR (Explicit VR Little Endian or JPEG 2000, #1107),
         # and one rule beats a stored value that can disagree with the
         # descriptor beside it.
         vr = 'OW' if bits > 8 else 'OB'
@@ -8364,11 +8367,12 @@ def _re_vr_warning(revrs) -> Optional[str]:
     Returns:
         Optional[str]: The sentence, or None.
     """
-    # Whatever the syntax: under Implicit VR Little Endian no VR is on the
-    # wire, but the value is still encoded as the new VR (a US written LO is
-    # text, not two bytes), and an explicit-VR file names it and re-ingest
-    # records it permanently. So the words say "written", never that the
-    # file names the VR.
+    # Whatever the syntax: the value is encoded as the new VR (a US written
+    # LO is text, not two bytes), every file the export writes names that
+    # VR (Explicit VR Little Endian or JPEG 2000, #1107), and re-ingest
+    # records it permanently. The sentence's wording predates #1107, when
+    # an uncompressed file named no VR; it is still true and is left as
+    # rows already carry it.
     if not revrs:
         return None
     named = []
@@ -8441,10 +8445,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # The syntax the file will be written under, decided here so the
         # label check judges what is actually being written rather than
         # re-deriving it beside each call. `_create_ds` starts every
-        # file at Implicit VR Little Endian and only the compressed path
-        # moves it.
+        # file at Explicit VR Little Endian and only the compressed path
+        # moves it (#1107).
         written_syntax = (str(JPEG2000Lossless) if compressed
-                          else str(ImplicitVRLittleEndian))
+                          else str(ExplicitVRLittleEndian))
 
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
@@ -8686,7 +8690,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                                                geom.samples > 1))
         if j2k_fallback:
             compressed = False
-            written_syntax = str(ImplicitVRLittleEndian)
+            written_syntax = str(ExplicitVRLittleEndian)
             corrections.append(_J2K_FALLBACK_NOTE.format(
                 dtype=arr.dtype, bits=arr.dtype.itemsize * 8,
                 samples=geom.samples))
@@ -9247,18 +9251,18 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # A value too long for its VR's 2-byte Explicit VR length is
         # written `UN`, and said (#692). After the ambiguous VRs are
-        # resolved, so every VR it weighs is concrete, and off the syntax
-        # in `ds.file_meta`, never `written_syntax`: a pixel-less file stays
-        # native under compression. Under Implicit VR every length is
-        # 4 bytes and nothing is relabelled.
+        # resolved, so every VR it weighs is concrete. Unconditionally:
+        # every file this worker writes is Explicit VR Little Endian or
+        # JPEG 2000 Lossless (#1107), and both state each VR with the
+        # same length fields. Were an Implicit VR write ever added back,
+        # it would need this gated on the syntax again, and #921's
+        # Implicit VR sentence (every private element weighed) restored.
         #
         # First, a private value this library's own ingest would drop is
-        # said (#921), under either syntax, while each element still has
-        # the VR `_merge` gave it.
-        implicit_vr = ds.file_meta.TransferSyntaxUID.is_implicit_VR
-        _said_dropped_on_re_ingest(ds, corrections, implicit=implicit_vr)
-        if not implicit_vr:
-            _relabel_long_short_length_values(ds, corrections)
+        # said (#921), while each element still has the VR `_merge` gave
+        # it.
+        _said_dropped_on_re_ingest(ds, corrections)
+        _relabel_long_short_length_values(ds, corrections)
 
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
@@ -9451,7 +9455,7 @@ def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
     # frame guard) and the native `YBR_FULL_422` correction (the runner is
     # told the syntax is JPEG 2000, and the worker has rewritten that label
     # to `YBR_FULL` before the encoder). The syntax is given, not read:
-    # `ds.file_meta` still says Implicit VR LE at this point.
+    # `ds.file_meta` still says Explicit VR LE at this point.
     runner = DecodeRunner(JPEG2000Lossless)
     runner.set_options(rows=int(getattr(ds, "Rows", 0) or 0),
                        columns=int(getattr(ds, "Columns", 0) or 0),
@@ -9493,7 +9497,7 @@ def _j2k_encodable(itemsize, multi_sample) -> bool:
 #: the syntax `use_compression=False` would have written, and a WARNING
 #: would grade a correct file REVIEW_REQUIRED.
 _J2K_FALLBACK_NOTE = (
-    "written uncompressed (Implicit VR Little Endian) under "
+    "written uncompressed (Explicit VR Little Endian) under "
     "use_compression=True: JPEG 2000 Lossless here is exact only to 25 "
     "bits, so a {dtype} frame at BitsAllocated {bits} with {samples} "
     "sample(s) per pixel cannot be compressed losslessly. The "
@@ -11243,9 +11247,10 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
             # encapsulated stream, and here the element still carries a
             # defined length and an `original_encoding` of (True, True),
             # which sends pydicom down its Implicit VR arm and answers
-            # `OW` -- for a file we are not writing. Asking the question
-            # early turns every compressed export's `OB` into
-            # `OW`, at 8 bits and at 16. pydicom asks it again at the
+            # `OW`. That is the answer pydicom gives an uncompressed file
+            # at the write too (`OW` at 8 bits as at 16, which PS3.5 A.2
+            # allows, #1107), but asking it early turns every compressed
+            # export's `OB` into `OW`. pydicom asks it again at the
             # write, where the flag is true, so leaving it alone is both
             # correct and complete. Pixel Data is the only arm in pydicom
             # 3.0.2 that reads write-time state; re-read
@@ -11623,8 +11628,8 @@ def _encapsulated_document_length(ds, corrections) -> None:
 _DROPPED_OVER_THE_LIMIT_VRS = frozenset(_BINARY_VR_WORD) | {"UN"}
 
 
-def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
-                               encodings=None, within="") -> None:
+def _said_dropped_on_re_ingest(ds, corrections, *, encodings=None,
+                               within="") -> None:
     """Say each private value written that this library's own ingest drops (#921).
 
     `populate_attrs` holds a private value as bytes, and drops it over its
@@ -11636,13 +11641,15 @@ def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
     `_relabel_long_short_length_values`, after every ambiguous VR is
     resolved.
 
+    Every file the export writes states each VR (Explicit VR Little
+    Endian or JPEG 2000, #1107), so only a binary VR or `UN` is weighed.
+    Its Implicit VR arm, where every private element was weighed because
+    the file stated none, was deleted with the last Implicit VR write.
+
     Args:
         ds (pydicom.Dataset): The dataset about to be written; sequence
             items are walked.
         corrections (list): Where each note goes.
-        implicit (bool): Whether the file is written under Implicit VR.
-            Keyword-only, no default: the two syntaxes drop different
-            values.
         encodings: The character sets text is encoded with; the dataset's
             own when None.
         within (str): The enclosing sequence path, for the note.
@@ -11670,17 +11677,15 @@ def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
                 path = (f"{within} > ({tag}) item {index}" if within
                         else f"({tag}) item {index}")
                 _said_dropped_on_re_ingest(
-                    item, corrections, implicit=implicit,
-                    encodings=encodings, within=path)
+                    item, corrections, encodings=encodings, within=path)
             continue
         if (elem.tag.group % 2 != 1 or elem.tag.element < 0x1000
                 or elem.is_empty):
             continue
-        # Under Explicit VR the file states each VR, and ingest weighs
-        # only the ones it holds as bytes; a `UT`, a `UC` or a number list
-        # is read back under its VR whatever its size. Under Implicit VR
-        # every private data element is weighed.
-        if not implicit and vr not in _DROPPED_OVER_THE_LIMIT_VRS:
+        # The file states each VR, and ingest weighs only the ones it
+        # holds as bytes; a `UT`, a `UC` or a number list is read back
+        # under its VR whatever its size.
+        if vr not in _DROPPED_OVER_THE_LIMIT_VRS:
             continue
         limit = _retention_limit_for(tag)
         if isinstance(elem.value, (bytes, bytearray, memoryview)):
@@ -11703,26 +11708,17 @@ def _said_dropped_on_re_ingest(ds, corrections, *, implicit: bool,
             continue
         # Bytes that re-parse byte-exactly as a sequence are restored as
         # one before any size gate (`populate_attrs`), wherever the file
-        # leaves the VR unknown: every private element under Implicit VR,
-        # and `UN` under Explicit VR. Saying those are dropped would be
-        # false.
-        if ((implicit or vr == "UN") and value.startswith(_ITEM_TAG_LE)
+        # leaves the VR unknown, which in a file stating each VR is `UN`.
+        # Saying those are dropped would be false.
+        if (vr == "UN" and value.startswith(_ITEM_TAG_LE)
                 and _sequence_from_un_bytes(value, elem.tag,
                                             encodings) is not None):
             continue
         where = f"{within} > " if within else ""
-        if implicit:
-            corrections.append(
-                f"{where}{tag} ({len(value)} bytes) is written as it stands, "
-                f"under Implicit VR, which names no VR: this library's "
-                f"ingest reads a private element whose VR the file does not "
-                f"state as UN bytes, and drops one over {limit} bytes with "
-                f"a DATA_LOSS row.")
-        else:
-            corrections.append(
-                f"{where}{tag} ({vr}, {len(value)} bytes) is written as it "
-                f"stands: this library's ingest drops a binary value over "
-                f"{limit} bytes with a DATA_LOSS row.")
+        corrections.append(
+            f"{where}{tag} ({vr}, {len(value)} bytes) is written as it "
+            f"stands: this library's ingest drops a binary value over "
+            f"{limit} bytes with a DATA_LOSS row.")
 
 
 def _read_back_words(tag, vr, length) -> str:
@@ -12381,10 +12377,10 @@ def _numeric_arm(vr, value):
     #
     # `US` has a 2-byte explicit length, so 32767 entries at most under an
     # Explicit VR syntax. A longer list -- a caller's, or an Implicit VR
-    # source's, where every length is 4 bytes -- does not raise: Implicit
-    # VR writes it whole, and an Explicit VR export writes it `UN` with an
-    # INFO note (`_relabel_long_short_length_values`, #692), which ingest
-    # decodes back under its dictionary VR.
+    # source's, where every length is 4 bytes -- does not raise: every
+    # export states its VRs (#1107) and writes it `UN` with an INFO note
+    # (`_relabel_long_short_length_values`, #692), which ingest decodes
+    # back under its dictionary VR.
     arms = vr.split(" or ")
     if vr not in AMBIGUOUS_VR:
         return vr
@@ -12799,7 +12795,7 @@ class DicomExporter:
             studies (List[Study], optional): Write only these studies.
                 Defaults to every study under `patient`.
             compression (str, optional): `'j2k'` for JPEG 2000 Lossless, or
-                None for Implicit VR Little Endian. Nothing else.
+                None for Explicit VR Little Endian. Nothing else.
             show_progress (bool): If True, shows a progress bar.
             executor (ProcessPoolExecutor, optional): Shared executor for parallelism.
             store_backend (SqliteStore, optional): Where to write a
@@ -13009,9 +13005,23 @@ class DicomExporter:
 
         meta.MediaStorageSOPClassUID = sop_class
         meta.MediaStorageSOPInstanceUID = inst.sop_instance_uid
-        meta.TransferSyntaxUID = ImplicitVRLittleEndian
+        # Explicit VR Little Endian, never Implicit (#1107). `_merge` has
+        # already chosen each element's VR -- a private element's recorded
+        # one when its value still fits -- and only an Explicit VR syntax
+        # puts that choice on the wire. Under Implicit VR a reader takes a
+        # private VR from its own dictionary, and where the device wrote
+        # another (GE `GEMS_PETD_01` (0009,109D): `SS` stored, `SL` listed)
+        # pydicom raises `BytesLengthException` on the whole file. Every
+        # file not compressed keeps this syntax: a pixel-less, float or
+        # 32-/64-bit file under `use_compression=True` too (owner ruling
+        # Q1, 2026-10-14). Not to be confused with
+        # `reversibility.PAYLOAD_TRANSFER_SYNTAX`, the Implicit VR UID
+        # *value* of (0400,0510), which names the token's payload and
+        # stays as it is (#790).
+        #
         # Encoding comes from meta.TransferSyntaxUID above; see the
         # note on the JPEG 2000 branch in `_compress_j2k`.
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
         ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
         return ds
 

@@ -38,7 +38,8 @@ from isocenter.io_handlers import (DicomExporter, ExportContext,
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
 SR_STORAGE = "1.2.840.10008.5.1.4.1.1.88.11"
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
-IMPLICIT_VR_LE = "1.2.840.10008.1.2"
+#: The native syntax, Explicit VR Little Endian since #1107 (Implicit before).
+EXPLICIT_VR_LE = "1.2.840.10008.1.2.1"
 
 #: Every spelling a caller could reasonably try, and the two falsy
 #: values that used to mean "native" by accident of the truthiness test.
@@ -189,6 +190,6 @@ def test_every_accepted_value_writes_the_pixels_the_arm_judged(
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
     assert "PixelData" not in written
-    assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert written.file_meta.TransferSyntaxUID == EXPLICIT_VR_LE
     assert len(outcome.warnings) == 1, outcome.warnings
     assert not [c for c in outcome.corrections if "this library cannot read such a file back" in c]

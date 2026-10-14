@@ -90,8 +90,10 @@ def test_the_reopened_arm_exports_what_the_live_arm_exports(two_takes):
     arms = two_takes["first"]["members"]["synthetic:private_nested"]["configs"]["A"]["arms"]
     (live,) = arms["A.dicom"]["files"].values()
     (reopened,) = arms["A.reopened.dicom"]["files"].values()
-    assert live["elements"]["0018,0050"] == "DS/implicit '1.000000'"
-    assert reopened["elements"]["0018,0050"] == "DS/implicit '1.000000'"
+    # `DS`, not `DS/implicit`, since #1107: the uncompressed arm is
+    # Explicit VR Little Endian and states the VR.
+    assert live["elements"]["0018,0050"] == "DS '1.000000'"
+    assert reopened["elements"]["0018,0050"] == "DS '1.000000'"
 
 
 def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
@@ -216,6 +218,9 @@ COMMITTED = {
                        "one_bit_excess-padded.dcm"],
     "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
+    "private_vr_unlike_the_dictionary": [
+        "private_vr_unlike_the_dictionary-sl.dcm",
+        "private_vr_unlike_the_dictionary-ss.dcm"],
     "redacted": ["redacted-1.dcm"],
     "sop_classes_in_the_file_meta": ["sop_classes_in_the_file_meta-1.dcm"],
     "source_says_unmodified": ["source_says_unmodified-1.dcm"],

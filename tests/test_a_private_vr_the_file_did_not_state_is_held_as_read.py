@@ -173,13 +173,17 @@ def test_an_implicit_source_element_of_a_known_creator_is_held_and_written_un(
     finally:
         session.close()
 
-    assert not pydicom.dcmread(str(explicit)) \
-        .file_meta.TransferSyntaxUID.is_implicit_VR
+    for path in (explicit, native):
+        assert not pydicom.dcmread(str(path)) \
+            .file_meta.TransferSyntaxUID.is_implicit_VR
     for tag, _, _ in KNOWN:
+        # `UN` and the bytes the source had, in both arms: the native
+        # export states each VR since #1107 (it was Implicit VR, and the
+        # wire VR None), and states `UN` where the source stated none.
         assert _raw(explicit, tag) == ("UN", source[tag][1]), tag
-        # No VR on the wire, and the bytes the source had.
-        assert _raw(native, tag) == (None, source[tag][1]), tag
+        assert _raw(native, tag) == ("UN", source[tag][1]), tag
     assert _raw(explicit, "0019,0010")[0] == "LO"
+    assert _raw(native, "0019,0010")[0] == "LO"
     assert not [r for r in rows + losses if "0019," in r[2]], (rows, losses)
 
 
@@ -686,8 +690,9 @@ def test_a_declined_shift_exports_the_date_the_source_held(
             "j2k": pydicom.dcmread(str(explicit)).get(temporal)} == {
         "status": PhiStatus.IDENTIFIED, "native": None, "j2k": None}
 
-    # The exported value: it is the statement the CHANGELOG makes.
-    assert _raw(native, "3109,100a") == (None, b"20200115")
+    # The exported value: it is the statement the CHANGELOG makes. `UN` in
+    # both arms since #1107; the native arm was Implicit VR, wire VR None.
+    assert _raw(native, "3109,100a") == ("UN", b"20200115")
     assert _raw(explicit, "3109,100a") == ("UN", b"20200115")
     for path in (native, explicit):
         assert pydicom.dcmread(str(path)).StudyDate != "20200101", (

@@ -328,8 +328,9 @@ def test_an_instance_with_no_pixels_exports_whatever_syntax_its_source_named(
     export then failed, `0 of 1`, with one `ERROR` row ending `Unable to
     decode the pixel data as a (0002,0010) 'Transfer Syntax UID' value
     of '...' is not supported`. Red there. It is written as every file
-    with no pixels is, Implicit VR Little Endian, and what was written
-    is ingested again.
+    with no pixels is, Explicit VR Little Endian (#1107; Implicit VR
+    Little Endian when this was written), and what was written is
+    ingested again.
     """
     src = os.path.join(str(tmp_path), "src")
     _write(src, _image(ts=ts, pixels=False))
@@ -347,7 +348,7 @@ def test_an_instance_with_no_pixels_exports_whatever_syntax_its_source_named(
         assert conn.execute("SELECT details FROM audit_log WHERE "
                             "action_type = 'ERROR'").fetchall() == []
     exported = pydicom.dcmread(written[0])
-    assert str(exported.file_meta.TransferSyntaxUID) == IMPLICIT_LE
+    assert str(exported.file_meta.TransferSyntaxUID) == EXPLICIT_LE
     assert not any(tag in exported for tag in PIXEL_TAGS)
     assert exported.Modality == "OT"
 

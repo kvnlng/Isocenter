@@ -208,10 +208,12 @@ def test_a_kept_name_is_exported_as_the_two_values_the_source_held(tmp_path):
         assert _grade(session, tmp_path) == "PASS"
 
 
-@pytest.mark.parametrize("compression", [False, True], ids=["implicit", "explicit"])
+@pytest.mark.parametrize("compression", [False, True], ids=["native", "j2k"])
 def test_an_export_with_no_pass_writes_the_sources_bytes_and_no_row(
         tmp_path, compression):
-    """Q5 A: no row. Under the Explicit VR arm the wire still says `PN`."""
+    """Q5 A: no row. Under either syntax the wire says `PN`: the native
+    export is Explicit VR Little Endian since #1107 (it was Implicit VR,
+    which named no VR, and the arm asserted None)."""
     _write(tmp_path)
     with _session(tmp_path) as session:
         session.export(str(tmp_path / "out"), use_compression=compression,
@@ -219,7 +221,7 @@ def test_an_export_with_no_pass_writes_the_sources_bytes_and_no_row(
         ds = _exported(tmp_path / "out")
         vr, value = _raw(ds, 0x00100010)
         assert value == TWO_ON_THE_WIRE
-        assert vr == ("PN" if compression else None)
+        assert vr == "PN"
         rows = _rows(session, "WARNING", "ERROR", "DATA_LOSS")
         assert rows == []
 
@@ -418,8 +420,8 @@ def test_a_private_person_name_of_several_values_is_written_pn_with_no_row(tmp_p
     every such name that way), so it is written `PN`, the source's bytes,
     with the source's VM, two and three; no row, PASS. Until #951 the two
     were written `UT` as one value, with a re-VR `WARNING` row that graded
-    the run REVIEW_REQUIRED. Explicit VR export only: an Implicit VR file
-    names no VR."""
+    the run REVIEW_REQUIRED. The native export's twin is
+    `test_a_native_export_of_the_private_names_is_pn_and_the_sources_bytes`."""
     _write(tmp_path, name="Single^Name", edit=_private_names)
     with _session(tmp_path, NO_RULES) as session:
         _, instance = _instance(session)
@@ -522,18 +524,17 @@ def test_a_reopened_store_writes_the_private_names_as_pn(tmp_path):
         assert _rows(reopened, "WARNING", "ERROR", "DATA_LOSS") == []
 
 
-def test_an_implicit_vr_export_of_the_private_names_is_the_sources_bytes(tmp_path):
-    """An Implicit VR file names no VR, so the element's bytes were the
-    source's before #951 and are now; what changes there is that no row
-    is written."""
+def test_a_native_export_of_the_private_names_is_pn_and_the_sources_bytes(tmp_path):
+    """The uncompressed export writes the private names as the compressed
+    one does: `PN`, the source's bytes, no row. Until #1107 it was Implicit
+    VR, which named no VR, and this test held only the bytes and the
+    absence of a row; it now holds the stated `PN` too."""
     _write(tmp_path, name="Single^Name", edit=_private_names)
     with _session(tmp_path, NO_RULES) as session:
         session.export(str(tmp_path / "out"), use_compression=False,
                        show_progress=False)
         ds = _exported(tmp_path / "out")
-        assert ds.file_meta.TransferSyntaxUID.is_implicit_VR
-        assert bytes(ds.get_item(0x00711001).value) == b"PrivA^X\\PrivB^Y "
-        assert bytes(ds.get_item(0x00711005).value) == b"PrivA^X\\PrivB^Y\\PrivC^Z "
+        assert _the_private_names_on_the_wire(ds) == AS_THE_SOURCE_WROTE
         assert _rows(session, "WARNING", "ERROR", "DATA_LOSS") == []
 
 

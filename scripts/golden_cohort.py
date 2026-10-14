@@ -978,6 +978,26 @@ def no_pixels_under_an_undecodable_syntax(out: Path):
     write(ds, out / f"{member}-jpip.dcm")
 
 
+def private_vr_unlike_the_dictionary(out: Path):
+    """A private element whose stated VR is not the one pydicom's private
+    dictionary lists (#1107). GE `GEMS_PETD_01` `(0009,109D)` is stored
+    `SS` by the scanner in the MIDI-B validation set and listed `SL` by
+    pydicom: `-ss` holds that shape, Explicit VR, value 0. `-sl` is the
+    same element under the dictionary's own VR, the control. Until #1107
+    the uncompressed export was Implicit VR, which states no VR, and
+    pydicom raised `BytesLengthException` reading `-ss`'s `B.dicom`; the
+    JPEG 2000 arm already wrote `SS`. Before this member no input held an
+    explicit-source private element whose VR disagreed with pydicom's
+    dictionary (`unstated_private_vr`'s `(0019,1012)` is a VR the source
+    did not state, which is another shape)."""
+    member = "private_vr_unlike_the_dictionary"
+    for inst, vr in ((1, "SS"), (2, "SL")):
+        ds = ct(member, inst=inst)
+        ds.add_new(0x00090010, "LO", "GEMS_PETD_01")
+        ds.add_new(0x0009109D, vr, 0)
+        write(ds, out / f"{member}-{vr.lower()}.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -989,7 +1009,7 @@ MEMBERS = {f.__name__: f for f in (
     source_says_unmodified, linkage_key_not_text,
     sop_classes_in_the_file_meta, label_spelling, one_bit_excess,
     offset_table_edges, fewer_fragments_than_frames,
-    no_pixels_under_an_undecodable_syntax)}
+    no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

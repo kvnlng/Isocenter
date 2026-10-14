@@ -13,8 +13,10 @@ queued behind it: `ingest()` raised (`AttributeError` on 3.12,
 after the offending one in path order was lost, the ones before it were
 linked and never saved, and no row was written.
 
-Implicit VR is the syntax `export(use_compression=False)` writes, so an
-exported palette or LUT file could not be ingested again.
+Implicit VR was the syntax `export(use_compression=False)` wrote until
+#1107, so an exported palette or LUT file could not be ingested again. The
+export is Explicit VR Little Endian since; an Implicit VR file from another
+tool still takes the root fix, which the hand-built ingest tests pin.
 
 Two changes, and the tests are split the same way:
 
@@ -156,11 +158,14 @@ def test_an_implicit_vr_lut_descriptor_ingests_beside_its_neighbours(
 
 
 def test_our_own_uncompressed_export_of_it_can_be_ingested_again(tmp_path):
-    """The round trip: Explicit VR in, Implicit VR out, and back in again.
+    """The round trip: Explicit VR in, our uncompressed export out, and
+    back in again.
 
     The source ingests on main -- Explicit VR hands pydicom the VR, so no
-    closure -- and the export writes Implicit VR Little Endian. It was the
-    re-ingest of that output that raised.
+    closure. Until #1107 the export wrote Implicit VR Little Endian, and it
+    was the re-ingest of that output that raised. The export is Explicit VR
+    Little Endian since, so the round trip no longer reaches the closure;
+    it still pins that this library ingests its own output.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -179,7 +184,7 @@ def test_our_own_uncompressed_export_of_it_can_be_ingested_again(tmp_path):
 
     written, = glob.glob(str(out / "**" / "*.dcm"), recursive=True)
     w = pydicom.dcmread(written)
-    assert w.file_meta.TransferSyntaxUID == ImplicitVRLittleEndian
+    assert w.file_meta.TransferSyntaxUID == ExplicitVRLittleEndian
     assert list(w.RedPaletteColorLookupTableDescriptor) == [0, 0, 16]
 
     again = tmp_path / "again"
