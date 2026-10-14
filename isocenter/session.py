@@ -3830,7 +3830,8 @@ class DicomSession:
         """Every instance of the series whose serial is `serial_number`.
 
         Read through `series_serial`, so `""` names every series with no
-        Device Serial Number, an equipment-less one included, as a
+        Device Serial Number, an equipment-less one (no manufacturer, no
+        model, no serial) included, as a
         `serial_number: ""` rule does (#1108). An exact compare: `"*"` is
         a literal here, as it always was for discovery.
 

@@ -105,7 +105,7 @@ class SeriesBuilder:
     def set_equipment(self, man, mod, sn=""):
         """Sets the Equipment metadata for this Series.
 
-        A call with neither a manufacturer nor a model name leaves
+        A call with no manufacturer, no model name and no serial leaves
         `series.equipment` as `None`, the same answer ingest and reload
         give.
 

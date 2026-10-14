@@ -49,9 +49,10 @@ class MachinePixelIndex:
         """
         # Every series, a serial-less one under `""` (#1108): one key for
         # both kinds of "no serial", a series whose equipment holds `""`
-        # and one with no equipment at all (no manufacturer and no model,
-        # `Equipment.from_parts`). `rule_applies_to` reads `""` the same
-        # way, so `redact()` and the export's zones still agree.
+        # and one with no equipment at all (no manufacturer, no model and
+        # no serial, `Equipment.from_parts`; a serial alone is equipment).
+        # `rule_applies_to` reads `""` the same way, so `redact()` and the
+        # export's zones still agree.
         self._index.clear()
         self._series = []
         for p in store.patients:
@@ -626,7 +627,8 @@ NO_SERIAL_ENTITY = "(no serial)"
 def series_serial(series) -> str:
     """A series' Device Serial Number as the rules read it: `""` for a
     series with no serial, whether its equipment holds `""` or it has no
-    equipment at all (#1108).
+    equipment at all, which means no manufacturer, no model and no serial
+    (`Equipment.from_parts`, #1108).
 
     Args:
         series (Series): The series.

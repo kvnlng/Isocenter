@@ -637,7 +637,7 @@ machines:
       - [0, 100, 0, 500]
 ```
 
-* **`serial_number`**: Exact match for `0018,1000`; `""` (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer and no model; or `"*"` for every series, with a serial or without. A bare `serial_number:` is null, and is refused as missing.
+* **`serial_number`**: Exact match for `0018,1000`; `""` (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer, no model and no serial (it has no equipment); a series whose files carry a serial and nothing else is matched by that serial, not by `""`; or `"*"` for every series, with a serial or without. A bare `serial_number:` is null, and is refused as missing.
 * **`match`**: select by device instead of serial, for a machine whose files carry no serial number:
 
     ```yaml

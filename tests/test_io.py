@@ -132,18 +132,15 @@ def test_a_series_with_a_manufacturer_and_no_model_still_gets_its_equipment(
     assert series.equipment.model_name == (model or "")
 
 
-def test_a_series_with_only_a_serial_number_ingests_without_equipment(tmp_path):
-    """DeviceSerialNumber with no manufacturer or model is not equipment (#290).
+def test_a_series_with_only_a_serial_number_ingests_with_equipment(tmp_path):
+    """DeviceSerialNumber with no manufacturer or model is equipment.
 
-    A characterization pin of the rule as it stands, not an endorsement
-    of it. Manufacturer (0008,0070) is Type 2 -- legally present and
-    empty -- and ManufacturerModelName is Type 3, so a file carrying
-    only a serial is a valid file. It ingests with `series.equipment is
-    None`, and because every downstream rule matches on the serial
-    (`_match_machine_rule`, the redaction task walk, `_redaction_zones_for`),
-    such a series can never match a rule and is skipped by redaction
-    silently. Widening `Equipment.from_parts` to the serial is filed
-    separately from #290; this test flips when it lands.
+    Manufacturer (0008,0070) is Type 2 -- legally present and empty --
+    and ManufacturerModelName is Type 3, so a file carrying only a serial
+    is a valid file. Until the review of #1111 (B1) it ingested with
+    `series.equipment is None`, and since every rule matches on the serial
+    no exact rule could reach it. #290's characterization pin promised
+    this flip; owner ruling of 2026-10-14.
     """
     path = _write_minimal(tmp_path / "serial_only.dcm",
                           DeviceSerialNumber="SN-ONLY")
@@ -152,7 +149,10 @@ def test_a_series_with_only_a_serial_number_ingests_without_equipment(tmp_path):
     DicomImporter.import_files([path], store)
 
     series = store.patients[0].studies[0].series[0]
-    assert series.equipment is None
+    assert series.equipment is not None
+    assert series.equipment.device_serial_number == "SN-ONLY"
+    assert series.equipment.manufacturer == ""
+    assert series.equipment.model_name == ""
 
 
 def _write_without_preamble(path):

@@ -65,7 +65,7 @@ Run either from a script whose top level is guarded by
 
 ## Setting Up New Machines (Zone Discovery)
 
-A new machine in your configuration has no zones: `create_config()` writes an empty `redaction_zones` list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. `discover_redaction_zones()` runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot. `serial_number=""` samples every series with no Device Serial Number, a series whose files name no manufacturer and no model included; the comparison is exact, so `"*"` is a literal here, not every series.
+A new machine in your configuration has no zones: `create_config()` writes an empty `redaction_zones` list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. `discover_redaction_zones()` runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot. `serial_number=""` samples every series with no Device Serial Number, a series with no equipment at all included; the comparison is exact, so `"*"` is a literal here, not every series.
 
 ```python
 import isocenter

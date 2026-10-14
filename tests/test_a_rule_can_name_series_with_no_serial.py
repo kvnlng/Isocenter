@@ -42,9 +42,9 @@ from isocenter.services import (MachinePixelIndex, RedactionService,
 from isocenter.privacy import _redaction_uid_for
 from isocenter.session import DicomSession
 from support.project_secret import FIXED_A, load_fixed_secret
-from support.serial_less_burned_cr import (BOX, ELSEWHERE, INK_PIXELS, OVER,
-                                           SERIAL, ink_left, source_uid,
-                                           write_inputs)
+from support.serial_less_burned_cr import (ALONE_SERIAL, BOX, ELSEWHERE,
+                                           INK_PIXELS, OVER, SERIAL, ink_left,
+                                           source_uid, write_inputs)
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ def _exported_ink(session, tmp_path, name="out"):
     for path in glob.glob(os.path.join(out, "**", "*.dcm"), recursive=True):
         ds = pydicom.dcmread(path)
         kind = {source_uid(k).rsplit(".", 1)[0]: k
-                for k in ("none", "serial", "bare")}[ds.SeriesInstanceUID]
+                for k in ("none", "serial", "bare", "alone")}[ds.SeriesInstanceUID]
         left[kind] = ink_left(ds.pixel_array)
     return left
 
@@ -377,3 +377,79 @@ def test_preview_counts_what_redact_would_reach(tmp_path, capsys, serial):
         assert "NO MATCH" not in out, out
     finally:
         session.close()
+
+
+
+# --- A serial on a file that names no manufacturer and no model -------------
+#
+# Review of #1111, B1, owner ruling of 2026-10-14. `Equipment.from_parts`
+# made a series equipment only when it had a manufacturer or a model, so a
+# file carrying Device Serial Number `SN-ALONE` and neither was held with no
+# equipment: an exact `SN-ALONE` rule reached nothing (on main too: all
+# 9,600 ink pixels exported), and `""` reached a series that has a serial.
+# The serial is now equipment by itself, at that one source of truth.
+
+def test_an_exact_rule_reaches_a_serial_with_no_manufacturer_or_model(tmp_path):
+    session = _session(tmp_path, ("alone",))
+    try:
+        equipment = _by_series_uid(session, "alone").equipment
+        assert equipment is not None
+        assert equipment.device_serial_number == ALONE_SERIAL
+        session.configuration.rules = _rules(ALONE_SERIAL)
+        assert _exported_ink(session, tmp_path, "zoned") == {"alone": 0}
+        assert session.redact(show_progress=False) == 1
+        assert ink_left(_by_series_uid(session, "alone").instances[0]
+                        .get_pixel_data()) == 0
+    finally:
+        session.close()
+
+
+def test_empty_does_not_reach_a_serial_with_no_manufacturer_or_model(tmp_path):
+    session = _session(tmp_path, ("alone", "none"))
+    try:
+        session.configuration.rules = _rules("")
+        assert session.redact(show_progress=False) == 1
+        assert _exported_ink(session, tmp_path) == {"alone": INK_PIXELS, "none": 0}
+        session.configuration.rules = _rules("*")
+        assert _exported_ink(session, tmp_path, "star") == {"alone": 0, "none": 0}
+    finally:
+        session.close()
+
+
+def test_a_serial_with_no_manufacturer_or_model_survives_a_reopen(tmp_path):
+    """The row keeps the serial now (`_upsert_series` writes the
+    equipment's fields), and the reload builds equipment from it."""
+    db = str(tmp_path / "s1108.db")
+    session = _session(tmp_path, ("alone",))
+    session.save(sync=True)
+    session.close()
+    with DicomSession(db) as reopened:
+        equipment = _by_series_uid(reopened, "alone").equipment
+        assert equipment is not None
+        assert equipment.device_serial_number == ALONE_SERIAL
+        reopened.configuration.rules = _rules(ALONE_SERIAL)
+        assert _exported_ink(reopened, tmp_path, "reopened") == {"alone": 0}
+
+
+def test_a_store_saved_before_the_fix_reads_such_a_series_as_serial_less(tmp_path):
+    """A store an earlier release saved held such a series with no
+    equipment, and wrote `""` for all three series columns: the serial is
+    not in the row, so a reopen cannot recover it. It reads as a series
+    with no serial, reached by `""` and `"*"` and not by its exact serial,
+    until its files are ingested into a new store."""
+    db = str(tmp_path / "s1108.db")
+    session = _session(tmp_path, ("alone",))
+    session.save(sync=True)
+    session.close()
+    with sqlite3.connect(db) as conn:
+        changed = conn.execute(
+            "UPDATE series SET manufacturer = '', model_name = '', "
+            "device_serial_number = '' WHERE series_instance_uid = ?",
+            (source_uid("alone").rsplit(".", 1)[0],)).rowcount
+    assert changed == 1
+    with DicomSession(db) as reopened:
+        assert _by_series_uid(reopened, "alone").equipment is None
+        reopened.configuration.rules = _rules(ALONE_SERIAL)
+        assert _exported_ink(reopened, tmp_path, "exact") == {"alone": INK_PIXELS}
+        reopened.configuration.rules = _rules("")
+        assert _exported_ink(reopened, tmp_path, "empty") == {"alone": 0}
