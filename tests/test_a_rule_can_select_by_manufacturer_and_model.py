@@ -396,10 +396,12 @@ def test_the_direct_service_path_finds_a_match_rules_targets(tmp_path):
     from isocenter.services import RedactionService
     session = _session(tmp_path, ("none", "bare"))
     try:
-        service = RedactionService(session.store)
+        service = RedactionService(session.store, session.store_backend)
         service.redact_machine_instances({"match": dict(FUJI)}, [tuple(OVER)],
                                          show_progress=False,
                                          project_secret=FIXED_A)
+        assert _ink(session, "none") == 0
+        assert _ink(session, "bare") == INK_PIXELS
         expected = _redaction_uid_for(
             source_uid("none"),
             _redaction_config_hash([{"match": FUJI}], [tuple(OVER)]), FIXED_A)

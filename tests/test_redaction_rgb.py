@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 from isocenter.services import RedactionService
 from isocenter.entities import Instance, Series, Study, Patient, Equipment
 from isocenter.io_handlers import DicomStore
+from support.memory_backend import MemoryBackend
 from support.project_secret import FIXED_A
 
 def test_redaction_rgb_dimensions():
@@ -32,7 +33,7 @@ def test_redaction_rgb_dimensions():
     store.patients.append(p)
 
     # 2. Setup Service
-    service = RedactionService(store)
+    service = RedactionService(store, MemoryBackend())
     service.logger = MagicMock()
 
     # 3. Apply Redaction

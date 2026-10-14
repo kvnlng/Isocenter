@@ -265,7 +265,7 @@ def test_a_serial_less_zone_task_is_prepared_for_the_empty_rule(tmp_path):
     """Kills a falsy gate in `prepare_redaction_tasks`."""
     session = _session(tmp_path)
     try:
-        service = RedactionService(session.store)
+        service = RedactionService(session.store, session.store_backend)
         tasks = service.prepare_redaction_tasks(
             _rules("")[0], project_secret=FIXED_A)
         assert len(tasks) == 1 and tasks[0]["machine_sn"] == ""

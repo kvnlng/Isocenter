@@ -1007,6 +1007,9 @@ class RedactionService:
         # `_one_task_per_instance` (#908).
         config_hash = _redaction_config_hash([serial], valid_rois)
 
+        # Before any task exists: a task run with nowhere to store its
+        # blanked frame would record a redaction it did not make (#1113).
+        self._require_backend()
         # The redacted UIDs are derived here, in the parent: the secret is
         # read once and never put on a task or on the service.
         secret = self._redaction_secret(project_secret)
@@ -1166,6 +1169,9 @@ class RedactionService:
         # *in* a `finally` replaces the return value.
 
         try:
+            # First, before the skip and the pixels: with nowhere to store
+            # the blanked frame, nothing may be written (#1113).
+            self._require_backend()
             # Skip if already redacted with the same configuration.
             #
             # `force` suppresses this and nothing else. The attestation is
@@ -1422,6 +1428,26 @@ class RedactionService:
                 verbose=verbose,
                 project_secret=project_secret)
 
+    def _require_backend(self) -> None:
+        """Refuse to redact with no store backend to persist pixels to (#1113).
+
+        A redaction writes its record -- the new SOP Instance UID, the
+        hash, Image Type `DERIVED` and Burned In Annotation `NO` -- on the
+        promise that the blanked frame is stored. With no backend nothing
+        stores it, the loader keeps pointing at the original frame, and an
+        export writes the record over the original pixels.
+
+        Raises:
+            RuntimeError: When the service has no backend, or one that
+                cannot persist pixels.
+        """
+        if self.store_backend is None or not hasattr(
+                self.store_backend, "persist_pixel_data"):
+            raise RuntimeError(
+                "RedactionService has no store backend to persist the "
+                "redacted pixels to; nothing was redacted. Build it with "
+                "the session's store backend, or call Session.redact().")
+
     def _redaction_secret(self, project_secret: Optional[bytes]) -> bytes:
         """The project secret a redaction derives its UIDs under.
 
@@ -1512,6 +1538,7 @@ class RedactionService:
                        if isinstance(machine_sn, dict)
                        else self.index.get_by_machine(machine_sn))
         # Before the first instance, so a refusal changes nothing.
+        self._require_backend()
         secret = self._redaction_secret(project_secret)
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")
