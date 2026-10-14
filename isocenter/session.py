@@ -802,6 +802,10 @@ class _ExportOptions(NamedTuple):
     allowed_uids: Optional[Set[str]]
     use_compression: bool
     verify_readback: bool = False
+    #: `check_burned_in=True` under a `burned_in_text` policy: the plan
+    #: leaves the record gate out, because a fresh read of every planned
+    #: instance decides it instead (#1108, Q6).
+    read_burned_in_text: bool = False
 
 
 #: What `_why_excluded` answers for an instance the subset did not select.
@@ -7657,7 +7661,9 @@ class DicomSession:
         Under a `burned_in_text` policy (#1108) the `dicom` format reads
         each instance's record of the last `redact()` pass, and runs no
         OCR; it loads each frame once to check that the record names the
-        pixels the instance holds now. An instance that holds pixels and
+        pixels the instance holds now. With `check_burned_in=True` it
+        reads the pixels it is about to write with OCR instead (see
+        `_export_dicom`). An instance that holds pixels and
         was never checked under the policy's threshold and zones, or whose
         pixels changed after the read, is withheld under `redact` and
         `withhold`, and written under `report`; one with text found is
@@ -7826,7 +7832,20 @@ class DicomSession:
                 withheld. An export that withheld everything returns an
                 empty summary and does not raise: nothing failed. An
                 instance outside `subset` is not withheld; it was never
-                asked for.
+                asked for. Under a `burned_in_text` policy (#1108), it
+                also reads with OCR every planned instance that holds
+                pixels, as it is about to be written, after the
+                configured zones; that read, not the record of the last
+                `redact()`, decides the instance: text found is withheld
+                under `redact` and `withhold` and written under `report`;
+                nothing found is written; a read that failed is withheld
+                under `redact` and `withhold` and written under `report`.
+                Each writes one `WARNING` row naming the instance, the
+                count and the frames, never the text. The read changes
+                nothing in the session: it redacts no pixel and moves no
+                UID. With the `ocr` extra or the tesseract binary
+                unavailable it raises `OcrUnavailableError` before the
+                scan, the save and any row.
             check_reversibility (bool): If True (the default), warn when the
                 files this export wrote still carry the encrypted originals
                 that `lock_identities()` embeds, and record the disclosure in
@@ -7960,8 +7979,15 @@ class DicomSession:
         # A `burned_in_text` policy assigned in code that a file could not
         # hold is refused here, before the scan and the save, as the
         # subset is (#1108).
-        config_manager._burned_in_text_policy(
+        policy = config_manager._burned_in_text_policy(
             self.configuration.burned_in_text, "session.configuration")
+        # Under the policy, `check_burned_in=True` also reads the pixels
+        # it is about to write (#1108, Q6). Refused here when OCR cannot
+        # run, before the tag scan re-records a status and before the
+        # save: an export that will not happen must not move the session.
+        read_pixels = bool(check_burned_in) and policy is not None
+        if read_pixels:
+            pixel_analysis._require_ocr("export(check_burned_in=True)")  # pylint: disable=protected-access
 
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them
@@ -7992,8 +8018,13 @@ class DicomSession:
 
         tasks, patient_count, withheld, gated = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,
-                           use_compression, verify_readback),
+                           use_compression, verify_readback,
+                           read_burned_in_text=read_pixels),
             target_ids)
+        if read_pixels and tasks:
+            tasks, read_gated = self._read_before_export(
+                tasks, policy, folder, show_progress)
+            gated.extend(read_gated)
 
         # Before the empty-plan branch, so an export that withheld
         # everything still leaves one row per instance it held back,
@@ -8764,6 +8795,80 @@ class DicomSession:
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
 
+    def _read_before_export(self, tasks, policy, folder, show_progress):
+        """`export(check_burned_in=True)`'s read of what it will write (#1108).
+
+        Reads every planned instance that holds pixels with `redact()`'s
+        phase-1 worker, after the zones the export applies (zeroed on a
+        copy), and decides each from that read alone, never its record:
+        text found is written with a row under `report` and withheld with
+        a row otherwise; nothing found is written with no row; a read
+        that failed is unchecked, withheld under `redact` and `withhold`
+        and written under `report`, with a row.
+
+        Never changes the graph, the store or a UID, and writes no
+        record: an export is a check here, not a redaction. Under
+        `redact` the remedy is `redact()`.
+
+        Args:
+            tasks (list): The plan's `ExportContext`s.
+            policy (dict): The normalised policy.
+            folder (str): The export's folder, for the row text.
+            show_progress (bool): Show the read's progress bar.
+
+        Returns:
+            tuple: `(tasks, gated)`: the tasks still to write, and
+                `(sop_instance_uid, detail, withheld)` per row.
+        """
+        candidates = [task for task in tasks if _holds_pixels(task.instance)]
+        if not candidates:
+            return tasks, []
+        action = policy["action"]
+        hold = action != "report"
+        verb = "withheld" if hold else "did not withhold"
+        tesseract_cmd = _caller_tesseract_cmd()
+        # As `redact()` resolves it, threads for a `:memory:` store
+        # included: a spawned child opens an empty in-memory database.
+        strategy = _resolve_strategy(
+            max_workers=_redaction_worker_count(),
+            chunksize=1,
+            maxtasksperchild=None,
+            disable_gc=False,
+            force_threads=self.store_backend.db_path == ":memory:",
+            show_progress=show_progress,
+            desc="Reading burned-in text",
+            total=len(candidates))
+        print(f"Reading {len(candidates)} image(s) for burned-in text (OCR)...")
+        with _one_tesseract_thread():
+            reads = run_parallel(
+                _burned_in_text_worker,
+                [(task.instance, task.redaction_zones, policy["min_confidence"],
+                  tesseract_cmd, None) for task in candidates],
+                strategy=strategy, ordered=True)
+        dropped = set()
+        gated = []
+        for task, outcome in zip(candidates, reads):
+            uid = task.instance.sop_instance_uid
+            if outcome.failure is not None:
+                # Fail closed, as `redact()` does: a frame not read is a
+                # frame not checked. The reason is not quoted: it is
+                # `redact()`'s unread row that carries one.
+                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                          f"the pre-export read (check_burned_in=True) could "
+                          f"not read its pixels in full, so its burned-in "
+                          f"text was not checked.")
+            elif outcome.boxes:
+                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                          f"the pre-export read (check_burned_in=True) found "
+                          f"{len(outcome.boxes)} text region(s) on frame(s) "
+                          f"{_frames_named(outcome.boxes)} (action: {action}).")
+            else:
+                continue
+            gated.append((uid, detail, hold))
+            if hold:
+                dropped.add(id(task))
+        return [task for task in tasks if id(task) not in dropped], gated
+
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
         """Walk the store and build one ExportContext per instance to write.
 
@@ -8836,8 +8941,11 @@ class DicomSession:
                         # instance holding pixels; the verdict reads its
                         # record and runs no OCR, and loads the frame only
                         # for a record otherwise current, to check its
-                        # pixel digest.
-                        if policy is not None and _holds_pixels(instance):
+                        # pixel digest. Under `check_burned_in=True` a
+                        # fresh read decides instead.
+                        if (policy is not None
+                                and not options.read_burned_in_text
+                                and _holds_pixels(instance)):
                             verdict = _burned_in_text_verdict(
                                 instance, policy, policy_hash, zones,
                                 options.folder)
