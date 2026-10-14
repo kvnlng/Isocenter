@@ -106,7 +106,7 @@ def _load(tmp_path, line):
 
 
 def test_an_empty_serial_loads_as_the_serial_less_selector(tmp_path):
-    _, rules, _, _, _ = _load(tmp_path, 'serial_number: ""')
+    rules = _load(tmp_path, 'serial_number: ""')[1]
     assert rules[0]["serial_number"] == ""
 
 

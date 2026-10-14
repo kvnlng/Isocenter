@@ -90,13 +90,13 @@ def _load(tmp_path, body):
 
 
 def test_a_match_rule_loads(tmp_path):
-    _, rules, _, _, _ = _load(tmp_path, (
+    rules = _load(tmp_path, (
         "  - match:\n"
         f"      manufacturer: \"{MANUFACTURER}\"\n"
         f"      model_name: {MODEL}\n"
         "    redaction_zones: [[0, 10, 0, 10]]\n"
         "  - match: {model_name: IRS}\n"
-        "    redaction_zones: [[0, 10, 0, 10]]\n"))
+        "    redaction_zones: [[0, 10, 0, 10]]\n"))[1]
     assert rules[0]["match"] == FUJI
     assert rules[1]["match"] == {"model_name": MODEL}
     assert "serial_number" not in rules[0]
@@ -290,7 +290,7 @@ def test_save_writes_a_match_rule_that_loads_back(tmp_path):
         path = str(tmp_path / "saved.yaml")
         session.configuration.config_path = path
         session.configuration.save()
-        _, rules, _, _, _ = ConfigLoader.load_unified_config(path)
+        rules = ConfigLoader.load_unified_config(path)[1]
         assert rules == [_match_rule()]
     finally:
         session.close()
