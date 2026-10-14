@@ -185,10 +185,9 @@ session.close()
 `PASS` says the zones you wrote were applied. It does not say the rest
 of each image is free of text: nothing on this page read the pixels for
 text. `scan_pixel_content()` does, with OCR, over the images of every
-machine your configuration names by serial with zones, and reports text
-no zone covers ([Checking Zones](../ocr.md#checking-zones-verification)).
-A series with no Device Serial Number is scanned when a `""`, `"*"` or
-`match:` rule with a zone covers it. Or configure
+series a rule with zones covers (by exact serial, `""`, `"*"` or
+`match:`), and reports text no zone covers
+([Checking Zones](../ocr.md#checking-zones-verification)). Or configure
 [`burned_in_text`](../configuration.md#burned-in-text), under which
 `redact()` reads every image that holds pixels with OCR and redacts,
 reports or withholds the text it finds, serial or not, whatever the

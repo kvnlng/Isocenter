@@ -275,6 +275,20 @@ def test_a_serial_less_zone_task_is_prepared_for_the_empty_rule(tmp_path):
         session.close()
 
 
+def test_the_serial_rule_path_redacts_under_the_empty_rule(tmp_path):
+    """Kills a falsy gate in `process_machine_rules` (review of #1111, M14)."""
+    session = _session(tmp_path)
+    try:
+        service = RedactionService(session.store, session.store_backend)
+        service.process_machine_rules(_rules("")[0], show_progress=False,
+                                      project_secret=FIXED_A)
+        inst = _by_series_uid(session, "none").instances[0]
+        assert inst.sop_instance_uid != source_uid("none")
+        assert ink_left(inst.get_pixel_data()) == 0
+    finally:
+        session.close()
+
+
 # --- The OCR side ----------------------------------------------------------
 
 #: The burned name as OCR hands it: (x, y, w, h) over `BOX`.

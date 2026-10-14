@@ -273,6 +273,12 @@ def test_the_serial_keyed_methods_do_not_see_match_rules(tmp_path):
         assert session.configuration.get_rule(None) is None
         assert session.configuration.delete_rule(None) is False
         assert session.configuration.rules == [rule]
+        # A hand-set rule holding serial None is what `delete_rule(None)`
+        # finds; the match rule beside it stays (review of #1111, M18).
+        held = {"serial_number": None, "redaction_zones": []}
+        session.configuration.rules = [rule, held]
+        assert session.configuration.delete_rule(None) is True
+        assert session.configuration.rules == [rule]
     finally:
         session.close()
 
