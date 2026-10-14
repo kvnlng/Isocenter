@@ -12,7 +12,8 @@ record:
 - text found: written with a `WARNING` row under `report`; withheld with
   a row under `redact` and `withhold`. The export never redacts: it does
   not change the graph, the store or a UID, and writes no record; under
-  `redact` the remedy is `redact()`, which the row names;
+  `redact` the row names the remedy, `redact()`, or `redact(force=True)`
+  for an instance `redact()` has already read;
 - nothing found: written, whatever the record says, and no row;
 - not read in full: withheld under `redact`/`withhold`, written under
   `report`, with a row: a frame not read is a frame not checked;
@@ -29,7 +30,7 @@ from isocenter import entities, pixel_analysis, services
 from isocenter.session import DicomSession as Session
 
 from test_redact_blanks_burned_in_text import (
-    INK, INK_BOX, ONE, TWO, FakeTesseract, _cohort, _config, audit_rows,
+    INK, INK_BOX, ONE, PADDED, TWO, FakeTesseract, _cohort, _config, audit_rows,
     exported_files, pixels_of, write_sr)
 
 
@@ -66,10 +67,15 @@ def _ready(tmp_path, action, *images):
     return session
 
 
+REMEDY = ("; run redact(), or redact(force=True) if redact() has already "
+          "read it under this policy")
+
+
 def _found(out, verb, uid, action):
+    remedy = REMEDY if action == "redact" else ""
     return (f"DICOM export to {out} {verb} instance {uid}: the pre-export read "
             f"(check_burned_in=True) found 1 text region(s) on frame(s) 0 "
-            f"(action: {action}).")
+            f"(action: {action}){remedy}.")
 
 
 @pytest.mark.parametrize("action, written", [("report", True), ("redact", False),
@@ -217,6 +223,53 @@ def test_ocr_unavailable_refuses_before_the_scan_the_save_and_any_row(tmp_path, 
         # The record gate needs no OCR: plain `export()` still runs.
         assert session.export(str(out), use_compression=False,
                               show_progress=False).written == 1
+
+
+def test_the_refusal_comes_before_the_tag_scan_and_the_save(tmp_path, monkeypatch):
+    """The session must hold something for the scan and the save to change:
+    no `audit()`, so the tag scan would record a status, and one unsaved
+    edit, so the save would write it. Both are as they were after the
+    raise. Kills the raise moved below the scan, or below the save (review
+    of #1110, M1 and M2)."""
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "report"))
+        session.save(sync=True)
+        inst = _instances(session)[ONE]
+        before = inst.phi_status
+        inst.set_attr("0008,1030", "EDITED")
+        assert inst.has_unsaved_changes
+        monkeypatch.setattr(pixel_analysis, "HAS_OCR", False)
+        monkeypatch.setattr(pixel_analysis, "pytesseract", None)
+        with pytest.raises(pixel_analysis.OcrUnavailableError):
+            session.export(str(out), use_compression=False, show_progress=False,
+                           check_burned_in=True)
+        assert inst.phi_status == before, "the tag scan ran before the refusal"
+        assert inst.has_unsaved_changes, "the save ran before the refusal"
+
+
+def test_the_read_is_of_the_pixels_after_the_export_zones(tmp_path, ocr):
+    """A machine zone covering the ink, under `withhold`, and no
+    `redact()`: the export zeroes the zone, so the read of what it writes
+    finds nothing and the instance is written with no row. Kills the read
+    handed no zones (review of #1110, M3)."""
+    zone = (f"machines:\n  - serial_number: SN-1\n    redaction_zones:\n"
+            f"      - [{PADDED[0]}, {PADDED[1]}, {PADDED[2]}, {PADDED[3]}]\n")
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)],
+                                                "serial": "SN-1"})))
+        session.load_config(_config(tmp_path, "withhold", zone))
+        session.anonymize()
+        summary = session.export(str(out), use_compression=False,
+                                 show_progress=False, check_burned_in=True)
+        db = session.store_backend.db_path
+    assert ocr.calls == 1
+    assert summary.written == 1
+    assert not [r for r in audit_rows(db) if r[0] == "WARNING"]
+    [path] = exported_files(out)
+    assert (pixels_of(path) != INK).all()
 
 
 def test_the_read_quotes_no_text(tmp_path, ocr, caplog):

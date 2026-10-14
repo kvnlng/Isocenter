@@ -7733,6 +7733,11 @@ class DicomSession:
                 that is not a `str`; and on `dicom` for a `subset` that is
                 bytes-like, not iterable, or holds an element that is not a
                 `str`.
+            OcrUnavailableError: On `dicom` with `check_burned_in=True`
+                under a `burned_in_text` policy, when the `ocr` extra or
+                the tesseract binary is unavailable (#1108); a
+                `RuntimeError`, raised before the tag scan, the save, any
+                row or any file.
             ExportError: From either exporter, when zero of N
                 attempted instances are reported written and at least one
                 failed. The folder then holds none of them, with one
@@ -7946,6 +7951,10 @@ class DicomSession:
                 the cohort report; or `configuration.burned_in_text` is
                 a policy the loader would refuse in a file (#1108), before
                 the pre-export scan and the save.
+            OcrUnavailableError: `check_burned_in=True` under a
+                `burned_in_text` policy with the `ocr` extra or the
+                tesseract binary unavailable (#1108); a `RuntimeError`,
+                raised before the tag scan, the save, any row or any file.
             ExportError: Every planned instance failed (nothing written and
                 at least one failure), raised last, after the audit rows
                 and the `EXPORT` row are written. A partial export and an
@@ -8808,7 +8817,11 @@ class DicomSession:
 
         Never changes the graph, the store or a UID, and writes no
         record: an export is a check here, not a redaction. Under
-        `redact` the remedy is `redact()`.
+        `redact` the found-text row names the remedy: `redact()`, or
+        `redact(force=True)` for an instance `redact()` has already read
+        under this policy, whose record it would not read again. Under
+        `withhold` there is none: the instance is withheld while its text
+        is found.
 
         Args:
             tasks (list): The plan's `ExportContext`s.
@@ -8826,9 +8839,19 @@ class DicomSession:
         action = policy["action"]
         hold = action != "report"
         verb = "withheld" if hold else "did not withhold"
+        # A withheld instance comes with its way out where there is one.
+        # `force=True` because an instance whose read after redaction
+        # still found text keeps a current record, which a plain
+        # `redact()` does not read again.
+        remedy = ("; run redact(), or redact(force=True) if redact() has "
+                  "already read it under this policy"
+                  if action == "redact" else "")
         tesseract_cmd = _caller_tesseract_cmd()
-        # As `redact()` resolves it, threads for a `:memory:` store
-        # included: a spawned child opens an empty in-memory database.
+        # Threads for a `:memory:` store, asked for per call as `redact()`
+        # asks. Unlike `redact()`, nothing refuses when worker recycling
+        # outranks that request and the read runs in processes: this
+        # worker writes nothing to the store (the review of #1110 measured
+        # the read there).
         strategy = _resolve_strategy(
             max_workers=_redaction_worker_count(),
             chunksize=1,
@@ -8861,7 +8884,8 @@ class DicomSession:
                 detail = (f"DICOM export to {folder} {verb} instance {uid}: "
                           f"the pre-export read (check_burned_in=True) found "
                           f"{len(outcome.boxes)} text region(s) on frame(s) "
-                          f"{_frames_named(outcome.boxes)} (action: {action}).")
+                          f"{_frames_named(outcome.boxes)} (action: {action})"
+                          f"{remedy}.")
             else:
                 continue
             gated.append((uid, detail, hold))
