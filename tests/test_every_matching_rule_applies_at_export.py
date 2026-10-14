@@ -31,6 +31,7 @@ import pytest
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from isocenter.entities import Equipment
 from isocenter.services import rule_applies_to, rules_matching, zone_rois
 from isocenter.session import DicomSession
 
@@ -148,17 +149,30 @@ def test_a_dict_zone_exports(tmp_path, redact):
     assert [_state(a, ZONE_A) for a in arrays] == ["zeroed"]
 
 
-def test_a_series_with_no_serial_matches_no_rule(tmp_path):
-    """A `"*"` rule over a series with no Device Serial Number: `redact()`
-    applies nothing, the export applies nothing, and the icon gate stays
-    False -- the index `redact()` walks holds only series with a serial,
-    and the export agrees with it. `_redaction_zones_for` hands a
-    serial-less series `None` rather than answering for it, so this
-    reaches the matcher: killing mutation, `"*"` matching a missing
-    serial (the export zeroes what `redact()` did not, and the gate reads
-    True)."""
+@pytest.mark.parametrize("rule_serial", ["*", ""])
+def test_a_series_with_no_serial_is_reached_by_star_and_empty(tmp_path, rule_serial):
+    """A `"*"` or a `""` rule over a series with no Device Serial Number:
+    `redact()` applies it, the export applies it, and the icon gate reads
+    True -- the index `redact()` walks keys the series under `""`, and the
+    export reads it the same way (owner ruling on #1108; until then a
+    serial-less series matched no rule, `"*"` included). Killing
+    mutations: either selector reading a missing serial as no match (the
+    export leaves the zone intact, `redact()` applies nothing, the gate
+    reads False)."""
     arrays, gate, applied, _ = _run(tmp_path, [
-        {"serial_number": "*", "redaction_zones": [ZONE_A]}],
+        {"serial_number": rule_serial, "redaction_zones": [ZONE_A]}],
+        serial=None, redact=True)
+
+    assert applied == 1
+    assert [_state(a, ZONE_A) for a in arrays] == ["zeroed"]
+    assert gate is True
+
+
+def test_an_exact_rule_does_not_reach_a_series_with_no_serial(tmp_path):
+    """The other side of the boundary: an exact serial covers only
+    itself."""
+    arrays, gate, applied, _ = _run(tmp_path, [
+        {"serial_number": "SN-580", "redaction_zones": [ZONE_A]}],
         serial=None, redact=True)
 
     assert applied == 0
@@ -197,19 +211,22 @@ def test_export_after_redact_with_a_star_rule_is_idempotent(tmp_path):
 # The matcher and the parser
 # ---------------------------------------------------------------------------
 
-def test_the_matcher_is_exact_or_star_and_needs_a_serial():
+def test_the_matcher_is_exact_empty_or_star():
     """Killing mutations: `"*"` read as a literal; a prefix or
-    case-insensitive compare; a falsy series serial matched by `"*"`; a
-    rule with no serial matching anything."""
+    case-insensitive compare; `"*"` not matching a missing serial; `""`
+    matching a serial; a rule with no serial matching anything (#1108)."""
     assert rule_applies_to("SN-1", "SN-1")
     assert rule_applies_to("*", "SN-1")
     assert not rule_applies_to("SN-1", "SN-2")
     assert not rule_applies_to("sn-1", "SN-1")
     assert not rule_applies_to("SN", "SN-1")
+    assert not rule_applies_to("", "SN-1")
     for missing in (None, ""):
-        assert not rule_applies_to("*", missing)
-        assert not rule_applies_to(missing, "SN-1")
-        assert not rule_applies_to(missing, missing)
+        assert rule_applies_to("*", missing)
+        assert rule_applies_to("", missing)
+        assert not rule_applies_to("SN-1", missing)
+        assert not rule_applies_to(None, "SN-1")
+        assert not rule_applies_to(None, missing)
 
 
 def test_every_matching_rule_is_returned_in_rule_order():
@@ -220,9 +237,13 @@ def test_every_matching_rule_is_returned_in_rule_order():
              {"redaction_zones": [[0, 1, 0, 1]]},
              {"serial_number": "SN-1", "redaction_zones": []}]
 
-    assert rules_matching(rules, "SN-1") == [rules[0], rules[2], rules[4]]
-    assert rules_matching(rules, "SN-3") == [rules[2]]
-    assert rules_matching(rules, None) == []
+    def machine(serial):
+        return Equipment("Maker", "Model", serial)
+
+    assert rules_matching(rules, machine("SN-1")) == [rules[0], rules[2], rules[4]]
+    assert rules_matching(rules, machine("SN-3")) == [rules[2]]
+    assert rules_matching(rules, None) == [rules[2]]
+    assert rules_matching(rules, machine("")) == [rules[2]]
 
 
 def test_the_zone_parser_takes_both_shapes_and_keeps_the_values():

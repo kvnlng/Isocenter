@@ -45,11 +45,20 @@ class TestRedactionVerifier(unittest.TestCase):
         self.assertIs(
             RedactionVerifier([exact, wildcard]).get_matching_rule(machine),
             exact)
-        # No serial: nothing covers it, "*" included, as `redact()` reads it.
+        # No serial (#1108): "*" covers it and so does `""`, as `redact()`
+        # reads it; an exact rule does not. No equipment reads as no serial.
         no_serial = Equipment(manufacturer="Man", model_name="C",
                               device_serial_number="")
-        self.assertIsNone(
-            RedactionVerifier([wildcard]).get_matching_rule(no_serial))
+        empty = {"serial_number": ""}
+        for equipment in (no_serial, None):
+            self.assertIs(
+                RedactionVerifier([wildcard]).get_matching_rule(equipment),
+                wildcard)
+            self.assertIs(
+                RedactionVerifier([exact, empty]).get_matching_rule(equipment),
+                empty)
+            self.assertIsNone(
+                RedactionVerifier([exact]).get_matching_rule(equipment))
 
     def test_is_covered(self):
         # Zones are zone space (y1, y2, x1, x2), the order every consumer

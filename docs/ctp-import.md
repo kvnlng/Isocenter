@@ -46,9 +46,11 @@ What the converter reads:
 - **Coordinates are converted.** CTP writes `(x, y, width, height)`;
   Isocenter zones are `[row_start, row_end, col_start, col_end]` in pixels,
   so `(x,y,w,h)` becomes `[y, y+h, x, x+w]`.
-- **No serial number.** CTP matches a manufacturer and model; Isocenter
-  matches a machine by its Device Serial Number. A block with a manufacturer
-  but no model gets `model_name: Unknown`.
+- **No serial number.** CTP matches a manufacturer and model; the imported
+  rule carries no selector. A block with a manufacturer but no model gets
+  `model_name: Unknown`. Add a `serial_number`, or replace the labels with a
+  `match:` naming the manufacturer and model exactly as the files spell
+  them (CTP's `containsIgnoreCase` is not exact).
 
 ## Use the rules in a configuration
 

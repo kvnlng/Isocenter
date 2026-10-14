@@ -19,10 +19,13 @@ def _rule_for_machine(finding, meta, zone):
         zone (list): `[y1, y2, x1, x2]` for the new rule.
 
     Returns:
-        Optional[dict]: The suggestion; None with no machine serial.
+        Optional[dict]: The suggestion; None when the finding names no
+            machine. A machine with no serial (`""`) gets a rule for
+            `serial_number: ""` (owner ruling on #1108).
     """
     machine = meta.get("machine_serial")
-    if not machine:
+    # `is None`, never falsy: `""` is the serial-less machine (#1108).
+    if machine is None:
         return None
     return {
         "serial": machine,
@@ -34,8 +37,14 @@ def _rule_for_machine(finding, meta, zone):
         # `apply_suggestions` grows that rule when it exists.
         "reason": (f"{meta.get('leak_type')} detected ({finding.value}); a "
                    f"zone on the '*' rule would apply to every machine, so "
-                   f"the zone goes to a rule for serial {machine}."),
+                   f"the zone goes to a rule for "
+                   f"{f'serial {machine}' if machine else 'the series with no serial'}."),
     }
+
+
+def _match_key(match):
+    """A `match:` selector as a hashable key: its sorted pairs (#1108)."""
+    return tuple(sorted(match.items()))
 
 
 class ConfigAutomator:
@@ -55,8 +64,14 @@ class ConfigAutomator:
         growing its best-matching zone to cover the text, on the rule
         that holds it; when that rule is `"*"`, it suggests a new exact
         rule carrying the grown zone instead (`ADD_RULE`), and `"*"` is
-        never widened. A finding with no `rule_serial` in its metadata
-        gets no suggestion. Zones are in config space, (y1, y2, x1, x2),
+        never widened. Which rule a NEW_LEAK's zone goes to is decided
+        narrowest first by the verifier (owner ruling on #1108): exact
+        serial, then `match:`, then `""`, then `"*"`; a serial-less
+        machine only `"*"` covers gets an `ADD_RULE` for
+        `serial_number: ""`. A `match:` rule is named by `rule_match`
+        and its suggestions carry `match` with `serial` None. A finding
+        with neither `rule_serial` nor `rule_match` in its metadata gets
+        no suggestion. Zones are in config space, (y1, y2, x1, x2),
         the order every consumer of ``redaction_zones`` reads; OCR boxes
         arrive as (x, y, w, h) and are converted.
 
@@ -85,13 +100,21 @@ class ConfigAutomator:
                 continue
 
             serial = meta.get("rule_serial")
-            if serial:
+            # `is not None`: `""` is the serial-less rule (#1108). A
+            # `match:` rule is keyed by its match, as sorted pairs.
+            if serial is not None:
                 findings_by_serial[serial].append(finding)
+            elif meta.get("rule_match"):
+                findings_by_serial[_match_key(meta["rule_match"])].append(finding)
             else:
                 # A finding with no matching rule gets no suggestion.
                 pass
 
         for serial, findings in findings_by_serial.items():
+            # A suggestion names its rule by `serial`, or by `match` (with
+            # `serial` None) for a `match:` rule (#1108).
+            target = ({"serial": None, "match": dict(serial)}
+                      if isinstance(serial, tuple) else {"serial": serial})
             for f in findings:
                 meta = f.metadata
                 l_type = meta.get("leak_type")
@@ -132,7 +155,7 @@ class ConfigAutomator:
                             continue
 
                         suggestions.append({
-                            "serial": serial,
+                            **target,
                             "action": "EXPAND_ZONE",
                             "original_zone": best_zone,
                             "new_zone": union_zone,
@@ -157,7 +180,7 @@ class ConfigAutomator:
                         continue
 
                     suggestions.append({
-                        "serial": serial,
+                        **target,
                         "action": "ADD_ZONE",
                         "zone": list(zone),
                         "reason": f"New leak detected ({f.value}). Added new zone."
@@ -196,12 +219,17 @@ class ConfigAutomator:
         rules = session.configuration.rules
 
         for sug in suggestions:
-            serial = sug["serial"]
+            serial = sug.get("serial")
             action = sug["action"]
 
             # Exact on `serial_number`: "*" is a literal value here, the
-            # serial of the wildcard rule.
-            same_serial = [r for r in rules if r.get("serial_number") == serial]
+            # serial of the wildcard rule. A `match:` rule is found by its
+            # match, and never by a serial (#1108).
+            if sug.get("match") is not None:
+                same_serial = [r for r in rules if r.get("match") == sug["match"]]
+            else:
+                same_serial = [r for r in rules if "match" not in r
+                               and r.get("serial_number") == serial]
 
             if action == "ADD_RULE" and not same_serial:
                 # `create_config()`'s shape for a machine; every key is in

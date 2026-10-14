@@ -9,13 +9,15 @@ the behaviour half: `test_config_behaviour_is_versioned.py` pins it per
 version, and a change that moves it must either bump the minor or, before
 the version ships, say in the CHANGELOG why it is not a behaviour change.
 
-**What it runs.** Five policies, each over the same seven files:
+**What it runs.** Six policies, each over the same seven files:
 
 - `basic@2026c`, the floor, and `basic@2026c` with `remove_private_tags:
   false`;
 - `none` with a kitchen-sink policy: each action on a tag of each VR
   family, a valued `REPLACE`, a value-less `REPLACE` on a UI and on every
   `VR_DUMMY` string VR, and a repeating-group mask key;
+- `basic@2026c` with a zone on a `match:` rule naming CT_small's
+  manufacturer (#1108), redacted after the passes;
 - `basic@2026c` with a dict zone on a `"*"` rule beside an exact rule for
   another machine (`STAR_CONFIG`). The store is audited and anonymized.
   Then fixed text regions on the synthetic image are classified against the
@@ -41,8 +43,10 @@ every UID the first pass minted verifies under this store's secret.
 
 **What it cannot see** (a change to any of these moves no digest, so its
 PR must say whether it is a behaviour change): pixel-zone matching beyond
-an exact serial and one `"*"` rule (no manufacturer or model match, no zone
-overlapping the frame edge, no multi-frame image); external
+an exact serial, one `"*"` rule over series with and without a serial,
+and one `match:` rule on a manufacturer (no `serial_number: ""` rule, no
+model match, no zone overlapping the frame edge, no multi-frame image);
+external
 profile files; `SHIFT` and `JITTER` on TM; date ranges other than the one
 `JITTER` fixes; `remove_private_tags: false` under the floor or `none`;
 nested sequences deeper than one item; private sequences; UIDs only another
@@ -112,6 +116,17 @@ STAR_CONFIG = (
     "  - serial_number: B4-OTHER-SN\n"
     "    redaction_zones:\n"
     "      - [0, 5, 0, 5]\n")
+
+#: The `match:` scenario's file (#1108): `ZONE` on a rule selecting by
+#: manufacturer, which CT_small and every image built from it carry (the
+#: synthetic image's serial included), and MR_small does not.
+MATCH_CONFIG = (
+    "privacy_profile: basic\n"
+    "machines:\n"
+    "  - match:\n"
+    "      manufacturer: GE MEDICAL SYSTEMS\n"
+    "    redaction_zones:\n"
+    f"      - {ZONE}\n")
 
 #: Text regions, `(x, y, w, h)`, as OCR would hand them for the synthetic
 #: image: one inside `ZONE`, one across its edge, one outside every zone,
@@ -414,6 +429,8 @@ def behaviour(root):
         # cover the synthetic image (#908).
         "star-zone": _scenario(root, "star", _load(STAR_CONFIG), redact=True,
                                inspect=_leaks_on_the_synthetic_image),
+        # Selects by manufacturer, whatever the serial (#1108).
+        "match-zone": _scenario(root, "match", _load(MATCH_CONFIG), redact=True),
     }
 
 
