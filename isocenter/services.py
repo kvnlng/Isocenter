@@ -166,7 +166,7 @@ def _report_redaction_failures(failures, store_backend=None):
     return reported
 
 
-def _redaction_config_hash(serials, rois) -> str:
+def _redaction_config_hash(serials, rois, ocr=None) -> str:
     """The attestation hash of the zones one image is redacted with.
 
     Over the rules' serials and every zone applied, both sorted, so the
@@ -184,18 +184,105 @@ def _redaction_config_hash(serials, rois) -> str:
     `"*"` on one image, #908) are a `"serials"` list instead, which no
     one-serial input can equal.
 
+    **The `burned_in_text` boxes (#1108)** are a third input, `ocr`,
+    present only when the pass found text to blank: `{"policy", "boxes"}`
+    beside the zones, the boxes sorted. With no boxes the key is exactly
+    the zone-only one, so a store redacted by zones before the policy was
+    loaded keeps its hash and its UIDs. An instance only OCR redacts has
+    no serial key at all, which no zone-only input can equal.
+
     Args:
         serials (Iterable[str]): The `serial_number` of each rule whose
-            zones are applied, duplicates allowed.
+            zones are applied, duplicates allowed; empty for an instance
+            only the `burned_in_text` pass redacts.
         rois (Iterable): Every zone applied, `[y1, y2, x1, x2]`.
+        ocr (tuple, optional): `(policy_hash, boxes)`, each box
+            `(frame, y1, y2, x1, x2)`; None or no boxes adds nothing.
 
     Returns:
         str: 32 hex digits.
     """
     distinct = sorted(set(serials))
-    key = {"serial": distinct[0]} if len(distinct) == 1 else {"serials": distinct}
+    if len(distinct) == 1:
+        key = {"serial": distinct[0]}
+    elif distinct:
+        key = {"serials": distinct}
+    else:
+        key = {}
     key["rois"] = sorted(list(roi) for roi in rois)
+    if ocr is not None and ocr[1]:
+        key["ocr"] = {"policy": ocr[0],
+                      "boxes": sorted(list(box) for box in ocr[1])}
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+#: Where the `burned_in_text` pass records what it read on an instance
+#: (#1108): JSON text of `{"policy", "boxes", "tesseract"}`, and
+#: `"redaction"` once a redaction carrying those boxes has landed. An
+#: underscore key, so `_merge` never writes it to a file and
+#: `attributes_json` persists it as `_ISOCENTER_REDACTION_HASH` is
+#: persisted. Coordinates and a version identify no one; the text OCR
+#: read is never kept anywhere.
+BURNED_IN_TEXT_ATTR = "_ISOCENTER_BURNED_IN_TEXT"
+
+
+def _burned_in_text_policy_hash(policy, zones) -> str:
+    """What a `burned_in_text` record is current under: what the boxes
+    depend on, the threshold and the zones zeroed before the read.
+
+    The zones are in it because a zone added later covers text the record
+    still names, and a zone removed uncovers text the record never saw.
+    The action is not: it decides what is done with the boxes, not which
+    boxes are found, so a store read under `report` is not read again
+    when the file says `redact`; `redact()` then blanks what the record
+    holds, and until it does the export withholds it.
+
+    Args:
+        policy (dict): The normalised policy, `{action, min_confidence}`.
+        zones (Iterable): The `(y1, y2, x1, x2)` zones of the rules that
+            cover the instance's series.
+
+    Returns:
+        str: 32 hex digits.
+    """
+    # A float, so `80` and `80.0` are one threshold and one hash (O4).
+    key = {"min_confidence": float(policy["min_confidence"]),
+           "zones": sorted(list(zone) for zone in zones)}
+    return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def burned_in_text_record(inst: Instance) -> Optional[dict]:
+    """The instance's `burned_in_text` record, or None when it has none
+    or holds one this library cannot read.
+
+    Args:
+        inst (Instance): The instance.
+
+    Returns:
+        Optional[dict]: The record.
+    """
+    text = inst.attributes.get(BURNED_IN_TEXT_ATTR)
+    if not isinstance(text, str):
+        return None
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def write_burned_in_text_record(inst: Instance, record: dict) -> None:
+    """Write `record` as the instance's `burned_in_text` record.
+
+    A direct write and a `mark_modified()`, as the attestation hash is
+    written: an underscore key goes around `set_attr`, which lowercases.
+
+    Args:
+        inst (Instance): The instance.
+        record (dict): The record.
+    """
+    inst.attributes[BURNED_IN_TEXT_ATTR] = json.dumps(record, sort_keys=True)
+    inst.mark_modified()
 
 
 def _redacted_uid_for(inst, config_hash, secret) -> str:
@@ -274,6 +361,7 @@ _REDACTION_OWN_ATTRS = frozenset({
     "0008,0018",                    # SOPInstanceUID, from regenerate_uid()
     SOURCE_SOP_UID_ATTR,            # the UID regenerate_uid() replaced
     "_ISOCENTER_REDACTION_HASH",    # the attestation
+    BURNED_IN_TEXT_ATTR,            # boxes and a version, never text (#1108)
     *_SET_PIXEL_DATA_TAGS,
 })
 #: Left out of the fingerprint, and checked by `_flags_are_redactions`.
@@ -668,7 +756,7 @@ class RedactionService:
             self.logger.info(f"Verified {count} Burned In Annotations were remediated.")
 
     def record_redaction_pass(self, machine_sn: str, zone_count: int,
-                              targeted: int, applied: int):
+                              targeted: int, applied: int, details=None):
         """One `REDACTION` audit row per rule-pass, spelled once for both paths.
 
         This is the row `generate_report`'s section 2 counts and the
@@ -682,6 +770,10 @@ class RedactionService:
             zone_count (int): How many zones the rule applies.
             targeted (int): How many instances the pass targeted.
             applied (int): How many it redacted.
+            details (str, optional): The row's text in place of the
+                zone sentence: the `burned_in_text` pass's counts
+                (#1108), written through here so the action word keeps
+                one spelling site.
         """
         # Per rule-pass, so the report stays bounded: per-instance rows
         # would put 10k lines in a 10k-instance session's report. After the
@@ -693,11 +785,13 @@ class RedactionService:
         # rows, so they account identically for identical work.
         if not self.store_backend:
             return
+        if details is None:
+            details = (f"Applied {applied} of {targeted} candidate images "
+                       f"with {zone_count} zones")
         self.store_backend.log_audit(
             action_type="REDACTION",
             entity_uid=machine_sn,
-            details=(f"Applied {applied} of {targeted} candidate images "
-                     f"with {zone_count} zones"))
+            details=details)
 
     def _targets_for(self, rule_serial) -> List[Instance]:
         """Every indexed instance a rule for `rule_serial` covers, in index order.
@@ -808,6 +902,10 @@ class RedactionService:
                 "rois": valid_rois,
                 "config_hash": config_hash,
                 "machine_sn": serial,
+                # The serials the hash was taken over, kept so the
+                # `burned_in_text` pass can take it again with its boxes
+                # beside the zones (#1108).
+                "serials": [serial],
                 "force": force
             })
 
@@ -866,6 +964,7 @@ class RedactionService:
             task = {key: value for key, value in first.items() if key != "machine_sn"}
             task.update({
                 "rois": rois,
+                "serials": [task["machine_sn"] for task in group],
                 "config_hash": config_hash,
                 "new_sop_uid": _redacted_uid_for(first["instance"], config_hash, secret),
                 "pass_keys": [key for task in group for key in task.get("pass_keys", ())],
@@ -925,6 +1024,11 @@ class RedactionService:
         rois = task["rois"]
         config_hash = task["config_hash"]
         force = task.get("force", False)
+        # The `burned_in_text` pass's boxes (#1108), and whether they are
+        # the only redaction this instance takes. `.get`: a zone task from
+        # `prepare_redaction_tasks` carries neither.
+        frame_boxes = task.get("frame_boxes", ())
+        ocr_only = task.get("ocr_only", False)
         # Nothing in the `finally` reads a name bound inside the `try`. If
         # one ever does, pre-bind it here: an `UnboundLocalError` raised
         # *in* a `finally` replaces the return value.
@@ -951,8 +1055,10 @@ class RedactionService:
             # The whole zone list in one call, never a loop: the callee
             # rebinds `arr` locally when it copies a read-only array, so a
             # second call would get the pristine original again and only
-            # the last zone would survive.
-            modified = self._redact_instance_pixels(inst, arr, rois)
+            # the last zone would survive. The `burned_in_text` boxes go in
+            # the same call, for the same reason.
+            modified = self._redact_instance_pixels(inst, arr, rois,
+                                                    frame_boxes)
 
             if not modified:
                 # No configured zone landed inside this image: a
@@ -964,7 +1070,10 @@ class RedactionService:
                 return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             attested_from = _capture_attestation(inst)
-            self._apply_redaction_flags(inst)
+            if ocr_only:
+                self._apply_redaction_flags(inst, burned_in=False)
+            else:
+                self._apply_redaction_flags(inst)
             inst.regenerate_uid(task["new_sop_uid"])
             # Mark as redacted with this hash
             inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
@@ -1042,9 +1151,13 @@ class RedactionService:
                 "photometric_interpretation": inst.attributes.get("0028,0004"),
                 "attributes": {
                     "0008,0008": inst.attributes.get("0008,0008"),
-                    "0028,0301": inst.attributes.get("0028,0301"),
                     "0008,2111": inst.attributes.get("0008,2111"),
                     "_ISOCENTER_REDACTION_HASH": inst.attributes.get("_ISOCENTER_REDACTION_HASH"),
+                    # Not for an OCR-only redaction, which did not write
+                    # it: copying it would put a None where the source
+                    # held no element, and the export would write one.
+                    **({} if ocr_only else
+                       {"0028,0301": inst.attributes.get("0028,0301")}),
                 },
                 "sequences": {
                     k: v for k, v in inst.sequences.items() if k == "0008,9215"
@@ -1523,7 +1636,7 @@ class RedactionService:
         return modified
 
     def _redact_instance_pixels(self, inst: Instance, arr,
-                                rois: List[tuple]) -> bool:
+                                rois: List[tuple], frame_boxes=()) -> bool:
         """
         Applies **every** ROI to one instance's pixel array, in one pass.
 
@@ -1544,9 +1657,13 @@ class RedactionService:
             inst (Instance): The instance being redacted.
             arr: Its pixel array, as `get_pixel_data()` returned it.
             rois (List[tuple]): Every (y1, y2, x1, x2) zone of the rule.
+            frame_boxes (Iterable[tuple]): `(frame, y1, y2, x1, x2)` per
+                box the `burned_in_text` pass found (#1108), each zeroed
+                on its own frame only. In this one call, with the zones,
+                for the reason this method is called once.
 
         Returns:
-            bool: True if any zone was applied.
+            bool: True if any zone or box was applied.
 
         Raises:
             ValueError: As `apply_redaction_to_array` raises it.
@@ -1577,9 +1694,27 @@ class RedactionService:
         # can correct a descriptor, and the redaction has to address the
         # array the way the instance now describes it.
         geometry = resolve_pixel_geometry(arr.shape, inst.attributes)
-        return self.apply_redaction_to_array(arr, rois, geometry=geometry)
+        modified = self.apply_redaction_to_array(arr, rois, geometry=geometry)
+        # Per frame, never through the zone call above, which zeroes a zone
+        # on every frame: OCR found the box on one frame, and a union over
+        # the frames would blank across a cine (#1108).
+        for frame, y1, y2, x1, x2 in frame_boxes:
+            if geometry.frames > 1:
+                # A view, so the zeroing lands in `arr`. `frames` is the
+                # array's first axis on every frames-major arm, the axis
+                # `_frames_for_ocr` split the read along.
+                target = arr[frame]
+            elif frame == 0:
+                target = arr
+            else:
+                raise ValueError(f"burned_in_text box for frame {frame} on "
+                                 f"an image of one frame")
+            if self.apply_redaction_to_array(target, [(y1, y2, x1, x2)],
+                                             geometry=geometry):
+                modified = True
+        return modified
 
-    def _apply_redaction_flags(self, inst: Instance):
+    def _apply_redaction_flags(self, inst: Instance, burned_in: bool = True):
         """
         Sets DICOM tags indicating Pixel Data modification.
 
@@ -1588,6 +1723,11 @@ class RedactionService:
 
         Args:
             inst (Instance): The instance to flag.
+            burned_in (bool): Write Burned In Annotation `NO`. False for an
+                instance only the `burned_in_text` pass redacted: OCR over
+                anatomy left fragments readable in the architect's
+                measurement, so OCR alone does not say the image holds no
+                burned-in text, and the source's value stands (#1108, Q5).
         """
 
         # 1. Image Type (0008,0008): the existing values are read and kept,
@@ -1600,8 +1740,11 @@ class RedactionService:
         inst.set_attr("0008,0008",
                       _derived_image_type(inst.attributes.get("0008,0008", [])))
 
-        # 2. Burned In Annotation (0028,0301) -> NO
-        inst.set_attr("0028,0301", _REDACTION_BURNED_IN)
+        # 2. Burned In Annotation (0028,0301) -> NO. Not for an OCR-only
+        # redaction, which leaves the value as found; the status-carry
+        # guard already accepts a flag "as captured".
+        if burned_in:
+            inst.set_attr("0028,0301", _REDACTION_BURNED_IN)
 
         # 3. Derivation Description (0008,2111)
         inst.set_attr("0008,2111", _REDACTION_DERIVATION_DESCRIPTION)

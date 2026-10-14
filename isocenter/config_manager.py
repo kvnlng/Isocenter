@@ -79,7 +79,8 @@ _UNVERSIONED_MEANS = "2.0"
 # schema is one edit here, plus the minor bump `CONFIG_VERSION`'s comment
 # describes.
 _TOP_LEVEL_KEYS = frozenset({"version", "privacy_profile", "phi_tags",
-                             "date_jitter", "remove_private_tags", "machines"})
+                             "date_jitter", "remove_private_tags", "machines",
+                             "burned_in_text"})
 #: `comment` is the shipped knowledge bases' own field
 #: (`resources/redaction_rules.json`, `ctp_rules.json`) and what
 #: `create_config` and `save()` write; `manufacturer` is what `add_rule`
@@ -98,6 +99,19 @@ _PHI_RULE_KEYS = frozenset({"name", "action", "value"})
 #: so any other key is refused: a profile carrying `privacy_profile: basic`
 #: beside one rule would otherwise load as that one rule.
 _PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
+#: The `burned_in_text` policy's keys (#1108). Joined the 2.0 row before
+#: 1.0.0 shipped it (owner ruling Q7, 2026-10-14). No `min_box_height`:
+#: word boxes of a 24 px name block measured 17-21 px, and noise boxes
+#: on anatomy 9-62 px, so a height floor misses text and spares no noise.
+_BURNED_IN_TEXT_KEYS = frozenset({"action", "min_confidence"})
+#: What the policy does with text OCR finds on an image, in the order the
+#: refusal lists them. Compared exactly, never case-folded: no `action`
+#: is folded anywhere in a configuration (#754).
+BURNED_IN_TEXT_ACTIONS = ("report", "redact", "withhold")
+#: The threshold when the file names none. Measured on 23 bundled
+#: anatomy-only images: no box at 80 or above, ten at 60 and above; the
+#: name blocks and most initials read at 86-96 (#1108, Q3).
+BURNED_IN_TEXT_DEFAULT_CONFIDENCE = 80
 
 # Null is read as absent for the five optional metadata strings -- a rule's
 # `manufacturer`, `model_name` and `comment`, a zone's `note`, a phi rule's
@@ -543,6 +557,78 @@ def _refuse_date_jitter_in_code(dj: Any) -> None:
     reason = _refused_date_jitter(dj)
     if reason is not None:
         raise ValueError(f"session.configuration: {reason}")
+
+
+def _refused_burned_in_text(policy: Any) -> Optional[str]:
+    """Why `policy` is not a `burned_in_text` this library applies, or None.
+
+    The one judge, for a file's (the loader) and for one assigned in code
+    (`redact()`, `export()`, `save()`, `create_config()`), so the two
+    cannot disagree or be worded twice. The caller prefixes its source.
+
+    Args:
+        policy: None (no policy), or a mapping with a required `action`
+            (one of `BURNED_IN_TEXT_ACTIONS`) and an optional
+            `min_confidence` (a number from 0 to 100, not a bool).
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        return (f"'burned_in_text' must be a mapping such as "
+                f"{{action: redact, min_confidence: 80}}, got {policy!r}")
+    reason = _unknown_keys(policy, _BURNED_IN_TEXT_KEYS, "", "burned_in_text's")
+    if reason is not None:
+        return f"'burned_in_text': {reason}"
+    action = policy.get("action")
+    if action is None:
+        return ("'burned_in_text' needs an 'action': one of "
+                f"{', '.join(BURNED_IN_TEXT_ACTIONS)}")
+    if action not in BURNED_IN_TEXT_ACTIONS:
+        return (f"'burned_in_text' action {action!r} is not one of "
+                f"{', '.join(BURNED_IN_TEXT_ACTIONS)} (exact spelling)")
+    if "min_confidence" in policy:
+        conf = policy["min_confidence"]
+        # A bool is not a number here, and a quoted "80" is text. NaN and
+        # the infinities fail the range test, which is written so they do.
+        if isinstance(conf, bool) or not isinstance(conf, (int, float)):
+            return (f"'burned_in_text' min_confidence must be a number from "
+                    f"0 to 100, got {conf!r} ({type(conf).__name__})")
+        if not 0 <= conf <= 100:
+            return (f"'burned_in_text' min_confidence must be a number from "
+                    f"0 to 100, got {conf!r}")
+    return None
+
+
+def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]:
+    """The policy with its default filled in, or None; refused when the
+    loader would refuse it.
+
+    Filled in so `{action: redact}` and `{action: redact,
+    min_confidence: 80}` are one policy wherever it is compared or hashed.
+
+    Args:
+        policy: What the file or the attribute holds.
+        source (str): Prefixes the refusal: the file's path, or
+            `session.configuration`.
+
+    Returns:
+        Optional[Dict[str, Any]]: `{action, min_confidence}`, a new dict,
+            or None.
+
+    Raises:
+        ValueError: `_refused_burned_in_text`'s refusal.
+    """
+    reason = _refused_burned_in_text(policy)
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
+    if policy is None:
+        return None
+    return {"action": policy["action"],
+            "min_confidence": policy.get("min_confidence",
+                                         BURNED_IN_TEXT_DEFAULT_CONFIDENCE)}
 
 
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
@@ -1391,7 +1477,8 @@ class ConfigLoader:
     @staticmethod
     def load_unified_config(
             filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]],
-                                    Dict[str, Any], bool, Optional[str]]:
+                                    Dict[str, Any], bool, Optional[str],
+                                    Optional[Dict[str, Any]]]:
         """Parse a unified YAML configuration (v2) into its parts.
 
         Every check runs before this returns, so a caller that assigns
@@ -1403,7 +1490,8 @@ class ConfigLoader:
 
         Returns:
             tuple: (phi_tags, machine_rules, date_jitter_config,
-            remove_private_tags, policy_base). `date_jitter_config` is
+            remove_private_tags, policy_base, burned_in_text).
+            `date_jitter_config` is
             `{min_days, max_days}`, `{-365, -1}` when the file has none;
             `remove_private_tags` defaults to True. The last element is
             what the policy was built on: a built-in profile's pinned
@@ -1411,7 +1499,9 @@ class ConfigLoader:
             external profile's path, `profiles.FLOOR` -- an object,
             compared with `is` -- for a file with no `privacy_profile`
             line, or None for `privacy_profile: none` and for an external
-            profile that contributed no rules.
+            profile that contributed no rules. `burned_in_text` is
+            `{action, min_confidence}` with the default filled in, or None
+            when the file holds no policy (#1108).
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -1420,8 +1510,9 @@ class ConfigLoader:
                 refuses, a `machines` that is not a list of mappings, a
                 machine rule `_validate_rule` refuses, a `date_jitter`
                 that is not `{min_days: int, max_days: int}` with
-                `min_days <= max_days`, and a `remove_private_tags` that
-                is not a bool.
+                `min_days <= max_days`, a `remove_private_tags` that
+                is not a bool, and a `burned_in_text` that
+                `_refused_burned_in_text` refuses.
         """
         # The version, the top-level keys, the phi_tags and the profile.
         data, base = _loaded_unified_config(filepath)
@@ -1431,7 +1522,8 @@ class ConfigLoader:
     def _checked_parts(
             data: Dict[str, Any], filepath: str,
             base: Any) -> tuple[Dict[str, Any], List[Dict[str, Any]],
-                                Dict[str, Any], bool, Any]:
+                                Dict[str, Any], bool, Any,
+                                Optional[Dict[str, Any]]]:
         """The rest of `load_unified_config`: the merged policy judged, the
         machines, `date_jitter` and `remove_private_tags` checked.
 
@@ -1507,8 +1599,13 @@ class ConfigLoader:
         for i, rule in enumerate(machine_rules):
             ConfigLoader._validate_rule(rule, i)
 
+        # A null `burned_in_text:` is absent, by owner ruling: a policy has
+        # no empty, and the one reading of "no value" is "no policy".
+        burned_in_text = _burned_in_text_policy(
+            data.get("burned_in_text"), filepath)
+
         return (phi_tags, machine_rules, date_jitter_config,
-                remove_private_tags, base)
+                remove_private_tags, base, burned_in_text)
 
     @staticmethod
     def clean_filename(filename: str) -> str:

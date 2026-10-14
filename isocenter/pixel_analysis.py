@@ -1,4 +1,7 @@
 """OCR over pixel data: find burned-in text and where it sits."""
+import hashlib
+import re
+
 import numpy as np
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
@@ -348,7 +351,7 @@ def _frames_for_ocr(instance: Instance, pixel_array: np.ndarray) -> List[np.ndar
     return [pixel_array]
 
 
-def _ocr_instance(instance: Instance) -> _InstanceOcr:
+def _ocr_instance(instance: Instance, prepare=None) -> _InstanceOcr:
     """OCR every frame of one instance, and say what could not be read.
 
     A load failure fails the instance; a frame's OCR failure fails that
@@ -359,6 +362,11 @@ def _ocr_instance(instance: Instance) -> _InstanceOcr:
 
     Args:
         instance (Instance): The instance to read.
+        prepare (Callable, optional): Given the loaded array, returns the
+            array to read. It must not write the array it is given, which
+            may be the instance's own; the `burned_in_text` pass zeroes
+            the configured zones on a copy here, so the read sees what the
+            export will write (#1108).
 
     Returns:
         _InstanceOcr: The regions found, whether any frame was read, and
@@ -396,13 +404,13 @@ def _ocr_instance(instance: Instance) -> _InstanceOcr:
     # load still frees it.
     was_resident = instance.pixel_array is not None
     try:
-        return _load_and_ocr(instance)
+        return _load_and_ocr(instance, prepare)
     finally:
         if not was_resident:
             instance.unload_pixel_data()
 
 
-def _load_and_ocr(instance: Instance) -> _InstanceOcr:
+def _load_and_ocr(instance: Instance, prepare=None) -> _InstanceOcr:
     """`_ocr_instance`'s body: load, prepare, and OCR each frame."""
     try:
         pixel_array = instance.get_pixel_data()
@@ -432,6 +440,8 @@ def _load_and_ocr(instance: Instance) -> _InstanceOcr:
             [], False, f"pytesseract could not be imported ({_OCR_IMPORT_ERROR})")
 
     try:
+        if prepare is not None:
+            pixel_array = prepare(pixel_array)
         frames = _frames_for_ocr(instance, pixel_array)
     except Exception as e:  # pylint: disable=broad-exception-caught
         return _InstanceOcr(
@@ -480,3 +490,171 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
         logger.error(
             f"Failed to analyze pixels for {instance.sop_instance_uid}: {result.failure}")
     return result.regions
+
+
+@dataclass
+class _InstanceBoxes:
+    """What the `burned_in_text` pass learned from one instance: no text.
+
+    `boxes` holds `(frame, y1, y2, x1, x2)` per region at or above the
+    threshold, padded and clipped to the frame, in zone space (rows `y1`
+    up to `y2`, the end excluded), sorted and without repeats. `read` and
+    `failure` mean what they mean on `_InstanceOcr`.
+    """
+    read: bool
+    failure: Optional[str]
+    boxes: List[Tuple[int, int, int, int, int]]
+    #: `_read_digest` of the array the read saw, the zones zeroed; None
+    #: when nothing was loaded.
+    pixels: Optional[str] = None
+
+
+def _read_digest(arr) -> str:
+    """The digest a `burned_in_text` record names its pixels by (#1108).
+
+    sha256 over the dtype, the shape and the bytes in C order. Not
+    `Instance._pixel_hash`: that is the sha256 of the bytes alone, so a
+    frame handed back under another dtype or shape (which the sidecar's
+    dedup keeps as the same frame) would read as unchanged though the
+    values OCR sees are not; and it names the frame the sidecar holds,
+    so between a `set_pixel_data()` and the next save it still names the
+    frame that was replaced.
+
+    Args:
+        arr (np.ndarray): The array the read saw.
+
+    Returns:
+        str: 64 hex digits.
+    """
+    arr = np.ascontiguousarray(arr)
+    digest = hashlib.sha256(f"{arr.dtype.str}|{arr.shape}|".encode("ascii"))
+    digest.update(arr.tobytes())
+    return digest.hexdigest()
+
+
+def _zoned_for_reading(instance: Instance, arr, zones):
+    """`arr` with `zones` zeroed, on a copy, as the `burned_in_text` read
+    sees it; `arr` itself when there are no zones. Never writes `arr`.
+
+    Returns:
+        tuple: `(array, geometry)`.
+    """
+    # Imported here: `services` is the one home of zone application, and
+    # this module is imported by things `services` must not need.
+    from .services import RedactionService  # pylint: disable=import-outside-toplevel
+    geometry = resolve_pixel_geometry(arr.shape, instance.attributes)
+    if not zones:
+        return arr, geometry
+    # A copy, never the instance's own array: this pass reads, and a
+    # zone zeroed in place would reach the graph under threads.
+    arr = np.array(arr, copy=True)
+    RedactionService.apply_redaction_to_array(arr, list(zones), geometry=geometry)
+    return arr, geometry
+
+
+def _pixels_digest(instance: Instance, zones=()) -> Optional[str]:
+    """`_read_digest` of the instance's pixels as the read would see them.
+
+    Loads the frame, and releases it again when it was not resident, as
+    `_ocr_instance` does. Takes no lock of its own: `get_pixel_data()` and
+    `unload_pixel_data()` take `PIXEL_STATE_LOCK` inside and release it
+    before they log, and the digest is computed with nothing held.
+
+    Args:
+        instance (Instance): The instance.
+        zones (Iterable[tuple]): The zones the read zeroes first.
+
+    Returns:
+        Optional[str]: The digest, or None when the pixels could not be
+            loaded or there are none: a digest that cannot be taken never
+            equals one a record holds.
+    """
+    was_resident = instance.pixel_array is not None
+    try:
+        arr = instance.get_pixel_data()
+        if arr is None:
+            return None
+        return _read_digest(_zoned_for_reading(instance, arr, zones)[0])
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+    finally:
+        if not was_resident:
+            instance.unload_pixel_data()
+
+
+#: `OCR failed on frame N: <Class>`, the head of a frame failure
+#: `_load_and_ocr` spells; what follows the class is the exception's text.
+_FRAME_FAILURE = re.compile(r"OCR failed on frame (\d+): ([A-Za-z_][\w.]*)")
+
+
+def _without_ocr_messages(failure: Optional[str]) -> Optional[str]:
+    """A failure as the `burned_in_text` pass may quote it: each OCR frame
+    failure cut to its frame and exception class.
+
+    The message of an exception raised while OCR ran is tesseract's own
+    output, and nothing promises it holds no text it read (review O7 of
+    #1108). A load failure, which runs before OCR, is quoted whole.
+    """
+    if failure is None:
+        return None
+    frames = _FRAME_FAILURE.findall(failure)
+    if not frames:
+        return failure
+    return "; ".join(f"OCR failed on frame {i}: {cls}" for i, cls in frames)
+
+
+def _padding(height: int) -> int:
+    """How far a box is widened on each side: `max(2, round(0.15 * h))`.
+
+    The architect's probe found every word's ink inside its box, with no
+    margin; anti-aliased or lossy-coded edges sit just outside it (#1108).
+    """
+    return max(2, round(0.15 * height))
+
+
+def _text_boxes(instance: Instance, min_confidence: float,
+                zones=()) -> _InstanceBoxes:
+    """The padded boxes OCR finds on each frame of `instance`, and nothing
+    of what they say.
+
+    The configured zones are zeroed on a copy first, so text a zone
+    already covers is not found again. Every region whose confidence is
+    `min_confidence` or more is kept, **whatever its length**: the
+    two-character filter `RedactionVerifier` applies to its own findings
+    would drop initials such as `JT` (#1108, Q3).
+
+    Args:
+        instance (Instance): The instance to read.
+        min_confidence (float): Keep regions at or above this.
+        zones (Iterable[tuple]): `(y1, y2, x1, x2)` zones to zero first.
+
+    Returns:
+        _InstanceBoxes: The boxes, with whether the instance was read and
+            why not, when it was not.
+    """
+    zones = [tuple(z) for z in zones]
+    size = {}
+
+    def prepare(arr):
+        arr, geometry = _zoned_for_reading(instance, arr, zones)
+        size["rows"], size["cols"] = geometry.rows, geometry.cols
+        # Over exactly what OCR is handed: after the zones, because the
+        # record speaks for what the export writes, which zeroes them too,
+        # so a zone's own redaction leaves the record current.
+        size["pixels"] = _read_digest(arr)
+        return arr
+
+    ocr = _ocr_instance(instance, prepare)
+    boxes = set()
+    for region in ocr.regions:
+        if region.confidence < min_confidence:
+            continue
+        x, y, w, h = (int(v) for v in region.box)
+        pad = _padding(h)
+        y1, y2 = max(0, y - pad), min(size["rows"], y + h + pad)
+        x1, x2 = max(0, x - pad), min(size["cols"], x + w + pad)
+        if y2 > y1 and x2 > x1:
+            boxes.add((int(region.frame_index), y1, y2, x1, x2))
+    # The regions, and their text, end here: only coordinates leave.
+    return _InstanceBoxes(ocr.read, _without_ocr_messages(ocr.failure),
+                          sorted(boxes), size.get("pixels"))
