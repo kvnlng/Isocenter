@@ -13019,7 +13019,7 @@ class DicomExporter:
         # *value* of (0400,0510), which names the token's payload and
         # stays as it is (#790).
         #
-        # Encoding comes from meta.TransferSyntaxUID above; see the
+        # Encoding comes from meta.TransferSyntaxUID below; see the
         # note on the JPEG 2000 branch in `_compress_j2k`.
         meta.TransferSyntaxUID = ExplicitVRLittleEndian
         ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
