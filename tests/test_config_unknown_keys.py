@@ -31,7 +31,7 @@ FIELDS = ("phi_tags", "rules", "date_jitter", "remove_private_tags",
 
 TOP_LEVEL_LIST = ("date_jitter, machines, phi_tags, privacy_profile, "
                   "remove_private_tags, version")
-RULE_LIST = "comment, manufacturer, model_name, redaction_zones, serial_number"
+RULE_LIST = "comment, manufacturer, match, model_name, redaction_zones, serial_number"
 
 
 def _set_sentinels(configuration, tmp_path):
