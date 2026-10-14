@@ -245,7 +245,8 @@ def _burned_in_text_policy_hash(policy, zones) -> str:
     Returns:
         str: 32 hex digits.
     """
-    key = {"min_confidence": policy["min_confidence"],
+    # A float, so `80` and `80.0` are one threshold and one hash (O4).
+    key = {"min_confidence": float(policy["min_confidence"]),
            "zones": sorted(list(zone) for zone in zones)}
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
 

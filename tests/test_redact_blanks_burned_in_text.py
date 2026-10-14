@@ -140,6 +140,12 @@ class FakeTesseract:
         self.sticky = False
         #: Raise, as a tesseract that exits non-zero does.
         self.fail = False
+        #: Raise on these calls only (1-based), so one frame of several,
+        #: or the read after redaction alone, can fail.
+        self.fail_calls = set()
+        self.fail_message = "tesseract exited 1: Error opening data file"
+        #: `OMP_THREAD_LIMIT` as each call saw it.
+        self.omp_seen = []
         self._last = None
         self.Output = SimpleNamespace(DICT="dict")
 
@@ -149,8 +155,9 @@ class FakeTesseract:
 
     def image_to_data(self, img, *args, **kwargs):
         self.calls += 1
-        if self.fail:
-            raise RuntimeError("tesseract exited 1: Error opening data file")
+        self.omp_seen.append(os.environ.get("OMP_THREAD_LIMIT"))
+        if self.fail or self.calls in self.fail_calls:
+            raise RuntimeError(self.fail_message)
         arr = np.asarray(img)
         ys, xs = np.nonzero(arr == INK)
         if len(ys):
@@ -454,7 +461,7 @@ def test_report_blanks_nothing_and_writes_a_row_per_instance_with_text(tmp_path,
          f"burned_in_text: 1 text region(s) found on frame(s) 0 of instance "
          f"{uid}; not redacted (action: report)."),
         ("WARNING", uid,
-         f"DICOM export to {out} wrote instance {uid}: burned_in_text found 1 "
+         f"DICOM export to {out} did not withhold instance {uid}: burned_in_text found 1 "
          f"text region(s) on frame(s) 0, not redacted (action: report).")]
     assert REVIEW_LINE in (tmp_path / "r.md").read_text()
 
@@ -517,7 +524,7 @@ def test_an_instance_never_checked_under_the_policy_is_gated(tmp_path, ocr, acti
         out = tmp_path / "out"
         summary = session.export(str(out), use_compression=False, show_progress=False)
     assert summary.written == written
-    verb = "wrote" if written else "withheld"
+    verb = "did not withhold" if written else "withheld"
     assert ("WARNING", ONE,
             f"DICOM export to {out} {verb} instance {ONE}: its pixels were not "
             f"checked for burned-in text under this configuration's "
@@ -705,7 +712,7 @@ def test_the_text_ocr_read_reaches_no_row_log_report_store_or_outcome(tmp_path, 
         ocr.sticky = True
         session.redact(show_progress=False)
         outcome = session_module._burned_in_text_worker(
-            (_only_instance(session), (), 80, None))
+            (_only_instance(session), (), 80, None, None))
         session.export(str(tmp_path / "out"), use_compression=False, show_progress=False)
         session.generate_report(str(tmp_path / "r.md"))
         session.save(sync=True)
@@ -721,12 +728,258 @@ def test_the_text_ocr_read_reaches_no_row_log_report_store_or_outcome(tmp_path, 
 
 
 def test_a_failing_tesseract_quotes_no_text_either(tmp_path, ocr, caplog):
+    """A tesseract whose failure message holds text: the pass names the
+    frame and the exception's class, never its message (review O7: with
+    a message that could not hold the sentinel, this could not fail)."""
     caplog.set_level(logging.DEBUG)
     ocr.fail = True
+    ocr.fail_message = f"tesseract exited 1: read {SENTINEL} then failed"
     db = tmp_path / "s.db"
     with Session(str(db)) as session:
         session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
         session.load_config(_config(tmp_path, "redact"))
         session.redact(show_progress=False)
-    assert not any(SENTINEL in str(cell) for row in audit_rows(db) for cell in row)
+    rows = audit_rows(db)
+    assert [r for r in rows if "OCR failed on frame 0: RuntimeError" in r[2]]
+    assert not any(SENTINEL in str(cell) for row in rows for cell in row)
     assert SENTINEL not in caplog.text
+
+
+# --- review of #1109: the lines nothing pinned (B1-B3, O1, O4, O5) ----------
+
+def _never_checked(out, uid, written):
+    verb = "did not withhold" if written else "withheld"
+    return ("WARNING", uid,
+            f"DICOM export to {out} {verb} instance {uid}: its pixels were not "
+            f"checked for burned-in text under this configuration's "
+            f"burned_in_text policy; run redact().")
+
+
+@pytest.mark.parametrize("action", ["redact", "withhold"])
+def test_one_frame_that_cannot_be_read_leaves_no_record(tmp_path, ocr, action):
+    """B1: three frames, OCR fails on the second only, so the instance
+    *was* read. A frame not read is a frame not checked: no record, one
+    unread row, withheld at export. Kills the `continue` after the
+    failure is noted, which `fail` on every frame hid behind `read`."""
+    ocr.fail_calls = {2}
+    db = tmp_path / "s.db"
+    out = tmp_path / "out"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"frames": 3, "ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, action))
+        assert session.redact(show_progress=False) == 0
+        inst = _only_instance(session)
+        assert services.BURNED_IN_TEXT_ATTR not in inst.attributes
+        assert "_ISOCENTER_REDACTION_HASH" not in inst.attributes
+        summary = session.export(str(out), use_compression=False, show_progress=False)
+    assert summary.written == 0
+    rows = audit_rows(db)
+    unread = [r for r in rows if r[0] == "WARNING" and "could not read" in r[2]]
+    assert [r[1] for r in unread] == [ONE]
+    assert _never_checked(out, ONE, False) in rows
+
+
+@pytest.mark.parametrize("zone_first", [True, False])
+def test_a_zone_removed_or_added_after_the_read_stales_the_record(tmp_path, ocr, zone_first):
+    """B2: the record speaks for the zones it was read under. A zone over
+    the text, removed after a `withhold` read, would otherwise leave a
+    current record with no boxes and the text exported unread; a zone
+    added makes the record stale the same way."""
+    zone = (f"machines:\n  - serial_number: SN-1\n    redaction_zones:\n"
+            f"      - [{PADDED[0]}, {PADDED[1]}, {PADDED[2]}, {PADDED[3]}]\n")
+    first, second = (zone, "") if zone_first else ("", zone)
+    out = tmp_path / "out"
+    db = tmp_path / "s.db"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)], "serial": "SN-1"})))
+        session.load_config(_config(tmp_path, "withhold", first))
+        session.redact(show_progress=False)
+        # The zone itself redacts the stored pixels when it comes first,
+        # and the instance takes a new UID.
+        uid = _only_instance(session).sop_instance_uid
+        session.load_config(_config(tmp_path, "withhold", second, "d.yaml"))
+        summary = session.export(str(out), use_compression=False, show_progress=False)
+    assert summary.written == 0
+    assert _never_checked(out, uid, False) in audit_rows(db)
+
+
+def test_a_zone_added_over_zeros_still_reads_again(tmp_path, ocr):
+    """B2, the hash's own term: a zone added exactly over a box `redact()`
+    already blanked moves no pixel the read sees, so only the zones in
+    the policy hash say the record was read under other zones. Kills
+    `"zones": []` in `_burned_in_text_policy_hash`, which the pixel digest
+    alone would not."""
+    zone = (f"machines:\n  - serial_number: SN-1\n    redaction_zones:\n"
+            f"      - [{PADDED[0]}, {PADDED[1]}, {PADDED[2]}, {PADDED[3]}]\n")
+    db = tmp_path / "s.db"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)], "serial": "SN-1"})))
+        session.load_config(_config(tmp_path, "redact"))
+        session.redact(show_progress=False)
+        session.load_config(_config(tmp_path, "redact", zone, "d.yaml"))
+        session.redact(show_progress=False)
+    passes = [r[2] for r in audit_rows(db) if r[0] == "REDACTION"
+              and r[1] == "burned_in_text"]
+    assert "read 1 of 1 instance(s) holding pixels, 0 could not be read, 0 already" in passes[-1]
+
+
+def test_the_padding_is_fifteen_percent_of_the_box_height(tmp_path, ocr):
+    """B3: a 20-pixel box pads by round(3.0) = 3, past the 2-pixel floor,
+    so the factor is told apart from the floor that a 10-pixel box hits."""
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, 10, 30, 30, 60)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        session.redact(show_progress=False)
+        assert _record(_only_instance(session))["boxes"] == [[0, 7, 33, 27, 63]]
+
+
+# --- the record is tied to the pixels it read (owner ruling, review of #1109) ---
+
+def _replace_pixels(inst, box=(40, 50, 10, 20)):
+    arr = inst.get_pixel_data().copy()
+    arr[box[0]:box[1], box[2]:box[3]] = INK
+    inst.set_pixel_data(arr)
+
+
+@pytest.mark.parametrize("action, written", [("redact", 0), ("withhold", 0), ("report", 1)])
+def test_pixels_replaced_after_redact_are_never_checked(tmp_path, ocr, action, written):
+    """The record names the pixels the read saw, by digest. Pixels set
+    after `redact()` are pixels no read saw: the export says so, as for
+    an instance never checked, whatever the record's boxes say."""
+    db = tmp_path / "s.db"
+    out = tmp_path / "out"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {})))
+        session.load_config(_config(tmp_path, action))
+        session.redact(show_progress=False)
+        inst = _only_instance(session)
+        assert _record(inst)["boxes"] == []
+        _replace_pixels(inst)
+        summary = session.export(str(out), use_compression=False, show_progress=False)
+    assert summary.written == written
+    assert _never_checked(out, ONE, written) in audit_rows(db)
+
+
+@pytest.mark.parametrize("action", ["redact", "withhold", "report"])
+def test_pixels_left_as_read_pass_the_gate(tmp_path, ocr, action):
+    """The control: the same image with its pixels as read is written,
+    with no row, under every action; under `redact` after its own
+    redaction too, whose read afterwards is what the digest names."""
+    ink = [(0, *INK_BOX)] if action == "redact" else []
+    db = tmp_path / "s.db"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": ink})))
+        session.load_config(_config(tmp_path, action))
+        session.redact(show_progress=False)
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 show_progress=False)
+    assert summary.written == 1
+    assert not [r for r in audit_rows(db) if r[0] == "WARNING"]
+
+
+def test_pixels_replaced_after_a_reopen_are_never_checked(tmp_path, ocr):
+    db = tmp_path / "s.db"
+    out = tmp_path / "out"
+    cfg = _config(tmp_path, "redact")
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(cfg)
+        session.redact(show_progress=False)
+        session.save(sync=True)
+    with Session(str(db)) as session:
+        session.load_config(cfg)
+        inst = _only_instance(session)
+        uid = inst.sop_instance_uid
+        _replace_pixels(inst)
+        summary = session.export(str(out), use_compression=False, show_progress=False)
+    assert summary.written == 0
+    assert _never_checked(out, uid, False) in audit_rows(db)
+
+
+def test_redact_reads_pixels_replaced_since_its_last_read(tmp_path, ocr):
+    """Not only the export: the next `redact()` reads the new pixels
+    without `force`, finds the new text and blanks it."""
+    box = (40, 50, 10, 20)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {})))
+        session.load_config(_config(tmp_path, "redact"))
+        session.redact(show_progress=False)
+        inst = _only_instance(session)
+        _replace_pixels(inst, box)
+        ocr.calls = 0
+        assert session.redact(show_progress=False) == 1
+        assert ocr.calls > 0
+        assert _record(inst)["boxes"] == [[0, 38, 52, 8, 22]]
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 show_progress=False)
+    assert summary.written == 1
+
+
+def test_the_digest_is_over_the_pixels_after_the_zones(tmp_path, ocr):
+    """What the read saw: the zones zeroed on a copy. So a zone's own
+    redaction, which zeroes exactly what the read already saw as zero,
+    leaves the record current."""
+    zone = "machines:\n  - serial_number: SN-1\n    redaction_zones: [[0, 4, 0, 4]]\n"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"serial": "SN-1"})))
+        session.load_config(_config(tmp_path, "withhold", zone))
+        assert session.redact(show_progress=False) == 1
+        inst = _only_instance(session)
+        zoned = inst.get_pixel_data().copy()
+        assert pixel_analysis._read_digest(zoned) == _record(inst)["pixels"]
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 show_progress=False)
+    assert summary.written == 1
+
+
+def test_a_read_after_redaction_that_fails_writes_a_row_and_stales_the_record(tmp_path, ocr):
+    """O5: the read after redaction is what names the redacted pixels. When
+    it fails, a row says so and the export treats the instance as never
+    checked, rather than as checked by a read of the pixels it replaced."""
+    ocr.fail_calls = {2}
+    db = tmp_path / "s.db"
+    out = tmp_path / "out"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        assert session.redact(show_progress=False) == 1
+        uid = _only_instance(session).sop_instance_uid
+        summary = session.export(str(out), use_compression=False, show_progress=False)
+    rows = audit_rows(db)
+    assert ("WARNING", uid,
+            f"burned_in_text: the read after redaction could not read instance "
+            f"{uid} in full, so its redacted pixels are not checked under this "
+            f"policy.") in rows
+    assert summary.written == 0
+    assert _never_checked(out, uid, False) in rows
+
+
+def test_a_second_report_pass_writes_no_second_row(tmp_path, ocr):
+    """O1: the report row belongs to the read that found the text."""
+    db = tmp_path / "s.db"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "report"))
+        session.redact(show_progress=False)
+        session.redact(show_progress=False)
+    rows = [r for r in audit_rows(db) if "(action: report)" in r[2]]
+    assert len(rows) == 1
+
+
+def test_tesseract_runs_with_one_thread_and_the_variable_is_put_back(tmp_path, ocr, monkeypatch):
+    """O1: `OMP_THREAD_LIMIT=1` while the pass reads, as found afterwards."""
+    monkeypatch.delenv("OMP_THREAD_LIMIT", raising=False)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        session.redact(show_progress=False)
+    assert ocr.omp_seen and set(ocr.omp_seen) == {"1"}
+    assert "OMP_THREAD_LIMIT" not in os.environ
+
+
+def test_eighty_and_eighty_point_zero_are_one_policy():
+    """O4: one threshold, one hash, however YAML spelled it."""
+    assert (services._burned_in_text_policy_hash(
+                {"action": "redact", "min_confidence": 80}, [])
+            == services._burned_in_text_policy_hash(
+                {"action": "redact", "min_confidence": 80.0}, []))

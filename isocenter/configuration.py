@@ -346,7 +346,9 @@ class IsocenterConfiguration:
                 that base would bring the rule back on reload; and when
                 `date_jitter` is a range the loader would refuse (#731);
                 and when `config_path` is a file declaring a newer
-                `version` minor than this library's (#784). Nothing is
+                `version` minor than this library's (#784). Also when
+                `burned_in_text` holds a policy the loader would refuse
+                in a file (#1108). Nothing is
                 written.
             OSError: The write's own error, unchanged.
         """
@@ -370,7 +372,8 @@ class IsocenterConfiguration:
 
         Raises:
             ValueError: When `phi_tags` lacks a rule its base supplies, or
-                `date_jitter` is a range the loader refuses (#731).
+                `date_jitter` is a range the loader refuses (#731), or
+                `burned_in_text` is a policy the loader refuses (#1108).
         """
         # First, before the file is opened: a range the loader refuses
         # would make a file that does not load (#731). Under auto-save this

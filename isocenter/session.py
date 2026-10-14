@@ -290,11 +290,17 @@ class _BurnedInTextRead(NamedTuple):
         failure: Why the instance could not be read in full, or None.
         boxes: `(frame, y1, y2, x1, x2)` per region at or above the
             threshold, padded and clipped.
+        pixels: `pixel_analysis._read_digest` of what the read saw, the
+            zones zeroed, or None when nothing was loaded.
+        unchanged: True when the pixels still match the digest the
+            caller handed in, so nothing was read by OCR.
     """
     entity_uid: Optional[str]
     read: bool
     failure: Optional[str]
     boxes: Tuple[Tuple[int, int, int, int, int], ...]
+    pixels: Optional[str] = None
+    unchanged: bool = False
 
 
 def _burned_in_text_worker(args):
@@ -304,10 +310,13 @@ def _burned_in_text_worker(args):
     one instance cannot end the pass.
 
     Args:
-        args (tuple): `(instance, zones, min_confidence, tesseract_cmd)`:
-            the `Instance`, the zones its series' rules hold (zeroed on a
-            copy before the read), the threshold, and the caller's
-            `tesseract_cmd` (see `_caller_tesseract_cmd`).
+        args (tuple): `(instance, zones, min_confidence, tesseract_cmd,
+            expected)`: the `Instance`, the zones its series' rules hold
+            (zeroed on a copy before the read), the threshold, the
+            caller's `tesseract_cmd` (see `_caller_tesseract_cmd`), and
+            the pixel digest of the instance's current record, or None.
+            When the pixels still match `expected`, nothing is read by OCR
+            and the outcome says `unchanged`.
 
     Returns:
         _BurnedInTextRead: The boxes, whether any frame was read, and why
@@ -318,18 +327,28 @@ def _burned_in_text_worker(args):
     # project secret and derives no UID: the redacted UID depends on the
     # boxes and is derived in the parent, under the secret, after this
     # returns (#1108).
-    instance, zones, min_confidence, tesseract_cmd = args
+    instance, zones, min_confidence, tesseract_cmd, expected = args
     uid = instance.sop_instance_uid
     _adopt_tesseract_cmd(tesseract_cmd)
+    # pylint: disable=protected-access
+    # The record is current only for the pixels it read: an instance
+    # whose pixels were replaced since is read again, whatever its record
+    # says (owner ruling on the review of #1108). Taken here, in the
+    # worker, so the load is spread over the pool as the read is.
+    if expected is not None:
+        now = pixel_analysis._pixels_digest(instance, zones)
+        if now == expected:
+            return _BurnedInTextRead(uid, False, None, (), now, True)
     # `_text_boxes` through the module, so a patch on `pixel_analysis`
     # reaches it; a boundary catch, for the reasons `_verify_worker` gives.
     try:
-        found = pixel_analysis._text_boxes(  # pylint: disable=protected-access
-            instance, min_confidence, zones)
+        found = pixel_analysis._text_boxes(instance, min_confidence, zones)
     except Exception as e:  # pylint: disable=broad-exception-caught
-        return _BurnedInTextRead(uid, False, describe_exception(e), ())
+        return _BurnedInTextRead(
+            uid, False, f"the read raised {type(e).__name__}", ())
     return _BurnedInTextRead(uid, found.read, found.failure,
-                             tuple(tuple(box) for box in found.boxes))
+                             tuple(tuple(box) for box in found.boxes),
+                             found.pixels)
 
 
 @contextlib.contextmanager
@@ -465,17 +484,21 @@ def _audit_withheld_instances(store_backend, folder, withheld):
                                 entity_uid=uid or "UNKNOWN", details=detail)
 
 
-def _burned_in_text_verdict(instance, policy, policy_hash, folder):
+def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
     """What the `burned_in_text` policy says about exporting one instance
-    that holds pixels (#1108), from its record alone.
+    that holds pixels (#1108), from its record and the pixels it holds.
 
-    Never loads a frame and never writes anything: export does not mutate
-    the graph. `redact()` is where pixels are read.
+    Never runs OCR and never writes anything: export does not mutate the
+    graph, and `redact()` is where text is read. It does load the frame
+    once, to take the digest the record must name, and releases it again
+    (`pixel_analysis._pixels_digest`), holding no lock while it does.
 
     Args:
         instance (Instance): The instance.
         policy (dict): The normalised policy.
         policy_hash (str): What a current record carries for its series.
+        zones (list): The zones the export applies to its series, which
+            the digest is taken after, as the read took it.
         folder (str): The export's folder, for the row text.
 
     Returns:
@@ -485,11 +508,20 @@ def _burned_in_text_verdict(instance, policy, policy_hash, folder):
     record = burned_in_text_record(instance)
     uid = instance.sop_instance_uid
     action = policy["action"]
-    if record is None or record.get("policy") != policy_hash:
+    # The record speaks for the pixels its read saw and no others: pixels
+    # set after the read (`set_pixel_data()`, a redaction since, another
+    # tool's write) are pixels no read saw. A digest is checked last and
+    # only for a record that is otherwise current, so a stale record costs
+    # no load.
+    if (record is None or record.get("policy") != policy_hash
+            or record.get("pixels") is None
+            or pixel_analysis._pixels_digest(instance, zones) != record["pixels"]):  # pylint: disable=protected-access
         # Fail closed for the two actions that promise something about
-        # pixels; `report` promises rows, and this is its row.
+        # pixels; `report` promises rows, and this is its row. "did not
+        # withhold", not "wrote": the row is written before the worker
+        # writes the file, and a write can still fail (review O10).
         hold = action != "report"
-        verb = "withheld" if hold else "wrote"
+        verb = "withheld" if hold else "did not withhold"
         return hold, (f"DICOM export to {folder} {verb} instance {uid}: its "
                       f"pixels were not checked for burned-in text under this "
                       f"configuration's burned_in_text policy; run redact().")
@@ -509,7 +541,7 @@ def _burned_in_text_verdict(instance, policy, policy_hash, folder):
     if action == "report":
         # A row per export that writes the text: the pass's row says what
         # was found, this one says a recipient holds it.
-        return False, (f"DICOM export to {folder} wrote instance {uid}: "
+        return False, (f"DICOM export to {folder} did not withhold instance {uid}: "
                        f"{found}, not redacted (action: report).")
     # `redact`, found and not blanked: the redaction carrying these boxes
     # did not land, another has replaced it since, or the boxes were read
@@ -3133,7 +3165,9 @@ class DicomSession:
                 loader would refuse in the file (#731), and `save()`'s
                 refusal when `phi_tags` lacks a rule its base supplies
                 (#741), or when `output_path` is a file declaring a newer
-                `version` minor than this library's (#784). Nothing is
+                `version` minor than this library's (#784); and when
+                `configuration.burned_in_text` is a policy the loader would
+                refuse in a file (#1108). Nothing is
                 written.
             OSError: The write's own error, after it is logged (#741).
         """
@@ -6343,9 +6377,12 @@ class DicomSession:
         UID is derived from the zones and the boxes; `report` writes one
         `WARNING` audit row per instance with text and changes no pixel;
         `withhold` changes nothing here, and `export()` withholds each
-        instance with text. An instance already read under this threshold
-        and these zones is not read again unless `force=True`. A redacted
-        instance is read once more, and text still found writes a
+        instance with text. The record names the pixels the read saw by a
+        digest; an instance already read under this threshold and these
+        zones, whose pixels still match it, is not read again by OCR
+        unless `force=True`. A redacted instance is read once more, which
+        moves the digest to its redacted pixels; a failure of that read
+        writes a `WARNING` row and leaves it unchecked; text still found writes a
         `WARNING` row. An instance only OCR redacted carries `DERIVED`
         and the derivation code but keeps Burned In Annotation as the
         source had it. Every pass writes one `REDACTION` row with its
@@ -6848,29 +6885,52 @@ class DicomSession:
             dict: The pass's state: `entries`, `failures`, `read`, `version`.
         """
         entries = self._burned_in_text_entries(policy)
-        to_read = [e for e in entries if force or e["record"] is None]
+        # Every instance goes to a worker: one whose record is current
+        # under this policy carries the record's pixel digest, and is read
+        # by OCR only when its pixels no longer match it.
+        to_read = entries
+
+        def expected(entry):
+            if force or entry["record"] is None:
+                return None
+            # A record with no digest names no pixels: "" matches none.
+            return entry["record"].get("pixels") or ""
+
         # Read in the parent, after `_require_ocr` probed the binary, so
         # the workers run the binary it checked.
         tesseract_cmd = _caller_tesseract_cmd()
         version = str(pixel_analysis.pytesseract.get_tesseract_version())
         reads = []
         if to_read:
-            print(f"Reading {len(to_read)} image(s) for burned-in text (OCR)...")
+            print(f"Checking {len(to_read)} image(s) for burned-in text (OCR)...")
             reads = run_parallel(
                 _burned_in_text_worker,
                 [(e["instance"], e["zones"], policy["min_confidence"],
-                  tesseract_cmd) for e in to_read],
+                  tesseract_cmd, expected(e)) for e in to_read],
                 strategy=dataclasses.replace(
                     strategy, desc="Reading burned-in text", total=len(to_read)),
                 ordered=True)
         failures = []
         read = 0
+        skipped = 0
         for entry, outcome in zip(to_read, reads):
+            if outcome.unchanged:
+                skipped += 1
+                continue
             if outcome.failure is not None:
                 # Fail closed: a frame not read is a frame not checked.
                 failures.append((outcome.entity_uid, outcome.failure))
+                if not force:
+                    # A record whose pixels were replaced, and could not
+                    # be read again, speaks for pixels the instance no
+                    # longer holds: its boxes must not be blanked on the
+                    # new ones. Under `force` the pixels are the ones it
+                    # read, and it is kept.
+                    entry["record"] = None
                 continue
             if not outcome.read:
+                if not force:
+                    entry["record"] = None
                 continue
             read += 1
             boxes = {tuple(box) for box in outcome.boxes}
@@ -6881,7 +6941,8 @@ class DicomSession:
                 boxes |= {tuple(box) for box in entry["record"]["boxes"]}
             record = {"policy": entry["policy"],
                       "boxes": sorted(list(box) for box in boxes),
-                      "tesseract": version}
+                      "tesseract": version,
+                      "pixels": outcome.pixels}
             inst = entry["instance"]
             captured = capture_phi_status_for_redaction(inst)
             write_burned_in_text_record(inst, record)
@@ -6889,7 +6950,7 @@ class DicomSession:
             entry["record"] = record
             entry["found_now"] = True
         return {"entries": entries, "failures": failures, "read": read,
-                "attempted": len(entries), "skipped": len(entries) - len(to_read),
+                "attempted": len(entries), "skipped": skipped,
                 "version": version, "strategy": strategy,
                 "tesseract_cmd": tesseract_cmd}
 
@@ -6989,7 +7050,7 @@ class DicomSession:
         # the loader reads now, under both.
         if landed:
             items = [(e["instance"], e["zones"], policy["min_confidence"],
-                      burned["tesseract_cmd"]) for e in landed]
+                      burned["tesseract_cmd"], None) for e in landed]
             residual = run_parallel(
                 _burned_in_text_worker, items,
                 strategy=dataclasses.replace(
@@ -6997,6 +7058,26 @@ class DicomSession:
                     total=len(items)),
                 ordered=True)
             for entry, outcome in zip(landed, residual):
+                inst = entry["instance"]
+                if outcome.failure is None and outcome.read:
+                    # This read is what names the redacted pixels: the
+                    # record's digest moves to them, its boxes and its
+                    # redaction stay. Carried as the phase-1 write is.
+                    captured = capture_phi_status_for_redaction(inst)
+                    entry["record"] = {**entry["record"], "pixels": outcome.pixels}
+                    write_burned_in_text_record(inst, entry["record"])
+                    carry_phi_status_across_redaction(inst, captured)
+                else:
+                    # O5: the record still names the pixels before the
+                    # redaction, so the export treats the instance as never
+                    # checked; this row says why. No reason is quoted.
+                    uid = inst.sop_instance_uid
+                    self.store_backend.log_audit(
+                        action_type="WARNING", entity_uid=uid,
+                        details=(f"burned_in_text: the read after redaction "
+                                 f"could not read instance {uid} in full, so "
+                                 f"its redacted pixels are not checked under "
+                                 f"this policy."))
                 if outcome.boxes:
                     uid = entry["instance"].sop_instance_uid
                     self.store_backend.log_audit(
@@ -7574,9 +7655,11 @@ class DicomSession:
         `check_burned_in=True` re-audits first, so it never does.
 
         Under a `burned_in_text` policy (#1108) the `dicom` format reads
-        each instance's record of the last `redact()` pass, and never its
-        pixels. An instance that holds pixels and was never checked under
-        the policy's threshold and zones is withheld under `redact` and
+        each instance's record of the last `redact()` pass, and runs no
+        OCR; it loads each frame once to check that the record names the
+        pixels the instance holds now. An instance that holds pixels and
+        was never checked under the policy's threshold and zones, or whose
+        pixels changed after the read, is withheld under `redact` and
         `withhold`, and written under `report`; one with text found is
         withheld under `withhold`, withheld under `redact` until a
         redaction carrying its boxes has landed, and written under
@@ -7841,7 +7924,9 @@ class DicomSession:
             ValueError: `subset` is a DataFrame carrying none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
                 PatientID, or a query string that does not run against
-                the cohort report.
+                the cohort report; or `configuration.burned_in_text` is
+                a policy the loader would refuse in a file (#1108), before
+                the pre-export scan and the save.
             ExportError: Every planned instance failed (nothing written and
                 at least one failure), raised last, after the audit rows
                 and the `EXPORT` row are written. A partial export and an
@@ -7965,7 +8050,11 @@ class DicomSession:
         if not tasks and (withheld or held_by_policy):
             requested = len(withheld) + held_by_policy
             get_logger().warning(
-                "No instances exported: all %d were withheld.", requested)
+                "No instances exported: all %d were withheld by the %s.",
+                requested,
+                ("pre-export scan" if not held_by_policy else
+                 "burned_in_text policy" if not withheld else
+                 "pre-export scan and the burned_in_text policy"))
             # Counted, unlike a true empty plan: the caller asked for
             # these instances and none was written, which is exactly what
             # "0 of K requested" says. A zero here is a fact about this
@@ -8745,10 +8834,13 @@ class DicomSession:
                         # subset and the scan: an instance not asked for,
                         # or already withheld, gets no second row. Only an
                         # instance holding pixels; the verdict reads its
-                        # record and never loads a frame.
+                        # record and runs no OCR, and loads the frame only
+                        # for a record otherwise current, to check its
+                        # pixel digest.
                         if policy is not None and _holds_pixels(instance):
                             verdict = _burned_in_text_verdict(
-                                instance, policy, policy_hash, options.folder)
+                                instance, policy, policy_hash, zones,
+                                options.folder)
                             if verdict is not None:
                                 hold, detail = verdict
                                 gated.append((instance.sop_instance_uid,
