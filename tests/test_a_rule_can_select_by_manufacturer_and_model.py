@@ -387,3 +387,24 @@ def test_a_partial_leak_on_a_match_zone_grows_that_zone(tmp_path, _stub_ocr):
         assert session.configuration.rules[0]["redaction_zones"] == [list(OVER)]
     finally:
         session.close()
+
+
+def test_the_direct_service_path_finds_a_match_rules_targets(tmp_path):
+    """`redact_machine_instances` with no `targets` resolves a match
+    selector through the equipment, not as an index key (which raised
+    `TypeError: unhashable type: 'dict'`)."""
+    from isocenter.services import RedactionService
+    session = _session(tmp_path, ("none", "bare"))
+    try:
+        service = RedactionService(session.store)
+        service.redact_machine_instances({"match": dict(FUJI)}, [tuple(OVER)],
+                                         show_progress=False,
+                                         project_secret=FIXED_A)
+        expected = _redaction_uid_for(
+            source_uid("none"),
+            _redaction_config_hash([{"match": FUJI}], [tuple(OVER)]), FIXED_A)
+        assert _series(session, "none").instances[0].sop_instance_uid == expected
+        assert (_series(session, "bare").instances[0].sop_instance_uid
+                == source_uid("bare"))
+    finally:
+        session.close()

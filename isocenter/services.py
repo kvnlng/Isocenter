@@ -12,7 +12,7 @@ import json
 import traceback
 import gc
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import numpy as np
 
 from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
@@ -663,7 +663,7 @@ def rule_applies_to(rule_serial, serial) -> bool:
     # under `""`, so `redact()` reaches what this says the export zeroes.
     if rule_serial is None:
         return False
-    return rule_serial == "*" or rule_serial == (serial or "")
+    return rule_serial in ("*", serial or "")
 
 
 def _equipment_serial(equipment) -> str:
@@ -702,7 +702,7 @@ def rule_covers(rule, equipment) -> bool:
                            _equipment_serial(equipment))
 
 
-def rule_selector(rule):
+def rule_selector(rule) -> Union[str, dict, None]:
     """What identifies `rule`'s selection in its attestation hash and its
     `REDACTION` row: its `serial_number`, or `{"match": {...}}` (#1108).
 
@@ -710,7 +710,8 @@ def rule_selector(rule):
         rule (dict): The machine rule.
 
     Returns:
-        The serial (str or None), or a `{"match": dict}`.
+        Union[str, dict, None]: The serial (None when the rule has none),
+        or a `{"match": dict}`.
     """
     if "match" in rule:
         return {"match": dict(rule.get("match") or {})}
@@ -724,7 +725,7 @@ def selector_label(selector) -> str:
     not PHI) (#1108).
 
     Args:
-        selector: As `rule_selector` returns it.
+        selector (Union[str, dict, None]): As `rule_selector` returns it.
 
     Returns:
         str: The label.
@@ -1504,7 +1505,10 @@ class RedactionService:
         # `force` stays last in the signature and defaulted: callers pass
         # the first two arguments positionally.
         if targets is None:
-            targets = self.index.get_by_machine(machine_sn)
+            # A match selector is not an index key (#1108).
+            targets = (self._targets_for(machine_sn)
+                       if isinstance(machine_sn, dict)
+                       else self.index.get_by_machine(machine_sn))
         # Before the first instance, so a refusal changes nothing.
         secret = self._redaction_secret(project_secret)
 
