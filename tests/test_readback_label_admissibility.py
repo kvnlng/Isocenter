@@ -51,6 +51,8 @@ from isocenter.session import DicomSession
 
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
 IMPLICIT_VR_LE = "1.2.840.10008.1.2"
+#: What the exporter writes natively, since #1107.
+EXPLICIT_VR_LE = "1.2.840.10008.1.2.1"
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 #: JPEG-LS Lossless: decodable by this library, never written by it, and
 #: deliberately absent from `_ADMISSIBLE_PHOTOMETRICS`.
@@ -571,7 +573,8 @@ def test_the_default_export_still_delivers_the_same_instance(tmp_path):
 def test_the_written_syntax_is_read_from_the_file_not_assumed(tmp_path):
     """`ImplicitVRLittleEndian` is not hard-coded (#507).
 
-    The exporter writes Implicit VR LE natively and JPEG 2000 Lossless
+    The exporter writes Explicit VR LE natively (#1107; Implicit VR LE
+    when this was written) and JPEG 2000 Lossless
     compressed, and the readback reads whichever the file carries -- so
     a `YBR_ICT` file passes compressed and fails native with no change
     to the check. Killing mutation: the syntax taken from
@@ -792,9 +795,11 @@ def test_unsigned_8_bit_ybr_full_converts_whenever_it_decodes(tmp_path):
         assert converted.size == stored.size, (path, converted.shape,
                                                stored.shape)
     # The grid was really built: a helper that silently wrote one shape
-    # nine times would make this a test of one file.
+    # nine times would make this a test of one file. The exported native
+    # files are Explicit VR LE since #1107; the hand-built ones keep the
+    # Implicit VR LE they are written in.
     assert shapes == {
-        (s, f, 0, "YBR_FULL") for s in (IMPLICIT_VR_LE, J2K_LOSSLESS)
+        (s, f, 0, "YBR_FULL") for s in (EXPLICIT_VR_LE, J2K_LOSSLESS)
         for f in (1, 2)} | {(IMPLICIT_VR_LE, 1, 0, "YBR_FULL_422"),
                             (IMPLICIT_VR_LE, 1, 1, "YBR_FULL")}, shapes
 

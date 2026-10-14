@@ -132,9 +132,10 @@ UNUSABLE = [
 ]
 SOURCES = [pytest.param(True, id="implicit-source"),
            pytest.param(False, id="explicit-source")]
-# This library's native export is Implicit VR; the compressed one names
-# its VRs on the wire.
-EXPORTS = [pytest.param(False, None, id="native-export"),
+# Both exports name their VRs on the wire: the native one is Explicit VR
+# Little Endian since #1107 (it was Implicit VR, and the wire VR None). The
+# arms are kept apart because they are two files under two syntaxes.
+EXPORTS = [pytest.param(False, "OW", id="native-export"),
            pytest.param(True, "OW", id="j2k-export")]
 
 

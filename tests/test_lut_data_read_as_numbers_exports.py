@@ -136,8 +136,10 @@ def test_lut_data_read_as_numbers_exports(tmp_path, path, syntax, compress):
         (written,) = _files(tmp_path / out)
         vr, entries = _raw_lut(written, path)
         assert entries == TABLE
-        # Explicit VR on the wire under JPEG 2000: the arm the value chose.
-        assert vr == ("US" if compress else None)
+        # The arm the value chose, on the wire under both syntaxes: the
+        # native export is Explicit VR LE since #1107 (Implicit VR before,
+        # where the wire VR was None).
+        assert vr == "US"
     assert _errors(db) == []
 
 
@@ -176,8 +178,8 @@ def test_lut_data_read_as_bytes_keeps_its_words(tmp_path, compress):
         assert not session.ingest(folder).failures
         session.export(str(tmp_path / "out"), use_compression=compress)
     (written,) = _files(tmp_path / "out")
-    assert _raw_lut(written, ((0x00283010, 0),)) == \
-        ("OW" if compress else None, TABLE)
+    # `OW` under both syntaxes since #1107; the native arm was None.
+    assert _raw_lut(written, ((0x00283010, 0),)) == ("OW", TABLE)
 
 
 @pytest.mark.parametrize("vr, value, arm", [

@@ -53,7 +53,7 @@ import pytest
 from PIL import Image
 from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.encaps import encapsulate
-from pydicom.uid import (ExplicitVRLittleEndian, ImplicitVRLittleEndian,
+from pydicom.uid import (ExplicitVRLittleEndian,
                          JPEG2000, JPEG2000Lossless, JPEGBaseline8Bit,
                          generate_uid)
 
@@ -334,7 +334,8 @@ def test_a_native_422_source_exports_raw_without_a_reader_error(tmp_path):
         session.export(str(out), use_compression=False, show_progress=False)
 
     exported = _exported(out)
-    assert exported.file_meta.TransferSyntaxUID == ImplicitVRLittleEndian
+    # The native syntax: Explicit VR LE since #1107 (Implicit VR LE before).
+    assert exported.file_meta.TransferSyntaxUID == ExplicitVRLittleEndian
     assert exported.PhotometricInterpretation == "RGB"
     px = exported.pixel_array[0, 0]     # raised ValueError before #372
     assert _close(px), tuple(px)
