@@ -72,7 +72,7 @@ def test_the_scaffold_reloads_to_the_sessions_policy(tmp_path, base, change):
         scaffold = tmp_path / "scaffold.yaml"
         session.create_config(str(scaffold))
 
-    reloaded, _, _, _, _ = ConfigLoader.load_unified_config(str(scaffold))
+    reloaded, _, _, _, _, _ = ConfigLoader.load_unified_config(str(scaffold))
     assert reloaded == expected
 
 
@@ -100,7 +100,7 @@ def test_a_floor_scaffold_still_teaches_the_research_defaults(tmp_path):
     data = yaml.safe_load(scaffold.read_text(encoding="utf-8"))
     assert data["privacy_profile"] == "basic@2026c"
     assert data["phi_tags"] == profiles.RESEARCH_DEFAULTS
-    reloaded, _, _, _, _ = ConfigLoader.load_unified_config(str(scaffold))
+    reloaded, _, _, _, _, _ = ConfigLoader.load_unified_config(str(scaffold))
     assert reloaded == profiles.FLOOR_POLICY
 
 

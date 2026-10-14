@@ -276,6 +276,14 @@ class IsocenterConfiguration:
     #: Survives `load_config()`, which never assigns it: it is the
     #: session's choice, not the file's, and a later load is written to.
     auto_save: bool = False
+    #: The `burned_in_text` policy (#1108): `{"action": "report" |
+    #: "redact" | "withhold", "min_confidence": 0..100}`, or None for no
+    #: OCR anywhere. Tier 2. Set by `load_config()` on every load, with
+    #: the default confidence filled in; assigned by hand, it is judged
+    #: by the loader's rule where it is used. Not in the PHI policy
+    #: fingerprint, as zones are not. Not a constructor parameter, so the
+    #: frozen field list and `__init__` are unchanged.
+    burned_in_text: Optional[Dict[str, Any]] = field(default=None, init=False)
     # Whether `phi_tags` came from the floor policy: a bare configuration,
     # or a loaded file with no `privacy_profile` line. `Session.load_config`
     # sets it on every load. The floor and `privacy_profile: none` both
@@ -398,6 +406,14 @@ class IsocenterConfiguration:
         data["date_jitter"] = self.date_jitter
         data["remove_private_tags"] = self.remove_private_tags
         data["machines"] = machines
+        # Only when set: a file with no policy carries no line, so a
+        # library from before the key still loads what this one saves.
+        # Judged first, so a policy assigned by hand that the loader would
+        # refuse is not written into a file that does not load.
+        policy = config_manager._burned_in_text_policy(
+            self.burned_in_text, "session.configuration")
+        if policy is not None:
+            data["burned_in_text"] = policy
         return yaml.dump(data, sort_keys=False, default_flow_style=False,
                          width=float("inf"))
 

@@ -480,7 +480,7 @@ def test_the_scaffold_is_generated_from_the_floor(tmp_path):
     assert data["privacy_profile"] == "basic@2026c"
     assert data["phi_tags"] == RESEARCH_DEFAULTS
 
-    tags, _, _, _, profile = ConfigLoader.load_unified_config(str(config))
+    tags, _, _, _, profile, _ = ConfigLoader.load_unified_config(str(config))
     assert profile == "basic@2026c"
     assert tags == FLOOR_POLICY
 
@@ -610,7 +610,7 @@ def test_the_loader_lowercases_user_keys_before_the_merge(tmp_path):
     config.write_text("privacy_profile: basic\nphi_tags:\n"
                       "  '0008,103E': {action: KEEP, name: Series Description}\n",
                       encoding="utf-8")
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(str(config))
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(str(config))
 
     assert "0008,103E" not in tags
     assert tags["0008,103e"]["action"] == "KEEP"
@@ -637,7 +637,7 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
                       encoding="utf-8")
 
     with caplog.at_level(logging.INFO, logger="isocenter"):
-        tags, _, _, _, profile = ConfigLoader.load_unified_config(str(config))
+        tags, _, _, _, profile, _ = ConfigLoader.load_unified_config(str(config))
 
     # Body Part Examined, which Table E.1-1 does not name: Protocol Name
     # was the tag here until #547 made it a basic rule, and a tag the

@@ -87,7 +87,7 @@ def _newer_minor():
 
 def test_this_librarys_own_minor_loads(tmp_path):
     """`"2.0"` (and so `CONFIG_VERSION`) loads. Kills `>` written `>=`."""
-    tags, _, _, _, profile = _loaded(
+    tags, _, _, _, profile, _ = _loaded(
         tmp_path, f'version: "{CONFIG_VERSION}"\nprivacy_profile: basic\n')
     assert profile == "basic@2026c"
     assert len(tags) > 0
@@ -314,12 +314,15 @@ def test_a_current_configuration_does_not_blame_its_profile(tmp_path):
 #: reads, and is refused for the key rather than for the version.
 SCHEMA_BY_VERSION = {
     "2.0": {
+        # `burned_in_text` joined the unshipped 2.0 row (#1108, owner ruling
+        # Q7 on 2026-10-14, after Q9 on #782: rows freeze at final tags).
         "top": {"version", "privacy_profile", "phi_tags", "date_jitter",
-                "remove_private_tags", "machines"},
+                "remove_private_tags", "machines", "burned_in_text"},
         "rule": {"serial_number", "manufacturer", "model_name",
                  "redaction_zones", "comment"},
         "zone": {"roi", "note"},
         "phi_rule": {"action", "name", "value"},
+        "burned_in_text": {"action", "min_confidence"},
         # Every `privacy_profile` value a built-in resolves, pinned names
         # and bare aliases alike (#714). A later PS3.15 edition is a new
         # value, so it comes with a new minor like a new key does.
@@ -335,6 +338,7 @@ def test_a_key_added_to_the_schema_bumps_the_minor():
     assert set(config_manager._RULE_KEYS) == expected["rule"]
     assert set(config_manager._ZONE_KEYS) == expected["zone"]
     assert set(config_manager._PHI_RULE_KEYS) == expected["phi_rule"]
+    assert set(config_manager._BURNED_IN_TEXT_KEYS) == expected["burned_in_text"]
 
 
 def test_a_new_profile_name_comes_with_a_schema_minor():

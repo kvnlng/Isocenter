@@ -348,7 +348,7 @@ def _frames_for_ocr(instance: Instance, pixel_array: np.ndarray) -> List[np.ndar
     return [pixel_array]
 
 
-def _ocr_instance(instance: Instance) -> _InstanceOcr:
+def _ocr_instance(instance: Instance, prepare=None) -> _InstanceOcr:
     """OCR every frame of one instance, and say what could not be read.
 
     A load failure fails the instance; a frame's OCR failure fails that
@@ -359,6 +359,11 @@ def _ocr_instance(instance: Instance) -> _InstanceOcr:
 
     Args:
         instance (Instance): The instance to read.
+        prepare (Callable, optional): Given the loaded array, returns the
+            array to read. It must not write the array it is given, which
+            may be the instance's own; the `burned_in_text` pass zeroes
+            the configured zones on a copy here, so the read sees what the
+            export will write (#1108).
 
     Returns:
         _InstanceOcr: The regions found, whether any frame was read, and
@@ -396,13 +401,13 @@ def _ocr_instance(instance: Instance) -> _InstanceOcr:
     # load still frees it.
     was_resident = instance.pixel_array is not None
     try:
-        return _load_and_ocr(instance)
+        return _load_and_ocr(instance, prepare)
     finally:
         if not was_resident:
             instance.unload_pixel_data()
 
 
-def _load_and_ocr(instance: Instance) -> _InstanceOcr:
+def _load_and_ocr(instance: Instance, prepare=None) -> _InstanceOcr:
     """`_ocr_instance`'s body: load, prepare, and OCR each frame."""
     try:
         pixel_array = instance.get_pixel_data()
@@ -432,6 +437,8 @@ def _load_and_ocr(instance: Instance) -> _InstanceOcr:
             [], False, f"pytesseract could not be imported ({_OCR_IMPORT_ERROR})")
 
     try:
+        if prepare is not None:
+            pixel_array = prepare(pixel_array)
         frames = _frames_for_ocr(instance, pixel_array)
     except Exception as e:  # pylint: disable=broad-exception-caught
         return _InstanceOcr(
@@ -480,3 +487,78 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
         logger.error(
             f"Failed to analyze pixels for {instance.sop_instance_uid}: {result.failure}")
     return result.regions
+
+
+@dataclass
+class _InstanceBoxes:
+    """What the `burned_in_text` pass learned from one instance: no text.
+
+    `boxes` holds `(frame, y1, y2, x1, x2)` per region at or above the
+    threshold, padded and clipped to the frame, in zone space (rows `y1`
+    up to `y2`, the end excluded), sorted and without repeats. `read` and
+    `failure` mean what they mean on `_InstanceOcr`.
+    """
+    read: bool
+    failure: Optional[str]
+    boxes: List[Tuple[int, int, int, int, int]]
+
+
+def _padding(height: int) -> int:
+    """How far a box is widened on each side: `max(2, round(0.15 * h))`.
+
+    The architect's probe found every word's ink inside its box, with no
+    margin; anti-aliased or lossy-coded edges sit just outside it (#1108).
+    """
+    return max(2, round(0.15 * height))
+
+
+def _text_boxes(instance: Instance, min_confidence: float,
+                zones=()) -> _InstanceBoxes:
+    """The padded boxes OCR finds on each frame of `instance`, and nothing
+    of what they say.
+
+    The configured zones are zeroed on a copy first, so text a zone
+    already covers is not found again. Every region whose confidence is
+    `min_confidence` or more is kept, **whatever its length**: the
+    two-character filter `RedactionVerifier` applies to its own findings
+    would drop initials such as `JT` (#1108, Q3).
+
+    Args:
+        instance (Instance): The instance to read.
+        min_confidence (float): Keep regions at or above this.
+        zones (Iterable[tuple]): `(y1, y2, x1, x2)` zones to zero first.
+
+    Returns:
+        _InstanceBoxes: The boxes, with whether the instance was read and
+            why not, when it was not.
+    """
+    zones = [tuple(z) for z in zones]
+    size = {}
+
+    def prepare(arr):
+        # Imported here: `services` is the one home of zone application,
+        # and this module is imported by things `services` must not need.
+        from .services import RedactionService  # pylint: disable=import-outside-toplevel
+        geometry = resolve_pixel_geometry(arr.shape, instance.attributes)
+        size["rows"], size["cols"] = geometry.rows, geometry.cols
+        if not zones:
+            return arr
+        # A copy, never the instance's own array: this pass reads, and a
+        # zone zeroed in place would reach the graph under threads.
+        arr = np.array(arr, copy=True)
+        RedactionService.apply_redaction_to_array(arr, zones, geometry=geometry)
+        return arr
+
+    ocr = _ocr_instance(instance, prepare)
+    boxes = set()
+    for region in ocr.regions:
+        if region.confidence < min_confidence:
+            continue
+        x, y, w, h = (int(v) for v in region.box)
+        pad = _padding(h)
+        y1, y2 = max(0, y - pad), min(size["rows"], y + h + pad)
+        x1, x2 = max(0, x - pad), min(size["cols"], x + w + pad)
+        if y2 > y1 and x2 > x1:
+            boxes.add((int(region.frame_index), y1, y2, x1, x2))
+    # The regions, and their text, end here: only coordinates leave.
+    return _InstanceBoxes(ocr.read, ocr.failure, sorted(boxes))

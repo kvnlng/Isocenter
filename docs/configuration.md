@@ -13,6 +13,7 @@ Load it with `session.load_config("isocenter_config.yaml")`. The policy in force
 | `privacy_profile` | `"basic@2026c"`, an external profile's path, or `None` for the floor and for `none` |
 | `config_path` | the file `save()` writes: the one `load_config()` read, or `None` |
 | `auto_save` | whether each change is written to `config_path` as it is made; `False` by default |
+| `burned_in_text` | the [`burned_in_text`](#burned-in-text) policy, `{"action": ..., "min_confidence": ...}` with the default filled in, or `None` |
 
 A session that loads no file has the defaults in the table below, and applies the [floor policy](#the-floor-policy).
 
@@ -26,6 +27,7 @@ A session that loads no file has the defaults in the table below, and applies th
 | **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). | `true` |
 | **[phi_tags](#phi-tags)** | Overrides or adds tag rules, keyed by quoted `"gggg,eeee"` hex (e.g., `"0010,0010"` for Patient's Name). | none: the profile's rules only |
 | **[machines](#pixel-redaction-machines)** | Burned-in text redaction zones for specific equipment. | none: no pixels are redacted |
+| **[burned_in_text](#burned-in-text)** | Read every image with OCR and redact, report or withhold the text found on it. | none: nothing is read by OCR |
 
 ---
 
@@ -101,6 +103,7 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` | `{min_days: -365, max_days: -1}` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
 | top level | `machines` | a list of machine rules | no rules |
+| top level | `burned_in_text` | a mapping of `action` (`report`, `redact` or `withhold`; required) and `min_confidence` (a number from 0 to 100); `null` is absent | no OCR |
 | machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits | required |
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
 | machine rule | `redaction_zones` | a list of zones | no zones |
@@ -641,6 +644,31 @@ machines:
   * End must be strictly greater than start on both axes. `load_config()` accepts a zone whose start equals its end, but it selects no pixels, and `redact()` fails every instance it applies to with `RedactionError`.
 
 To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-new-machines-zone-discovery).
+
+### Burned-in Text
+
+Reads every image with OCR and acts on the text it finds, image by image: for text that moves from one image to the next, which no zone describes, and for series with no Device Serial Number, which no machine rule reaches ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)). **Default:** absent, so nothing is read by OCR and nothing below happens. It needs the `ocr` extra and the `tesseract` binary ([OCR prerequisites](ocr.md#prerequisites)).
+
+```yaml
+burned_in_text:
+  action: redact        # report | redact | withhold (required)
+  min_confidence: 80    # 0 to 100; default 80
+```
+
+* **`action`** (required, spelled exactly):
+  * `redact`: `redact()` blanks each box OCR finds, on its own frame, widened on every side by 15% of its height (at least 2 pixels). The image takes a new SOP Instance UID, derived from its source UID, the zones and the boxes, and `DERIVED` and the derivation code; Burned In Annotation `(0028,0301)` is left as the source had it, because OCR alone does not show the image holds no text (see [What OCR misses](ocr.md#what-ocr-misses)). Each redacted image is read once more, and text still found writes a `WARNING` audit row.
+  * `report`: `redact()` changes no pixel and writes one `WARNING` row per image with text; the export writes the image and one more `WARNING` row for it.
+  * `withhold`: `redact()` changes no pixel; the export leaves out every image with text, with one `WARNING` row each.
+* **`min_confidence`**: a box is kept when tesseract's confidence is this or more. There is no length filter: two letters (`JT`) are text.
+* `null` (a bare `burned_in_text:`) is the same as no key. An unknown key, an action spelled any other way, or a `min_confidence` that is not a number from 0 to 100 is refused when the file loads.
+
+**Only `redact()` reads pixels.** It reads every image that holds pixels, serial or not, after zeroing on a copy the zones its machine rules hold, so text a zone covers is not found again, and records on each image the boxes it found (never the text), the tesseract version and the threshold and zones it read under. An image already read under the same threshold and zones is not read again; `redact(force=True)` reads every image again and keeps the boxes recorded before. `redact()` with this key present and OCR unavailable raises `OcrUnavailableError` before anything, the zones included. `redact_by_machine()` does not run it.
+
+**The export reads the record, never the pixels.** Under `redact` and `withhold`, an image that holds pixels and was never read under the policy's threshold and zones (`redact()` not called since `load_config()`, or an image it could not read) is withheld, with a `WARNING` row saying to run `redact()`; under `report` it is written, with that row. Under `redact`, an image with text is withheld until a redaction carrying its boxes has landed. The `EXPORT` row counts the images the policy withheld apart from the ones the pre-export scan withheld. An image with no pixels (an SR, an RT object, a waveform) is never read, gated or counted. Not seen: an `Instance` built by hand with only a `file_path`, never ingested or loaded, reads as holding no pixels.
+
+**The grade.** A `redact` pass that blanked text does not cost the PASS by itself. The rows that do are text still found after redaction, images OCR could not read, and images the export gated as unchecked. Each pass writes one `REDACTION` row with its counts and the tesseract version, and section 5 of the report says what the passes of the session did.
+
+The key is not part of the [policy fingerprint](#what-an-exported-file-says-about-itself): adding it moves no `(0012,0063)` value and no recorded PHI status.
 
 
 ### Generating Configuration Templates

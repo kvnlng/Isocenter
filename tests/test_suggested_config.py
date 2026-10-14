@@ -51,7 +51,7 @@ def test_the_fragment_round_trips_through_the_config_loader(tmp_path, capsys):
     # `privacy_profile: none`, so the result is the fragment's rules alone.
     path.write_text("privacy_profile: none\n" + path.read_text(encoding="utf-8"),
                     encoding="utf-8")
-    loaded, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
+    loaded, _, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
 
     assert set(loaded) == set(COUNTS)
     assert loaded["0010,0010"]["action"] == "REMOVE"

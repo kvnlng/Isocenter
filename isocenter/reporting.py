@@ -58,6 +58,36 @@ class PixelScanSummary:
     skipped: int
 
 
+@dataclass(frozen=True)
+class BurnedInTextSummary:
+    """What one `burned_in_text` pass did, for section 5 (#1108).
+
+    Session-local and never persisted, as `PixelScanSummary` is: a report
+    over a reopened store does not describe an earlier session's pass,
+    whose `REDACTION` row section 2 still counts.
+
+    Attributes:
+        source (str): The call that ran it: `redact()`.
+        action (str): `report`, `redact` or `withhold`.
+        attempted (int): Instances holding pixels.
+        read (int): Of those, read in this pass.
+        unread (int): Could not be read in full.
+        skipped (int): Already checked under this policy, not read again.
+        with_text (int): Instances whose current record holds a box.
+        regions (int): Boxes across them.
+        acted (int): Redacted, reported or to be withheld, by action.
+    """
+    source: str
+    action: str
+    attempted: int
+    read: int
+    unread: int
+    skipped: int
+    with_text: int
+    regions: int
+    acted: int
+
+
 #: Closes section 5, after the grade basis and the metadata, PHI-scan and
 #: pixel-scan lines, which each say what happened. This sentence claims
 #: nothing about the run.
@@ -163,6 +193,12 @@ def _pixel_scan_line(report: "ComplianceReport") -> str:
     # and its failures reach section 4 too; a line that said only
     # "pixel scan" would read as contradicting a discovery row there.
     label = "*   **Pixel Scan (`scan_pixel_content()`):** "
+    if not report.pixel_scans and report.burned_in_text_passes:
+        # After a `burned_in_text` pass the old sentence would be false:
+        # OCR did check burned-in text, by the line below (#1108).
+        return (label + "No `scan_pixel_content()` ran in this session; the "
+                "`burned_in_text` pass below is what read burned-in text by "
+                "OCR.\n")
     if not report.pixel_scans:
         return (label + "No `scan_pixel_content()` ran in this session, so "
                 "this report does not say burned-in text was checked by OCR. "
@@ -196,6 +232,43 @@ def _pixel_scan_line(report: "ComplianceReport") -> str:
     numbered = "; ".join(f"run {i}: {run}" for i, run in enumerate(runs, 1))
     return (label + f"ran {len(runs)} times in this session -- "
             f"{numbered}.{kept}\n")
+
+
+#: What a `burned_in_text` pass did to the instances it found text on, by
+#: action, for section 5.
+_BURNED_IN_TEXT_ACTED = {"redact": "redacted",
+                         "report": "reported, not redacted",
+                         "withhold": "to be withheld at export"}
+
+
+def _burned_in_text_line(report: "ComplianceReport") -> str:
+    """What the `burned_in_text` passes of this session did, one line, or
+    nothing when none ran (#1108).
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Burned-in Text bullet, or "".
+    """
+    if not report.burned_in_text_passes:
+        return ""
+    runs = []
+    for run in report.burned_in_text_passes:
+        runs.append(
+            f"{run.source} under action {run.action} read {run.read} of "
+            f"{run.attempted} instance(s) holding pixels ({run.skipped} "
+            f"already checked, {run.unread} could not be read) and found text "
+            f"on {run.with_text} ({run.regions} region(s)); {run.acted} "
+            f"{_BURNED_IN_TEXT_ACTED[run.action]}")
+    label = "*   **Burned-in Text (`burned_in_text`):** "
+    tail = (" Text OCR did not find is not described here: OCR misses "
+            "faint and short text, and reads text over anatomy in "
+            "fragments.\n")
+    if len(runs) == 1:
+        return label + f"{runs[0]}.{tail}"
+    numbered = "; ".join(f"pass {i}: {run}" for i, run in enumerate(runs, 1))
+    return label + f"ran {len(runs)} times in this session -- {numbered}.{tail}"
 
 
 @dataclass
@@ -254,6 +327,8 @@ class ComplianceReport:
         pixel_scans (List[PixelScanSummary]): Each `scan_pixel_content()`
             call made in this session, in order. Empty means none ran here,
             not that a scan found nothing.
+        burned_in_text_passes (List[BurnedInTextSummary]): Each
+            `burned_in_text` pass this session ran (#1108), in order.
         unacted_findings (Dict[str, int]): Patients, studies and instances
             reading IDENTIFIED when the report was assembled, keyed
             "patients", "studies", "instances": a finding the last PHI
@@ -353,6 +428,7 @@ class ComplianceReport:
     # Section 5. Both are what happened, never what was configured.
     metadata_remediations: int = 0
     pixel_scans: List[PixelScanSummary] = field(default_factory=list)
+    burned_in_text_passes: List["BurnedInTextSummary"] = field(default_factory=list)
 
     # Condition 7 of the grade: patients, studies and instances
     # reading IDENTIFIED, per level. Its reason line in `review_reasons`
@@ -548,6 +624,7 @@ The following actions were recorded in the secure audit trail:
         md_content += _metadata_line(report)
         md_content += _phi_scan_line(report)
         md_content += _pixel_scan_line(report)
+        md_content += _burned_in_text_line(report)
         md_content += (f"*   **Methodology:** {report.deid_method}. "
                        f"{_METHODOLOGY_DISCLAIMER}\n")
         md_content += """

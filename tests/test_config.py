@@ -24,7 +24,7 @@ def test_load_valid_config(tmp_path):
         "version": "2.0",
         "machines": [{"serial_number": "SN1", "redaction_zones": []}]
     })
-    _, rules, _, _, _ = ConfigLoader.load_unified_config(path)
+    _, rules, _, _, _, _ = ConfigLoader.load_unified_config(path)
     assert len(rules) == 1
     assert rules[0]["serial_number"] == "SN1"
 
@@ -73,5 +73,5 @@ def test_tag_keys_are_lowercased(tmp_path):
     """Killer for "return the raw mapping": the validator lowercases keys."""
     path = _write(tmp_path, {"privacy_profile": "none",
                              "phi_tags": {"0010,00A0": "PatientName"}})
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(path)
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(path)
     assert tags == {"0010,00a0": "PatientName"}, tags

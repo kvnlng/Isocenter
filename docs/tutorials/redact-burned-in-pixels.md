@@ -187,7 +187,10 @@ text. `scan_pixel_content()` does, with OCR, over the images of every
 machine your configuration names by serial with zones, and reports text
 no zone covers ([Checking Zones](../ocr.md#checking-zones-verification)).
 A series with no Device Serial Number is reached by neither a zone nor
-that scan, so check such a series yourself.
+that scan, so check such a series yourself, or configure
+[`burned_in_text`](../configuration.md#burned-in-text), under which
+`redact()` reads every image that holds pixels with OCR and redacts,
+reports or withholds the text it finds, serial or not.
 
 A zone is applied whether or not you call `redact()`: `export()` looks up
 every matching rule and zeroes a copy of each frame it writes. Calling

@@ -124,7 +124,7 @@ def _instance():
 
 def _loaded_tags(tmp_path, rule_text):
     path = _write(tmp_path, f"privacy_profile: none\nphi_tags:\n  '{INSTITUTION}': {rule_text}\n")
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(path)
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(path)
     return tags
 
 
@@ -153,7 +153,7 @@ def test_a_null_name_on_a_sequence_rule_reads_as_absent(tmp_path):
     """The same on the sequence arm. Kills the fix made at one arm only."""
     path = _write(tmp_path, f"privacy_profile: none\nphi_tags:\n"
                             f"  '{REFERENCED_STUDY}': {{action: REMOVE, name: null}}\n")
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(path)
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(path)
     instance = _instance()
     item = DicomItem()
     item.set_attr("0008,1150", "1.2.840.10008.3.1.2.3.1")

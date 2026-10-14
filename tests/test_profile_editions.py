@@ -258,7 +258,7 @@ def test_the_floor_is_the_pinned_base_with_the_research_defaults(tmp_path):
     assert FLOOR_POLICY == {**profiles.PRIVACY_PROFILES[PINNED_FLOOR_BASE],
                             **RESEARCH_DEFAULTS}
 
-    tags, _, _, _, base = ConfigLoader.load_unified_config(
+    tags, _, _, _, base, _ = ConfigLoader.load_unified_config(
         _config(tmp_path, "remove_private_tags: true\n"))
     assert tags == FLOOR_POLICY
     assert base is profiles.FLOOR
@@ -297,7 +297,7 @@ def test_the_scaffold_names_and_diffs_one_profile(tmp_path, monkeypatch):
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert data["privacy_profile"] == "basic@2026c"
     assert data["phi_tags"] == RESEARCH_DEFAULTS
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(str(config))
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(str(config))
     assert tags == FLOOR_POLICY
 
     other = {tag: dict(rule) for tag, rule in BASIC_PROFILE.items()}
@@ -396,7 +396,7 @@ def test_a_0_9_8_scaffold_still_means_the_floor(tmp_path):
     defaults. It loads to the floor, and the configuration names the
     pinned table. Kills the bare alias dropped, and a 0.9.x file refused."""
     fixture = str(FIXTURES / "scaffolded_config_0_9_8.yaml")
-    tags, _, _, _, base = ConfigLoader.load_unified_config(fixture)
+    tags, _, _, _, base, _ = ConfigLoader.load_unified_config(fixture)
     assert tags == FLOOR_POLICY
     assert base == "basic@2026c"
     with Session(str(tmp_path / "s.db")) as session:
