@@ -8,7 +8,11 @@ Isocenter uses **Tesseract** optical character recognition to help you write and
 2. **Check** that the zones you configured cover the text actually present: `scan_pixel_content()`.
 3. **Fix** the zones from what the check found: `auto_remediate_config()`.
 
-OCR runs only when you call one of these. None of `redact()`, `export()` or the compliance grade runs OCR: a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` re-runs the tag scan (`audit()`); it does not look for text in the pixels.
+And, for text that moves from image to image, or images whose series carry no Device Serial Number, which no zone reaches:
+
+4. **Redact, report or withhold** the text found on each image: the [`burned_in_text`](configuration.md#burned-in-text) configuration key, applied by `redact()` ([below](#redacting-the-text-ocr-finds-on-each-image)).
+
+OCR runs only when you call one of the first three, or `redact()` with `burned_in_text` configured. `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` re-runs the tag scan (`audit()`); it does not look for text in the pixels.
 
 ## Prerequisites
 
@@ -33,7 +37,9 @@ and the Tesseract binary, which pip cannot install:
 
 Without either, `scan_pixel_content()` and `discover_redaction_zones()` raise
 `OcrUnavailableError`, a `RuntimeError`, naming what is missing, before they scan
-anything. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
+anything. So does `redact()` when the configuration holds `burned_in_text`,
+before it redacts anything, the zones included; `load_config()` still loads
+such a file, so one file serves machines with and without OCR. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
 does not check the binary. If you point `pytesseract.pytesseract.tesseract_cmd`
 at a tesseract that is not on `PATH`, the scan uses that one.
 
@@ -186,6 +192,33 @@ machines:
 ```
 
 Or in code, with `session.configuration.add_rule()` or `update_rule()` (see [Programmatic Configuration](configuration.md#programmatic-configuration)), then `session.configuration.save()`.
+
+## Redacting the text OCR finds on each image
+
+A zone is a rectangle on every image of one machine. Text that moves (a technologist's initials, a name block placed wherever the operator clicked), and images whose series carry no Device Serial Number, need a reading of each image instead. That is the `burned_in_text` key:
+
+```yaml
+burned_in_text:
+  action: redact        # report | redact | withhold
+  min_confidence: 80
+```
+
+With it loaded, `redact()` reads every image that holds pixels with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more, whatever its length, and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
+
+Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.
+
+The boxes depend on the tesseract build and its language data. The same image, threshold and zones under the same tesseract give the same boxes, and so the same UID and the same pixels; another tesseract may find other boxes, and then the image takes another UID, which is right, since its pixels differ. The version is in each image's record and in the pass's `REDACTION` row.
+
+### What OCR misses
+
+Measured on bundled images with text drawn on them, and on 35 MIDI-B validation images ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)):
+
+* **Faint or short text.** Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (`ICG`) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.
+* **Text over anatomy is read in fragments.** On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (`E`, `1970-`), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a `WARNING` row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing `NO`.
+* **Labels you may want are blanked too.** Technique labels (`PA`, `PORTABLE`, `ERECT`) and ultrasound measurement text were read at 95 and above, and `redact` blanks them. Single drawn `L`/`R` side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.
+* **Palette-colour images** are read as their palette indices.
+
+A `PASS` after a `redact` pass says what OCR found was blanked, not that each image is free of text. Use `report` first on a cohort you have not looked at.
 
 ## Checking Zones (Verification)
 
