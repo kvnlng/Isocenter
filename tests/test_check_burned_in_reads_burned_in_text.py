@@ -281,6 +281,30 @@ def test_the_read_is_of_the_pixels_after_the_export_zones(tmp_path, ocr):
     assert (pixels_of(path) != INK).all()
 
 
+@pytest.mark.parametrize("selector", ['serial_number: ""', "match: {manufacturer: ACME}"],
+                         ids=["empty", "match"])
+def test_a_serial_less_series_is_read_after_its_rules_zones(tmp_path, ocr, selector):
+    """The reconciliation of #1110 and #1111: a serial-less image whose ink
+    a `""` or `match:` rule's zone covers. The read sees the zone zeroed,
+    as the export writes it, so nothing is found and the image is written
+    with no row. Kills the read's zones looked up by serial alone."""
+    zone = (f"machines:\n  - {selector}\n    redaction_zones:\n"
+            f"      - [{PADDED[0]}, {PADDED[1]}, {PADDED[2]}, {PADDED[3]}]\n")
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "withhold", zone))
+        session.anonymize()
+        summary = session.export(str(out), use_compression=False,
+                                 show_progress=False, check_burned_in=True)
+        db = session.store_backend.db_path
+    assert ocr.calls == 1
+    assert summary.written == 1
+    assert not [r for r in audit_rows(db) if r[0] == "WARNING"]
+    [path] = exported_files(out)
+    assert (pixels_of(path) != INK).all()
+
+
 def test_the_read_quotes_no_text(tmp_path, ocr, caplog):
     with _ready(tmp_path, "report", (ONE, {"ink": [(0, *INK_BOX)]})) as session:
         session.export(str(tmp_path / "out"), use_compression=False,
