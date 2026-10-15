@@ -171,8 +171,16 @@ def test_an_instance_the_read_cannot_read_is_unchecked(tmp_path, ocr, action, wr
         ocr.fail = True
         summary = session.export(str(out), use_compression=False,
                                  show_progress=False, check_burned_in=True)
+        session.generate_report(str(tmp_path / "r.md"))
         db = session.store_backend.db_path
     assert summary.written == written
+    # Section 5 counts the read that failed as not read (review of #1110:
+    # `unread=0` and `read=len(reads)` survived without this).
+    done = "written" if written else "withheld"
+    assert (f"export(check_burned_in=True) under action {action} read 0 of 1 "
+            f"planned instance(s) holding pixels (1 could not be read) and "
+            f"found text on 0 (0 region(s)); 1 {done}, with a row."
+            ) in _section_5_line((tmp_path / "r.md").read_text())
     verb = "did not withhold" if written else "withheld"
     assert [r for r in audit_rows(db) if r[0] == "WARNING"] == [(
         "WARNING", uid,
@@ -331,3 +339,16 @@ def test_section_5_counts_what_the_read_found_and_never_says_redacted(
             f"planned instance(s) holding pixels (0 could not be read) and "
             f"found text on 1 (1 region(s)); 1 {done}, with a row.") in line
     assert "redacted" not in line
+
+
+def test_numbered_runs_say_which_is_the_export_read(tmp_path, ocr):
+    """A `redact()` pass and an export's read in one session: two numbered
+    entries, and the export's is not called a pass (review of #1110)."""
+    with _ready(tmp_path, "redact", (ONE, {"ink": [(0, *INK_BOX)]})) as session:
+        session.redact(show_progress=False)
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False, check_burned_in=True)
+        session.generate_report(str(tmp_path / "r.md"))
+    line = _section_5_line((tmp_path / "r.md").read_text())
+    assert "ran 2 times in this session -- pass 1: redact() under action redact" in line
+    assert "; export read 2: export(check_burned_in=True) under action redact" in line

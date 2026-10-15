@@ -1,7 +1,7 @@
 """The compliance report: its data, and its Markdown rendering."""
 import datetime
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Protocol
+from typing import ClassVar, Dict, List, Optional, Protocol
 
 #: What section 3.2 says became of an element the PHI scan could not
 #: open. The `SCAN_GAP` row is written at ingest, before
@@ -75,7 +75,7 @@ class BurnedInTextSummary:
 
     Attributes:
         source (str): The call that ran it: `redact()`, or
-            `_EXPORT_READ_SOURCE`.
+            `BurnedInTextSummary.EXPORT_READ`.
         action (str): `report`, `redact` or `withhold`.
         attempted (int): Instances holding pixels (planned, for the
             export's read).
@@ -88,6 +88,13 @@ class BurnedInTextSummary:
         acted (int): Redacted, reported or to be withheld, by action; for
             the export's read, withheld or written with a row.
     """
+    #: The `source` of an `export(check_burned_in=True)` read's summary,
+    #: which the section 5 line reads to say withheld or written, never
+    #: `redacted`: the export redacts nothing, under any action. A class
+    #: attribute, so the writer in `session.py` and the reader here name
+    #: one value without a private import across modules.
+    EXPORT_READ: ClassVar[str] = "export(check_burned_in=True)"
+
     source: str
     action: str
     attempted: int
@@ -251,11 +258,6 @@ _BURNED_IN_TEXT_ACTED = {"redact": "redacted",
                          "report": "reported, not redacted",
                          "withhold": "to be withheld at export"}
 
-#: The `source` of an `export(check_burned_in=True)` read's summary. Its
-#: line says withheld or written, never `redacted`: the export redacts
-#: nothing, under any action.
-_EXPORT_READ_SOURCE = "export(check_burned_in=True)"
-
 
 def _burned_in_text_line(report: "ComplianceReport") -> str:
     """What the `burned_in_text` passes of this session did, one line, or
@@ -271,7 +273,7 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
         return ""
     runs = []
     for run in report.burned_in_text_passes:
-        if run.source == _EXPORT_READ_SOURCE:
+        if run.source == BurnedInTextSummary.EXPORT_READ:
             done = "written" if run.action == "report" else "withheld"
             runs.append(
                 f"{run.source} under action {run.action} read {run.read} of "
@@ -292,7 +294,12 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
             "fragments.\n")
     if len(runs) == 1:
         return label + f"{runs[0]}.{tail}"
-    numbered = "; ".join(f"pass {i}: {run}" for i, run in enumerate(runs, 1))
+    # Each numbered entry says what it is: a `redact()` pass, or the
+    # read an `export(check_burned_in=True)` ran, which is no pass.
+    kinds = ["export read" if run.source == BurnedInTextSummary.EXPORT_READ
+             else "pass" for run in report.burned_in_text_passes]
+    numbered = "; ".join(f"{kind} {i}: {run}"
+                         for i, (kind, run) in enumerate(zip(kinds, runs), 1))
     return label + f"ran {len(runs)} times in this session -- {numbered}.{tail}"
 
 

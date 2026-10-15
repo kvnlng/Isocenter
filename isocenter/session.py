@@ -50,7 +50,7 @@ from .privacy import (PhiInspector, PhiFinding, PhiReport,
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, BurnedInTextSummary,
                         get_renderer, GAP_REMOVED,
-                        GAP_RETAINED, GAP_UNRESOLVED, _EXPORT_READ_SOURCE)
+                        GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore, _network_filesystem_type
@@ -8897,7 +8897,7 @@ class DicomSession:
         # nothing.
         found = [o for o in reads if o.failure is None and o.boxes]
         self._burned_in_text_passes.append(BurnedInTextSummary(
-            source=_EXPORT_READ_SOURCE, action=action,
+            source=BurnedInTextSummary.EXPORT_READ, action=action,
             attempted=len(candidates),
             read=sum(1 for o in reads if o.failure is None and o.read),
             unread=sum(1 for o in reads if o.failure is not None),
