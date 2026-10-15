@@ -138,6 +138,9 @@ def test_an_rc19_policy_without_a_scope_is_refused_naming_the_values(tmp_path):
     ("{action: redact, scope: modalities, modalities: [CR, '']}",
      "'burned_in_text' modalities item '' is not a Modality as DICOM "
      "writes it (upper case: CR, DX, MG)"),
+    ("{action: redact, scope: modalities, modalities: [' ']}",
+     "'burned_in_text' modalities item ' ' is not a Modality as DICOM "
+     "writes it (upper case: CR, DX, MG)"),
     ("{action: redact, scope: modalities, modalities: [CR, 7]}",
      "'burned_in_text' modalities item 7 is not a Modality as DICOM "
      "writes it (upper case: CR, DX, MG)"),
@@ -149,7 +152,7 @@ def test_an_rc19_policy_without_a_scope_is_refused_naming_the_values(tmp_path):
      "writes it (upper case: CR, DX, MG)"),
 ], ids=["null", "case", "modalities-missing", "modalities-under-all",
         "modalities-under-flagged", "bare-string", "empty", "lower-case",
-        "blank-item", "number-item", "too-long", "hyphen"])
+        "blank-item", "space-item", "number-item", "too-long", "hyphen"])
 def test_each_scope_refusal_says_one_sentence(tmp_path, body, reason):
     """Each refusal in full, so a check deleted or reworded is red. A
     `null` scope is refused as a value, never read as absent: only the
@@ -253,10 +256,13 @@ def test_flagged_reads_an_image_whose_record_holds_a_box_and_no_other():
 
 @pytest.mark.parametrize("modality, inside", [
     ("CR", True), ("DX", True), ("CR\\DX", True), (" DX ", True),
+    ("dx", True), ("ct\\dx", True),
     ("CT", False), ("", False), (None, False), ("DXA", False),
 ])
 def test_modalities_reads_each_listed_value_of_a_multi_valued_modality(modality, inside):
-    """A multi-valued Modality is held backslash-joined (#985)."""
+    """A multi-valued Modality is held backslash-joined (#985). A source
+    writing its Modality in lower case is read upper-cased, so it falls in
+    the list rather than silently leaving the scope (review of #1122)."""
     policy = {"action": "withhold", "scope": "modalities",
               "modalities": ["DX"], "min_confidence": 80}
     if modality == "CR":
@@ -345,6 +351,34 @@ def test_plain_export_gates_only_the_images_in_scope(tmp_path, reads):
     assert live[MR].sop_instance_uid not in written
     gated = {r[1] for r in audit_rows(db) if r[0] == "WARNING"}
     assert gated == {live[CR].sop_instance_uid, live[MR].sop_instance_uid}
+
+
+def test_plain_export_reads_the_modality_of_an_image_never_read(tmp_path, reads):
+    """Pins the plain export's Modality reading (review of #1122): no
+    `redact()`, so no record and no attestation; the CR is in scope by its
+    Modality alone and, never checked, is withheld with its row under
+    `withhold`. The test above runs `redact()` first, where the record
+    arm would gate it whatever Modality the gate was handed."""
+    src = tmp_path / "in"
+    src.mkdir()
+    write_image(src / "cr.dcm", sop_uid=CR, ink=[(0, *INK_BOX)], modality="CR")
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(src))
+        session.load_config(str(_write(tmp_path, SCOPED)))
+        session.anonymize()
+        uid = _by_source(session)[CR].sop_instance_uid
+        summary = session.export(str(out), use_compression=False,
+                                 show_progress=False)
+        db = session.store_backend.db_path
+    assert reads == []
+    assert summary.written == 0
+    assert exported_files(out) == []
+    assert [r for r in audit_rows(db) if r[0] == "WARNING"] == [(
+        "WARNING", uid,
+        f"DICOM export to {out} withheld instance {uid}: its pixels were not "
+        f"checked for burned-in text under this configuration's "
+        f"burned_in_text policy; run redact().")]
 
 
 def test_the_export_read_reads_only_the_images_in_scope(tmp_path, reads):

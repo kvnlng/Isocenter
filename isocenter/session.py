@@ -404,10 +404,20 @@ def _scope_named(policy) -> str:
 
 
 def _says_burned_in_yes(value) -> bool:
-    """Whether a Burned In Annotation value says `YES`: a `str` that,
-    stripped and upper-cased, is `YES`, or a list, tuple or `MultiValue`
-    any `str` value of which is. Case-insensitive, as the `COMPLIANCE_CHECK`
-    reader is. Not seen: a value held as `bytes`, which reads as not YES.
+    """Whether a Burned In Annotation value says `YES`: a `str` whose
+    `strip().upper()` equals `YES`, or a list, tuple or `MultiValue` any
+    `str` value of which does. Not seen: a value held as `bytes`, which
+    reads as not YES.
+
+    Not the rule the library's other readers of the flag use, and not
+    meant to be one with them. `scan_burned_in_annotations` (services)
+    and the scaffold's per-machine warning (`_burned_in_warning`, read by
+    `create_config()`'s machine rules) both test a substring,
+    `"YES" in value.upper()`, so `YESNO` is YES to them and not here. The
+    report's `COMPLIANCE_CHECK` row comes from a SQL `LIKE` on the stored
+    JSON (`"0028,0301": "YES"`), case-insensitive for ASCII and blind to
+    padding and to a multi-valued value. Equality is used here because
+    this answer chooses what OCR reads; a `NO` must not read as `YES`.
     """
     values = value if isinstance(value, (list, tuple, MultiValue)) else [value]
     return any(isinstance(v, str) and v.strip().upper() == "YES" for v in values)
@@ -427,7 +437,10 @@ def _in_burned_in_text_scope(instance, modality, policy) -> bool:
       attestation; **or** whose `burned_in_text` record, under any policy,
       holds a box (owner ruling Q-A1 (a)).
     - `modalities`: what `flagged` reads, and every instance of a series
-      one of whose Modality values is in `policy["modalities"]`.
+      one of whose Modality values, stripped and upper-cased, is in
+      `policy["modalities"]`. The list is refused in lower case at load;
+      the source's value is upper-cased here, so a source writing `cr`
+      falls in `[CR]` rather than silently leaving the scope.
 
     **Why the two extra `flagged` arms.** A zone redaction writes `(0028,
     0301) NO` beside the attestation, in the same `redact()` that runs the
@@ -465,7 +478,7 @@ def _in_burned_in_text_scope(instance, modality, policy) -> bool:
     if scope != "modalities" or not isinstance(modality, str):
         return False
     listed = set(policy["modalities"])
-    return any(part.strip() in listed for part in modality.split("\\"))
+    return any(part.strip().upper() in listed for part in modality.split("\\"))
 
 
 def _warn_unread_instances(operation, failures, attempted, where):
@@ -9150,8 +9163,10 @@ class DicomSession:
                             verify_readback=options.verify_readback,
                             deid_markers=deid_markers(patient, study,
                                                       instance, stamps),
-                            # For the missing-pixel guard only: the
-                            # source's, which no rule sets (#869).
+                            # The source's, which no rule sets (#869):
+                            # for the missing-pixel guard, and for the
+                            # `check_burned_in=True` read's scope check
+                            # (#1121).
                             source_modality=series.modality))
 
         return tasks, patient_count, withheld, gated
