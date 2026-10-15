@@ -169,6 +169,10 @@ def test_a_wide_ybr_rct_label_is_not_told_to_compress(tmp_path):
     assert len(label) == 1, outcome.warnings
     assert "Export with use_compression=True" not in label[0], label[0]
     assert "written uncompressed" in label[0], label[0]
+    # The syntax the row names is the fallback's `written_syntax`, the one
+    # the file carries (#1107): the only reader of that write site, so a
+    # fallback naming another syntax is red here and nowhere else.
+    assert "(1.2.840.10008.1.2.1)" in label[0], label[0]
 
 
 def test_a_16_bit_ybr_rct_label_under_readback_is_still_told_to_compress(tmp_path):
