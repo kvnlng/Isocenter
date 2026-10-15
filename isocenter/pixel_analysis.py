@@ -794,8 +794,9 @@ def _regions_of_kinds(regions: Sequence[TextRegion], target):
     narrowed target never redact more than `any` (the invariant).
 
     A detector region (PR C) is a region whose text is its crop's
-    reading; it joins a line by where it sits, as a word does, and a span
-    overlapping its reading redacts it.
+    reading. `_db_text_boxes` hands each one in alone, so it is a line of
+    its own and never joins a neighbour on its row, and a span anywhere in
+    its reading redacts it.
 
     Nothing read leaves this function: it returns regions the caller
     already holds and integer counts.
@@ -1096,20 +1097,27 @@ def _db_text_boxes(instance: Instance, min_confidence: float, prepare,
     if narrowed:
         unread = [region for region, text in found
                   if _alnum_count(text) < BURNED_IN_TEXT_MIN_ALNUM]
-        # Each readable region is a line of its own (PR B's seam: a unique
-        # `_line`), so a span anywhere in its reading boxes it.
-        lines, by_line = [], {}
-        for number, (region, text) in enumerate(found):
+        # Each readable region is classified alone, as a line of its own:
+        # the crop read it as one line (`--psm 7`), the spike measured the
+        # kinds per box, and grouping by position (`_lines_of`) would join
+        # boxes on one row into a reading no crop made. So a span anywhere
+        # in a region's reading boxes it, and never a neighbour's.
+        counts = {kind: 0 for kind in target}
+        kept, left_frames = [], []
+        for region, text in found:
             if _alnum_count(text) < BURNED_IN_TEXT_MIN_ALNUM:
                 continue
             y1, y2, x1, x2 = region.box
             line = TextRegion(text, (x1, y1, x2 - x1, y2 - y1),
-                              region.score * 100.0, region.frame,
-                              _line=(-1, -1, number))
-            lines.append(line)
-            by_line[id(line)] = region
-        kept, counts, left_frames = _regions_of_kinds(lines, target)
-        boxed = unread + [by_line[id(line)] for line in kept]
+                              region.score * 100.0, region.frame)
+            took, took_counts, took_left = _regions_of_kinds([line], target)
+            for kind in target:
+                counts[kind] += took_counts[kind]
+            left_frames.extend(took_left)
+            if took:
+                kept.append(region)
+        counts["left"] = len(left_frames)
+        boxed = unread + kept
         counts["unread"] = len(unread)
     else:
         boxed = [region for region, _ in found]

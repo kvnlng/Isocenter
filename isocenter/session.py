@@ -335,8 +335,7 @@ def _burned_in_text_worker(args):
             #1121; under `db` with `target: any` no tesseract is asked
             anything).
             When the pixels still match `expected`, nothing is read by OCR
-            and the outcome says `unchanged`. `detector` is `tesseract`
-            or `db` (#1121); under `db` no tesseract is asked anything.
+            and the outcome says `unchanged`.
 
     Returns:
         _BurnedInTextRead: The boxes, whether any frame was read, and why

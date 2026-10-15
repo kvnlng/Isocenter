@@ -4,7 +4,8 @@ The shipped PP-OCRv3 DB model, run by OpenCV, on pydicom's bundled
 `RG3_UNCR.dcm` (the #1108 acceptance CR) with initials `JT` drawn tilted
 15 degrees on its unexposed border, the shape of a lead side marker. The
 detector finds them; tesseract at 80 does not (measured when this was
-written: no region at 80). A text-free bundled CT gives no box at the
+written: no region at 80; not asserted, since a tesseract on another
+system does find one). A text-free bundled CT gives no box at the
 default threshold. Through `redact()`, the redacted export carries no
 ink there, in threads and in spawned processes (a spawned worker loads
 the model itself).
@@ -28,7 +29,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pydicom.data import get_testdata_file
 from pydicom.pixels import apply_voi_lut
 
-from isocenter import text_detection
+from isocenter import pixel_analysis, services, text_detection
 from isocenter.session import DicomSession as Session
 
 REQUIRED = os.environ.get("ISOCENTER_REQUIRE_TEXT_DETECTOR") == "1"
@@ -132,3 +133,44 @@ def test_redact_blanks_the_initials_and_the_export_carries_none(tmp_path, monkey
     [path] = glob.glob(str(out / "**" / "*.dcm"), recursive=True)
     written = pydicom.dcmread(path).pixel_array
     assert not written[ink].any()
+
+
+@pytest.mark.parametrize("mode", ["threads", "processes"])
+def test_a_narrowed_target_reads_the_region_with_the_real_tesseract(tmp_path, monkeypatch, mode):
+    """The crop read end to end: the real detector, the real pytesseract,
+    the worker pickled to a spawned process. What a given tesseract makes
+    of `JT` differs between builds, so only what holds either way is
+    asserted: no date or ID is read in it, and the region is counted as
+    unreadable (redacted) or left. Skipped without tesseract: the
+    variable requires the detector, not OCR."""
+    if pixel_analysis._ocr_unavailable_reason() is not None:  # pylint: disable=protected-access
+        pytest.skip("tesseract is not installed")
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    if mode == "threads":
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    else:
+        monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+        monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    src = tmp_path / "in"
+    _marked_cr(str(src))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("privacy_profile: basic\nburned_in_text:\n  action: redact\n"
+                   "  scope: modalities\n  modalities: [CR]\n  detector: db\n"
+                   "  target: [dates, ids]\n", encoding="utf-8")
+    out = tmp_path / "out"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(src))
+        session.load_config(str(cfg))
+        redacted = session.redact(show_progress=False)
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        record = services.burned_in_text_record(inst)
+        session.export(str(out), use_compression=False, show_progress=False)
+    assert record["tesseract"]
+    counts = record["counts"]
+    assert counts["dates"] == counts["ids"] == 0
+    assert counts["unread"] + counts["left"] >= 1
+    # Redacted only when a region could not be read (Q-B10 (a)).
+    assert redacted == (1 if counts["unread"] else 0)
+    assert len(glob.glob(str(out / "**" / "*.dcm"), recursive=True)) == 1

@@ -42,15 +42,17 @@ Without the extra or the binary, the two methods that read burned-in text, `scan
 
 `isocenter.pixel_analysis.HAS_OCR` is `False` when `pytesseract` did not import. It does not check the binary.
 
-### Natural language processing (NLP)
+### Text detection
 
-To find burned-in text with a text-detection model instead of tesseract (`burned_in_text: {detector: db}`), install the `textdetect` extra, which brings OpenCV; the model itself ships inside the package:
+To find burned-in text with a text-detection model instead of tesseract (`burned_in_text: {detector: db}`), install the `textdetect` extra, which brings OpenCV; the model itself ships inside the package. With `target: any` it needs no tesseract; with a narrowed target each detected region is read by tesseract too, so the `ocr` extra and the binary above are needed as well:
 
 ```bash
 pip install "isocenter[textdetect]"
 ```
 
 OpenCV publishes no free-threaded wheel, so this extra cannot be installed on Python 3.14t, and `detector: db` raises `TextDetectorUnavailableError` there ([OCR](ocr.md#detecting-text-with-a-model-detector-db)).
+
+### Natural language processing (NLP)
 
 `discover_redaction_zones()` can use spaCy to classify the text it finds as names. Install the `nlp` extra and the English model:
 

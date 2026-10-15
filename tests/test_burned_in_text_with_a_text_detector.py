@@ -12,8 +12,10 @@ The owner's rulings of 2026-10-15 these tests hold:
   free-threaded build) `detector: db` raises `TextDetectorUnavailableError`,
   an `OcrUnavailableError`, before anything (Q-C1);
 - `min_confidence` under `db` is the DB score times 100, default 80 (Q-C5);
-- under `db` no tesseract is needed, the two-letters rule does not apply,
-  and a lone `L` or `R` the detector finds is blanked (Q-C6);
+- under `db` with `target: any` no tesseract is needed, the two-letters
+  rule does not apply, and a lone `L` or `R` the detector finds is blanked
+  (Q-C6); a narrowed target's crop read is
+  `test_burned_in_text_detector_reads_its_regions.py`;
 - the whole frame, its long side brought to 1280 only when larger, never
   upscaled, each side rounded to 32 (design 1, after the spike);
 - a box whose short side is more than a quarter of the frame's short side
@@ -88,7 +90,7 @@ def _threads(monkeypatch):
 @pytest.fixture
 def detector(monkeypatch):
     """The detector stubbed at its seam, with **no tesseract at all**, so
-    every test here also says `db` needs none."""
+    every test here also says `db` under `target: any` needs none."""
     fake = FakeDetector()
     monkeypatch.setattr(text_detection, "HAS_DETECTOR", True)
     monkeypatch.setattr(text_detection, "cv2",
