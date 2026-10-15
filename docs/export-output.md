@@ -54,7 +54,17 @@ A source that was compressed lossily is re-encoded losslessly from its decoded s
 
 `export(folder, check_burned_in=True)` runs `audit()` first and withholds every instance that still carries an identifier, on itself or on its patient, study or series, under the policy in force. On a session that has not run `anonymize()`, that is every instance carrying a value any rule acts on.
 
-It checks tags, not pixels. Burned-in text is handled by redaction zones, and found by `scan_pixel_content()` ([Burned-in text (OCR)](ocr.md)).
+Without a [`burned_in_text`](configuration.md#burned-in-text) policy, it checks tags, not pixels. Burned-in text is then handled by redaction zones, and found by `scan_pixel_content()` ([Burned-in text (OCR)](ocr.md)).
+
+**With a `burned_in_text` policy, it also reads the pixels** ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)). Every planned instance that holds pixels is read with OCR as it is about to be written, after the configured zones, and that read decides it, whatever the last `redact()` recorded:
+
+| The read | `report` | `redact` | `withhold` |
+| :--- | :--- | :--- | :--- |
+| finds text | written, with a row | withheld, with a row | withheld, with a row |
+| finds nothing | written | written | written |
+| cannot read it in full | written, with a row | withheld, with a row | withheld, with a row |
+
+The rows are `WARNING` rows naming the instance, the number of regions and their frames, never the text. The read changes nothing in the session: under `redact` the export does not redact, and its row names the remedy. `redact()` reads and redacts an instance it has not read under this policy, or whose recorded text no redaction has blanked. An instance whose read after redaction still found text keeps a current record, which a plain `redact()` does not read again: it needs `redact(force=True)`, and until a redaction blanks what the read finds, every `check_burned_in=True` export withholds it. Under `withhold`, `redact()` changes no pixel and is no remedy: the instance is withheld while its text is found. The `EXPORT` row counts the instances it withheld apart from the ones the tag scan withheld. Section 5 of the [report](analytics.md) gains one line per such export, saying how many instances the read read and could not read, how many it found text on, and how many it withheld or wrote with a row; a read that found nothing costs no `PASS`. With the `ocr` extra or the `tesseract` binary unavailable, `export(check_burned_in=True)` raises `OcrUnavailableError` before the tag scan, the save and any row; plain `export()` needs no OCR, and reads each instance's record instead.
 
 Each withheld instance writes one `WARNING` audit row naming the instance and the level that carried the identifier, never the value, so the report grades `REVIEW_REQUIRED`. "Instances Written" counts withheld instances as requested ("1 of 2 requested"). An export that withheld everything returns an empty `ExportSummary` and does not raise. An instance outside `subset` is not withheld; it was never asked for.
 

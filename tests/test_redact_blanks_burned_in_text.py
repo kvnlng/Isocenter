@@ -977,6 +977,19 @@ def test_tesseract_runs_with_one_thread_and_the_variable_is_put_back(tmp_path, o
     assert "OMP_THREAD_LIMIT" not in os.environ
 
 
+def test_the_digest_names_the_dtype_and_the_shape_not_only_the_bytes():
+    """The same bytes handed back as another dtype (an int8 view of a
+    uint8 frame) or another shape are other pixels to OCR, and the
+    sidecar's dedup keeps them as the same frame: the digest's prefix is
+    what tells them apart (review of #1109, optional item)."""
+    arr = np.arange(64 * 96, dtype=np.uint8).reshape(64, 96)
+    signed = arr.view(np.int8)
+    turned = arr.reshape(96, 64)
+    assert arr.tobytes() == signed.tobytes() == turned.tobytes()
+    digests = {pixel_analysis._read_digest(a) for a in (arr, signed, turned)}
+    assert len(digests) == 3
+
+
 def test_eighty_and_eighty_point_zero_are_one_policy():
     """O4: one threshold, one hash, however YAML spelled it."""
     assert (services._burned_in_text_policy_hash(

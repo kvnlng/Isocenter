@@ -122,7 +122,7 @@ session.export("/path/to/export_clean", check_burned_in=True)
 
 Files land at `<folder>/Subject_<PatientID>/Study_…/Series_…/<SOPInstanceUID>.dcm`. The folder names are built from the exported values, so run `anonymize()` first.
 
-`check_burned_in=True` runs `audit()` again and withholds every instance that still carries an identifier in its tags, with a `WARNING` row for each. It checks tags, not pixels. Burned-in text is handled by redaction zones and found by `scan_pixel_content()`.
+`check_burned_in=True` runs `audit()` again and withholds every instance that still carries an identifier in its tags, with a `WARNING` row for each. Without a [`burned_in_text`](configuration.md#burned-in-text) policy it checks tags, not pixels, and burned-in text is handled by redaction zones and found by `scan_pixel_content()`; with one, it also reads the pixels it is about to write with OCR.
 
 ### What the export writes
 
