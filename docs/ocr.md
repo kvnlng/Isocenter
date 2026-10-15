@@ -8,7 +8,11 @@ Isocenter uses **Tesseract** optical character recognition to help you write and
 2. **Check** that the zones you configured cover the text actually present: `scan_pixel_content()`.
 3. **Fix** the zones from what the check found: `auto_remediate_config()`.
 
-OCR runs only when you call one of these. None of `redact()`, `export()` or the compliance grade runs OCR: a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` re-runs the tag scan (`audit()`); it does not look for text in the pixels.
+And, for text that moves from image to image, or images whose series carry no Device Serial Number, which no zone reaches:
+
+4. **Redact, report or withhold** the text found on each image: the [`burned_in_text`](configuration.md#burned-in-text) configuration key, applied by `redact()` ([below](#redacting-the-text-ocr-finds-on-each-image)).
+
+OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
 
 ## Prerequisites
 
@@ -33,7 +37,10 @@ and the Tesseract binary, which pip cannot install:
 
 Without either, `scan_pixel_content()` and `discover_redaction_zones()` raise
 `OcrUnavailableError`, a `RuntimeError`, naming what is missing, before they scan
-anything. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
+anything. So does `redact()` when the configuration holds `burned_in_text`,
+before it redacts anything, the zones included, and
+`export(check_burned_in=True)`, before its tag scan; `load_config()` still loads
+such a file, so one file serves machines with and without OCR. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
 does not check the binary. If you point `pytesseract.pytesseract.tesseract_cmd`
 at a tesseract that is not on `PATH`, the scan uses that one.
 
@@ -58,7 +65,7 @@ Run either from a script whose top level is guarded by
 
 ## Setting Up New Machines (Zone Discovery)
 
-A new machine in your configuration has no zones: `create_config()` writes an empty `redaction_zones` list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. `discover_redaction_zones()` runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot.
+A new machine in your configuration has no zones: `create_config()` writes an empty `redaction_zones` list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. `discover_redaction_zones()` runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot. `serial_number=""` samples every series with no Device Serial Number, a series with no equipment at all included; the comparison is exact, so `"*"` is a literal here, not every series.
 
 ```python
 import isocenter
@@ -187,13 +194,40 @@ machines:
 
 Or in code, with `session.configuration.add_rule()` or `update_rule()` (see [Programmatic Configuration](configuration.md#programmatic-configuration)), then `session.configuration.save()`.
 
+## Redacting the text OCR finds on each image
+
+A zone is a rectangle on every image of one machine. Text that moves (a technologist's initials, a name block placed wherever the operator clicked), and images whose series carry no Device Serial Number, need a reading of each image instead. That is the `burned_in_text` key:
+
+```yaml
+burned_in_text:
+  action: redact        # report | redact | withhold
+  min_confidence: 80
+```
+
+With it loaded, `redact()` reads every image that holds pixels with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more, whatever its length, and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
+
+Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.
+
+The boxes depend on the tesseract build and its language data. The same image, threshold and zones under the same tesseract give the same boxes, and so the same UID and the same pixels; another tesseract may find other boxes, and then the image takes another UID, which is right, since its pixels differ. The version is in each image's record and in the pass's `REDACTION` row.
+
+### What OCR misses
+
+Measured on bundled images with text drawn on them, and on 35 MIDI-B validation images ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)):
+
+* **Faint or short text.** Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (`ICG`) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.
+* **Text over anatomy is read in fragments.** On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (`E`, `1970-`), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a `WARNING` row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing `NO`.
+* **Labels you may want are blanked too.** Technique labels (`PA`, `PORTABLE`, `ERECT`) and ultrasound measurement text were read at 95 and above, and `redact` blanks them. Single drawn `L`/`R` side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.
+* **Palette-colour images** are read as their palette indices.
+
+A `PASS` after a `redact` pass says what OCR found was blanked, not that each image is free of text. Use `report` first on a cohort you have not looked at.
+
 ## Checking Zones (Verification)
 
 `scan_pixel_content()` runs OCR over the images of the machines you configured and reports the text your zones do not cover. It does not report text inside a zone, so labels your zones already black out do not appear.
 
 ### How it works
 
-1. **Match**: each instance is matched to every rule that covers its series' Device Serial Number, exactly or by `"*"`, as `redact()` reads them.
+1. **Match**: each instance is matched to every rule that covers its series, exactly by serial, by `""` (no serial), by `"*"` or by `match:`, as `redact()` reads them.
 2. **Scan**: OCR finds every text region in the image.
 3. **Filter**: each region is compared with the `redaction_zones` of every matching rule:
     * **Covered**: at least 80% of the region lies in one zone. Not reported.
@@ -202,12 +236,12 @@ Or in code, with `session.configuration.add_rule()` or `update_rule()` (see [Pro
 
 Text of two characters or fewer is skipped as noise.
 
-**Zones the scan reads.** The zones `redact()` and `export()` apply: both forms a rule accepts, `[y1, y2, x1, x2]` and `{roi: [y1, y2, x1, x2]}`, from every rule that covers the instance's machine, an exact rule and a `"*"` rule alike. A zone that does not hold exactly four values is not a zone here either.
+**Zones the scan reads.** The zones `redact()` and `export()` apply: both forms a rule accepts, `[y1, y2, x1, x2]` and `{roi: [y1, y2, x1, x2]}`, from every rule that covers the instance's machine, an exact rule, a `""` rule, a `match:` rule and a `"*"` rule alike. A zone that does not hold exactly four values is not a zone here either.
 
-**What is scanned.** Only instances of a machine a rule covers, by exact serial or `"*"`, and only when at least one of the rules covering it has a zone. So:
+**What is scanned.** Only instances of a machine a rule covers, by exact serial, `""`, `"*"` or `match:`, and only when at least one of the rules covering it has a zone. So:
 
 * a session that has loaded no configuration, or whose rules are all fresh from `create_config()` with empty `redaction_zones`, scans nothing: it prints "No matching configured instances found to scan." with how many instances it skipped, counting those of machines no rule names apart from those whose rules have no zone, and returns an empty report;
-* a series with no Device Serial Number is never scanned, not even by a `"*"` rule, as `redact()` never redacts one.
+* a series with no Device Serial Number is scanned under a `""`, `"*"` or `match:` rule with a zone, as `redact()` redacts it. `scan_pixel_content(serial_number="")` is still no filter: it scans every configured series, not only the serial-less ones.
 
 Load a configuration whose rules have zones first:
 
@@ -245,7 +279,7 @@ After changing the zones, scan again: a report with no findings means every text
 
 ## Automated Remediation
 
-`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it, in place (a `{roi: [...]}` zone keeps its `note`). A `NEW_LEAK` on a machine that only a `"*"` rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on `"*"`, which would redact that region on every machine's images. A `PARTIAL_LEAK` whose zone is the `"*"` rule's does the same with the grown zone: `"*"` is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.
+`auto_remediate_config()` turns a scan's findings into zone changes: a `NEW_LEAK` becomes a new zone around its text, and a `PARTIAL_LEAK` grows the zone that covers most of it, in place (a `{roi: [...]}` zone keeps its `note`). A `NEW_LEAK`'s zone goes to the narrowest rule covering the machine: its exact serial rule, else the first `match:` rule, else, for a series with no serial, its `""` rule. A `NEW_LEAK` on a machine that only a `"*"` rule covers becomes a new rule for that machine's serial (`serial_number: ""` for a series with none), with its manufacturer, model and the new zone, rather than a zone on `"*"`, which would redact that region on every machine's images. A suggested `""` rule covers every series with no serial, whatever its device; to confine the zone to one device, write a `match:` rule for its manufacturer and model instead. A `PARTIAL_LEAK` whose zone is the `"*"` rule's does the same with the grown zone: `"*"` is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.
 
 ```python
 import isocenter

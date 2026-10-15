@@ -90,9 +90,11 @@ def test_a_canonical_version_loads(tmp_path, monkeypatch, version):
     ConfigLoader.load_unified_config(_write(tmp_path, f'version: "{version}"\n'))
 
 
-@pytest.mark.parametrize("serial", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
+@pytest.mark.parametrize("serial", ["   ", "\t"], ids=["spaces", "tab"])
 def test_a_blank_serial_is_refused_by_the_loader(tmp_path, serial):
-    """Kills the blank serial loaded (only `""` was refused)."""
+    """Kills the blank serial loaded (only `""` was refused). `""` itself
+    is the serial-less selector since #1108
+    (`test_a_rule_can_name_series_with_no_serial.py`)."""
     path = _write(tmp_path, f'machines:\n  - serial_number: "{serial}"\n')
     with pytest.raises(ValueError, match="serial_number"):
         ConfigLoader.load_unified_config(path)
@@ -124,7 +126,7 @@ def _instance():
 
 def _loaded_tags(tmp_path, rule_text):
     path = _write(tmp_path, f"privacy_profile: none\nphi_tags:\n  '{INSTITUTION}': {rule_text}\n")
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(path)
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(path)
     return tags
 
 
@@ -153,7 +155,7 @@ def test_a_null_name_on_a_sequence_rule_reads_as_absent(tmp_path):
     """The same on the sequence arm. Kills the fix made at one arm only."""
     path = _write(tmp_path, f"privacy_profile: none\nphi_tags:\n"
                             f"  '{REFERENCED_STUDY}': {{action: REMOVE, name: null}}\n")
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(path)
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(path)
     instance = _instance()
     item = DicomItem()
     item.set_attr("0008,1150", "1.2.840.10008.3.1.2.3.1")

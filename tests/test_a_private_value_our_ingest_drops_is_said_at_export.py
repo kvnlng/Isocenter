@@ -18,6 +18,11 @@ Ruled (Q5 A, 2026-10-06): one INFO note per element, under Implicit VR for
 any private value over the limit and under Explicit VR for a binary-VR
 private value over it. No audit row.
 
+Since #1107 no export is Implicit VR: `use_compression=False` writes
+Explicit VR Little Endian, so its arms here take the Explicit VR sentence,
+and the Implicit VR sentence was deleted with the last write that could
+say it.
+
 Each note is asserted whole, and the first test re-ingests the export and
 finds the rows the notes foretold, so the notes are held to the truth.
 """
@@ -31,18 +36,13 @@ from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.filebase import DicomBytesIO
 from pydicom.filewriter import write_dataset
 from pydicom.sequence import Sequence
-from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
+from pydicom.uid import ExplicitVRLittleEndian
 
 from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
 SOP = "1.2.826.0.1.921.1"
 
-IMPLICIT = (
-    "{where}{tag} ({n} bytes) is written as it stands, under Implicit VR, "
-    "which names no VR: this library's ingest reads a private element whose "
-    "VR the file does not state as UN bytes, and drops one over 65534 bytes "
-    "with a DATA_LOSS row.")
 EXPLICIT = (
     "{where}{tag} ({vr}, {n} bytes) is written as it stands: this library's "
     "ingest drops a binary value over 65534 bytes with a DATA_LOSS row.")
@@ -124,34 +124,54 @@ def _reingest_losses(tmp_path, written, name="again"):
     return held, losses
 
 
-def test_an_implicit_export_says_each_value_re_ingest_drops(tmp_path, caplog):
-    """Four values over the limit, four notes, and re-ingest drops those four.
+def test_an_uncompressed_export_says_what_the_compressed_one_says(
+        tmp_path, caplog):
+    """The four values over the limit, written uncompressed.
 
-    Killing mutations: the call deleted (no notes); the notes raised under
-    Explicit VR only.
+    Until #1107 this file was Implicit VR, and the test held four Implicit
+    VR notes and four drops on re-ingest: a file naming no VR left every
+    private element to be read as `UN` bytes. The uncompressed export now
+    states each VR, so it says and loses exactly what the compressed one
+    does: the 40000-value list is `UC` (#901) and kept, the recorded `US`
+    list is #692's `UN` and dropped, the bytes are `UN` and dropped (this
+    note), and the 70000-character text is `UT`, unsaid and **kept** on
+    re-ingest, where the Implicit VR file lost it with a PRIVATE
+    `DATA_LOSS` row.
+
+    Killing mutations: the call deleted (no #921 note); the binary-VR
+    restriction dropped (a note for `UT` and `UC`).
     """
     written, notes, rows, losses = _export(
         tmp_path, caplog, compress=False, mutate=_four)
 
-    assert str(pydicom.dcmread(str(written)).file_meta.TransferSyntaxUID) \
-        == ImplicitVRLittleEndian
+    ds = pydicom.dcmread(str(written))
+    assert str(ds.file_meta.TransferSyntaxUID) == ExplicitVRLittleEndian
+    assert [ds.get_item(0x00091000 + n).VR for n in (1, 2, 3, 4)] == [
+        "UC", "UN", "UT", "UN"]
     assert notes == [
-        IMPLICIT.format(where="", tag="0009,1001", n=228890),
-        IMPLICIT.format(where="", tag="0009,1002", n=80000),
-        IMPLICIT.format(where="", tag="0009,1003", n=70000),
-        IMPLICIT.format(where="", tag="0009,1004", n=70000)]
+        EXPLICIT.format(where="", tag="0009,1004", vr="UN", n=70000),
+        "0009,1001 (LO, 228890 bytes) is written as UC: an Explicit VR LO "
+        "element can hold at most 65535 bytes (PS3.5 6.2.2), and UC holds "
+        "the same values with a 4-byte length; this library reads them "
+        "back as UC.",
+        "0009,1002 (US, 80000 bytes) is written as UN: an Explicit VR US "
+        "element can hold at most 65535 bytes (PS3.5 6.2.2). The bytes are "
+        "the value's own, in Implicit VR Little Endian encoding, and this "
+        "library holds them as UN bytes on re-ingest, which drops a UN "
+        "over 65534 bytes with a DATA_LOSS row."]
     # A note, never a row: the file is written as asked.
     assert not [r for r in rows if "0009," in r[2]], rows
     assert not [r for r in losses if "0009," in r[2]], losses
 
     held, again = _reingest_losses(tmp_path, written)
     dropped = sorted(r[2] for r in again if "0009," in r[2])
-    assert len(dropped) == 4, again
-    for tag, text in zip(("0009,1001", "0009,1002", "0009,1003", "0009,1004"),
-                         dropped):
+    assert len(dropped) == 2, again
+    for tag, text in zip(("0009,1002", "0009,1004"), dropped):
         assert tag in text and "65534-byte retention threshold" in text, text
         assert tag not in held
     assert all(r[3] == "PRIVATE" for r in again if "0009," in r[2]), again
+    assert held["0009,1003"] == "x" * 70000
+    assert [str(v) for v in held["0009,1001"]] == [str(i) for i in range(40000)]
     # The one under the limit comes back.
     assert "0009,1005" in held
 
@@ -280,8 +300,9 @@ def test_the_limit_is_the_ingest_gates_own(tmp_path, caplog, compress, length,
         assert notes == []
         assert not dropped and len(held["0009,1004"]) == 65534
     else:
-        template = EXPLICIT if compress else IMPLICIT
-        assert notes == [template.format(where="", tag="0009,1004", vr="UN",
+        # One sentence under both arms since #1107: the native export
+        # states each VR too.
+        assert notes == [EXPLICIT.format(where="", tag="0009,1004", vr="UN",
                                          n=written_length)]
         assert len(dropped) == 1 and "0009,1004" not in held
 
@@ -336,8 +357,7 @@ def test_a_nested_private_value_is_said_with_its_path(tmp_path, caplog,
     _written, notes, _rows, _losses = _export(
         tmp_path, caplog, compress=compress, extra=nested, mutate=mutate)
 
-    template = EXPLICIT if compress else IMPLICIT
-    assert notes == [template.format(where="(0008,1140) item 0 > ",
+    assert notes == [EXPLICIT.format(where="(0008,1140) item 0 > ",
                                      tag="0009,1004", vr="UN", n=70000)]
 
 

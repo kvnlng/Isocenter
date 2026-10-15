@@ -54,7 +54,7 @@ def _write(tmp_path, name, text):
 
 def _loaded(path):
     """What the one loader gives for a file: `(phi_tags, fingerprint)`."""
-    tags, _machines, _jitter, private, _base = (
+    tags, _machines, _jitter, private, _base, _ocr = (
         ConfigLoader.load_unified_config(str(path)))
     return tags, _scan_policy_for(tags, private, "base").fingerprint
 

@@ -10,6 +10,7 @@ import os
 import re
 import json
 import contextlib
+import dataclasses
 import threading
 import datetime
 import multiprocessing
@@ -37,14 +38,20 @@ from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
-                       _report_redaction_failures, rules_matching, zone_rois)
+                       _report_redaction_failures, rule_selector,
+                       rules_matching, selector_label, series_serial,
+                       zone_rois,
+                       _burned_in_text_policy_hash, _redaction_config_hash,
+                       _redacted_uid_for, burned_in_text_record,
+                       write_burned_in_text_record)
 from . import config_manager
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
                       _is_replacement_id, _is_replacement_name, _owned_rule)
 from .logger import configure_logger, describe_exception, get_logger
-from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
+from .reporting import (ComplianceReport, PixelScanSummary, BurnedInTextSummary,
+                        get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
@@ -272,6 +279,120 @@ def _discover_worker(args):
             [], False, describe_exception(e))
 
 
+class _BurnedInTextRead(NamedTuple):
+    """What `_burned_in_text_worker` hands back for one instance (#1108).
+
+    Coordinates only. There is deliberately no field for the text OCR
+    read: the text never leaves the worker, so no row, log line, report
+    or store downstream can be handed it by mistake.
+
+    Attributes:
+        entity_uid: The instance's SOP Instance UID when it was read.
+        read: Whether at least one frame was read through OCR.
+        failure: Why the instance could not be read in full, or None.
+        boxes: `(frame, y1, y2, x1, x2)` per region at or above the
+            threshold, padded and clipped.
+        pixels: `pixel_analysis._read_digest` of what the read saw, the
+            zones zeroed, or None when nothing was loaded.
+        unchanged: True when the pixels still match the digest the
+            caller handed in, so nothing was read by OCR.
+    """
+    entity_uid: Optional[str]
+    read: bool
+    failure: Optional[str]
+    boxes: Tuple[Tuple[int, int, int, int, int], ...]
+    pixels: Optional[str] = None
+    unchanged: bool = False
+
+
+def _burned_in_text_worker(args):
+    """OCR one instance for the `burned_in_text` pass, and return boxes.
+
+    Any exception is caught and returned as the outcome's `failure`, so
+    one instance cannot end the pass.
+
+    Args:
+        args (tuple): `(instance, zones, min_confidence, tesseract_cmd,
+            expected)`: the `Instance`, the zones its series' rules hold
+            (zeroed on a copy before the read), the threshold, the
+            caller's `tesseract_cmd` (see `_caller_tesseract_cmd`), and
+            the pixel digest of the instance's current record, or None.
+            When the pixels still match `expected`, nothing is read by OCR
+            and the outcome says `unchanged`.
+
+    Returns:
+        _BurnedInTextRead: The boxes, whether any frame was read, and why
+            the instance could not be read in full.
+    """
+    # Module scope, so it pickles; its own name, so the dispatch finder
+    # tells it from the scan's and discovery's workers. It is handed no
+    # project secret and derives no UID: the redacted UID depends on the
+    # boxes and is derived in the parent, under the secret, after this
+    # returns (#1108).
+    instance, zones, min_confidence, tesseract_cmd, expected = args
+    uid = instance.sop_instance_uid
+    _adopt_tesseract_cmd(tesseract_cmd)
+    # pylint: disable=protected-access
+    # The record is current only for the pixels it read: an instance
+    # whose pixels were replaced since is read again, whatever its record
+    # says (owner ruling on the review of #1108). Taken here, in the
+    # worker, so the load is spread over the pool as the read is.
+    if expected is not None:
+        now = pixel_analysis._pixels_digest(instance, zones)
+        if now == expected:
+            return _BurnedInTextRead(uid, False, None, (), now, True)
+    # `_text_boxes` through the module, so a patch on `pixel_analysis`
+    # reaches it; a boundary catch, for the reasons `_verify_worker` gives.
+    try:
+        found = pixel_analysis._text_boxes(instance, min_confidence, zones)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        return _BurnedInTextRead(
+            uid, False, f"the read raised {type(e).__name__}", ())
+    return _BurnedInTextRead(uid, found.read, found.failure,
+                             tuple(tuple(box) for box in found.boxes),
+                             found.pixels)
+
+
+@contextlib.contextmanager
+def _one_tesseract_thread():
+    """Hold `OMP_THREAD_LIMIT=1` for the processes this pass starts.
+
+    Tesseract may run OpenMP threads, and several tesseract processes at
+    once, each with its own threads, is where a box could move between
+    runs. pytesseract hands its subprocess the process environment, so
+    the environment is the one lever: set only when the caller has not
+    set it, and put back as found on every exit (#1108). Process workers
+    started inside the `with` inherit it.
+    """
+    if "OMP_THREAD_LIMIT" in os.environ:
+        yield
+        return
+    os.environ["OMP_THREAD_LIMIT"] = "1"
+    try:
+        yield
+    finally:
+        os.environ.pop("OMP_THREAD_LIMIT", None)
+
+
+def _holds_pixels(instance) -> bool:
+    """Whether the `burned_in_text` policy reads and gates this instance.
+
+    A resident frame or a pixel loader: every image `ingest()` stores has
+    a sidecar loader, and an SR, RT object or waveform has none. Asked
+    without loading anything, so the export can ask it of every instance.
+    Not seen: a hand-built `Instance(file_path=...)` that was never
+    ingested or loaded, which this reads as holding no pixels.
+
+    Args:
+        instance (Instance): The instance.
+
+    Returns:
+        bool: True when the instance holds pixels.
+    """
+    # pylint: disable=protected-access
+    return instance.pixel_array is not None or instance._pixel_loader is not None
+
+
 def _warn_unread_instances(operation, failures, attempted, where):
     """Log one WARNING counting the instances an OCR pass could not read.
 
@@ -363,6 +484,72 @@ def _audit_withheld_instances(store_backend, folder, withheld):
         detail = " ".join(detail.split()).replace("|", "\\|")
         store_backend.log_audit(action_type="WARNING",
                                 entity_uid=uid or "UNKNOWN", details=detail)
+
+
+def _burned_in_text_verdict(instance, policy, policy_hash, zones, folder):
+    """What the `burned_in_text` policy says about exporting one instance
+    that holds pixels (#1108), from its record and the pixels it holds.
+
+    Never runs OCR and never writes anything: export does not mutate the
+    graph, and `redact()` is where text is read. It does load the frame
+    once, to take the digest the record must name, and releases it again
+    (`pixel_analysis._pixels_digest`), holding no lock while it does.
+
+    Args:
+        instance (Instance): The instance.
+        policy (dict): The normalised policy.
+        policy_hash (str): What a current record carries for its series.
+        zones (list): The zones the export applies to its series, which
+            the digest is taken after, as the read took it.
+        folder (str): The export's folder, for the row text.
+
+    Returns:
+        Optional[tuple]: None to write it with no row; otherwise
+            `(withhold, detail)`, the row text for a `WARNING`.
+    """
+    record = burned_in_text_record(instance)
+    uid = instance.sop_instance_uid
+    action = policy["action"]
+    # The record speaks for the pixels its read saw and no others: pixels
+    # set after the read (`set_pixel_data()`, a redaction since, another
+    # tool's write) are pixels no read saw. A digest is checked last and
+    # only for a record that is otherwise current, so a stale record costs
+    # no load.
+    if (record is None or record.get("policy") != policy_hash
+            or record.get("pixels") is None
+            or pixel_analysis._pixels_digest(instance, zones) != record["pixels"]):  # pylint: disable=protected-access
+        # Fail closed for the two actions that promise something about
+        # pixels; `report` promises rows, and this is its row. "did not
+        # withhold", not "wrote": the row is written before the worker
+        # writes the file, and a write can still fail (review O10).
+        hold = action != "report"
+        verb = "withheld" if hold else "did not withhold"
+        return hold, (f"DICOM export to {folder} {verb} instance {uid}: its "
+                      f"pixels were not checked for burned-in text under this "
+                      f"configuration's burned_in_text policy; run redact().")
+    boxes = record.get("boxes") or []
+    if not boxes:
+        return None
+    found = (f"burned_in_text found {len(boxes)} text region(s) on frame(s) "
+             f"{_frames_named(boxes)}")
+    if action == "withhold":
+        return True, (f"DICOM export to {folder} withheld instance {uid}: "
+                      f"{found} (action: withhold).")
+    blanked = (record.get("redaction") is not None
+               and record.get("redaction") == instance.attributes.get(
+                   "_ISOCENTER_REDACTION_HASH"))
+    if blanked:
+        return None
+    if action == "report":
+        # A row per export that writes the text: the pass's row says what
+        # was found, this one says a recipient holds it.
+        return False, (f"DICOM export to {folder} did not withhold instance {uid}: "
+                       f"{found}, not redacted (action: report).")
+    # `redact`, found and not blanked: the redaction carrying these boxes
+    # did not land, another has replaced it since, or the boxes were read
+    # under another action and `redact()` has not run since.
+    return True, (f"DICOM export to {folder} withheld instance {uid}: "
+                  f"{found} that no redaction has blanked; run redact().")
 
 
 RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -617,6 +804,10 @@ class _ExportOptions(NamedTuple):
     allowed_uids: Optional[Set[str]]
     use_compression: bool
     verify_readback: bool = False
+    #: `check_burned_in=True` under a `burned_in_text` policy: the plan
+    #: leaves the record gate out, because a fresh read of every planned
+    #: instance decides it instead (#1108, Q6).
+    read_burned_in_text: bool = False
 
 
 #: What `_why_excluded` answers for an instance the subset did not select.
@@ -1152,6 +1343,17 @@ _NO_REDACTION_RULES = (
     "No redaction rules: the configuration names no machines. Load one "
     "with load_config(), or add machines to its rules.")
 _NO_IMAGE_MATCHED = "No image matched any loaded rule's serial_number."
+
+#: The `burned_in_text` pass (#1108): its `REDACTION` row's entity, and
+#: the pass key its tasks' applications are counted under, apart from
+#: the rule indices the zone passes are keyed by.
+_BURNED_IN_TEXT_PASS = "burned_in_text"
+
+
+def _frames_named(boxes) -> str:
+    """The frames a list of `(frame, y1, y2, x1, x2)` boxes sit on, as a
+    row names them: sorted, without repeats, comma-separated."""
+    return ", ".join(str(f) for f in sorted({int(box[0]) for box in boxes}))
 
 
 def _redaction_worker_count() -> int:
@@ -1763,6 +1965,9 @@ class DicomSession:
         # session": a scan an earlier session ran over this store is not
         # known here, and the report says so rather than guessing.
         self._pixel_scans: List[PixelScanSummary] = []
+        # Each `burned_in_text` pass this session ran, for section 5
+        # (#1108): session-local like the scans above, never persisted.
+        self._burned_in_text_passes: List[BurnedInTextSummary] = []
 
         if os.path.exists("isocenter.key"):
             # Only this call is wrapped: wider, a `ValueError` from
@@ -2867,12 +3072,15 @@ class DicomSession:
         # returns, so the prints below cannot fail after the assignments
         # either and leave half of a failed file in the session.
         (tags, rules, jitter, remove_private,
-         base) = ConfigLoader.load_unified_config(config_file)
+         base, burned_in_text) = ConfigLoader.load_unified_config(config_file)
 
         self.configuration.phi_tags = tags
         self.configuration.rules = rules
         self.configuration.date_jitter = jitter
         self.configuration.remove_private_tags = remove_private
+        # On every load, None included: a policy left from an earlier file
+        # would OCR a store whose file never asked for it (#1108).
+        self.configuration.burned_in_text = burned_in_text
         self.configuration.config_path = config_file
         # Both, on every load: the floor and `none` both leave
         # `privacy_profile` at None, and a flag set only when true would
@@ -2918,12 +3126,17 @@ class DicomSession:
         match_count = 0
 
         for rule in self.configuration.rules:
-            serial = rule.get("serial_number", "UNKNOWN")
+            serial = selector_label(rule_selector(rule)) if (
+                "serial_number" in rule or "match" in rule) else "UNKNOWN"
             model = rule.get("model_name", "Unknown Model")
             zones = rule.get("redaction_zones", [])
 
-            # check matches in store
-            targets = service.index.get_by_machine(serial)
+            # The instances `redact()` would reach for this rule, by the
+            # one predicate (`_targets_for`): `"*"` every series and `""`
+            # the serial-less ones (#1108). A lookup of the literal serial
+            # previewed a `"*"` rule as matching nothing.
+            targets = (service._targets_for(rule)  # pylint: disable=protected-access
+                       if "serial_number" in rule or "match" in rule else [])
 
             if targets:
                 count = len(targets)
@@ -2963,13 +3176,17 @@ class DicomSession:
                 loader would refuse in the file (#731), and `save()`'s
                 refusal when `phi_tags` lacks a rule its base supplies
                 (#741), or when `output_path` is a file declaring a newer
-                `version` minor than this library's (#784). Nothing is
+                `version` minor than this library's (#784); and when
+                `configuration.burned_in_text` is a policy the loader would
+                refuse in a file (#1108). Nothing is
                 written.
             OSError: The write's own error, after it is logged (#741).
         """
         # First: the scaffold carries the range, and a range the loader
         # refuses would make a file that does not load (#731).
         config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
+        burned_in_text = config_manager._burned_in_text_policy(
+            self.configuration.burned_in_text, "session.configuration")
         if not (output_path.endswith(".yaml") or output_path.endswith(".yml")):
             output_path += ".yaml"
             print(f"Note: Appending .yaml extension -> {output_path}")
@@ -3005,6 +3222,10 @@ class DicomSession:
             "remove_private_tags": self.configuration.remove_private_tags,
             "machines": machine_rules + self.configuration.rules
         }
+        # Carried when set (#1108), judged by the loader's rule first so
+        # the scaffold loads; no line when there is no policy.
+        if burned_in_text is not None:
+            data["burned_in_text"] = burned_in_text
 
         if not machine_rules and not self.configuration.rules:
             print("No machines detected to scaffold.")
@@ -3177,7 +3398,7 @@ class DicomSession:
             # The same loader, and the same exceptions, as `load_config`.
             # No fallback to reading the file as a plain tag list: a file
             # `load_config` refuses must be refused here too.
-            tags_to_use, _, _, _, base = ConfigLoader.load_unified_config(config_path)
+            tags_to_use, _, _, _, base, _ = ConfigLoader.load_unified_config(config_path)
             # The policy this scan runs with: the file's rules, and
             # the session's `remove_private_tags` -- the flag the inspector
             # below is given, not the file's -- under the file's base,
@@ -3480,11 +3701,11 @@ class DicomSession:
                         continue
 
                     # The rules `redact()` and the export's zones read for
-                    # this series (`rules_matching`: exact or "*", and none
-                    # for a series with no serial), never a reading of its
-                    # own. Taking the first exact match missed "*" and
-                    # every rule after the first (#808).
-                    matched = rules_matching(current_rules, sn)
+                    # this series (`rules_matching`: exact, `""` for a
+                    # series with no serial, or "*", #1108), never a
+                    # reading of its own. Taking the first exact match
+                    # missed "*" and every rule after the first (#808).
+                    matched = rules_matching(current_rules, equip)
                     if not matched:
                         unconfigured += len(se.instances)
                         continue
@@ -3605,13 +3826,36 @@ class DicomSession:
 
         return count
 
+    def _discovery_targets(self, serial_number: str) -> list:
+        """Every instance of the series whose serial is `serial_number`.
+
+        Read through `series_serial`, so `""` names every series with no
+        Device Serial Number, an equipment-less one (no manufacturer, no
+        model, no serial) included, as a
+        `serial_number: ""` rule does (#1108). An exact compare: `"*"` is
+        a literal here, as it always was for discovery.
+
+        Args:
+            serial_number (str): The serial, or `""`.
+
+        Returns:
+            list: The instances, in store order.
+        """
+        return [inst
+                for p in self.store.patients
+                for st in p.studies
+                for se in st.series
+                if series_serial(se) == serial_number
+                for inst in se.instances]
+
     def discover_redaction_zones(self, serial_number: str, sample_size: int = 50, min_confidence: float = 80.0):
         """
         OCR a random sample of one machine's instances and collect where
         burned-in text appears.
 
         Args:
-            serial_number (str): The Device Serial Number of the machine.
+            serial_number (str): The Device Serial Number of the machine;
+                `""` for every series with no Device Serial Number.
             sample_size (int): The most instances to read; a machine with
                 more is sampled at random.
             min_confidence (float): The lowest OCR confidence, 0 to 100, a
@@ -3649,12 +3893,7 @@ class DicomSession:
         get_logger().info(f"Discovering zones for {serial_number}...")
 
         # 1. Gather instances
-        target_instances = []
-        for p in self.store.patients:
-            for st in p.studies:
-                for se in st.series:
-                    if se.equipment and se.equipment.device_serial_number == serial_number:
-                        target_instances.extend(se.instances)
+        target_instances = self._discovery_targets(serial_number)
 
         if not target_instances:
             print(f"No instances found for serial {serial_number}")
@@ -4290,6 +4529,7 @@ class DicomSession:
                 audit_summary.get(action, 0)
                 for action in REMEDIATION_ACTION_TYPES),
             pixel_scans=list(self._pixel_scans),
+            burned_in_text_passes=list(self._burned_in_text_passes),
             unacted_findings=unacted,
             unscanned_instances=unscanned_instances,
             never_scanned=never_scanned,
@@ -6156,6 +6396,28 @@ class DicomSession:
         Instance UID, derived from its source SOP Instance UID and the zones
         of every rule that matches it, whatever order the work runs in.
 
+        **The `burned_in_text` policy** (`configuration.burned_in_text`,
+        #1108). When the configuration holds one, this call also reads
+        every instance that holds pixels with OCR, serial or not, after
+        the zones its rules hold, and records the boxes of the text it
+        finds at `min_confidence` or above (never the text). The policy's
+        `action` decides the rest: `redact` blanks each box, padded, on
+        its own frame, in the same task as the zones, and the instance's
+        UID is derived from the zones and the boxes; `report` writes one
+        `WARNING` audit row per instance with text and changes no pixel;
+        `withhold` changes nothing here, and `export()` withholds each
+        instance with text. The record names the pixels the read saw by a
+        digest; an instance already read under this threshold and these
+        zones, whose pixels still match it, is not read again by OCR
+        unless `force=True`. A redacted instance is read once more, which
+        moves the digest to its redacted pixels; a failure of that read
+        writes a `WARNING` row and leaves it unchecked; text still found writes a
+        `WARNING` row. An instance only OCR redacted carries `DERIVED`
+        and the derivation code but keeps Burned In Annotation as the
+        source had it. Every pass writes one `REDACTION` row with its
+        counts and the tesseract version. `redact_by_machine()` does not
+        run it.
+
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this
         call waits (bounded, see `Raises`) and then proceeds. A worker whose
@@ -6172,17 +6434,21 @@ class DicomSession:
                 exported filename it already has, and other zones give
                 another. `file_path` becomes None either way. To repair a
                 store redacted by 0.9.0 or earlier, see Upgrading from
-                0.9.x.
+                0.9.x. Under a `burned_in_text` policy, also read every
+                instance again, and keep every box its record held beside
+                the ones found now.
 
         Returns:
-            int: How many instances had at least one configured zone
-                applied to their pixels. An instance a rule *matched* but
-                whose every zone fell outside the image is **not** counted;
-                a zone with no area fails its instance and the pass raises
-                `RedactionError`, so it is never counted. Zero means nothing
-                was redacted: no rules loaded, no image matched one, every
-                match was already redacted under this configuration, or no
-                zone landed.
+            int: How many instances had at least one configured zone, or
+                one `burned_in_text` box, applied to their pixels. An
+                instance a rule *matched* but whose every zone fell outside
+                the image is **not** counted; a zone with no area fails its
+                instance and the pass raises `RedactionError`, so it is
+                never counted. Zero means nothing was redacted: no rules
+                loaded and no `burned_in_text` policy, no image matched
+                one, every match was already redacted under this
+                configuration, no zone landed, or the policy's action is
+                `report` or `withhold`.
 
         Raises:
             RedactionError: If any instance's zone could not be applied.
@@ -6203,7 +6469,14 @@ class DicomSession:
                 `save()` that failed raises when the entry drain runs it
                 again and it still fails; one that has passed is saved
                 there and nothing is raised (#941). A call with no rules
-                loaded returns 0 before that drain.
+                loaded and no `burned_in_text` policy returns 0 before
+                that drain.
+            ValueError: A `burned_in_text` assigned in code that
+                `load_config()` would refuse in a file, before the drain.
+            OcrUnavailableError: A `RuntimeError`, when a
+                `burned_in_text` policy is configured and the `ocr` extra
+                or the tesseract binary is unavailable: after the drain,
+                before any task, UID, pixel or row, zones included.
             RuntimeError: If the pass cannot start within 180 s because a
                 `compact()` is still saving or rewriting the sidecar.
                 Raised before any worker is dispatched and before any UID
@@ -6220,7 +6493,14 @@ class DicomSession:
                 call asks for threads, which outranks the variable, and a
                 `WARNING` names the variable instead.
         """
-        if not self.configuration.rules:
+        # The `burned_in_text` policy (#1108), judged by the loader's rule
+        # before anything else: one assigned in code that a file could not
+        # hold is refused here, before the drain, as `audit()` refuses a
+        # `date_jitter` (#731). None when there is no policy, and when
+        # `redact_by_machine()` has swapped it out.
+        policy = config_manager._burned_in_text_policy(
+            self.configuration.burned_in_text, "session.configuration")
+        if not self.configuration.rules and policy is None:
             # True whether or not a file was loaded (#807): a scaffold over
             # a cohort with no Device Serial Number loads with no machines.
             # Not branched on `configuration.config_path`, which only
@@ -6239,6 +6519,13 @@ class DicomSession:
         # can simply refuse to open the window at all.
         if hasattr(self, 'persistence_manager'):
             self.persistence_manager.flush()
+
+        # After the drain, which stays true of every call, and before any
+        # task, UID or row: a policy that asks for OCR on a machine that
+        # cannot run it is refused whole, zones included, so one pass is
+        # all or nothing (#1108).
+        if policy is not None:
+            pixel_analysis._require_ocr("redact()")  # pylint: disable=protected-access
 
         # Resolved here, once, and carried to the pool. The console line
         # a few lines into `_apply_redaction_rules` names the strategy
@@ -6304,9 +6591,11 @@ class DicomSession:
             # `RedactionService` callers are not covered -- the pass is
             # a `Session` concept -- and `redact_by_machine` goes
             # through here, so it does not open a second one.
-            with self.store_backend._hold_pass_lock():
+            with self.store_backend._hold_pass_lock(), (
+                    _one_tesseract_thread() if policy is not None
+                    else contextlib.nullcontext()):
                 return self._apply_redaction_rules(service, strategy, force,
-                                                   project_secret)
+                                                   project_secret, policy)
         except Exception:
             get_logger().exception(
                 "Redaction failed. Images already processed are still redacted "
@@ -6337,7 +6626,7 @@ class DicomSession:
         zoned = {}
         for rule in self.configuration.rules:
             has_zone = bool(zone_rois(rule.get("redaction_zones")))
-            for inst in service._targets_for(rule.get("serial_number")):
+            for inst in service._targets_for(rule):
                 zoned[id(inst)] = zoned.get(id(inst), False) or has_zone
         if not zoned:
             return _NO_IMAGE_MATCHED
@@ -6347,7 +6636,7 @@ class DicomSession:
                 f"nothing to redact.")
 
     def _apply_redaction_rules(self, service, strategy, force=False,
-                               project_secret=None):
+                               project_secret=None, policy=None):
         """Run every loaded rule and apply the results to the store.
 
         The caller logs and re-raises a failure.
@@ -6358,12 +6647,16 @@ class DicomSession:
                 the pass-lock: worker count, progress bar, and threads or
                 processes.
             force (bool): Redact instances already attested under this
-                configuration; read only by the attestation skip.
+                configuration; read only by the attestation skip. Under a
+                `burned_in_text` policy, also read every instance again.
             project_secret (bytes, optional): The store's secret, used in this
                 process to derive each redacted instance's new UID.
+            policy (dict, optional): The normalised `burned_in_text`
+                policy, or None for no OCR (#1108).
 
         Returns:
-            int: How many instances had a zone applied to their pixels.
+            int: How many instances had a zone or a box applied to their
+                pixels.
 
         Raises:
             RedactionError: When any instance could not be redacted, at the end
@@ -6408,14 +6701,36 @@ class DicomSession:
         tasks = service._one_task_per_instance(  # pylint: disable=protected-access
             tasks, project_secret=project_secret)
 
+        # The `burned_in_text` pass (#1108). Phase 1 here: workers OCR and
+        # hand back boxes, and the parent records them. Under `redact`,
+        # each instance with boxes then joins the zone tasks as one task
+        # per instance, its hash and UID taken over the zones and the
+        # boxes here in the parent, where the secret is; phase 2 is the
+        # dispatch below, run by the redaction workers unchanged in shape.
+        burned = None
+        if policy is not None:
+            burned = self._read_burned_in_text(policy, strategy, force)
+            if policy["action"] == "redact":
+                tasks = self._fold_burned_in_text(
+                    service, tasks, burned, force, project_secret)
+                passes[_BURNED_IN_TEXT_PASS] = {'applied': 0}
+
         if not tasks:
+            if burned is not None:
+                # A pass that read and found nothing to blank still ran,
+                # and still writes its row: without it a clean `report`
+                # pass would leave no evidence, and condition 6 would hold.
+                self._finish_burned_in_text(service, burned, policy, 0, [])
+                return 0
             message = self._why_no_redaction_task(service)
             get_logger().warning(message)
             print(message)
             return 0
 
         print(f"Queued {len(tasks)} redaction tasks across "
-              f"{len(self.configuration.rules)} rules.")
+              f"{len(self.configuration.rules)} rules"
+              + (" and the burned_in_text policy." if burned is not None
+                 else "."))
         # The parenthetical is read off the resolved strategy -- the very
         # object the pool below is built from -- and not derived a second
         # time here. It says *what*, never *why*: a
@@ -6482,6 +6797,12 @@ class DicomSession:
         applied, failures = self._apply_redaction_outcomes(
             mutations, instances, self.store_backend, passes)
 
+        # Before the carry below, which re-records each captured status
+        # over what changed: the record's `redaction` is one of
+        # redaction's own writes, and the carry must see it.
+        landed = (self._record_burned_in_text_redactions(burned, force)
+                  if burned is not None else [])
+
         # Every instance, landed or not, and before the raise below: a
         # skipped instance was not written to and records the status it
         # already carries, which `record_phi_status` ignores; a failed one
@@ -6497,10 +6818,19 @@ class DicomSession:
         # for this run. Before `scan_burned_in_annotations` too,
         # so a crash in the risk scan cannot cost the run its redaction
         # accounting.
-        for acct in passes.values():
+        for key, acct in passes.items():
+            # The `burned_in_text` pass writes its own row, with its own
+            # counts, in `_finish_burned_in_text`.
+            if key == _BURNED_IN_TEXT_PASS:
+                continue
             service.record_redaction_pass(
                 acct['machine_sn'], acct['zones'],
                 acct['targeted'], acct['applied'])
+        if burned is not None:
+            self._finish_burned_in_text(
+                service, burned, policy,
+                passes.get(_BURNED_IN_TEXT_PASS, {}).get('applied', 0),
+                landed)
         # Recorded beside the emitter, not at the top of `redact()`: the
         # grade demands REDACTION evidence only from a session that
         # would have emitted it, and a call with no rules loaded or no
@@ -6529,6 +6859,304 @@ class DicomSession:
         if failures:
             raise RedactionError(failures, len(tasks))
         return applied
+
+    def _burned_in_text_entries(self, policy):
+        """Every instance the `burned_in_text` policy covers, with the
+        zones its series' rules hold and the policy hash its record must
+        carry to be current.
+
+        Args:
+            policy (dict): The normalised policy.
+
+        Returns:
+            list: One dict per instance holding pixels: `instance`,
+                `zones`, `policy` (the hash), `record` (its current
+                record, or None).
+        """
+        entries = []
+        for patient in self.store.patients:
+            for study in patient.studies:
+                for series in study.series:
+                    # The zones `redact()` and the export apply, read by the
+                    # one helper both read, so the read sees what will be
+                    # written.
+                    zones = self._redaction_zones_for(series)
+                    policy_hash = _burned_in_text_policy_hash(policy, zones)
+                    for inst in series.instances:
+                        if not _holds_pixels(inst):
+                            continue
+                        record = burned_in_text_record(inst)
+                        if record is not None and record.get("policy") != policy_hash:
+                            record = None
+                        entries.append({"instance": inst, "zones": zones,
+                                        "policy": policy_hash,
+                                        "record": record})
+        return entries
+
+    def _read_burned_in_text(self, policy, strategy, force):
+        """Phase 1 of the `burned_in_text` pass: read, then record (#1108).
+
+        Reads every instance holding pixels whose record is not current
+        under this policy (every one under `force`), in workers that hand
+        back boxes and never text, and writes each read instance's record
+        in this process, carrying its PHI status across the write as a
+        redaction carries it. An instance a frame of which could not be
+        read gets no record, so the export gate treats it as never
+        checked; a forced re-read that fails keeps the record it had.
+
+        Args:
+            policy (dict): The normalised policy.
+            strategy (_Strategy): `redact()`'s resolved strategy.
+            force (bool): Read every instance again, and keep every box
+                its record held beside the ones found now.
+
+        Returns:
+            dict: The pass's state: `entries`, `failures`, `read`, `version`.
+        """
+        entries = self._burned_in_text_entries(policy)
+        # Every instance goes to a worker: one whose record is current
+        # under this policy carries the record's pixel digest, and is read
+        # by OCR only when its pixels no longer match it.
+        to_read = entries
+
+        def expected(entry):
+            if force or entry["record"] is None:
+                return None
+            # A record with no digest names no pixels: "" matches none.
+            return entry["record"].get("pixels") or ""
+
+        # Read in the parent, after `_require_ocr` probed the binary, so
+        # the workers run the binary it checked.
+        tesseract_cmd = _caller_tesseract_cmd()
+        version = str(pixel_analysis.pytesseract.get_tesseract_version())
+        reads = []
+        if to_read:
+            print(f"Checking {len(to_read)} image(s) for burned-in text (OCR)...")
+            reads = run_parallel(
+                _burned_in_text_worker,
+                [(e["instance"], e["zones"], policy["min_confidence"],
+                  tesseract_cmd, expected(e)) for e in to_read],
+                strategy=dataclasses.replace(
+                    strategy, desc="Reading burned-in text", total=len(to_read)),
+                ordered=True)
+        failures = []
+        read = 0
+        skipped = 0
+        for entry, outcome in zip(to_read, reads):
+            if outcome.unchanged:
+                skipped += 1
+                continue
+            if outcome.failure is not None:
+                # Fail closed: a frame not read is a frame not checked.
+                failures.append((outcome.entity_uid, outcome.failure))
+                if not force:
+                    # A record whose pixels were replaced, and could not
+                    # be read again, speaks for pixels the instance no
+                    # longer holds: its boxes must not be blanked on the
+                    # new ones. Under `force` the pixels are the ones it
+                    # read, and it is kept.
+                    entry["record"] = None
+                continue
+            if not outcome.read:
+                if not force:
+                    entry["record"] = None
+                continue
+            read += 1
+            boxes = {tuple(box) for box in outcome.boxes}
+            if force and entry["record"] is not None:
+                # The union, so the hash and the UID describe every region
+                # that is zero: the frame read now is already blanked
+                # where the record's boxes are.
+                boxes |= {tuple(box) for box in entry["record"]["boxes"]}
+            record = {"policy": entry["policy"],
+                      "boxes": sorted(list(box) for box in boxes),
+                      "tesseract": version,
+                      "pixels": outcome.pixels}
+            inst = entry["instance"]
+            captured = capture_phi_status_for_redaction(inst)
+            write_burned_in_text_record(inst, record)
+            carry_phi_status_across_redaction(inst, captured)
+            entry["record"] = record
+            entry["found_now"] = True
+        return {"entries": entries, "failures": failures, "read": read,
+                "attempted": len(entries), "skipped": skipped,
+                "version": version, "strategy": strategy,
+                "tesseract_cmd": tesseract_cmd}
+
+    def _fold_burned_in_text(self, service, tasks, burned, force, project_secret):
+        """Join each instance's boxes to its zone task, or give it one.
+
+        Under `action: redact`. The hash and the redacted UID are taken
+        here, in this process, over the zones and the boxes: the boxes
+        are what the UID depends on, and the secret it is derived under
+        never reaches a worker (#1108).
+
+        Args:
+            service (RedactionService): The pass's service.
+            tasks (list): One zone task per instance.
+            burned (dict): `_read_burned_in_text`'s state.
+            force (bool): Carried into each new task.
+            project_secret (bytes): The store's secret.
+
+        Returns:
+            list: The tasks, one per instance.
+        """
+        by_instance = {id(task["instance"]): task for task in tasks}
+        secret = None
+        for entry in burned["entries"]:
+            record = entry["record"]
+            if record is None or not record["boxes"]:
+                continue
+            if secret is None:
+                secret = service._redaction_secret(project_secret)  # pylint: disable=protected-access
+            inst = entry["instance"]
+            boxes = [tuple(box) for box in record["boxes"]]
+            task = by_instance.get(id(inst))
+            if task is None:
+                config_hash = _redaction_config_hash(
+                    [], [], ocr=(record["policy"], boxes))
+                task = {"instance": inst,
+                        "original_sop_uid": inst.sop_instance_uid,
+                        "rois": [], "serials": [], "force": force,
+                        "pass_keys": [_BURNED_IN_TEXT_PASS],
+                        "ocr_only": True}
+                tasks.append(task)
+            else:
+                config_hash = _redaction_config_hash(
+                    task["serials"], task["rois"], ocr=(record["policy"], boxes))
+                task["pass_keys"] = list(task["pass_keys"]) + [_BURNED_IN_TEXT_PASS]
+            task["frame_boxes"] = boxes
+            task["config_hash"] = config_hash
+            task["new_sop_uid"] = _redacted_uid_for(inst, config_hash, secret)
+            entry["task_hash"] = config_hash
+            entry["hash_before"] = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
+        return tasks
+
+    @staticmethod
+    def _record_burned_in_text_redactions(burned, force):
+        """Mark each record whose boxes a landed redaction blanked.
+
+        The export gate reads `redaction` beside the instance's
+        attestation: a record with boxes and no redaction that matches is
+        text found and not blanked, whatever became of the task.
+
+        Args:
+            burned (dict): `_read_burned_in_text`'s state.
+            force (bool): Whether the pass re-redacted attested instances.
+
+        Returns:
+            list: The entries whose redaction landed in this pass.
+        """
+        landed = []
+        for entry in burned["entries"]:
+            task_hash = entry.get("task_hash")
+            if task_hash is None:
+                continue
+            inst = entry["instance"]
+            if inst.attributes.get("_ISOCENTER_REDACTION_HASH") != task_hash:
+                continue
+            if force or entry["hash_before"] != task_hash:
+                landed.append(entry)
+            if entry["record"].get("redaction") != task_hash:
+                entry["record"] = {**entry["record"], "redaction": task_hash}
+                write_burned_in_text_record(inst, entry["record"])
+        return landed
+
+    def _finish_burned_in_text(self, service, burned, policy, blanked, landed):
+        """The residual read, the rows and section 5's record of the pass.
+
+        Args:
+            service (RedactionService): The pass's service.
+            burned (dict): `_read_burned_in_text`'s state.
+            policy (dict): The normalised policy.
+            blanked (int): How many instances a box was applied to.
+            landed (list): The entries redacted in this pass.
+        """
+        action = policy["action"]
+        # The residual read (phase 3): each instance redacted in this pass
+        # is read once more under the same threshold. Read-only, and in
+        # threads or processes as the pass ran; the redacted frame is what
+        # the loader reads now, under both.
+        if landed:
+            items = [(e["instance"], e["zones"], policy["min_confidence"],
+                      burned["tesseract_cmd"], None) for e in landed]
+            residual = run_parallel(
+                _burned_in_text_worker, items,
+                strategy=dataclasses.replace(
+                    burned["strategy"], desc="Re-reading redacted images",
+                    total=len(items)),
+                ordered=True)
+            for entry, outcome in zip(landed, residual):
+                inst = entry["instance"]
+                if outcome.failure is None and outcome.read:
+                    # This read is what names the redacted pixels: the
+                    # record's digest moves to them, its boxes and its
+                    # redaction stay. Carried as the phase-1 write is.
+                    captured = capture_phi_status_for_redaction(inst)
+                    entry["record"] = {**entry["record"], "pixels": outcome.pixels}
+                    write_burned_in_text_record(inst, entry["record"])
+                    carry_phi_status_across_redaction(inst, captured)
+                else:
+                    # O5: the record still names the pixels before the
+                    # redaction, so the export treats the instance as never
+                    # checked; this row says why. No reason is quoted.
+                    uid = inst.sop_instance_uid
+                    self.store_backend.log_audit(
+                        action_type="WARNING", entity_uid=uid,
+                        details=(f"burned_in_text: the read after redaction "
+                                 f"could not read instance {uid} in full, so "
+                                 f"its redacted pixels are not checked under "
+                                 f"this policy."))
+                if outcome.boxes:
+                    uid = entry["instance"].sop_instance_uid
+                    self.store_backend.log_audit(
+                        action_type="WARNING", entity_uid=uid,
+                        details=(f"burned_in_text: {len(outcome.boxes)} text "
+                                 f"region(s) still found after redaction on "
+                                 f"frame(s) {_frames_named(outcome.boxes)} of "
+                                 f"instance {uid}."))
+        with_text = [e for e in burned["entries"]
+                     if e["record"] is not None and e["record"]["boxes"]]
+        if action == "report":
+            # One row per instance read in this pass with text: a row is
+            # permanent, and an instance read in an earlier pass already
+            # has its own.
+            for entry in with_text:
+                if not entry.get("found_now"):
+                    continue
+                uid = entry["instance"].sop_instance_uid
+                boxes = entry["record"]["boxes"]
+                self.store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid,
+                    details=(f"burned_in_text: {len(boxes)} text region(s) "
+                             f"found on frame(s) {_frames_named(boxes)} of "
+                             f"instance {uid}; not redacted (action: report)."))
+        failures = burned["failures"]
+        _audit_unread_instances(self.store_backend, "redact()", failures)
+        _warn_unread_instances("redact()", failures, len(failures) + burned["read"],
+                               "the audit log")
+        acted = {"redact": f"{blanked} redacted",
+                 "report": f"{len(with_text)} reported, not redacted",
+                 "withhold": f"{len(with_text)} to be withheld at export"}[action]
+        regions = sum(len(e["record"]["boxes"]) for e in with_text)
+        details = (f"burned_in_text (action {action}, min_confidence "
+                   f"{policy['min_confidence']:g}): read {burned['read']} of "
+                   f"{burned['attempted']} instance(s) holding pixels, "
+                   f"{len(failures)} could not be read, {burned['skipped']} "
+                   f"already checked under this policy; text found on "
+                   f"{len(with_text)} ({regions} region(s)); {acted}. OCR by "
+                   f"tesseract {burned['version']}.")
+        # Through the one spelling of the pass row, under its own entity.
+        service.record_redaction_pass(_BURNED_IN_TEXT_PASS, 0, 0, 0,
+                                      details=details)
+        self._actions_performed.add("REDACTION")
+        self._burned_in_text_passes.append(BurnedInTextSummary(
+            source="redact()", action=action,
+            attempted=burned["attempted"], read=burned["read"],
+            unread=len(failures), skipped=burned["skipped"],
+            with_text=len(with_text), regions=regions,
+            acted=blanked if action == "redact" else len(with_text)))
+        print(f"burned_in_text: {details}")
 
     @staticmethod
     def _apply_redaction_outcomes(outcomes, instances, store_backend=None,
@@ -6794,10 +7422,14 @@ class DicomSession:
 
         Replaces the configuration's rules with one rule for
         `serial_number` holding `roi`, runs `redact()`, and restores the
-        original rules afterwards, also when `redact()` raises.
+        original rules afterwards, also when `redact()` raises. A
+        `burned_in_text` policy is set aside and restored the same way, so
+        this call runs no OCR (#1108).
 
         Args:
-            serial_number (str): The device serial number to target.
+            serial_number (str): The device serial number to target; `""`
+                for every series with no Device Serial Number, `"*"` for
+                every series, as in a rule (#1108).
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
 
         Raises:
@@ -6815,11 +7447,18 @@ class DicomSession:
         # Swap in a single-rule configuration, run redact() against it, then
         # restore the original rules in `finally` regardless of outcome.
         original = list(self.configuration.rules)  # Shallow copy
+        # The `burned_in_text` policy is swapped out with the rules and put
+        # back with them (#1108): this call is frozen as "apply this one
+        # zone to this machine", and with the policy in place it would OCR
+        # the whole store.
+        policy = self.configuration.burned_in_text
         try:
             self.configuration.rules = [{"serial_number": serial_number, "redaction_zones": [roi]}]
+            self.configuration.burned_in_text = None
             self.redact()
         finally:
             self.configuration.rules = original
+            self.configuration.burned_in_text = policy
 
     def anonymize(self, findings: List[PhiFinding] = None):
         """
@@ -7046,6 +7685,21 @@ class DicomSession:
         before 1.0); the report then grades `REVIEW_REQUIRED`.
         `check_burned_in=True` re-audits first, so it never does.
 
+        Under a `burned_in_text` policy (#1108) the `dicom` format reads
+        each instance's record of the last `redact()` pass, and runs no
+        OCR; it loads each frame once to check that the record names the
+        pixels the instance holds now. With `check_burned_in=True` it
+        reads the pixels it is about to write with OCR instead (see
+        `_export_dicom`). An instance that holds pixels and
+        was never checked under the policy's threshold and zones, or whose
+        pixels changed after the read, is withheld under `redact` and
+        `withhold`, and written under `report`; one with text found is
+        withheld under `withhold`, withheld under `redact` until a
+        redaction carrying its boxes has landed, and written under
+        `report`. Each writes one `WARNING` row, and the `EXPORT` row
+        counts the withheld apart. An instance with no pixels is neither
+        read nor gated.
+
         Either format also writes one `WARNING` audit row, and logs one
         `WARNING` line, when `patient_ids` names an ID no patient in the
         session holds: counted by position, never named, and the report
@@ -7106,6 +7760,11 @@ class DicomSession:
                 that is not a `str`; and on `dicom` for a `subset` that is
                 bytes-like, not iterable, or holds an element that is not a
                 `str`.
+            OcrUnavailableError: On `dicom` with `check_burned_in=True`
+                under a `burned_in_text` policy, when the `ocr` extra or
+                the tesseract binary is unavailable (#1108); a
+                `RuntimeError`, raised before the tag scan, the save, any
+                row or any file.
             ExportError: From either exporter, when zero of N
                 attempted instances are reported written and at least one
                 failed. The folder then holds none of them, with one
@@ -7205,7 +7864,20 @@ class DicomSession:
                 withheld. An export that withheld everything returns an
                 empty summary and does not raise: nothing failed. An
                 instance outside `subset` is not withheld; it was never
-                asked for.
+                asked for. Under a `burned_in_text` policy (#1108), it
+                also reads with OCR every planned instance that holds
+                pixels, as it is about to be written, after the
+                configured zones; that read, not the record of the last
+                `redact()`, decides the instance: text found is withheld
+                under `redact` and `withhold` and written under `report`;
+                nothing found is written; a read that failed is withheld
+                under `redact` and `withhold` and written under `report`.
+                Each writes one `WARNING` row naming the instance, the
+                count and the frames, never the text. The read changes
+                nothing in the session: it redacts no pixel and moves no
+                UID. With the `ocr` extra or the tesseract binary
+                unavailable it raises `OcrUnavailableError` before the
+                scan, the save and any row.
             check_reversibility (bool): If True (the default), warn when the
                 files this export wrote still carry the encrypted originals
                 that `lock_identities()` embeds, and record the disclosure in
@@ -7303,7 +7975,13 @@ class DicomSession:
             ValueError: `subset` is a DataFrame carrying none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
                 PatientID, or a query string that does not run against
-                the cohort report.
+                the cohort report; or `configuration.burned_in_text` is
+                a policy the loader would refuse in a file (#1108), before
+                the pre-export scan and the save.
+            OcrUnavailableError: `check_burned_in=True` under a
+                `burned_in_text` policy with the `ocr` extra or the
+                tesseract binary unavailable (#1108); a `RuntimeError`,
+                raised before the tag scan, the save, any row or any file.
             ExportError: Every planned instance failed (nothing written and
                 at least one failure), raised last, after the audit rows
                 and the `EXPORT` row are written. A partial export and an
@@ -7334,6 +8012,19 @@ class DicomSession:
         subset_selection = self._resolve_subset(subset)
         allowed_uids = subset_selection.uids
 
+        # A `burned_in_text` policy assigned in code that a file could not
+        # hold is refused here, before the scan and the save, as the
+        # subset is (#1108).
+        policy = config_manager._burned_in_text_policy(
+            self.configuration.burned_in_text, "session.configuration")
+        # Under the policy, `check_burned_in=True` also reads the pixels
+        # it is about to write (#1108, Q6). Refused here when OCR cannot
+        # run, before the tag scan re-records a status and before the
+        # save: an export that will not happen must not move the session.
+        read_pixels = bool(check_burned_in) and policy is not None
+        if read_pixels:
+            pixel_analysis._require_ocr("export(check_burned_in=True)")  # pylint: disable=protected-access
+
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them
         # differently, so they must not collapse into one falsy value.
@@ -7361,15 +8052,28 @@ class DicomSession:
         self.save(sync=True)
         self._release_memory(show_progress)
 
-        tasks, patient_count, withheld = self._build_export_plan(
+        tasks, patient_count, withheld, gated = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,
-                           use_compression, verify_readback),
+                           use_compression, verify_readback,
+                           read_burned_in_text=read_pixels),
             target_ids)
+        if read_pixels and tasks:
+            tasks, read_gated = self._read_before_export(
+                tasks, policy, folder, show_progress)
+            gated.extend(read_gated)
 
         # Before the empty-plan branch, so an export that withheld
         # everything still leaves one row per instance it held back,
         # rather than reading as an empty plan under PASS.
         _audit_withheld_instances(self.store_backend, folder, withheld)
+        # The `burned_in_text` gate's rows (#1108), one per instance it
+        # withheld or wrote unchecked, in the same place for the same
+        # reason. `WARNING`, so each costs the run its PASS.
+        for uid, detail, _hold in gated:
+            self.store_backend.log_audit(
+                action_type="WARNING", entity_uid=uid or "UNKNOWN",
+                details=" ".join(detail.split()).replace("|", "\\|"))
+        held_by_policy = sum(1 for _uid, _detail, hold in gated if hold)
 
         # The ids that selected nobody, counted and never named,
         # and the subset's values that name nothing, the same way.
@@ -7410,23 +8114,37 @@ class DicomSession:
                  if id(instance) in planned],
                 folder, "DICOM")
 
-        if not tasks and withheld:
+        if not tasks and (withheld or held_by_policy):
+            requested = len(withheld) + held_by_policy
             get_logger().warning(
-                "No instances exported: all %d were withheld by the "
-                "pre-export scan.", len(withheld))
+                "No instances exported: all %d were withheld by the %s.",
+                requested,
+                ("pre-export scan" if not held_by_policy else
+                 "burned_in_text policy" if not withheld else
+                 "pre-export scan and the burned_in_text policy"))
             # Counted, unlike a true empty plan: the caller asked for
             # these instances and none was written, which is exactly what
             # "0 of K requested" says. A zero here is a fact about this
             # export, not a stand-in for "not answered".
             self._last_export_written = 0
-            self._last_export_requested = len(withheld)
+            self._last_export_requested = requested
+            if not held_by_policy:
+                # Byte for byte what it was before #1108.
+                details = (f"DICOM export to {folder}: wrote 0 of "
+                           f"{len(withheld)} requested instances; all "
+                           f"{len(withheld)} were withheld by the pre-export "
+                           f"scan (check_burned_in=True).")
+            else:
+                by = ([f"{len(withheld)} by the pre-export scan "
+                       f"(check_burned_in=True)"] if withheld else [])
+                by.append(f"{held_by_policy} by the burned_in_text policy")
+                details = (f"DICOM export to {folder}: wrote 0 of {requested} "
+                           f"requested instances; all {requested} were "
+                           f"withheld, {' and '.join(by)}.")
             self.store_backend.log_audit(
                 action_type="EXPORT",
                 entity_uid=folder,
-                details=(f"DICOM export to {folder}: wrote 0 of "
-                         f"{len(withheld)} requested instances; all "
-                         f"{len(withheld)} were withheld by the pre-export "
-                         f"scan (check_burned_in=True)."))
+                details=details)
             # Returned, not `ExportError`: nothing was attempted and
             # nothing failed. The rows above grade the run and the
             # counters say none of it was written.
@@ -7472,7 +8190,7 @@ class DicomSession:
         # Withheld instances were requested and not written, so they are
         # in the denominator: the count answers for the cohort, not for
         # the plan.
-        self._last_export_requested = len(tasks) + len(withheld)
+        self._last_export_requested = len(tasks) + len(withheld) + held_by_policy
 
         # The run itself is an audited action, not only its failures.
         # One row per run rather than per instance -- the
@@ -7487,6 +8205,11 @@ class DicomSession:
         withheld_clause = (f"; {len(withheld)} more withheld by the "
                            f"pre-export scan (check_burned_in=True)"
                            if withheld else "")
+        # The same for the `burned_in_text` gate (#1108): its own clause,
+        # so neither count is said in the other's words.
+        if held_by_policy:
+            withheld_clause += (f"; {held_by_policy} more withheld by the "
+                                f"burned_in_text policy")
         self.store_backend.log_audit(
             action_type="EXPORT",
             entity_uid=folder,
@@ -8108,6 +8831,107 @@ class DicomSession:
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)
 
+    def _read_before_export(self, tasks, policy, folder, show_progress):
+        """`export(check_burned_in=True)`'s read of what it will write (#1108).
+
+        Reads every planned instance that holds pixels with `redact()`'s
+        phase-1 worker, after the zones the export applies (zeroed on a
+        copy), and decides each from that read alone, never its record:
+        text found is written with a row under `report` and withheld with
+        a row otherwise; nothing found is written with no row; a read
+        that failed is unchecked, withheld under `redact` and `withhold`
+        and written under `report`, with a row.
+
+        Never changes the graph, the store or a UID, and writes no
+        record: an export is a check here, not a redaction. Under
+        `redact` the found-text row names the remedy: `redact()`, or
+        `redact(force=True)` for an instance `redact()` has already read
+        under this policy, whose record it would not read again. Under
+        `withhold` there is none: the instance is withheld while its text
+        is found.
+
+        Args:
+            tasks (list): The plan's `ExportContext`s.
+            policy (dict): The normalised policy.
+            folder (str): The export's folder, for the row text.
+            show_progress (bool): Show the read's progress bar.
+
+        Returns:
+            tuple: `(tasks, gated)`: the tasks still to write, and
+                `(sop_instance_uid, detail, withheld)` per row.
+        """
+        candidates = [task for task in tasks if _holds_pixels(task.instance)]
+        if not candidates:
+            return tasks, []
+        action = policy["action"]
+        hold = action != "report"
+        verb = "withheld" if hold else "did not withhold"
+        # A withheld instance comes with its way out where there is one.
+        # `force=True` because an instance whose read after redaction
+        # still found text keeps a current record, which a plain
+        # `redact()` does not read again.
+        remedy = ("; run redact(), or redact(force=True) if redact() has "
+                  "already read it under this policy"
+                  if action == "redact" else "")
+        tesseract_cmd = _caller_tesseract_cmd()
+        # Threads for a `:memory:` store, asked for per call as `redact()`
+        # asks. Unlike `redact()`, nothing refuses when worker recycling
+        # outranks that request and the read runs in processes: this
+        # worker writes nothing to the store (the review of #1110 measured
+        # the read there).
+        strategy = _resolve_strategy(
+            max_workers=_redaction_worker_count(),
+            chunksize=1,
+            maxtasksperchild=None,
+            disable_gc=False,
+            force_threads=self.store_backend.db_path == ":memory:",
+            show_progress=show_progress,
+            desc="Reading burned-in text",
+            total=len(candidates))
+        print(f"Reading {len(candidates)} image(s) for burned-in text (OCR)...")
+        with _one_tesseract_thread():
+            reads = run_parallel(
+                _burned_in_text_worker,
+                [(task.instance, task.redaction_zones, policy["min_confidence"],
+                  tesseract_cmd, None) for task in candidates],
+                strategy=strategy, ordered=True)
+        dropped = set()
+        gated = []
+        for task, outcome in zip(candidates, reads):
+            uid = task.instance.sop_instance_uid
+            if outcome.failure is not None:
+                # Fail closed, as `redact()` does: a frame not read is a
+                # frame not checked. The reason is not quoted: it is
+                # `redact()`'s unread row that carries one.
+                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                          f"the pre-export read (check_burned_in=True) could "
+                          f"not read its pixels in full, so its burned-in "
+                          f"text was not checked.")
+            elif outcome.boxes:
+                detail = (f"DICOM export to {folder} {verb} instance {uid}: "
+                          f"the pre-export read (check_burned_in=True) found "
+                          f"{len(outcome.boxes)} text region(s) on frame(s) "
+                          f"{_frames_named(outcome.boxes)} (action: {action})"
+                          f"{remedy}.")
+            else:
+                continue
+            gated.append((uid, detail, hold))
+            if hold:
+                dropped.add(id(task))
+        # Section 5's line for this read (review of #1110), so a clean
+        # read leaves a trace in the report as a `redact()` pass does. No
+        # `REDACTION` row and no `_actions_performed`: the export redacted
+        # nothing.
+        found = [o for o in reads if o.failure is None and o.boxes]
+        self._burned_in_text_passes.append(BurnedInTextSummary(
+            source=BurnedInTextSummary.EXPORT_READ, action=action,
+            attempted=len(candidates),
+            read=sum(1 for o in reads if o.failure is None and o.read),
+            unread=sum(1 for o in reads if o.failure is not None),
+            skipped=0, with_text=len(found),
+            regions=sum(len(o.boxes) for o in found), acted=len(gated)))
+        return [task for task in tasks if id(task) not in dropped], gated
+
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
         """Walk the store and build one ExportContext per instance to write.
 
@@ -8119,14 +8943,22 @@ class DicomSession:
             target_ids (FrozenSet[str]): The Patient IDs to export.
 
         Returns:
-            tuple: `(contexts, patients_visited, withheld)`, where `withheld`
-                lists `(sop_instance_uid, level)` for every instance the subset
-                selected and the pre-export scan held back. An instance outside
-                the subset is in neither list.
+            tuple: `(contexts, patients_visited, withheld, gated)`, where
+                `withheld` lists `(sop_instance_uid, level)` for every
+                instance the subset selected and the pre-export scan held
+                back, and `gated` lists `(sop_instance_uid, detail,
+                withheld)` for every instance the `burned_in_text` policy
+                has a row for (#1108). An instance outside the subset is in
+                none of them.
         """
         tasks = []
         withheld = []
+        gated = []
         patient_count = 0
+        # Read once, judged by the loader's rule; `_export_dicom` has
+        # already refused one that would not load.
+        policy = config_manager._burned_in_text_policy(
+            self.configuration.burned_in_text, "session.configuration")
 
         drop_foreign = self._foreign_icon_gate()
         # Here, in the parent, and never in the graph or the worker:
@@ -8155,6 +8987,8 @@ class DicomSession:
                     # in its order, for the temporal marker's walk.
                     stamps = {**patient_attrs, **study_attrs, **series_attrs}
                     zones = self._redaction_zones_for(series)
+                    policy_hash = (_burned_in_text_policy_hash(policy, zones)
+                                   if policy is not None else None)
 
                     for instance in series.instances:
                         why = _why_excluded(
@@ -8163,6 +8997,27 @@ class DicomSession:
                             withheld.append((instance.sop_instance_uid, why))
                         if why is not None:
                             continue
+
+                        # The `burned_in_text` gate (#1108), after the
+                        # subset and the scan: an instance not asked for,
+                        # or already withheld, gets no second row. Only an
+                        # instance holding pixels; the verdict reads its
+                        # record and runs no OCR, and loads the frame only
+                        # for a record otherwise current, to check its
+                        # pixel digest. Under `check_burned_in=True` a
+                        # fresh read decides instead.
+                        if (policy is not None
+                                and not options.read_burned_in_text
+                                and _holds_pixels(instance)):
+                            verdict = _burned_in_text_verdict(
+                                instance, policy, policy_hash, zones,
+                                options.folder)
+                            if verdict is not None:
+                                hold, detail = verdict
+                                gated.append((instance.sop_instance_uid,
+                                              detail, hold))
+                                if hold:
+                                    continue
 
                         # The SOP Instance UID names the file: it is
                         # unique where InstanceNumber is not. Through the
@@ -8193,7 +9048,7 @@ class DicomSession:
                             # source's, which no rule sets (#869).
                             source_modality=series.modality))
 
-        return tasks, patient_count, withheld
+        return tasks, patient_count, withheld, gated
 
     def _foreign_icon_gate(self) -> bool:
         """Whether to drop every nested icon that is not its carrier's own.
@@ -8225,12 +9080,13 @@ class DicomSession:
     def _redaction_zones_for(self, series) -> list:
         """The configured pixel-redaction zones for a series' scanner.
 
-        Every matching rule's zones, exact or `"*"`, in rule order, each parsed
+        Every matching rule's zones, exact, `""` or `"*"`, in rule order, each parsed
         to a 4-tuple with the matcher and parser `redact()` uses. Logs nothing
         for an invalid zone.
 
         Args:
-            series (Series): The series whose equipment's serial is matched.
+            series (Series): The series whose equipment the rules are
+                matched against.
 
         Returns:
             list: `(y1, y2, x1, x2)` per zone; empty when no rule matches.
@@ -8238,13 +9094,12 @@ class DicomSession:
         # Not `Configuration.get_rule`, which is exact and first-match and
         # returns raw zones: through it a `"*"` rule or a second rule on the
         # same serial would export unredacted pixels, and a `{"roi": ...}` zone
-        # would fail the export. A series with no equipment or no serial is
-        # handed a `None` rather than answered here, so `rule_applies_to` stays
-        # the one answer.
-        serial = (series.equipment.device_serial_number
-                  if series.equipment else None)
+        # would fail the export. The series' equipment is handed over as
+        # held, None included, so `rule_covers` stays the one answer: a
+        # serial-less series reads as `""`, the key the index puts it under,
+        # and a `match:` rule reads the equipment (#1108).
         return [roi
-                for rule in rules_matching(self.configuration.rules, serial)
+                for rule in rules_matching(self.configuration.rules, series.equipment)
                 for roi in zone_rois(rule.get("redaction_zones", []))]
 
     @staticmethod

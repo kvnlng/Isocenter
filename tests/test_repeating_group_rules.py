@@ -113,8 +113,11 @@ def test_a_private_group_beside_them_is_the_private_sweeps(tmp_path):
     the user chose to keep."""
     _, out, _ = _run(tmp_path, remove_private=False)
     assert out[0x50010010].value == "VENDOR"          # a private creator, LO
-    # No creator for this block, so it is read back as UN bytes.
-    assert b"private beside the overlay" in bytes(out[0x60011000].value)
+    # No creator for this block. Read raw: the element is kept whatever VR
+    # the file states. Under the Implicit VR export it came back as UN
+    # bytes; since #1107 the export states the VR and pydicom decodes text.
+    raw = out.get_item(0x60011000, keep_deferred=True)
+    assert b"private beside the overlay" in bytes(raw.value)
 
 
 def test_the_private_sweep_still_removes_them(tmp_path):

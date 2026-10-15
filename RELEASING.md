@@ -555,7 +555,7 @@ fixes, never features.
    other step, or in `Run Tests`, is not this case.
 
    **Count the skips** in the rehearsal, and again in step 6's run: the
-   last line of each shard's `Run Tests` step, added up over the eight
+   last line of each shard's `Run Tests` step, added up over the twelve
    shards of a version. Since #966 the runners fetch every tag and
    `origin/main`, and what skips is a short, fixed list. On 3.12, 3.13
    and 3.14 (3.14t skips one fewer, as marked):
@@ -623,7 +623,11 @@ fixes, never features.
    `Install tesseract`, and its skip count, apply to this run too.
 7. **Create the GitHub Release** for `vX.Y.Z`, with the `[X.Y.Z]` changelog
    section as its notes. This does not publish anything. Zenodo archives it
-   and mints the version DOI.
+   and mints the version DOI. GitHub holds a release body to 125,000
+   characters. A section longer than that is given with its `### Breaking`
+   entries whole and every other entry by its bold lead, under a link to
+   `CHANGELOG.md` at the tag, which has the rest: 1.0.0rc18's section was
+   170,372 characters, and its Release is written that way.
 8. **Bring the release record back to `main`** in an ordinary PR into
    `main`, made of ordinary commits, never a merge of the release branch
    (see "Never merge a release branch into `main`"). It:

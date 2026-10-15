@@ -200,6 +200,9 @@ TIER_TWO_NAMES = {
                  "identity_token_is_this_stores"},
     "Study": {"record_date_shift", "date_shift_vouches_for"},
     "Equipment": {"from_parts"},
+    # The `burned_in_text` policy (#1108), tier 2 by owner ruling of
+    # 2026-10-14, as `rules` and `phi_tags` are read by users.
+    "IsocenterConfiguration": {"burned_in_text"},
     "DiscoveryResult": {"get_density_matrix", "visualize_heatmap",
                         "analyze_temporal_stability", "inspect_clusters",
                         "candidates", "n_sources"},

@@ -432,7 +432,8 @@ otherwise.
   `save()` itself still returns before the write and raises nothing for
   it, and `close()` does not raise for it. `save(sync=True)`, `export()`
   and `compact()` save the session themselves, as before. `redact()`
-  with no rules loaded returns 0 before it drains.
+  with no rules loaded and no `burned_in_text` policy returns 0 before
+  it drains.
   A session that ends, by `close()` or when the process exits with the
   session still referenced and never closed, with a failed background
   save that no later save has healed
@@ -459,6 +460,13 @@ otherwise.
   unavailable to the calling process; and `RuntimeError` after the pass
   when at least one instance failed and none could be read. A scan that
   read some instances returns its report with the others in `failures`.
+- `redact()`, when the configuration holds a `burned_in_text` policy:
+  `RuntimeError` when the `ocr` extra or the `tesseract` binary is
+  unavailable to the calling process, after the entry drain and before
+  anything is redacted, the configured zones included. So does
+  `export(check_burned_in=True)` under that policy, before its pre-export
+  scan and its save. An instance the
+  pass cannot read is a `WARNING` row, not a raise.
 - `generate_report()` and `generate_manifest()`: `ValueError` for a
   `format` other than the spellings above, naming them; no file is
   written.
@@ -690,6 +698,12 @@ CHANGELOG entry naming both spellings:
   `get_ingested_paths()`, `get_superseded_uids()`, `save_state()` and
   `load_state()`. Its `patients` list is frozen (above); what else the
   store object offers is not.
+- **`IsocenterConfiguration.burned_in_text`**, the `burned_in_text`
+  policy a configuration file holds (`{"action": ..., "min_confidence":
+  ...}` or `None`), as `load_config()` sets it. The file key and what
+  each action does are documented on the
+  [Configuration](../configuration.md#burned-in-text) page; the
+  attribute's name and shape are not frozen.
 - **`profiles.FLOOR_POLICY`**, the name the floor policy is held under.
   What the floor *contains* is frozen (above); the name is not.
 - **`entities` helpers** `clone_sequences`, `exported_patient_id`,

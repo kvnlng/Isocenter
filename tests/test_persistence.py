@@ -226,17 +226,13 @@ def test_load_patient_rebuilds_partial_equipment_in_field_order(
 
 
 def test_both_hydration_routes_agree_with_ingest_on_serial_only_equipment(store):
-    """A serial with no manufacturer or model reloads as no equipment, on both routes (#290).
+    """A serial with no manufacturer or model reloads as that equipment, on both routes.
 
-    The store keeps the serial -- the flattened row carries it -- and
-    both `load_all` and `load_patient` discard it, because the rule is
-    "a manufacturer or a model name" and a serial is neither. That is
-    today's rule pinned as it stands, not endorsed: the serial is what
-    every downstream rule matches on, so such a series can never match
-    one, and widening the predicate is filed separately from #290. What
-    this test guards until then is the three routes agreeing: it goes
-    red the day someone widens one hydration route and not the other,
-    or not ingest.
+    #290 pinned the opposite (both routes discarded the serial) and said
+    the pin would flip when the predicate was widened; the review of #1111
+    widened it at `Equipment.from_parts`, which ingest and both routes
+    share. What this guards is the three routes agreeing: it goes red the
+    day one route answers differently from the others.
     """
     store.save_all([_patient_with_equipment(Equipment("", "", "SN-ONLY"))])
 
@@ -244,8 +240,6 @@ def test_both_hydration_routes_agree_with_ingest_on_serial_only_equipment(store)
     via_load_patient = store.load_patient("P1").studies[0].series[0].equipment
     row = next(store.get_flattened_instances(patient_ids=["P1"]))
 
-    assert via_load_all is None
-    assert via_load_patient is None
-    assert row["device_serial_number"] == "SN-ONLY", (
-        "the store dropped the serial; the loss this test documents is "
-        "in the predicate, not the write")
+    assert via_load_all == Equipment("", "", "SN-ONLY")
+    assert via_load_patient == Equipment("", "", "SN-ONLY")
+    assert row["device_serial_number"] == "SN-ONLY"

@@ -2,7 +2,8 @@
 Services for Isocenter.
 
 This module contains the core service logic for:
-- MachinePixelIndex: Fast retrieval of instances by device serial number.
+- MachinePixelIndex: Fast retrieval of instances by device serial number
+  (`""` for every series with none).
 - RedactionService: Handling the application of redaction rules to pixel data.
 """
 
@@ -11,7 +12,7 @@ import json
 import traceback
 import gc
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import numpy as np
 
 from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
@@ -33,6 +34,9 @@ class MachinePixelIndex:
 
     def __init__(self):
         self._index: Dict[str, List[Instance]] = {}
+        # `(equipment, instances)` per series, in store order: what a
+        # `match:` rule is compared against (#1108).
+        self._series: List[tuple] = []
 
     def index_store(self, store: DicomStore):
         """
@@ -43,15 +47,20 @@ class MachinePixelIndex:
         Args:
             store (DicomStore): The store to index.
         """
+        # Every series, a serial-less one under `""` (#1108): one key for
+        # both kinds of "no serial", a series whose equipment holds `""`
+        # and one with no equipment at all (no manufacturer, no model and
+        # no serial, `Equipment.from_parts`; a serial alone is equipment).
+        # `rule_applies_to` reads `""` the same way, so `redact()` and the
+        # export's zones still agree.
         self._index.clear()
+        self._series = []
         for p in store.patients:
             for st in p.studies:
                 for se in st.series:
-                    if se.equipment and se.equipment.device_serial_number:
-                        sn = se.equipment.device_serial_number
-                        if sn not in self._index:
-                            self._index[sn] = []
-                        self._index[sn].extend(se.instances)
+                    sn = series_serial(se)
+                    self._index.setdefault(sn, []).extend(se.instances)
+                    self._series.append((se.equipment, se.instances))
 
     def get_by_machine(self, sn):
         """The instances of every series whose Device Serial Number is `sn`.
@@ -166,7 +175,7 @@ def _report_redaction_failures(failures, store_backend=None):
     return reported
 
 
-def _redaction_config_hash(serials, rois) -> str:
+def _redaction_config_hash(serials, rois, ocr=None) -> str:
     """The attestation hash of the zones one image is redacted with.
 
     Over the rules' serials and every zone applied, both sorted, so the
@@ -184,18 +193,116 @@ def _redaction_config_hash(serials, rois) -> str:
     `"*"` on one image, #908) are a `"serials"` list instead, which no
     one-serial input can equal.
 
+    **The `burned_in_text` boxes (#1108)** are a third input, `ocr`,
+    present only when the pass found text to blank: `{"policy", "boxes"}`
+    beside the zones, the boxes sorted. With no boxes the key is exactly
+    the zone-only one, so a store redacted by zones before the policy was
+    loaded keeps its hash and its UIDs. An instance only OCR redacts has
+    no serial key at all, which no zone-only input can equal.
+
     Args:
-        serials (Iterable[str]): The `serial_number` of each rule whose
-            zones are applied, duplicates allowed.
+        serials (Iterable): Each applied rule's selector, duplicates
+            allowed: its `serial_number`, or `{"match": {...}}` for a
+            `match:` rule (`rule_selector`, #1108); empty for an instance
+            only the `burned_in_text` pass redacts.
         rois (Iterable): Every zone applied, `[y1, y2, x1, x2]`.
+        ocr (tuple, optional): `(policy_hash, boxes)`, each box
+            `(frame, y1, y2, x1, x2)`; None or no boxes adds nothing.
 
     Returns:
         str: 32 hex digits.
     """
-    distinct = sorted(set(serials))
-    key = {"serial": distinct[0]} if len(distinct) == 1 else {"serials": distinct}
+    serials = list(serials)
+    if not serials:
+        key = {}
+    elif all(isinstance(serial, str) for serial in serials):
+        distinct = sorted(set(serials))
+        key = {"serial": distinct[0]} if len(distinct) == 1 else {"serials": distinct}
+    else:
+        # A `match:` rule's selector (#1108) is `{"match": {...}}`: one
+        # alone is its own shape, and any mix is a `"selectors"` list,
+        # neither of which a serial-only input can equal, so no stored
+        # attestation moves.
+        distinct = {json.dumps(s, sort_keys=True): s for s in serials}
+        ordered = [distinct[k] for k in sorted(distinct)]
+        if len(ordered) == 1:
+            key = {"match": ordered[0]["match"]}
+        else:
+            key = {"selectors": ordered}
     key["rois"] = sorted(list(roi) for roi in rois)
+    if ocr is not None and ocr[1]:
+        key["ocr"] = {"policy": ocr[0],
+                      "boxes": sorted(list(box) for box in ocr[1])}
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+#: Where the `burned_in_text` pass records what it read on an instance
+#: (#1108): JSON text of `{"policy", "boxes", "tesseract"}`, and
+#: `"redaction"` once a redaction carrying those boxes has landed. An
+#: underscore key, so `_merge` never writes it to a file and
+#: `attributes_json` persists it as `_ISOCENTER_REDACTION_HASH` is
+#: persisted. Coordinates and a version identify no one; the text OCR
+#: read is never kept anywhere.
+BURNED_IN_TEXT_ATTR = "_ISOCENTER_BURNED_IN_TEXT"
+
+
+def _burned_in_text_policy_hash(policy, zones) -> str:
+    """What a `burned_in_text` record is current under: what the boxes
+    depend on, the threshold and the zones zeroed before the read.
+
+    The zones are in it because a zone added later covers text the record
+    still names, and a zone removed uncovers text the record never saw.
+    The action is not: it decides what is done with the boxes, not which
+    boxes are found, so a store read under `report` is not read again
+    when the file says `redact`; `redact()` then blanks what the record
+    holds, and until it does the export withholds it.
+
+    Args:
+        policy (dict): The normalised policy, `{action, min_confidence}`.
+        zones (Iterable): The `(y1, y2, x1, x2)` zones of the rules that
+            cover the instance's series.
+
+    Returns:
+        str: 32 hex digits.
+    """
+    # A float, so `80` and `80.0` are one threshold and one hash (O4).
+    key = {"min_confidence": float(policy["min_confidence"]),
+           "zones": sorted(list(zone) for zone in zones)}
+    return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def burned_in_text_record(inst: Instance) -> Optional[dict]:
+    """The instance's `burned_in_text` record, or None when it has none
+    or holds one this library cannot read.
+
+    Args:
+        inst (Instance): The instance.
+
+    Returns:
+        Optional[dict]: The record.
+    """
+    text = inst.attributes.get(BURNED_IN_TEXT_ATTR)
+    if not isinstance(text, str):
+        return None
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def write_burned_in_text_record(inst: Instance, record: dict) -> None:
+    """Write `record` as the instance's `burned_in_text` record.
+
+    A direct write and a `mark_modified()`, as the attestation hash is
+    written: an underscore key goes around `set_attr`, which lowercases.
+
+    Args:
+        inst (Instance): The instance.
+        record (dict): The record.
+    """
+    inst.attributes[BURNED_IN_TEXT_ATTR] = json.dumps(record, sort_keys=True)
+    inst.mark_modified()
 
 
 def _redacted_uid_for(inst, config_hash, secret) -> str:
@@ -274,6 +381,7 @@ _REDACTION_OWN_ATTRS = frozenset({
     "0008,0018",                    # SOPInstanceUID, from regenerate_uid()
     SOURCE_SOP_UID_ATTR,            # the UID regenerate_uid() replaced
     "_ISOCENTER_REDACTION_HASH",    # the attestation
+    BURNED_IN_TEXT_ATTR,            # boxes and a version, never text (#1108)
     *_SET_PIXEL_DATA_TAGS,
 })
 #: Left out of the fingerprint, and checked by `_flags_are_redactions`.
@@ -511,6 +619,27 @@ def _withdraw_attestation(inst: Instance, attested_from: tuple) -> None:
     inst.mark_modified()
 
 
+#: The `REDACTION` row's entity for a `serial_number: ""` rule-pass
+#: (#1108): an empty entity would read as a missing one.
+NO_SERIAL_ENTITY = "(no serial)"
+
+
+def series_serial(series) -> str:
+    """A series' Device Serial Number as the rules read it: `""` for a
+    series with no serial, whether its equipment holds `""` or it has no
+    equipment at all, which means no manufacturer, no model and no serial
+    (`Equipment.from_parts`, #1108).
+
+    Args:
+        series (Series): The series.
+
+    Returns:
+        str: The serial, or `""`.
+    """
+    equipment = series.equipment
+    return (equipment.device_serial_number or "") if equipment else ""
+
+
 def rule_applies_to(rule_serial, serial) -> bool:
     """Does a redaction rule written for `rule_serial` cover a series whose
     Device Serial Number is `serial`?
@@ -520,40 +649,114 @@ def rule_applies_to(rule_serial, serial) -> bool:
 
     Args:
         rule_serial (Optional[str]): The rule's `serial_number`: an exact
-            serial, or `"*"` for every series.
-        serial (Optional[str]): The series' Device Serial Number.
+            serial, `""` for every series with no serial, or `"*"` for
+            every series.
+        serial (Optional[str]): The series' Device Serial Number; None or
+            `""` for a series with none.
 
     Returns:
-        bool: True for an exact match or `"*"`; False when `serial` is
-        empty or None, whatever the rule.
+        bool: True for `"*"`, and for a rule serial equal to the series'
+        (`""` included); False for a rule with no serial (None).
     """
-    # A serial-less series matches nothing because `MachinePixelIndex`
-    # indexes only series with equipment and a serial: `redact()` never
-    # reaches one, and the export must agree with it.
-    if not serial:
+    # Owner ruling on #1108: `"*"` covers every series, serial-less ones
+    # included, and `""` covers exactly the serial-less ones. Until then a
+    # serial-less series matched nothing, and a burned-in name on it was
+    # exported under a `"*"` zone. `MachinePixelIndex` keys such a series
+    # under `""`, so `redact()` reaches what this says the export zeroes.
+    if rule_serial is None:
         return False
-    return rule_serial in ("*", serial)
+    return rule_serial in ("*", serial or "")
 
 
-def rules_matching(rules, serial) -> List[dict]:
-    """Every rule that covers a series with this serial, in rule order.
+def _equipment_serial(equipment) -> str:
+    """`series_serial` for an equipment, None (no equipment) included."""
+    return (equipment.device_serial_number or "") if equipment else ""
+
+
+def rule_covers(rule, equipment) -> bool:
+    """Does `rule` cover a series with this equipment?
+
+    A `match:` rule (#1108) covers a series whose equipment holds every
+    field the match names, compared exactly (case and whitespace
+    significant), whatever its serial; never a series with no equipment.
+    Any other rule is read by its `serial_number` (`rule_applies_to`).
+
+    Args:
+        rule (dict): The machine rule.
+        equipment (Optional[Equipment]): The series' equipment, or None.
+
+    Returns:
+        bool: Whether the rule covers it.
+    """
+    # The loader holds a rule to exactly one selector, and `match` to
+    # `manufacturer` and/or `model_name`; a hand-built rule holding both
+    # selectors is read by `match`, and a match naming another field
+    # matches nothing rather than reading an attribute by that name.
+    if "match" in rule:
+        match = rule.get("match")
+        if not equipment or not isinstance(match, dict) or not match:
+            return False
+        held = {"manufacturer": equipment.manufacturer,
+                "model_name": equipment.model_name}
+        return all(key in held and held[key] == value
+                   for key, value in match.items())
+    return rule_applies_to(rule.get("serial_number"),
+                           _equipment_serial(equipment))
+
+
+def rule_selector(rule) -> Union[str, dict, None]:
+    """What identifies `rule`'s selection in its attestation hash and its
+    `REDACTION` row: its `serial_number`, or `{"match": {...}}` (#1108).
+
+    Args:
+        rule (dict): The machine rule.
+
+    Returns:
+        Union[str, dict, None]: The serial (None when the rule has none),
+        or a `{"match": dict}`.
+    """
+    if "match" in rule:
+        return {"match": dict(rule.get("match") or {})}
+    return rule.get("serial_number")
+
+
+def selector_label(selector) -> str:
+    """The `REDACTION` row's entity for a rule-pass's selector: the serial
+    as written (`"*"` included), `(no serial)` for `""`, and
+    `match:manufacturer=...;model_name=...` for a match (device names are
+    not PHI) (#1108).
+
+    Args:
+        selector (Union[str, dict, None]): As `rule_selector` returns it.
+
+    Returns:
+        str: The label.
+    """
+    if isinstance(selector, dict):
+        match = selector.get("match") or {}
+        return "match:" + ";".join(f"{key}={match[key]}" for key in sorted(match))
+    return selector if selector != "" else NO_SERIAL_ENTITY
+
+
+def rules_matching(rules, equipment) -> List[dict]:
+    """Every rule that covers a series with this equipment, in rule order.
 
     Every one, not the first: `redact()` runs each loaded rule as its own
-    pass, so an exact rule and a `"*"` rule, or two rules on one serial,
-    all apply to that series.
+    pass, so an exact rule and a `"*"` rule, a `match:` rule, or two
+    rules on one serial, all apply to that series (#908, #1108).
 
     Args:
         rules (Optional[List[dict]]): The machine rules, or None.
-        serial (Optional[str]): The series' Device Serial Number.
+        equipment (Optional[Equipment]): The series' equipment, or None
+            for a series with none.
 
     Returns:
-        List[dict]: The rules `rule_applies_to` accepts.
+        List[dict]: The rules `rule_covers` accepts.
     """
     # An export that took only the first match would leave the second
     # rule's zones unredacted. The session's `_redaction_zones_for` and,
     # through it, the store-wide icon gate read this.
-    return [rule for rule in (rules or ())
-            if rule_applies_to(rule.get("serial_number"), serial)]
+    return [rule for rule in (rules or ()) if rule_covers(rule, equipment)]
 
 
 def zone_rois(zones, on_invalid=None) -> List[tuple]:
@@ -668,7 +871,7 @@ class RedactionService:
             self.logger.info(f"Verified {count} Burned In Annotations were remediated.")
 
     def record_redaction_pass(self, machine_sn: str, zone_count: int,
-                              targeted: int, applied: int):
+                              targeted: int, applied: int, details=None):
         """One `REDACTION` audit row per rule-pass, spelled once for both paths.
 
         This is the row `generate_report`'s section 2 counts and the
@@ -677,11 +880,18 @@ class RedactionService:
         service has no store backend.
 
         Args:
-            machine_sn (str): The serial spelling the rule was configured
-                with, `"*"` included; the row's entity.
+            machine_sn: The rule's selector (`rule_selector`): the serial
+                spelling it was configured with, `"*"` included, or a
+                `{"match": ...}`. The row's entity is `selector_label`'s
+                spelling of it: `""` is written `(no serial)` and a match
+                `match:manufacturer=...;model_name=...` (#1108).
             zone_count (int): How many zones the rule applies.
             targeted (int): How many instances the pass targeted.
             applied (int): How many it redacted.
+            details (str, optional): The row's text in place of the
+                zone sentence: the `burned_in_text` pass's counts
+                (#1108), written through here so the action word keeps
+                one spelling site.
         """
         # Per rule-pass, so the report stays bounded: per-instance rows
         # would put 10k lines in a 10k-instance session's report. After the
@@ -693,22 +903,32 @@ class RedactionService:
         # rows, so they account identically for identical work.
         if not self.store_backend:
             return
+        if details is None:
+            details = (f"Applied {applied} of {targeted} candidate images "
+                       f"with {zone_count} zones")
         self.store_backend.log_audit(
             action_type="REDACTION",
-            entity_uid=machine_sn,
-            details=(f"Applied {applied} of {targeted} candidate images "
-                     f"with {zone_count} zones"))
+            entity_uid=selector_label(machine_sn),
+            details=details)
 
-    def _targets_for(self, rule_serial) -> List[Instance]:
-        """Every indexed instance a rule for `rule_serial` covers, in index order.
+    def _targets_for(self, rule) -> List[Instance]:
+        """Every indexed instance `rule` covers, in index order.
 
         Args:
-            rule_serial: The rule's `serial_number`, exact or `"*"`.
+            rule (dict): The machine rule: its `serial_number` (exact, `""`
+                or `"*"`) or its `match` selects (#1108).
 
         Returns:
-            List[Instance]: The covered instances (`rule_applies_to`).
+            List[Instance]: The covered instances (`rule_covers`).
         """
         targets = []
+        if "match" in rule:
+            # By equipment, series by series: a match is not a serial.
+            for equipment, instances in self.index._series:
+                if rule_covers(rule, equipment):
+                    targets.extend(instances)
+            return targets
+        rule_serial = rule.get("serial_number")
         for serial in self.index._index:
             if rule_applies_to(rule_serial, serial):
                 targets.extend(self.index.get_by_machine(serial))
@@ -744,28 +964,34 @@ class RedactionService:
                 secret to derive their UIDs under, as
                 `redact_machine_instances` raises.
         """
-        serial = machine_rules.get("serial_number")
+        # The rule's selector: its serial (`""` and `"*"` included), or its
+        # `match` (#1108). It keys the attestation hash and names the row.
+        serial = rule_selector(machine_rules)
         zones = machine_rules.get("redaction_zones", [])
 
-        if not serial:
+        # `is None`, never falsy: `""` is the serial-less selector (#1108).
+        if serial is None:
             if verbose:
                 self.logger.warning("Skipping rule with missing serial number.")
             return []
 
         if not zones:
             if verbose:
-                self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
+                self.logger.info(
+                    f"Machine {selector_label(serial)} has no redaction zones "
+                    f"configured. Skipping.")
             return []
 
-        # Every indexed serial this rule covers, by the one predicate the
-        # export's zones also ask. The index holds only series with
-        # a serial, so this is exact or "*" over those.
-        targets = self._targets_for(serial)
+        # Every indexed series this rule covers, by the one predicate the
+        # export's zones also ask: exact, `""` for the serial-less series,
+        # "*" over every series, or a match on the equipment (#1108).
+        targets = self._targets_for(machine_rules)
 
         if not targets:
             if verbose and serial != "*":
                 self.logger.warning(
-                    f"Config rule exists for {serial}, but no matching images found in Session.")
+                    f"Config rule exists for {selector_label(serial)}, but no "
+                    f"matching images found in Session.")
             return []
 
         valid_rois = zone_rois(
@@ -781,6 +1007,9 @@ class RedactionService:
         # `_one_task_per_instance` (#908).
         config_hash = _redaction_config_hash([serial], valid_rois)
 
+        # Before any task exists: a task run with nowhere to store its
+        # blanked frame would record a redaction it did not make (#1113).
+        self._require_backend()
         # The redacted UIDs are derived here, in the parent: the secret is
         # read once and never put on a task or on the service.
         secret = self._redaction_secret(project_secret)
@@ -808,6 +1037,10 @@ class RedactionService:
                 "rois": valid_rois,
                 "config_hash": config_hash,
                 "machine_sn": serial,
+                # The serials the hash was taken over, kept so the
+                # `burned_in_text` pass can take it again with its boxes
+                # beside the zones (#1108).
+                "serials": [serial],
                 "force": force
             })
 
@@ -866,6 +1099,7 @@ class RedactionService:
             task = {key: value for key, value in first.items() if key != "machine_sn"}
             task.update({
                 "rois": rois,
+                "serials": [task["machine_sn"] for task in group],
                 "config_hash": config_hash,
                 "new_sop_uid": _redacted_uid_for(first["instance"], config_hash, secret),
                 "pass_keys": [key for task in group for key in task.get("pass_keys", ())],
@@ -925,11 +1159,19 @@ class RedactionService:
         rois = task["rois"]
         config_hash = task["config_hash"]
         force = task.get("force", False)
+        # The `burned_in_text` pass's boxes (#1108), and whether they are
+        # the only redaction this instance takes. `.get`: a zone task from
+        # `prepare_redaction_tasks` carries neither.
+        frame_boxes = task.get("frame_boxes", ())
+        ocr_only = task.get("ocr_only", False)
         # Nothing in the `finally` reads a name bound inside the `try`. If
         # one ever does, pre-bind it here: an `UnboundLocalError` raised
         # *in* a `finally` replaces the return value.
 
         try:
+            # First, before the skip and the pixels: with nowhere to store
+            # the blanked frame, nothing may be written (#1113).
+            self._require_backend()
             # Skip if already redacted with the same configuration.
             #
             # `force` suppresses this and nothing else. The attestation is
@@ -951,8 +1193,10 @@ class RedactionService:
             # The whole zone list in one call, never a loop: the callee
             # rebinds `arr` locally when it copies a read-only array, so a
             # second call would get the pristine original again and only
-            # the last zone would survive.
-            modified = self._redact_instance_pixels(inst, arr, rois)
+            # the last zone would survive. The `burned_in_text` boxes go in
+            # the same call, for the same reason.
+            modified = self._redact_instance_pixels(inst, arr, rois,
+                                                    frame_boxes)
 
             if not modified:
                 # No configured zone landed inside this image: a
@@ -964,7 +1208,10 @@ class RedactionService:
                 return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             attested_from = _capture_attestation(inst)
-            self._apply_redaction_flags(inst)
+            if ocr_only:
+                self._apply_redaction_flags(inst, burned_in=False)
+            else:
+                self._apply_redaction_flags(inst)
             inst.regenerate_uid(task["new_sop_uid"])
             # Mark as redacted with this hash
             inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
@@ -1042,9 +1289,13 @@ class RedactionService:
                 "photometric_interpretation": inst.attributes.get("0028,0004"),
                 "attributes": {
                     "0008,0008": inst.attributes.get("0008,0008"),
-                    "0028,0301": inst.attributes.get("0028,0301"),
                     "0008,2111": inst.attributes.get("0008,2111"),
                     "_ISOCENTER_REDACTION_HASH": inst.attributes.get("_ISOCENTER_REDACTION_HASH"),
+                    # Not for an OCR-only redaction, which did not write
+                    # it: copying it would put a None where the source
+                    # held no element, and the export would write one.
+                    **({} if ocr_only else
+                       {"0028,0301": inst.attributes.get("0028,0301")}),
                 },
                 "sequences": {
                     k: v for k, v in inst.sequences.items() if k == "0008,9215"
@@ -1134,10 +1385,12 @@ class RedactionService:
             RuntimeError: Propagated from `redact_machine_instances` when
                 there is no project secret to derive a UID under.
         """
-        serial = machine_rules.get("serial_number")
+        # As `prepare_redaction_tasks` reads the rule (#1108).
+        serial = rule_selector(machine_rules)
         zones = machine_rules.get("redaction_zones", [])
 
-        if not serial:
+        # `is None`, never falsy: `""` is the serial-less selector (#1108).
+        if serial is None:
             if verbose:
                 self.logger.warning("Skipping rule with missing serial number.")
             return
@@ -1147,7 +1400,7 @@ class RedactionService:
                 self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
             return
 
-        targets = self._targets_for(serial)
+        targets = self._targets_for(machine_rules)
 
         if not targets:
             # Only warn if not wildcard (wildcard yielding 0 means empty store, which is fine)
@@ -1174,6 +1427,26 @@ class RedactionService:
                 show_progress=show_progress,
                 verbose=verbose,
                 project_secret=project_secret)
+
+    def _require_backend(self) -> None:
+        """Refuse to redact with no store backend to persist pixels to (#1113).
+
+        A redaction writes its record -- the new SOP Instance UID, the
+        hash, Image Type `DERIVED` and Burned In Annotation `NO` -- on the
+        promise that the blanked frame is stored. With no backend nothing
+        stores it, the loader keeps pointing at the original frame, and an
+        export writes the record over the original pixels.
+
+        Raises:
+            RuntimeError: When the service has no backend, or one that
+                cannot persist pixels.
+        """
+        if self.store_backend is None or not hasattr(
+                self.store_backend, "persist_pixel_data"):
+            raise RuntimeError(
+                "RedactionService has no store backend to persist the "
+                "redacted pixels to; nothing was redacted. Build it with "
+                "the session's store backend, or call Session.redact().")
 
     def _redaction_secret(self, project_secret: Optional[bytes]) -> bytes:
         """The project secret a redaction derives its UIDs under.
@@ -1229,7 +1502,8 @@ class RedactionService:
         (`record_redaction_pass`), before any raise.
 
         Args:
-            machine_sn (str): The serial number (for logging/auditing).
+            machine_sn: The rule's selector (`rule_selector`): its serial,
+                or `{"match": ...}` (#1108); hashed and audited.
             rois (List[tuple]): List of (y1, y2, x1, x2) ROIs.
             targets (List[Instance], optional): Pre-filtered list of instances.
             show_progress (bool): If True, shows progress bar.
@@ -1259,8 +1533,12 @@ class RedactionService:
         # `force` stays last in the signature and defaulted: callers pass
         # the first two arguments positionally.
         if targets is None:
-            targets = self.index.get_by_machine(machine_sn)
+            # A match selector is not an index key (#1108).
+            targets = (self._targets_for(machine_sn)
+                       if isinstance(machine_sn, dict)
+                       else self.index.get_by_machine(machine_sn))
         # Before the first instance, so a refusal changes nothing.
+        self._require_backend()
         secret = self._redaction_secret(project_secret)
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")
@@ -1523,7 +1801,7 @@ class RedactionService:
         return modified
 
     def _redact_instance_pixels(self, inst: Instance, arr,
-                                rois: List[tuple]) -> bool:
+                                rois: List[tuple], frame_boxes=()) -> bool:
         """
         Applies **every** ROI to one instance's pixel array, in one pass.
 
@@ -1544,9 +1822,13 @@ class RedactionService:
             inst (Instance): The instance being redacted.
             arr: Its pixel array, as `get_pixel_data()` returned it.
             rois (List[tuple]): Every (y1, y2, x1, x2) zone of the rule.
+            frame_boxes (Iterable[tuple]): `(frame, y1, y2, x1, x2)` per
+                box the `burned_in_text` pass found (#1108), each zeroed
+                on its own frame only. In this one call, with the zones,
+                for the reason this method is called once.
 
         Returns:
-            bool: True if any zone was applied.
+            bool: True if any zone or box was applied.
 
         Raises:
             ValueError: As `apply_redaction_to_array` raises it.
@@ -1577,9 +1859,27 @@ class RedactionService:
         # can correct a descriptor, and the redaction has to address the
         # array the way the instance now describes it.
         geometry = resolve_pixel_geometry(arr.shape, inst.attributes)
-        return self.apply_redaction_to_array(arr, rois, geometry=geometry)
+        modified = self.apply_redaction_to_array(arr, rois, geometry=geometry)
+        # Per frame, never through the zone call above, which zeroes a zone
+        # on every frame: OCR found the box on one frame, and a union over
+        # the frames would blank across a cine (#1108).
+        for frame, y1, y2, x1, x2 in frame_boxes:
+            if geometry.frames > 1:
+                # A view, so the zeroing lands in `arr`. `frames` is the
+                # array's first axis on every frames-major arm, the axis
+                # `_frames_for_ocr` split the read along.
+                target = arr[frame]
+            elif frame == 0:
+                target = arr
+            else:
+                raise ValueError(f"burned_in_text box for frame {frame} on "
+                                 f"an image of one frame")
+            if self.apply_redaction_to_array(target, [(y1, y2, x1, x2)],
+                                             geometry=geometry):
+                modified = True
+        return modified
 
-    def _apply_redaction_flags(self, inst: Instance):
+    def _apply_redaction_flags(self, inst: Instance, burned_in: bool = True):
         """
         Sets DICOM tags indicating Pixel Data modification.
 
@@ -1588,6 +1888,11 @@ class RedactionService:
 
         Args:
             inst (Instance): The instance to flag.
+            burned_in (bool): Write Burned In Annotation `NO`. False for an
+                instance only the `burned_in_text` pass redacted: OCR over
+                anatomy left fragments readable in the architect's
+                measurement, so OCR alone does not say the image holds no
+                burned-in text, and the source's value stands (#1108, Q5).
         """
 
         # 1. Image Type (0008,0008): the existing values are read and kept,
@@ -1600,8 +1905,11 @@ class RedactionService:
         inst.set_attr("0008,0008",
                       _derived_image_type(inst.attributes.get("0008,0008", [])))
 
-        # 2. Burned In Annotation (0028,0301) -> NO
-        inst.set_attr("0028,0301", _REDACTION_BURNED_IN)
+        # 2. Burned In Annotation (0028,0301) -> NO. Not for an OCR-only
+        # redaction, which leaves the value as found; the status-carry
+        # guard already accepts a flag "as captured".
+        if burned_in:
+            inst.set_attr("0028,0301", _REDACTION_BURNED_IN)
 
         # 3. Derivation Description (0008,2111)
         inst.set_attr("0008,2111", _REDACTION_DERIVATION_DESCRIPTION)

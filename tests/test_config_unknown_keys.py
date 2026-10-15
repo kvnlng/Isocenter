@@ -31,7 +31,7 @@ FIELDS = ("phi_tags", "rules", "date_jitter", "remove_private_tags",
 
 TOP_LEVEL_LIST = ("date_jitter, machines, phi_tags, privacy_profile, "
                   "remove_private_tags, version")
-RULE_LIST = "comment, manufacturer, model_name, redaction_zones, serial_number"
+RULE_LIST = "comment, manufacturer, match, model_name, redaction_zones, serial_number"
 
 
 def _set_sentinels(configuration, tmp_path):
@@ -96,7 +96,7 @@ def test_a_non_string_top_level_key_is_named(tmp_path):
 
 def test_a_file_carrying_every_top_level_key_loads(tmp_path):
     """The positive control. Kills an allowlist missing one key."""
-    tags, rules, jitter, remove_private, profile = _loaded(
+    tags, rules, jitter, remove_private, profile, _ = _loaded(
         tmp_path,
         'version: "2.0"\n'
         "privacy_profile: basic\n"
@@ -147,7 +147,7 @@ def test_a_misspelt_serial_key_is_named_before_the_missing_serial(tmp_path):
 
 def test_a_rule_carrying_every_known_key_loads(tmp_path):
     """Kills an allowlist missing `comment` or `manufacturer`."""
-    _, rules, _, _, _ = _loaded(
+    _, rules, _, _, _, _ = _loaded(
         tmp_path,
         "machines:\n  - serial_number: SN1\n    manufacturer: ACME\n"
         "    model_name: M1\n    comment: a note\n"
@@ -163,7 +163,7 @@ def test_a_zone_with_an_unknown_key_is_refused_and_note_is_allowed(tmp_path):
                                  "    redaction_zones: [{roi: [0, 4, 0, 4], nte: x}]\n")
     assert "Rule #0 (SN1), Zone #0: unknown key 'nte'" in message, message
     assert "note, roi" in message, message
-    _, rules, _, _, _ = _loaded(tmp_path, "machines:\n  - serial_number: SN1\n"
+    _, rules, _, _, _, _ = _loaded(tmp_path, "machines:\n  - serial_number: SN1\n"
                                 "    redaction_zones: [{roi: [0, 4, 0, 4], note: x}]\n")
     assert rules[0]["redaction_zones"][0]["note"] == "x"
 
@@ -283,7 +283,7 @@ def test_an_external_profile_with_a_version_loads(tmp_path):
     profile = tmp_path / "profile.yaml"
     profile.write_text('version: "2.0"\nphi_tags:\n  \'0010,0010\': {action: REMOVE}\n',
                        encoding="utf-8")
-    tags, _, _, _, profile_name = _loaded(tmp_path, f"privacy_profile: {profile}\n")
+    tags, _, _, _, profile_name, _ = _loaded(tmp_path, f"privacy_profile: {profile}\n")
     assert tags == {"0010,0010": {"action": "REMOVE"}}
     assert profile_name == str(profile)
 
@@ -315,7 +315,7 @@ def test_what_0_9_8_wrote_still_loads():
     ConfigLoader.load_unified_config(
         os.path.join(FIXTURES, "scaffolded_config_0_9_8.yaml"))
 
-    tags, rules, jitter, remove_private, profile = ConfigLoader.load_unified_config(
+    tags, rules, jitter, remove_private, profile, _ = ConfigLoader.load_unified_config(
         os.path.join(FIXTURES, "autosaved_config_0_9_8.yaml"))
     assert rules == [
         {"serial_number": "SN-KB-1", "model_name": "LOGIQ E9",
@@ -350,7 +350,7 @@ def test_a_0_9_8_autosave_with_null_metadata_still_loads():
     `update_rule("SN-1", {"comment": None})`, and committed verbatim. It
     loads, and the nulls load as the nulls it was saved from. Kills a null
     refused in any of the three rule fields."""
-    _, rules, _, _, _ = ConfigLoader.load_unified_config(
+    _, rules, _, _, _, _ = ConfigLoader.load_unified_config(
         os.path.join(FIXTURES, "autosaved_config_0_9_8_null_metadata.yaml"))
     assert rules == [{"serial_number": "SN-1", "manufacturer": None,
                       "model_name": None, "redaction_zones": [[0, 4, 0, 4]],
@@ -445,7 +445,7 @@ def test_add_rule_with_null_metadata_writes_a_file_that_loads(tmp_path):
     configuration = IsocenterConfiguration(config_path=str(path), auto_save=True)
     configuration.add_rule("SN-1", manufacturer=None, model_name=None, redaction_zones=[[0, 4, 0, 4]])
     configuration.update_rule("SN-1", {"comment": None})
-    _, rules, _, _, _ = ConfigLoader.load_unified_config(str(path))
+    _, rules, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
     assert rules[0]["manufacturer"] is None and rules[0]["comment"] is None
 
 

@@ -321,7 +321,7 @@ def test_a_hand_assigned_bare_name_is_written_as_assigned(tmp_path):
     saved = _parsed(path)
     assert saved["privacy_profile"] == "basic"
     assert list(saved["phi_tags"]) == [_D]
-    tags, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
+    tags, _, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
     assert tags == configuration.phi_tags
 
 

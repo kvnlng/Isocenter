@@ -79,14 +79,22 @@ _UNVERSIONED_MEANS = "2.0"
 # schema is one edit here, plus the minor bump `CONFIG_VERSION`'s comment
 # describes.
 _TOP_LEVEL_KEYS = frozenset({"version", "privacy_profile", "phi_tags",
-                             "date_jitter", "remove_private_tags", "machines"})
+                             "date_jitter", "remove_private_tags", "machines",
+                             "burned_in_text"})
 #: `comment` is the shipped knowledge bases' own field
 #: (`resources/redaction_rules.json`, `ctp_rules.json`) and what
 #: `create_config` and `save()` write; `manufacturer` is what `add_rule`
 #: writes. Both are metadata and nothing reads them, but refusing either
 #: would refuse the library's own output.
-_RULE_KEYS = frozenset({"serial_number", "manufacturer", "model_name",
-                        "redaction_zones", "comment"})
+#: `match` is the second selector (#1108): a rule has exactly one of it
+#: and `serial_number`. The two labels stay labels: `add_rule` writes
+#: `'Unknown'` for both, so reading them as selectors would stop every
+#: such rule matching.
+_RULE_KEYS = frozenset({"serial_number", "match", "manufacturer",
+                        "model_name", "redaction_zones", "comment"})
+#: What a `match:` selector compares, exactly, against a series'
+#: equipment (#1108).
+_MATCH_KEYS = frozenset({"manufacturer", "model_name"})
 #: `note` is written as data by `create_config` for every machine the
 #: knowledge base matches by serial, so it is a zone key.
 _ZONE_KEYS = frozenset({"roi", "note"})
@@ -98,6 +106,19 @@ _PHI_RULE_KEYS = frozenset({"name", "action", "value"})
 #: so any other key is refused: a profile carrying `privacy_profile: basic`
 #: beside one rule would otherwise load as that one rule.
 _PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
+#: The `burned_in_text` policy's keys (#1108). Joined the 2.0 row before
+#: 1.0.0 shipped it (owner ruling Q7, 2026-10-14). No `min_box_height`:
+#: word boxes of a 24 px name block measured 17-21 px, and noise boxes
+#: on anatomy 9-62 px, so a height floor misses text and spares no noise.
+_BURNED_IN_TEXT_KEYS = frozenset({"action", "min_confidence"})
+#: What the policy does with text OCR finds on an image, in the order the
+#: refusal lists them. Compared exactly, never case-folded: no `action`
+#: is folded anywhere in a configuration (#754).
+BURNED_IN_TEXT_ACTIONS = ("report", "redact", "withhold")
+#: The threshold when the file names none. Measured on 23 bundled
+#: anatomy-only images: no box at 80 or above, ten at 60 and above; the
+#: name blocks and most initials read at 86-96 (#1108, Q3).
+BURNED_IN_TEXT_DEFAULT_CONFIDENCE = 80
 
 # Null is read as absent for the five optional metadata strings -- a rule's
 # `manufacturer`, `model_name` and `comment`, a zone's `note`, a phi rule's
@@ -543,6 +564,78 @@ def _refuse_date_jitter_in_code(dj: Any) -> None:
     reason = _refused_date_jitter(dj)
     if reason is not None:
         raise ValueError(f"session.configuration: {reason}")
+
+
+def _refused_burned_in_text(policy: Any) -> Optional[str]:
+    """Why `policy` is not a `burned_in_text` this library applies, or None.
+
+    The one judge, for a file's (the loader) and for one assigned in code
+    (`redact()`, `export()`, `save()`, `create_config()`), so the two
+    cannot disagree or be worded twice. The caller prefixes its source.
+
+    Args:
+        policy: None (no policy), or a mapping with a required `action`
+            (one of `BURNED_IN_TEXT_ACTIONS`) and an optional
+            `min_confidence` (a number from 0 to 100, not a bool).
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        return (f"'burned_in_text' must be a mapping such as "
+                f"{{action: redact, min_confidence: 80}}, got {policy!r}")
+    reason = _unknown_keys(policy, _BURNED_IN_TEXT_KEYS, "", "burned_in_text's")
+    if reason is not None:
+        return f"'burned_in_text': {reason}"
+    action = policy.get("action")
+    if action is None:
+        return ("'burned_in_text' needs an 'action': one of "
+                f"{', '.join(BURNED_IN_TEXT_ACTIONS)}")
+    if action not in BURNED_IN_TEXT_ACTIONS:
+        return (f"'burned_in_text' action {action!r} is not one of "
+                f"{', '.join(BURNED_IN_TEXT_ACTIONS)} (exact spelling)")
+    if "min_confidence" in policy:
+        conf = policy["min_confidence"]
+        # A bool is not a number here, and a quoted "80" is text. NaN and
+        # the infinities fail the range test, which is written so they do.
+        if isinstance(conf, bool) or not isinstance(conf, (int, float)):
+            return (f"'burned_in_text' min_confidence must be a number from "
+                    f"0 to 100, got {conf!r} ({type(conf).__name__})")
+        if not 0 <= conf <= 100:
+            return (f"'burned_in_text' min_confidence must be a number from "
+                    f"0 to 100, got {conf!r}")
+    return None
+
+
+def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]:
+    """The policy with its default filled in, or None; refused when the
+    loader would refuse it.
+
+    Filled in so `{action: redact}` and `{action: redact,
+    min_confidence: 80}` are one policy wherever it is compared or hashed.
+
+    Args:
+        policy: What the file or the attribute holds.
+        source (str): Prefixes the refusal: the file's path, or
+            `session.configuration`.
+
+    Returns:
+        Optional[Dict[str, Any]]: `{action, min_confidence}`, a new dict,
+            or None.
+
+    Raises:
+        ValueError: `_refused_burned_in_text`'s refusal.
+    """
+    reason = _refused_burned_in_text(policy)
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
+    if policy is None:
+        return None
+    return {"action": policy["action"],
+            "min_confidence": policy.get("min_confidence",
+                                         BURNED_IN_TEXT_DEFAULT_CONFIDENCE)}
 
 
 def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
@@ -1378,6 +1471,42 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
         f"moved, set privacy_profile to its path")
 
 
+def _refused_match(match, label) -> None:
+    """Refuse a `match:` selector that cannot be compared as written (#1108).
+
+    Args:
+        match: The rule's `match` value.
+        label (str): The rule's label, for the message.
+
+    Raises:
+        ValueError: In this order: not a mapping; an unknown key; no key;
+            a value that is not a string (null included); a blank value.
+    """
+    if not isinstance(match, dict):
+        raise ValueError(
+            f"{label}: 'match' must be a mapping of manufacturer and/or "
+            f"model_name, got {match!r} ({type(match).__name__})")
+    reason = _unknown_keys(match, _MATCH_KEYS, "", "A match's")
+    if reason is not None:
+        raise ValueError(f"{label}: {reason}")
+    if not match:
+        raise ValueError(
+            f"{label}: 'match' names no field; give manufacturer and/or "
+            f"model_name, as the files spell them")
+    for key in sorted(match):
+        value = match[key]
+        # Null is not absent here: leaving the key out is how a field is
+        # left unmatched, and a null would compare with nothing.
+        if not isinstance(value, str):
+            raise ValueError(
+                f"{label}: match {key!r} must be a string, got {value!r} "
+                f"({type(value).__name__})")
+        if not value.strip():
+            raise ValueError(
+                f"{label}: match {key!r} {value!r} is blank; leave the key "
+                f"out to match any {key}")
+
+
 class ConfigLoader:
     """Loads and validates unified YAML configuration files (schema
     version 2), through static methods.
@@ -1391,7 +1520,8 @@ class ConfigLoader:
     @staticmethod
     def load_unified_config(
             filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]],
-                                    Dict[str, Any], bool, Optional[str]]:
+                                    Dict[str, Any], bool, Optional[str],
+                                    Optional[Dict[str, Any]]]:
         """Parse a unified YAML configuration (v2) into its parts.
 
         Every check runs before this returns, so a caller that assigns
@@ -1403,7 +1533,8 @@ class ConfigLoader:
 
         Returns:
             tuple: (phi_tags, machine_rules, date_jitter_config,
-            remove_private_tags, policy_base). `date_jitter_config` is
+            remove_private_tags, policy_base, burned_in_text).
+            `date_jitter_config` is
             `{min_days, max_days}`, `{-365, -1}` when the file has none;
             `remove_private_tags` defaults to True. The last element is
             what the policy was built on: a built-in profile's pinned
@@ -1411,7 +1542,9 @@ class ConfigLoader:
             external profile's path, `profiles.FLOOR` -- an object,
             compared with `is` -- for a file with no `privacy_profile`
             line, or None for `privacy_profile: none` and for an external
-            profile that contributed no rules.
+            profile that contributed no rules. `burned_in_text` is
+            `{action, min_confidence}` with the default filled in, or None
+            when the file holds no policy (#1108).
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -1420,8 +1553,9 @@ class ConfigLoader:
                 refuses, a `machines` that is not a list of mappings, a
                 machine rule `_validate_rule` refuses, a `date_jitter`
                 that is not `{min_days: int, max_days: int}` with
-                `min_days <= max_days`, and a `remove_private_tags` that
-                is not a bool.
+                `min_days <= max_days`, a `remove_private_tags` that
+                is not a bool, and a `burned_in_text` that
+                `_refused_burned_in_text` refuses.
         """
         # The version, the top-level keys, the phi_tags and the profile.
         data, base = _loaded_unified_config(filepath)
@@ -1431,7 +1565,8 @@ class ConfigLoader:
     def _checked_parts(
             data: Dict[str, Any], filepath: str,
             base: Any) -> tuple[Dict[str, Any], List[Dict[str, Any]],
-                                Dict[str, Any], bool, Any]:
+                                Dict[str, Any], bool, Any,
+                                Optional[Dict[str, Any]]]:
         """The rest of `load_unified_config`: the merged policy judged, the
         machines, `date_jitter` and `remove_private_tags` checked.
 
@@ -1507,8 +1642,13 @@ class ConfigLoader:
         for i, rule in enumerate(machine_rules):
             ConfigLoader._validate_rule(rule, i)
 
+        # A null `burned_in_text:` is absent, by owner ruling: a policy has
+        # no empty, and the one reading of "no value" is "no policy".
+        burned_in_text = _burned_in_text_policy(
+            data.get("burned_in_text"), filepath)
+
         return (phi_tags, machine_rules, date_jitter_config,
-                remove_private_tags, base)
+                remove_private_tags, base, burned_in_text)
 
     @staticmethod
     def clean_filename(filename: str) -> str:
@@ -1548,7 +1688,8 @@ class ConfigLoader:
 
         Raises:
             ValueError: In this order: an unknown key; a `serial_number`
-                that is missing or empty, not a `str`, or blank;
+                that is missing (null), not a `str`, or blank (whitespace
+                only; `""` is the serial-less selector, #1108);
                 `manufacturer`, `model_name` or `comment` present, not
                 null and not a string; `redaction_zones` not a list; per
                 zone, a zone neither a list nor a mapping, an unknown zone
@@ -1571,9 +1712,26 @@ class ConfigLoader:
         if reason is not None:
             raise ValueError(f"{label}: {reason}")
 
-        if sn is None or sn == "":
-            raise ValueError(f"Rule #{index}: Missing 'serial_number'.")
-        if not isinstance(sn, str):
+        # `""` is a selector, not a missing serial (#1108): it names every
+        # series with no Device Serial Number, which is what ingest holds
+        # for one. Null is still missing: YAML reads a bare
+        # `serial_number:` as null, and the author meant something.
+        if "match" in rule:
+            # The other selector (#1108); exactly one per rule, so which
+            # series a rule covers never depends on how two selectors in
+            # one rule would combine.
+            if "serial_number" in rule:
+                raise ValueError(
+                    f"{label}: a rule has exactly one of 'serial_number' and "
+                    f"'match'; write two rules to select by both")
+            _refused_match(rule["match"], label)
+        elif sn is None:
+            raise ValueError(
+                f"Rule #{index}: Missing 'serial_number'; write "
+                f"serial_number: \"\" (quoted) for the series with no Device "
+                f"Serial Number, \"*\" for every series, or match: with "
+                f"manufacturer and/or model_name to select by device.")
+        elif not isinstance(sn, str):
             # An unquoted serial is a YAML number -- `0123` loads as the
             # octal 83 -- and never equals a Device Serial Number, so the
             # rule would match nothing and the machine would not be redacted.
@@ -1583,12 +1741,15 @@ class ConfigLoader:
                 f"machine (serial_number: \"0123\", not serial_number: 0123), "
                 f"because YAML reads unquoted digits as a number, and a "
                 f"leading 0 as octal: 0123 loads as 83")
-        if not sn.strip():
-            # As an empty serial is: no Device Serial Number is blank, so
-            # the rule would match no machine and redact nothing.
+        elif sn and not sn.strip():
+            # No Device Serial Number is blank (ingest holds an absent one
+            # as `""`), so the rule would match no machine and redact
+            # nothing.
             raise ValueError(
                 f"Rule #{index}: 'serial_number' {sn!r} is blank; give the "
-                f"serial as it is written on the machine")
+                f"serial as it is written on the machine, or write "
+                f"serial_number: \"\" for the series with no Device Serial "
+                f"Number")
 
         for key in ("manufacturer", "model_name", "comment"):
             # Null is absent (the comment above `_VERSION_SHAPE`).

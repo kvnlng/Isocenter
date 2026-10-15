@@ -38,7 +38,7 @@ def test_execute_config_crash_repro(tmp_path):
         session.store.patients.append(p)
 
         # Re-index
-        service = RedactionService(session.store)
+        service = RedactionService(session.store, session.store_backend)
 
         # This should NOT raise AttributeError anymore
         try:

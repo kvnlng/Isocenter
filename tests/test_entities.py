@@ -49,23 +49,21 @@ def test_from_parts_treats_either_identifying_field_as_equipment(man, model):
     assert eq.device_serial_number == "SN-1"
 
 
-@pytest.mark.parametrize("serial", ["", "SN-ONLY"])
-def test_from_parts_returns_none_when_neither_identifying_field_is_present(
-        serial):
-    """A serial alone is not equipment -- today's rule, pinned as it stands (#290).
+def test_from_parts_returns_none_when_no_field_is_present():
+    """Nothing identifies the device: no equipment (#290)."""
+    assert Equipment.from_parts("", "", "") is None
+    assert Equipment.from_parts(None, None, None) is None
 
-    This is a characterization pin, not an endorsement. The serial is
-    what every downstream rule matches on (`_match_machine_rule` gives an
-    exact serial precedence over every other match), so a series whose
-    file carries DeviceSerialNumber with an empty Manufacturer and no
-    ManufacturerModelName ingests with no equipment and is skipped by
-    redaction without a word. Widening the predicate to the serial is a
-    semantic change filed separately from #290, which is a
-    behaviour-preserving refactor; when that issue lands, this test
-    flips with it. Until then it kills a `from_parts` that quietly
-    widened on one route and not the others.
-    """
-    assert Equipment.from_parts("", "", serial) is None
+
+def test_a_serial_alone_is_equipment():
+    """A serial with no manufacturer and no model is equipment (review of
+    #1111, B1, owner ruling of 2026-10-14; the flip #290's pin promised).
+    Every rule matches on the serial, so a series holding one with no
+    equipment was reached by no exact rule, and by `""` though it has a
+    serial. Kills a `from_parts` that still asks for a manufacturer or a
+    model, and one that drops the serial."""
+    assert Equipment.from_parts("", "", "SN-ONLY") == Equipment("", "", "SN-ONLY")
+    assert Equipment.from_parts(None, None, "SN-ONLY") == Equipment(None, None, "SN-ONLY")
 
 
 def test_from_parts_does_not_normalise_its_inputs():
@@ -78,19 +76,24 @@ def test_from_parts_does_not_normalise_its_inputs():
     assert Equipment.from_parts("ACME", None, None) == Equipment("ACME", None, None)
 
 
-def test_set_equipment_with_no_identifying_field_leaves_the_series_without_equipment():
+def test_set_equipment_applies_the_rule_ingest_and_reload_apply():
     """`SeriesBuilder.set_equipment` applies the same rule as ingest and reload (#290).
 
     It was the fourth construction site and the only one with no
-    predicate: `.set_equipment("", "", "SN")` set an `Equipment` that
-    `save_all` wrote faithfully and neither `load_all` nor `load_patient`
-    could return. The loss now shows at construction rather than at
-    reload. No in-tree caller passes empty identifying fields.
+    predicate. Since the review of #1111 (B1) a serial alone is equipment
+    on every route, so `.set_equipment("", "", "SN")` keeps it, and only a
+    call with none of the three leaves the series without equipment.
     """
+    serial_only = (DicomBuilder.start_patient("P1", "Test^Patient")
+                   .add_study("1.2.3", "20230101")
+                   .add_series("1.2.3.4", "CT", 1)
+                   .set_equipment("", "", "SN"))
+    assert serial_only.series.equipment.device_serial_number == "SN"
+
     without = (DicomBuilder.start_patient("P1", "Test^Patient")
                .add_study("1.2.3", "20230101")
                .add_series("1.2.3.4", "CT", 1)
-               .set_equipment("", "", "SN"))
+               .set_equipment("", "", ""))
     assert without.series.equipment is None
 
     partial = (DicomBuilder.start_patient("P1", "Test^Patient")

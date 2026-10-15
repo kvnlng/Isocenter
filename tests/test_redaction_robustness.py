@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import MagicMock, call
 from isocenter.services import RedactionService
+from support.memory_backend import MemoryBackend
 from isocenter.entities import Instance, Series, Study, Patient, Equipment
 from isocenter.io_handlers import DicomStore
 
@@ -32,7 +33,7 @@ def test_redaction_crash_prevention(mock_store):
     series.instances.append(inst)
 
     # 2. Run Redaction
-    service = RedactionService(store)
+    service = RedactionService(store, MemoryBackend())
     service.logger = MagicMock()
 
     # Patch the CLASS method because slots prevent instance monkeypatching

@@ -78,13 +78,13 @@ def test_a_quoted_false_says_why_it_would_have_read_as_true(tmp_path):
     ("true", True), ("false", False), ("yes", True), ("no", False)])
 def test_yaml_booleans_load_as_booleans(tmp_path, value, expected):
     """Kills an over-eager check refusing YAML 1.1 booleans."""
-    _, _, _, remove_private, _ = _loaded(tmp_path, f"remove_private_tags: {value}\n")
+    _, _, _, remove_private, _, _ = _loaded(tmp_path, f"remove_private_tags: {value}\n")
     assert remove_private is expected
 
 
 def test_an_absent_remove_private_tags_is_true(tmp_path):
     """Kills the default changed."""
-    _, _, _, remove_private, _ = _loaded(tmp_path, "privacy_profile: basic\n")
+    _, _, _, remove_private, _, _ = _loaded(tmp_path, "privacy_profile: basic\n")
     assert remove_private is True
 
 
@@ -102,14 +102,15 @@ def test_a_numeric_serial_is_refused(tmp_path, serial, shown):
 
 
 def test_a_quoted_numeric_serial_loads_as_written(tmp_path):
-    _, rules, _, _, _ = _loaded(tmp_path, 'machines:\n  - serial_number: "0123"\n')
+    _, rules, _, _, _, _ = _loaded(tmp_path, 'machines:\n  - serial_number: "0123"\n')
     assert rules[0]["serial_number"] == "0123"
 
 
-@pytest.mark.parametrize("line", ["serial_number:", 'serial_number: ""'])
-def test_an_empty_serial_is_still_missing(tmp_path, line):
-    """The existing refusal, kept for null and the empty string."""
-    message = _refused(tmp_path, f"machines:\n  - {line}\n")
+def test_a_null_serial_is_still_missing(tmp_path):
+    """The existing refusal, kept for null. The empty string is the
+    serial-less selector since #1108
+    (`test_a_rule_can_name_series_with_no_serial.py`)."""
+    message = _refused(tmp_path, "machines:\n  - serial_number:\n")
     assert "Missing 'serial_number'" in message, message
 
 
@@ -202,7 +203,7 @@ def test_an_integer_date_jitter_is_refused(tmp_path):
 
 def test_a_fixed_shift_is_spelled_with_equal_bounds(tmp_path):
     """What replaces the int form loads, and means a fixed shift."""
-    _, _, jitter, _, _ = _loaded(
+    _, _, jitter, _, _, _ = _loaded(
         tmp_path, "privacy_profile: basic\ndate_jitter: {min_days: -5, max_days: -5}\n")
     assert jitter == {"min_days": -5, "max_days": -5}
 

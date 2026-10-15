@@ -276,6 +276,14 @@ class IsocenterConfiguration:
     #: Survives `load_config()`, which never assigns it: it is the
     #: session's choice, not the file's, and a later load is written to.
     auto_save: bool = False
+    #: The `burned_in_text` policy (#1108): `{"action": "report" |
+    #: "redact" | "withhold", "min_confidence": 0..100}`, or None for no
+    #: OCR anywhere. Tier 2. Set by `load_config()` on every load, with
+    #: the default confidence filled in; assigned by hand, it is judged
+    #: by the loader's rule where it is used. Not in the PHI policy
+    #: fingerprint, as zones are not. Not a constructor parameter, so the
+    #: frozen field list and `__init__` are unchanged.
+    burned_in_text: Optional[Dict[str, Any]] = field(default=None, init=False)
     # Whether `phi_tags` came from the floor policy: a bare configuration,
     # or a loaded file with no `privacy_profile` line. `Session.load_config`
     # sets it on every load. The floor and `privacy_profile: none` both
@@ -338,7 +346,9 @@ class IsocenterConfiguration:
                 that base would bring the rule back on reload; and when
                 `date_jitter` is a range the loader would refuse (#731);
                 and when `config_path` is a file declaring a newer
-                `version` minor than this library's (#784). Nothing is
+                `version` minor than this library's (#784). Also when
+                `burned_in_text` holds a policy the loader would refuse
+                in a file (#1108). Nothing is
                 written.
             OSError: The write's own error, unchanged.
         """
@@ -362,7 +372,8 @@ class IsocenterConfiguration:
 
         Raises:
             ValueError: When `phi_tags` lacks a rule its base supplies, or
-                `date_jitter` is a range the loader refuses (#731).
+                `date_jitter` is a range the loader refuses (#731), or
+                `burned_in_text` is a policy the loader refuses (#1108).
         """
         # First, before the file is opened: a range the loader refuses
         # would make a file that does not load (#731). Under auto-save this
@@ -398,6 +409,14 @@ class IsocenterConfiguration:
         data["date_jitter"] = self.date_jitter
         data["remove_private_tags"] = self.remove_private_tags
         data["machines"] = machines
+        # Only when set: a file with no policy carries no line, so a
+        # library from before the key still loads what this one saves.
+        # Judged first, so a policy assigned by hand that the loader would
+        # refuse is not written into a file that does not load.
+        policy = config_manager._burned_in_text_policy(
+            self.burned_in_text, "session.configuration")
+        if policy is not None:
+            data["burned_in_text"] = policy
         return yaml.dump(data, sort_keys=False, default_flow_style=False,
                          width=float("inf"))
 
@@ -544,9 +563,11 @@ class IsocenterConfiguration:
         Returns:
             bool: Whether a rule was removed.
         """
+        # A `match:` rule has no serial and is never removed by one (#1108).
         before = len(configuration.rules)
         configuration.rules = [r for r in configuration.rules
-                               if r.get("serial_number") != serial_number]
+                               if "match" in r
+                               or r.get("serial_number") != serial_number]
         return len(configuration.rules) < before
 
     def add_rule(self, serial_number: str, manufacturer: str = "Unknown",
@@ -726,15 +747,19 @@ class IsocenterConfiguration:
         not a copy.
 
         Exact spelling, first match. Redaction does not use this: `redact()`
-        and the export apply every matching rule, `"*"` included.
+        and the export apply every matching rule, `"*"` included. A
+        `match:` rule (#1108) has no serial, and is not returned here; nor
+        do `update_rule` and `delete_rule` see one. Write it in the file,
+        or append it to `rules`.
 
         Args:
-            serial_number (str): The serial number to find.
+            serial_number (str): The serial number to find; `""` finds the
+                rule for series with no Device Serial Number.
 
         Returns:
             Optional[Dict[str, Any]]: The rule dictionary if found, else None.
         """
         for r in self.rules:
-            if r.get("serial_number") == serial_number:
+            if "match" not in r and r.get("serial_number") == serial_number:
                 return r
         return None

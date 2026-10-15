@@ -13,6 +13,7 @@ Load it with `session.load_config("isocenter_config.yaml")`. The policy in force
 | `privacy_profile` | `"basic@2026c"`, an external profile's path, or `None` for the floor and for `none` |
 | `config_path` | the file `save()` writes: the one `load_config()` read, or `None` |
 | `auto_save` | whether each change is written to `config_path` as it is made; `False` by default |
+| `burned_in_text` | the [`burned_in_text`](#burned-in-text) policy, `{"action": ..., "min_confidence": ...}` with the default filled in, or `None` |
 
 A session that loads no file has the defaults in the table below, and applies the [floor policy](#the-floor-policy).
 
@@ -26,6 +27,7 @@ A session that loads no file has the defaults in the table below, and applies th
 | **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). | `true` |
 | **[phi_tags](#phi-tags)** | Overrides or adds tag rules, keyed by quoted `"gggg,eeee"` hex (e.g., `"0010,0010"` for Patient's Name). | none: the profile's rules only |
 | **[machines](#pixel-redaction-machines)** | Burned-in text redaction zones for specific equipment. | none: no pixels are redacted |
+| **[burned_in_text](#burned-in-text)** | Read every image with OCR and redact, report or withhold the text found on it. | none: nothing is read by OCR |
 
 ---
 
@@ -101,7 +103,9 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` | `{min_days: -365, max_days: -1}` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
 | top level | `machines` | a list of machine rules | no rules |
-| machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits | required |
+| top level | `burned_in_text` | a mapping of `action` (`report`, `redact` or `withhold`; required) and `min_confidence` (a number from 0 to 100); `null` is absent | no OCR |
+| machine rule | `serial_number` | a string, **quoted** if it is all digits; `""` (quoted) for the series with no Device Serial Number, `"*"` for every series; not whitespace only | required, unless the rule has `match` |
+| machine rule | `match` | a mapping of `manufacturer` and/or `model_name`, each a non-blank string; a rule has exactly one of `match` and `serial_number` | none |
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
 | machine rule | `redaction_zones` | a list of zones | no zones |
 | zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) | |
@@ -362,10 +366,10 @@ answer: under implicit VR every private tag is held as `UN`, and a
 A kept binary value whose bytes are not a whole number of its VR's words
 -- an `OL` of six bytes, say -- is written `UN` instead, and the
 instance's export draws one `WARNING` row naming the tag, the VR it was
-read with and the one it was written under. The VR is
-visible only in an explicit-VR export -- the compressed export of an
-instance with pixels; an uncompressed export, and any export of an
-instance without pixels, is Implicit VR and carries no VR on the wire.
+read with and the one it was written under. Every export states the
+VR on the wire: the compressed export is JPEG 2000 and every other file
+is Explicit VR Little Endian
+([#1107](https://github.com/kvnlng/Isocenter/issues/1107)).
 **A private element is written under the VR its source stated, and
 `UN` when the source stated none.** A source states no VR for a private
 element in two ways: it is Implicit VR, which names none, or it is
@@ -384,9 +388,8 @@ removed the element. And a rule
 that needs to read the value -- a date shift on a private key -- cannot
 read `UN` bytes: the proposal is declined with a `REMEDIATION_DECLINED`
 row and the run grades `REVIEW_REQUIRED`; `REMOVE`, `EMPTY` and a valued
-`REPLACE` act on it as on any private value, and an explicit-VR export
-writes the replacement as `LO` and the emptied element as a zero-length
-`UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
+`REPLACE` act on it as on any private value, and the export writes the
+replacement as `LO` and the emptied element as a zero-length `UN`. An Explicit VR Big Endian source that says `UN` draws one `WARNING`
 row per such element at ingest, since the byte order of `UN` words is
 unknown. The private creator element itself is always read as `LO`.
 
@@ -401,10 +404,8 @@ two. A *private* `PN` holding several values, kept with
 source's values, and no audit row
 ([#951](https://github.com/kvnlng/Isocenter/issues/951)). One case is
 still written differently: a private `PN` holding a value of more than 64
-characters, which `PN` cannot carry. An export in an Explicit VR transfer
-syntax (`use_compression=True`) writes that element under `UT`, the same
-text; an Implicit VR export (`use_compression=False`) names no VR and
-carries the same text. Either way the export writes one `WARNING` row
+characters, which `PN` cannot carry. The export writes that element
+under `UT`, the same text, with or without compression, and one `WARNING` row
 naming the tag and both VRs, so the run grades `REVIEW_REQUIRED`
 ([#937](https://github.com/kvnlng/Isocenter/issues/937)).
 
@@ -636,8 +637,20 @@ machines:
       - [0, 100, 0, 500]
 ```
 
-* **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
-* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
+* **`serial_number`**: Exact match for `0018,1000`; `""` (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer, no model and no serial (it has no equipment); a series whose files carry a serial and nothing else is matched by that serial, not by `""`; or `"*"` for every series, with a serial or without. A bare `serial_number:` is null, and is refused as missing.
+* **`match`**: select by device instead of serial, for a machine whose files carry no serial number:
+
+    ```yaml
+    machines:
+      - match:
+          manufacturer: "FUJI PHOTO FILM CO. LTD."
+          model_name: IRS
+        redaction_zones:
+          - [60, 90, 60, 380]
+    ```
+
+    Give `manufacturer`, `model_name`, or both. Each is compared exactly with Manufacturer `(0008,0070)` and Manufacturer's Model Name `(0008,1090)` as the files spell them, case and spaces included, and the rule covers every series of that device whatever its serial, with one or without. A series whose files name neither is never matched. A rule has exactly one selector: `serial_number` or `match`, never both. The `manufacturer` and `model_name` keys beside `serial_number` are still labels, read by nothing, because `add_rule()` writes `Unknown` for both by default. `get_rule()`, `update_rule()` and `delete_rule()` look a rule up by its serial and do not see a `match` rule: write it in the file, or append it to `configuration.rules`.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule, a `match` rule, a `""` rule and a `"*"` rule, or two rules for one serial, each zero their zones. No rule takes precedence over another for what is zeroed. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
   * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
@@ -645,10 +658,37 @@ machines:
 
 To find where a machine draws its text, see [Zone Discovery](ocr.md#setting-up-new-machines-zone-discovery).
 
+### Burned-in Text
+
+Reads every image with OCR and acts on the text it finds, image by image: for text that moves from one image to the next, which no zone describes, and for series with no Device Serial Number, which no machine rule reaches ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)). **Default:** absent, so nothing is read by OCR and nothing below happens. It needs the `ocr` extra and the `tesseract` binary ([OCR prerequisites](ocr.md#prerequisites)).
+
+```yaml
+burned_in_text:
+  action: redact        # report | redact | withhold (required)
+  min_confidence: 80    # 0 to 100; default 80
+```
+
+* **`action`** (required, spelled exactly):
+  * `redact`: `redact()` blanks each box OCR finds, on its own frame, widened on every side by 15% of its height (at least 2 pixels). The image takes a new SOP Instance UID, derived from its source UID, the zones and the boxes, and `DERIVED` and the derivation code; Burned In Annotation `(0028,0301)` is left as the source had it, because OCR alone does not show the image holds no text (see [What OCR misses](ocr.md#what-ocr-misses)). Each redacted image is read once more, and text still found writes a `WARNING` audit row.
+  * `report`: `redact()` changes no pixel and writes one `WARNING` row per image with text; the export writes the image and one more `WARNING` row for it.
+  * `withhold`: `redact()` changes no pixel; the export leaves out every image with text, with one `WARNING` row each.
+* **`min_confidence`**: a box is kept when tesseract's confidence is this or more. There is no length filter: two letters (`JT`) are text.
+* `null` (a bare `burned_in_text:`) is the same as no key. An unknown key, an action spelled any other way, or a `min_confidence` that is not a number from 0 to 100 is refused when the file loads.
+
+**`redact()` reads pixels and records what it read; `export(check_burned_in=True)` reads them too and records nothing** ([`check_burned_in=True`](export-output.md#check_burned_intrue)). `redact()` reads every image that holds pixels, serial or not, after zeroing on a copy the zones its machine rules hold, so text a zone covers is not found again, and records on each image the boxes it found (never the text), the tesseract version and the threshold and zones it read under. An image already read under the same threshold and zones, whose pixels are still the ones it read, is not read again by OCR; `redact(force=True)` reads every image again and keeps the boxes recorded before. `redact()` with this key present and OCR unavailable raises `OcrUnavailableError` before anything, the zones included. `redact_by_machine()` does not run it.
+
+**The record names the pixels it read.** Each image's record holds a sha256 digest of the pixels the read saw, after the zones (so a zone's own redaction leaves it current), and a redacted image's digest is moved to its redacted pixels by the read after redaction. Pixels set on an image afterwards, by `set_pixel_data()` or anything else, are pixels no read saw: the export treats the image as never checked, and the next `redact()` reads it again without `force`.
+
+**The export reads the record and runs no OCR**, unless `check_burned_in=True`, which reads the pixels with OCR instead ([`check_burned_in=True`](export-output.md#check_burned_intrue)). It loads each image's frame once to check the record's digest. That check runs one image at a time in the calling process, while the export is planned and before any export worker starts. Under `redact` and `withhold`, an image that holds pixels and was never read under the policy's threshold and zones (`redact()` not called since `load_config()`, an image it could not read in full, or pixels changed since the read) is withheld, with a `WARNING` row saying to run `redact()`; under `report` it is not withheld, with that row. Under `redact`, an image with text is withheld until a redaction carrying its boxes has landed. The `EXPORT` row counts the images the policy withheld apart from the ones the pre-export scan withheld. An image with no pixels (an SR, an RT object, a waveform) is never read, gated or counted. Not seen: an `Instance` built by hand with only a `file_path`, never ingested or loaded, reads as holding no pixels.
+
+**The grade.** A `redact` pass that blanked text does not cost the PASS by itself. The rows that do are text still found after redaction, images OCR could not read, and images the export gated as unchecked. Each pass writes one `REDACTION` row with its counts and the tesseract version, and section 5 of the report says what the passes of the session did.
+
+The key is not part of the [policy fingerprint](#what-an-exported-file-says-about-itself): adding it moves no `(0012,0063)` value and no recorded PHI status.
+
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A series with no Device Serial Number gets no scaffolded rule; write `serial_number: ""` for it yourself. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file
