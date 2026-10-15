@@ -2402,7 +2402,8 @@ otherwise.</p>
   <code>save()</code> itself still returns before the write and raises nothing for
   it, and <code>close()</code> does not raise for it. <code>save(sync=True)</code>, <code>export()</code>
   and <code>compact()</code> save the session themselves, as before. <code>redact()</code>
-  with no rules loaded returns 0 before it drains.
+  with no rules loaded and no <code>burned_in_text</code> policy returns 0 before
+  it drains.
   A session that ends, by <code>close()</code> or when the process exits with the
   session still referenced and never closed, with a failed background
   save that no later save has healed
@@ -2429,6 +2430,13 @@ otherwise.</p>
   unavailable to the calling process; and <code>RuntimeError</code> after the pass
   when at least one instance failed and none could be read. A scan that
   read some instances returns its report with the others in <code>failures</code>.</li>
+<li><code>redact()</code>, when the configuration holds a <code>burned_in_text</code> policy:
+  <code>RuntimeError</code> when the <code>ocr</code> extra or the <code>tesseract</code> binary is
+  unavailable to the calling process, after the entry drain and before
+  anything is redacted, the configured zones included. So does
+  <code>export(check_burned_in=True)</code> under that policy, before its pre-export
+  scan and its save. An instance the
+  pass cannot read is a <code>WARNING</code> row, not a raise.</li>
 <li><code>generate_report()</code> and <code>generate_manifest()</code>: <code>ValueError</code> for a
   <code>format</code> other than the spellings above, naming them; no file is
   written.</li>
@@ -2657,6 +2665,12 @@ CHANGELOG entry naming both spellings:</p>
   <code>get_ingested_paths()</code>, <code>get_superseded_uids()</code>, <code>save_state()</code> and
   <code>load_state()</code>. Its <code>patients</code> list is frozen (above); what else the
   store object offers is not.</li>
+<li><strong><code>IsocenterConfiguration.burned_in_text</code></strong>, the <code>burned_in_text</code>
+  policy a configuration file holds (<code>{"action": ..., "min_confidence":
+  ...}</code> or <code>None</code>), as <code>load_config()</code> sets it. The file key and what
+  each action does are documented on the
+  <a href="../../configuration/#burned-in-text">Configuration</a> page; the
+  attribute's name and shape are not frozen.</li>
 <li><strong><code>profiles.FLOOR_POLICY</code></strong>, the name the floor policy is held under.
   What the floor <em>contains</em> is frozen (above); the name is not.</li>
 <li><strong><code>entities</code> helpers</strong> <code>clone_sequences</code>, <code>exported_patient_id</code>,

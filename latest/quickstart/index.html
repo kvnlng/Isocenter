@@ -2051,7 +2051,7 @@
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"/path/to/export_clean"</span><span class="p">,</span> <span class="n">check_burned_in</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p>Files land at <code>&lt;folder&gt;/Subject_&lt;PatientID&gt;/Study_…/Series_…/&lt;SOPInstanceUID&gt;.dcm</code>. The folder names are built from the exported values, so run <code>anonymize()</code> first.</p>
-<p><code>check_burned_in=True</code> runs <code>audit()</code> again and withholds every instance that still carries an identifier in its tags, with a <code>WARNING</code> row for each. It checks tags, not pixels. Burned-in text is handled by redaction zones and found by <code>scan_pixel_content()</code>.</p>
+<p><code>check_burned_in=True</code> runs <code>audit()</code> again and withholds every instance that still carries an identifier in its tags, with a <code>WARNING</code> row for each. Without a <a href="../configuration/#burned-in-text"><code>burned_in_text</code></a> policy it checks tags, not pixels, and burned-in text is handled by redaction zones and found by <code>scan_pixel_content()</code>; with one, it also reads the pixels it is about to write with OCR.</p>
 <h3 id="what-the-export-writes">What the export writes</h3>
 <p><a href="../export-output/">What the export writes</a> covers the layout, compression and colour images, the de-identification markers, and what <code>check_burned_in=True</code> and <code>verify_readback=True</code> add.</p>
 <h2 id="6-report">6. Report</h2>

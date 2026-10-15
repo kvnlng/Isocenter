@@ -2080,7 +2080,9 @@ rule for a tag its base supplies, because a file naming
 that base would bring the rule back on reload; and when
 <code>date_jitter</code> is a range the loader would refuse (#731);
 and when <code>config_path</code> is a file declaring a newer
-<code>version</code> minor than this library's (#784). Nothing is
+<code>version</code> minor than this library's (#784). Also when
+<code>burned_in_text</code> holds a policy the loader would refuse
+in a file (#1108). Nothing is
 written.</p>
               </div>
             </td>
@@ -2604,7 +2606,10 @@ is then as it was.</p>
         <p>Return the rule for a serial number: the rule dictionary itself,
 not a copy.</p>
 <p>Exact spelling, first match. Redaction does not use this: <code>redact()</code>
-and the export apply every matching rule, <code>"*"</code> included.</p>
+and the export apply every matching rule, <code>"*"</code> included. A
+<code>match:</code> rule (#1108) has no serial, and is not returned here; nor
+do <code>update_rule</code> and <code>delete_rule</code> see one. Write it in the file,
+or append it to <code>rules</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2627,7 +2632,8 @@ and the export apply every matching rule, <code>"*"</code> included.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The serial number to find.</p>
+                <p>The serial number to find; <code>""</code> finds the
+rule for series with no Device Serial Number.</p>
               </div>
             </td>
             <td>

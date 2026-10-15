@@ -1813,9 +1813,11 @@ block such as</p>
 <li><strong>Coordinates are converted.</strong> CTP writes <code>(x, y, width, height)</code>;
   Isocenter zones are <code>[row_start, row_end, col_start, col_end]</code> in pixels,
   so <code>(x,y,w,h)</code> becomes <code>[y, y+h, x, x+w]</code>.</li>
-<li><strong>No serial number.</strong> CTP matches a manufacturer and model; Isocenter
-  matches a machine by its Device Serial Number. A block with a manufacturer
-  but no model gets <code>model_name: Unknown</code>.</li>
+<li><strong>No serial number.</strong> CTP matches a manufacturer and model; the imported
+  rule carries no selector. A block with a manufacturer but no model gets
+  <code>model_name: Unknown</code>. Add a <code>serial_number</code>, or replace the labels with a
+  <code>match:</code> naming the manufacturer and model exactly as the files spell
+  them (CTP's <code>containsIgnoreCase</code> is not exact).</li>
 </ul>
 <h2 id="use-the-rules-in-a-configuration">Use the rules in a configuration</h2>
 <p>The output is a rule list, not a configuration: <code>load_config()</code> refuses it

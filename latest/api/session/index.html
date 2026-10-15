@@ -1395,6 +1395,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="redact">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.session.DicomSession.redact--1108-when-the-configuration-holds-one-this-call-also-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1108). When the configuration holds one, this call also reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2141,6 +2158,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="redact">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#isocenter.session.DicomSession.redact--1108-when-the-configuration-holds-one-this-call-also-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1108). When the configuration holds one, this call also reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -2925,7 +2959,9 @@ the session's <code>phi_tags</code>.</p>
 loader would refuse in the file (#731), and <code>save()</code>'s
 refusal when <code>phi_tags</code> lacks a rule its base supplies
 (#741), or when <code>output_path</code> is a file declaring a newer
-<code>version</code> minor than this library's (#784). Nothing is
+<code>version</code> minor than this library's (#784); and when
+<code>configuration.burned_in_text</code> is a policy the loader would
+refuse in a file (#1108). Nothing is
 written.</p>
               </div>
             </td>
@@ -4284,6 +4320,27 @@ several rules match (an exact rule and <code>"*"</code>) is redacted once, with
 every matching rule's zones. A redacted instance takes a new SOP
 Instance UID, derived from its source SOP Instance UID and the zones
 of every rule that matches it, whatever order the work runs in.</p>
+<p><strong>The <code>burned_in_text</code> policy</strong> (<code>configuration.burned_in_text</code>,</p>
+<h4 id="isocenter.session.DicomSession.redact--1108-when-the-configuration-holds-one-this-call-also-reads">1108). When the configuration holds one, this call also reads</h4>
+<p>every instance that holds pixels with OCR, serial or not, after
+the zones its rules hold, and records the boxes of the text it
+finds at <code>min_confidence</code> or above (never the text). The policy's
+<code>action</code> decides the rest: <code>redact</code> blanks each box, padded, on
+its own frame, in the same task as the zones, and the instance's
+UID is derived from the zones and the boxes; <code>report</code> writes one
+<code>WARNING</code> audit row per instance with text and changes no pixel;
+<code>withhold</code> changes nothing here, and <code>export()</code> withholds each
+instance with text. The record names the pixels the read saw by a
+digest; an instance already read under this threshold and these
+zones, whose pixels still match it, is not read again by OCR
+unless <code>force=True</code>. A redacted instance is read once more, which
+moves the digest to its redacted pixels; a failure of that read
+writes a <code>WARNING</code> row and leaves it unchecked; text still found writes a
+<code>WARNING</code> row. An instance only OCR redacted carries <code>DERIVED</code>
+and the derivation code but keeps Burned In Annotation as the
+source had it. Every pass writes one <code>REDACTION</code> row with its
+counts and the tesseract version. <code>redact_by_machine()</code> does not
+run it.</p>
 <p><strong>Concurrency.</strong> <code>compact()</code> on any thread of this session raises
 while a pass runs. While a <code>compact()</code> is saving or rewriting, this
 call waits (bounded, see <code>Raises</code>) and then proceeds. A worker whose
@@ -4335,7 +4392,9 @@ UID and its matching rules' zones: unchanged zones give the UID and
 exported filename it already has, and other zones give
 another. <code>file_path</code> becomes None either way. To repair a
 store redacted by 0.9.0 or earlier, see Upgrading from
-0.9.x.</p>
+0.9.x. Under a <code>burned_in_text</code> policy, also read every
+instance again, and keep every box its record held beside
+the ones found now.</p>
               </div>
             </td>
             <td>
@@ -4361,14 +4420,16 @@ store redacted by 0.9.0 or earlier, see Upgrading from
             </td>
             <td>
               <div class="doc-md-description">
-                <p>How many instances had at least one configured zone
-applied to their pixels. An instance a rule <em>matched</em> but
-whose every zone fell outside the image is <strong>not</strong> counted;
-a zone with no area fails its instance and the pass raises
-<code>RedactionError</code>, so it is never counted. Zero means nothing
-was redacted: no rules loaded, no image matched one, every
-match was already redacted under this configuration, or no
-zone landed.</p>
+                <p>How many instances had at least one configured zone, or
+one <code>burned_in_text</code> box, applied to their pixels. An
+instance a rule <em>matched</em> but whose every zone fell outside
+the image is <strong>not</strong> counted; a zone with no area fails its
+instance and the pass raises <code>RedactionError</code>, so it is
+never counted. Zero means nothing was redacted: no rules
+loaded and no <code>burned_in_text</code> policy, no image matched
+one, every match was already redacted under this
+configuration, no zone landed, or the policy's action is
+<code>report</code> or <code>withhold</code>.</p>
               </div>
             </td>
           </tr>
@@ -4418,7 +4479,32 @@ it. Also, before the pass starts, what a background
 <code>save()</code> that failed raises when the entry drain runs it
 again and it still fails; one that has passed is saved
 there and nothing is raised (#941). A call with no rules
-loaded returns 0 before that drain.</p>
+loaded and no <code>burned_in_text</code> policy returns 0 before
+that drain.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A <code>burned_in_text</code> assigned in code that
+<code>load_config()</code> would refuse in a file, before the drain.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="OcrUnavailableError">OcrUnavailableError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A <code>RuntimeError</code>, when a
+<code>burned_in_text</code> policy is configured and the <code>ocr</code> extra
+or the tesseract binary is unavailable: after the drain,
+before any task, UID, pixel or row, zones included.</p>
               </div>
             </td>
           </tr>
@@ -4478,7 +4564,9 @@ call asks for threads, which outranks the variable, and a
 configuration.</p>
 <p>Replaces the configuration's rules with one rule for
 <code>serial_number</code> holding <code>roi</code>, runs <code>redact()</code>, and restores the
-original rules afterwards, also when <code>redact()</code> raises.</p>
+original rules afterwards, also when <code>redact()</code> raises. A
+<code>burned_in_text</code> policy is set aside and restored the same way, so
+this call runs no OCR (#1108).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4501,7 +4589,9 @@ original rules afterwards, also when <code>redact()</code> raises.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The device serial number to target.</p>
+                <p>The device serial number to target; <code>""</code>
+for every series with no Device Serial Number, <code>"*"</code> for
+every series, as in a rule (#1108).</p>
               </div>
             </td>
             <td>
@@ -4742,7 +4832,8 @@ burned-in text appears.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The Device Serial Number of the machine.</p>
+                <p>The Device Serial Number of the machine;
+<code>""</code> for every series with no Device Serial Number.</p>
               </div>
             </td>
             <td>
@@ -4930,6 +5021,20 @@ under a policy that is neither the one in force nor one this
 session scanned under, or with no recorded policy (a store written
 before 1.0); the report then grades <code>REVIEW_REQUIRED</code>.
 <code>check_burned_in=True</code> re-audits first, so it never does.</p>
+<p>Under a <code>burned_in_text</code> policy (#1108) the <code>dicom</code> format reads
+each instance's record of the last <code>redact()</code> pass, and runs no
+OCR; it loads each frame once to check that the record names the
+pixels the instance holds now. With <code>check_burned_in=True</code> it
+reads the pixels it is about to write with OCR instead (see
+<code>_export_dicom</code>). An instance that holds pixels and
+was never checked under the policy's threshold and zones, or whose
+pixels changed after the read, is withheld under <code>redact</code> and
+<code>withhold</code>, and written under <code>report</code>; one with text found is
+withheld under <code>withhold</code>, withheld under <code>redact</code> until a
+redaction carrying its boxes has landed, and written under
+<code>report</code>. Each writes one <code>WARNING</code> row, and the <code>EXPORT</code> row
+counts the withheld apart. An instance with no pixels is neither
+read nor gated.</p>
 <p>Either format also writes one <code>WARNING</code> audit row, and logs one
 <code>WARNING</code> line, when <code>patient_ids</code> names an ID no patient in the
 session holds: counted by position, never named, and the report
@@ -5096,6 +5201,20 @@ ID in a list), bytes-like, not iterable, or holds an element
 that is not a <code>str</code>; and on <code>dicom</code> for a <code>subset</code> that is
 bytes-like, not iterable, or holds an element that is not a
 <code>str</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="OcrUnavailableError">OcrUnavailableError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>On <code>dicom</code> with <code>check_burned_in=True</code>
+under a <code>burned_in_text</code> policy, when the <code>ocr</code> extra or
+the tesseract binary is unavailable (#1108); a
+<code>RuntimeError</code>, raised before the tag scan, the save, any
+row or any file.</p>
               </div>
             </td>
           </tr>
@@ -5963,7 +6082,20 @@ requested"), and the <code>EXPORT</code> row says how many were
 withheld. An export that withheld everything returns an
 empty summary and does not raise: nothing failed. An
 instance outside <code>subset</code> is not withheld; it was never
-asked for.</p>
+asked for. Under a <code>burned_in_text</code> policy (#1108), it
+also reads with OCR every planned instance that holds
+pixels, as it is about to be written, after the
+configured zones; that read, not the record of the last
+<code>redact()</code>, decides the instance: text found is withheld
+under <code>redact</code> and <code>withhold</code> and written under <code>report</code>;
+nothing found is written; a read that failed is withheld
+under <code>redact</code> and <code>withhold</code> and written under <code>report</code>.
+Each writes one <code>WARNING</code> row naming the instance, the
+count and the frames, never the text. The read changes
+nothing in the session: it redacts no pixel and moves no
+UID. With the <code>ocr</code> extra or the tesseract binary
+unavailable it raises <code>OcrUnavailableError</code> before the
+scan, the save and any row.</p>
               </div>
             </td>
             <td>
@@ -6191,7 +6323,22 @@ does not take, before anything is flushed or written.</p>
                 <p><code>subset</code> is a DataFrame carrying none of
 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
 PatientID, or a query string that does not run against
-the cohort report.</p>
+the cohort report; or <code>configuration.burned_in_text</code> is
+a policy the loader would refuse in a file (#1108), before
+the pre-export scan and the save.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="OcrUnavailableError">OcrUnavailableError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>check_burned_in=True</code> under a
+<code>burned_in_text</code> policy with the <code>ocr</code> extra or the
+tesseract binary unavailable (#1108); a <code>RuntimeError</code>,
+raised before the tag scan, the save, any row or any file.</p>
               </div>
             </td>
           </tr>

@@ -1048,6 +1048,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#redacting-the-text-ocr-finds-on-each-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redacting the text OCR finds on each image
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Redacting the text OCR finds on each image">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-ocr-misses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What OCR misses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#checking-zones-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1848,6 +1876,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#redacting-the-text-ocr-finds-on-each-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redacting the text OCR finds on each image
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Redacting the text OCR finds on each image">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-ocr-misses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What OCR misses
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#checking-zones-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1984,7 +2040,11 @@
 <li><strong>Check</strong> that the zones you configured cover the text actually present: <code>scan_pixel_content()</code>.</li>
 <li><strong>Fix</strong> the zones from what the check found: <code>auto_remediate_config()</code>.</li>
 </ol>
-<p>OCR runs only when you call one of these. None of <code>redact()</code>, <code>export()</code> or the compliance grade runs OCR: a <code>PASS</code> says the zones you wrote were applied, not that the rest of each image is free of text. <code>export(check_burned_in=True)</code> re-runs the tag scan (<code>audit()</code>); it does not look for text in the pixels.</p>
+<p>And, for text that moves from image to image, or images whose series carry no Device Serial Number, which no zone reaches:</p>
+<ol>
+<li><strong>Redact, report or withhold</strong> the text found on each image: the <a href="../configuration/#burned-in-text"><code>burned_in_text</code></a> configuration key, applied by <code>redact()</code> (<a href="#redacting-the-text-ocr-finds-on-each-image">below</a>).</li>
+</ol>
+<p>OCR runs only when you call one of the first three, or, with <code>burned_in_text</code> configured, <code>redact()</code> or <code>export(check_burned_in=True)</code>. Plain <code>export()</code> and the compliance grade never run OCR: without <code>burned_in_text</code>, a <code>PASS</code> says the zones you wrote were applied, not that the rest of each image is free of text. Without <code>burned_in_text</code>, <code>export(check_burned_in=True)</code> re-runs the tag scan (<code>audit()</code>) and does not look for text in the pixels; with it, it also reads every image it is about to write (<a href="../export-output/#check_burned_intrue"><code>check_burned_in=True</code></a>).</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <p>OCR needs two things. The <code>ocr</code> extra, which brings <code>pytesseract</code> (quoted,
 because zsh expands unquoted brackets):</p>
@@ -2005,7 +2065,10 @@ because zsh expands unquoted brackets):</p>
 </div>
 <p>Without either, <code>scan_pixel_content()</code> and <code>discover_redaction_zones()</code> raise
 <code>OcrUnavailableError</code>, a <code>RuntimeError</code>, naming what is missing, before they scan
-anything. <code>pixel_analysis.HAS_OCR</code> says only whether <code>pytesseract</code> imported; it
+anything. So does <code>redact()</code> when the configuration holds <code>burned_in_text</code>,
+before it redacts anything, the zones included, and
+<code>export(check_burned_in=True)</code>, before its tag scan; <code>load_config()</code> still loads
+such a file, so one file serves machines with and without OCR. <code>pixel_analysis.HAS_OCR</code> says only whether <code>pytesseract</code> imported; it
 does not check the binary. If you point <code>pytesseract.pytesseract.tesseract_cmd</code>
 at a tesseract that is not on <code>PATH</code>, the scan uses that one.</p>
 <p><strong>When an image cannot be read.</strong> <code>scan_pixel_content()</code> lists each instance
@@ -2026,7 +2089,7 @@ lists the variables that change either choice.
 Run either from a script whose top level is guarded by
 <code>if __name__ == "__main__":</code>, as the examples below are.</p>
 <h2 id="setting-up-new-machines-zone-discovery">Setting Up New Machines (Zone Discovery)</h2>
-<p>A new machine in your configuration has no zones: <code>create_config()</code> writes an empty <code>redaction_zones</code> list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. <code>discover_redaction_zones()</code> runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot.</p>
+<p>A new machine in your configuration has no zones: <code>create_config()</code> writes an empty <code>redaction_zones</code> list for each machine it does not recognise. The same model in the same room tends to draw its text in the same place every time. <code>discover_redaction_zones()</code> runs OCR over a random sample of one machine's instances and reports where text was found, so you can write zones from what the data does rather than from one screenshot. <code>serial_number=""</code> samples every series with no Device Serial Number, a series with no equipment at all included; the comparison is exact, so <code>"*"</code> is a literal here, not every series.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
@@ -2129,11 +2192,29 @@ not from a candidate's <code>box</code>, which is <code>[x, y, w, h]</code>.</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">50</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">80</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">20</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">220</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>Or in code, with <code>session.configuration.add_rule()</code> or <code>update_rule()</code> (see <a href="../configuration/#programmatic-configuration">Programmatic Configuration</a>), then <code>session.configuration.save()</code>.</p>
+<h2 id="redacting-the-text-ocr-finds-on-each-image">Redacting the text OCR finds on each image</h2>
+<p>A zone is a rectangle on every image of one machine. Text that moves (a technologist's initials, a name block placed wherever the operator clicked), and images whose series carry no Device Serial Number, need a reading of each image instead. That is the <code>burned_in_text</code> key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">burned_in_text</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span><span class="w">        </span><span class="c1"># report | redact | withhold</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">min_confidence</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+</code></pre></div>
+<p>With it loaded, <code>redact()</code> reads every image that holds pixels with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at <code>min_confidence</code> or more, whatever its length, and records the boxes on the image, never the text. Under <code>redact</code> it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under <code>report</code> and <code>withhold</code> it changes no pixel, and the export writes the image with a row, or leaves it out with a row. <a href="../configuration/#burned-in-text">Configuration</a> has the whole contract: the export gate, the rows, the grade.</p>
+<p>Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.</p>
+<p>The boxes depend on the tesseract build and its language data. The same image, threshold and zones under the same tesseract give the same boxes, and so the same UID and the same pixels; another tesseract may find other boxes, and then the image takes another UID, which is right, since its pixels differ. The version is in each image's record and in the pass's <code>REDACTION</code> row.</p>
+<h3 id="what-ocr-misses">What OCR misses</h3>
+<p>Measured on bundled images with text drawn on them, and on 35 MIDI-B validation images (<a href="https://github.com/kvnlng/Isocenter/issues/1108">#1108</a>):</p>
+<ul>
+<li><strong>Faint or short text.</strong> Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (<code>ICG</code>) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.</li>
+<li><strong>Text over anatomy is read in fragments.</strong> On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (<code>E</code>, <code>1970-</code>), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a <code>WARNING</code> row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing <code>NO</code>.</li>
+<li><strong>Labels you may want are blanked too.</strong> Technique labels (<code>PA</code>, <code>PORTABLE</code>, <code>ERECT</code>) and ultrasound measurement text were read at 95 and above, and <code>redact</code> blanks them. Single drawn <code>L</code>/<code>R</code> side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.</li>
+<li><strong>Palette-colour images</strong> are read as their palette indices.</li>
+</ul>
+<p>A <code>PASS</code> after a <code>redact</code> pass says what OCR found was blanked, not that each image is free of text. Use <code>report</code> first on a cohort you have not looked at.</p>
 <h2 id="checking-zones-verification">Checking Zones (Verification)</h2>
 <p><code>scan_pixel_content()</code> runs OCR over the images of the machines you configured and reports the text your zones do not cover. It does not report text inside a zone, so labels your zones already black out do not appear.</p>
 <h3 id="how-it-works">How it works</h3>
 <ol>
-<li><strong>Match</strong>: each instance is matched to every rule that covers its series' Device Serial Number, exactly or by <code>"*"</code>, as <code>redact()</code> reads them.</li>
+<li><strong>Match</strong>: each instance is matched to every rule that covers its series, exactly by serial, by <code>""</code> (no serial), by <code>"*"</code> or by <code>match:</code>, as <code>redact()</code> reads them.</li>
 <li><strong>Scan</strong>: OCR finds every text region in the image.</li>
 <li><strong>Filter</strong>: each region is compared with the <code>redaction_zones</code> of every matching rule:<ul>
 <li><strong>Covered</strong>: at least 80% of the region lies in one zone. Not reported.</li>
@@ -2143,75 +2224,75 @@ not from a candidate's <code>box</code>, which is <code>[x, y, w, h]</code>.</p>
 </li>
 </ol>
 <p>Text of two characters or fewer is skipped as noise.</p>
-<p><strong>Zones the scan reads.</strong> The zones <code>redact()</code> and <code>export()</code> apply: both forms a rule accepts, <code>[y1, y2, x1, x2]</code> and <code>{roi: [y1, y2, x1, x2]}</code>, from every rule that covers the instance's machine, an exact rule and a <code>"*"</code> rule alike. A zone that does not hold exactly four values is not a zone here either.</p>
-<p><strong>What is scanned.</strong> Only instances of a machine a rule covers, by exact serial or <code>"*"</code>, and only when at least one of the rules covering it has a zone. So:</p>
+<p><strong>Zones the scan reads.</strong> The zones <code>redact()</code> and <code>export()</code> apply: both forms a rule accepts, <code>[y1, y2, x1, x2]</code> and <code>{roi: [y1, y2, x1, x2]}</code>, from every rule that covers the instance's machine, an exact rule, a <code>""</code> rule, a <code>match:</code> rule and a <code>"*"</code> rule alike. A zone that does not hold exactly four values is not a zone here either.</p>
+<p><strong>What is scanned.</strong> Only instances of a machine a rule covers, by exact serial, <code>""</code>, <code>"*"</code> or <code>match:</code>, and only when at least one of the rules covering it has a zone. So:</p>
 <ul>
 <li>a session that has loaded no configuration, or whose rules are all fresh from <code>create_config()</code> with empty <code>redaction_zones</code>, scans nothing: it prints "No matching configured instances found to scan." with how many instances it skipped, counting those of machines no rule names apart from those whose rules have no zone, and returns an empty report;</li>
-<li>a series with no Device Serial Number is never scanned, not even by a <code>"*"</code> rule, as <code>redact()</code> never redacts one.</li>
+<li>a series with no Device Serial Number is scanned under a <code>""</code>, <code>"*"</code> or <code>match:</code> rule with a zone, as <code>redact()</code> redacts it. <code>scan_pixel_content(serial_number="")</code> is still no filter: it scans every configured series, not only the serial-less ones.</li>
 </ul>
 <p>Load a configuration whose rules have zones first:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-12345"</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Sono1"</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">30</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># name banner, top left</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-12345"</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Sono1"</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">30</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># name banner, top left</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"dicom_data/"</span><span class="p">)</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="c1"># Every configured machine that has zones</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="c1"># OR: one machine</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="n">serial_number</span><span class="o">=</span><span class="s2">"SN-12345"</span><span class="p">)</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks."</span><span class="p">)</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>    <span class="k">for</span> <span class="n">finding</span> <span class="ow">in</span> <span class="n">report</span><span class="p">:</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s1">'leak_type'</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</code></pre></div>
-<p><code>finding.value</code> is the text OCR read, which may be misread (<code>SMITH4JOHN</code> for <code>SMITH^JOHN</code>), and <code>finding.entity_uid</code> is the SOP Instance UID. Text the scan finds is counted in section 5 of the compliance report and does not change the grade; an instance it could not read does.</p>
-<p>After changing the zones, scan again: a report with no findings means every text region OCR found is at least 80% covered.</p>
-<h2 id="automated-remediation">Automated Remediation</h2>
-<p><code>auto_remediate_config()</code> turns a scan's findings into zone changes: a <code>NEW_LEAK</code> becomes a new zone around its text, and a <code>PARTIAL_LEAK</code> grows the zone that covers most of it, in place (a <code>{roi: [...]}</code> zone keeps its <code>note</code>). A <code>NEW_LEAK</code> on a machine that only a <code>"*"</code> rule covers becomes a new rule for that machine's serial, with its manufacturer, model and the new zone, rather than a zone on <code>"*"</code>, which would redact that region on every machine's images. A <code>PARTIAL_LEAK</code> whose zone is the <code>"*"</code> rule's does the same with the grown zone: <code>"*"</code> is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="c1"># 1. Scan</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="c1"># 2. Apply suggestions to the in-memory configuration</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="n">count</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">auto_remediate_config</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> fixes."</span><span class="p">)</span>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>        <span class="c1"># 3. Scan again to confirm</span>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>        <span class="n">report_v2</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report_v2</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks left."</span><span class="p">)</span>  <span class="c1"># 0 when the new zones cover everything</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>
-<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        <span class="c1"># 4. Write the file load_config() read. To write another file,</span>
-<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>        <span class="c1">#    set session.configuration.config_path first.</span>
-<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>        <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
-<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"dicom_data/"</span><span class="p">)</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="c1"># Every configured machine that has zones</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="c1"># OR: one machine</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="n">serial_number</span><span class="o">=</span><span class="s2">"SN-12345"</span><span class="p">)</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks."</span><span class="p">)</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    <span class="k">for</span> <span class="n">finding</span> <span class="ow">in</span> <span class="n">report</span><span class="p">:</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s1">'leak_type'</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p><code>finding.value</code> is the text OCR read, which may be misread (<code>SMITH4JOHN</code> for <code>SMITH^JOHN</code>), and <code>finding.entity_uid</code> is the SOP Instance UID. Text the scan finds is counted in section 5 of the compliance report and does not change the grade; an instance it could not read does.</p>
+<p>After changing the zones, scan again: a report with no findings means every text region OCR found is at least 80% covered.</p>
+<h2 id="automated-remediation">Automated Remediation</h2>
+<p><code>auto_remediate_config()</code> turns a scan's findings into zone changes: a <code>NEW_LEAK</code> becomes a new zone around its text, and a <code>PARTIAL_LEAK</code> grows the zone that covers most of it, in place (a <code>{roi: [...]}</code> zone keeps its <code>note</code>). A <code>NEW_LEAK</code>'s zone goes to the narrowest rule covering the machine: its exact serial rule, else the first <code>match:</code> rule, else, for a series with no serial, its <code>""</code> rule. A <code>NEW_LEAK</code> on a machine that only a <code>"*"</code> rule covers becomes a new rule for that machine's serial (<code>serial_number: ""</code> for a series with none), with its manufacturer, model and the new zone, rather than a zone on <code>"*"</code>, which would redact that region on every machine's images. A suggested <code>""</code> rule covers every series with no serial, whatever its device; to confine the zone to one device, write a <code>match:</code> rule for its manufacturer and model instead. A <code>PARTIAL_LEAK</code> whose zone is the <code>"*"</code> rule's does the same with the grown zone: <code>"*"</code> is never widened. A zone the rule already holds, in either form, is not added again. It changes the configuration in memory and returns the number of changes.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="c1"># 1. Scan</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    <span class="c1"># 2. Apply suggestions to the in-memory configuration</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="n">count</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">auto_remediate_config</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> fixes."</span><span class="p">)</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>        <span class="c1"># 3. Scan again to confirm</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>        <span class="n">report_v2</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report_v2</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks left."</span><span class="p">)</span>  <span class="c1"># 0 when the new zones cover everything</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>        <span class="c1"># 4. Write the file load_config() read. To write another file,</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>        <span class="c1">#    set session.configuration.config_path first.</span>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>        <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a>    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
 <p>Read the zones it added before you keep them: a zone around a word OCR misread, or around text that is not an identifier, blacks out those pixels in every image from that machine.</p>
 <h2 id="configuration-reference">Configuration Reference</h2>
 <p>Your <code>isocenter_config.yaml</code> defines the zones used for verification. See <a href="../configuration/#pixel-redaction-machines">Pixel Redaction</a> for the full rule format.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-12345"</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"CT-Scanner-X"</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="c1"># [y1, y2, x1, x2] (row start, row end, column start, column end)</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># Top-Left Info Box</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">400</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">450</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">400</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># Bottom-Right Label</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-12345"</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"CT-Scanner-X"</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">      </span><span class="c1"># [y1, y2, x1, x2] (row start, row end, column start, column end)</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># Top-Left Info Box</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">400</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">450</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">400</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># Bottom-Right Label</span>
 </code></pre></div>
 <h2 id="api-reference">API Reference</h2>
 <p><code>scan_pixel_content()</code>, <code>discover_redaction_zones()</code> and <code>auto_remediate_config()</code> are documented on the <a href="../api/session/">Session API</a> page, and <code>DiscoveryResult</code> and the verification classes on the <a href="../api/ocr/">OCR API</a> page.</p>

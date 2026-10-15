@@ -1120,6 +1120,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#burned-in-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Burned-in Text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#generating-configuration-templates" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2226,6 +2237,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#burned-in-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Burned-in Text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#generating-configuration-templates" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2459,6 +2481,10 @@
 <td style="text-align: left;"><code>auto_save</code></td>
 <td style="text-align: left;">whether each change is written to <code>config_path</code> as it is made; <code>False</code> by default</td>
 </tr>
+<tr>
+<td style="text-align: left;"><code>burned_in_text</code></td>
+<td style="text-align: left;">the <a href="#burned-in-text"><code>burned_in_text</code></a> policy, <code>{"action": ..., "min_confidence": ...}</code> with the default filled in, or <code>None</code></td>
+</tr>
 </tbody>
 </table>
 <p>A session that loads no file has the defaults in the table below, and applies the <a href="#the-floor-policy">floor policy</a>.</p>
@@ -2501,6 +2527,11 @@
 <td style="text-align: left;"><strong><a href="#pixel-redaction-machines">machines</a></strong></td>
 <td style="text-align: left;">Burned-in text redaction zones for specific equipment.</td>
 <td style="text-align: left;">none: no pixels are redacted</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong><a href="#burned-in-text">burned_in_text</a></strong></td>
+<td style="text-align: left;">Read every image with OCR and redact, report or withhold the text found on it.</td>
+<td style="text-align: left;">none: nothing is read by OCR</td>
 </tr>
 </tbody>
 </table>
@@ -2608,10 +2639,22 @@ see <a href="../migration/#configuration-files">Configuration files</a> on the u
 <td style="text-align: left;">no rules</td>
 </tr>
 <tr>
+<td style="text-align: left;">top level</td>
+<td style="text-align: left;"><code>burned_in_text</code></td>
+<td style="text-align: left;">a mapping of <code>action</code> (<code>report</code>, <code>redact</code> or <code>withhold</code>; required) and <code>min_confidence</code> (a number from 0 to 100); <code>null</code> is absent</td>
+<td style="text-align: left;">no OCR</td>
+</tr>
+<tr>
 <td style="text-align: left;">machine rule</td>
 <td style="text-align: left;"><code>serial_number</code></td>
-<td style="text-align: left;">a non-blank string, <strong>quoted</strong> if it is all digits</td>
-<td style="text-align: left;">required</td>
+<td style="text-align: left;">a string, <strong>quoted</strong> if it is all digits; <code>""</code> (quoted) for the series with no Device Serial Number, <code>"*"</code> for every series; not whitespace only</td>
+<td style="text-align: left;">required, unless the rule has <code>match</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">machine rule</td>
+<td style="text-align: left;"><code>match</code></td>
+<td style="text-align: left;">a mapping of <code>manufacturer</code> and/or <code>model_name</code>, each a non-blank string; a rule has exactly one of <code>match</code> and <code>serial_number</code></td>
+<td style="text-align: left;">none</td>
 </tr>
 <tr>
 <td style="text-align: left;">machine rule</td>
@@ -2965,10 +3008,10 @@ answer: under implicit VR every private tag is held as <code>UN</code>, and a
 <p>A kept binary value whose bytes are not a whole number of its VR's words
 -- an <code>OL</code> of six bytes, say -- is written <code>UN</code> instead, and the
 instance's export draws one <code>WARNING</code> row naming the tag, the VR it was
-read with and the one it was written under. The VR is
-visible only in an explicit-VR export -- the compressed export of an
-instance with pixels; an uncompressed export, and any export of an
-instance without pixels, is Implicit VR and carries no VR on the wire.
+read with and the one it was written under. Every export states the
+VR on the wire: the compressed export is JPEG 2000 and every other file
+is Explicit VR Little Endian
+(<a href="https://github.com/kvnlng/Isocenter/issues/1107">#1107</a>).
 <strong>A private element is written under the VR its source stated, and
 <code>UN</code> when the source stated none.</strong> A source states no VR for a private
 element in two ways: it is Implicit VR, which names none, or it is
@@ -2987,9 +3030,8 @@ removed the element. And a rule
 that needs to read the value -- a date shift on a private key -- cannot
 read <code>UN</code> bytes: the proposal is declined with a <code>REMEDIATION_DECLINED</code>
 row and the run grades <code>REVIEW_REQUIRED</code>; <code>REMOVE</code>, <code>EMPTY</code> and a valued
-<code>REPLACE</code> act on it as on any private value, and an explicit-VR export
-writes the replacement as <code>LO</code> and the emptied element as a zero-length
-<code>UN</code>. An Explicit VR Big Endian source that says <code>UN</code> draws one <code>WARNING</code>
+<code>REPLACE</code> act on it as on any private value, and the export writes the
+replacement as <code>LO</code> and the emptied element as a zero-length <code>UN</code>. An Explicit VR Big Endian source that says <code>UN</code> draws one <code>WARNING</code>
 row per such element at ingest, since the byte order of <code>UN</code> words is
 unknown. The private creator element itself is always read as <code>LO</code>.</p>
 <p><strong>A Person Name holding several values is kept as the source wrote it.</strong>
@@ -3003,10 +3045,8 @@ two. A <em>private</em> <code>PN</code> holding several values, kept with
 source's values, and no audit row
 (<a href="https://github.com/kvnlng/Isocenter/issues/951">#951</a>). One case is
 still written differently: a private <code>PN</code> holding a value of more than 64
-characters, which <code>PN</code> cannot carry. An export in an Explicit VR transfer
-syntax (<code>use_compression=True</code>) writes that element under <code>UT</code>, the same
-text; an Implicit VR export (<code>use_compression=False</code>) names no VR and
-carries the same text. Either way the export writes one <code>WARNING</code> row
+characters, which <code>PN</code> cannot carry. The export writes that element
+under <code>UT</code>, the same text, with or without compression, and one <code>WARNING</code> row
 naming the tag and both VRs, so the run grades <code>REVIEW_REQUIRED</code>
 (<a href="https://github.com/kvnlng/Isocenter/issues/937">#937</a>).</p>
 <p><strong>Two values in an element a series is described by.</strong> Manufacturer,
@@ -3284,32 +3324,62 @@ section but does not change the grade.</p>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <ul>
-<li><strong><code>serial_number</code></strong> (Required): Exact match for <code>0018,1000</code>, or <code>"*"</code> for every series that has one. A series with no Device Serial Number matches no rule.</li>
-<li><strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones. <code>redact()</code> redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in (<a href="https://github.com/kvnlng/Isocenter/issues/908">#908</a>). The export applies them whether or not <code>redact()</code> has run.</li>
-<li><strong><code>redaction_zones</code></strong>: List of regions to zero out.</li>
-<li>Format: <code>[y1, y2, x1, x2]</code> (Row Start, Row End, Col Start, Col End), or <code>{"roi": [y1, y2, x1, x2]}</code>, the shape the shipped knowledge base uses and <code>create_config()</code> copies for a machine it recognises.</li>
-<li>Coordinates are 0-indexed.</li>
-<li>End must be strictly greater than start on both axes. <code>load_config()</code> accepts a zone whose start equals its end, but it selects no pixels, and <code>redact()</code> fails every instance it applies to with <code>RedactionError</code>.</li>
+<li><strong><code>serial_number</code></strong>: Exact match for <code>0018,1000</code>; <code>""</code> (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer, no model and no serial (it has no equipment); a series whose files carry a serial and nothing else is matched by that serial, not by <code>""</code>; or <code>"*"</code> for every series, with a serial or without. A bare <code>serial_number:</code> is null, and is refused as missing.</li>
+<li>
+<p><strong><code>match</code></strong>: select by device instead of serial, for a machine whose files carry no serial number:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">match</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">      </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="s">"FUJI</span><span class="nv"> </span><span class="s">PHOTO</span><span class="nv"> </span><span class="s">FILM</span><span class="nv"> </span><span class="s">CO.</span><span class="nv"> </span><span class="s">LTD."</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IRS</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">90</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">380</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Give <code>manufacturer</code>, <code>model_name</code>, or both. Each is compared exactly with Manufacturer <code>(0008,0070)</code> and Manufacturer's Model Name <code>(0008,1090)</code> as the files spell them, case and spaces included, and the rule covers every series of that device whatever its serial, with one or without. A series whose files name neither is never matched. A rule has exactly one selector: <code>serial_number</code> or <code>match</code>, never both. The <code>manufacturer</code> and <code>model_name</code> keys beside <code>serial_number</code> are still labels, read by nothing, because <code>add_rule()</code> writes <code>Unknown</code> for both by default. <code>get_rule()</code>, <code>update_rule()</code> and <code>delete_rule()</code> look a rule up by its serial and do not see a <code>match</code> rule: write it in the file, or append it to <code>configuration.rules</code>.
+* <strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule, a <code>match</code> rule, a <code>""</code> rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones. No rule takes precedence over another for what is zeroed. <code>redact()</code> redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in (<a href="https://github.com/kvnlng/Isocenter/issues/908">#908</a>). The export applies them whether or not <code>redact()</code> has run.
+* <strong><code>redaction_zones</code></strong>: List of regions to zero out.
+  * Format: <code>[y1, y2, x1, x2]</code> (Row Start, Row End, Col Start, Col End), or <code>{"roi": [y1, y2, x1, x2]}</code>, the shape the shipped knowledge base uses and <code>create_config()</code> copies for a machine it recognises.
+  * Coordinates are 0-indexed.
+  * End must be strictly greater than start on both axes. <code>load_config()</code> accepts a zone whose start equals its end, but it selects no pixels, and <code>redact()</code> fails every instance it applies to with <code>RedactionError</code>.</p>
+</li>
 </ul>
 <p>To find where a machine draws its text, see <a href="../ocr/#setting-up-new-machines-zone-discovery">Zone Discovery</a>.</p>
+<h3 id="burned-in-text">Burned-in Text</h3>
+<p>Reads every image with OCR and acts on the text it finds, image by image: for text that moves from one image to the next, which no zone describes, and for series with no Device Serial Number, which no machine rule reaches (<a href="https://github.com/kvnlng/Isocenter/issues/1108">#1108</a>). <strong>Default:</strong> absent, so nothing is read by OCR and nothing below happens. It needs the <code>ocr</code> extra and the <code>tesseract</code> binary (<a href="../ocr/#prerequisites">OCR prerequisites</a>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">burned_in_text</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span><span class="w">        </span><span class="c1"># report | redact | withhold (required)</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">min_confidence</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span><span class="w">    </span><span class="c1"># 0 to 100; default 80</span>
+</code></pre></div>
+<ul>
+<li><strong><code>action</code></strong> (required, spelled exactly):</li>
+<li><code>redact</code>: <code>redact()</code> blanks each box OCR finds, on its own frame, widened on every side by 15% of its height (at least 2 pixels). The image takes a new SOP Instance UID, derived from its source UID, the zones and the boxes, and <code>DERIVED</code> and the derivation code; Burned In Annotation <code>(0028,0301)</code> is left as the source had it, because OCR alone does not show the image holds no text (see <a href="../ocr/#what-ocr-misses">What OCR misses</a>). Each redacted image is read once more, and text still found writes a <code>WARNING</code> audit row.</li>
+<li><code>report</code>: <code>redact()</code> changes no pixel and writes one <code>WARNING</code> row per image with text; the export writes the image and one more <code>WARNING</code> row for it.</li>
+<li><code>withhold</code>: <code>redact()</code> changes no pixel; the export leaves out every image with text, with one <code>WARNING</code> row each.</li>
+<li><strong><code>min_confidence</code></strong>: a box is kept when tesseract's confidence is this or more. There is no length filter: two letters (<code>JT</code>) are text.</li>
+<li><code>null</code> (a bare <code>burned_in_text:</code>) is the same as no key. An unknown key, an action spelled any other way, or a <code>min_confidence</code> that is not a number from 0 to 100 is refused when the file loads.</li>
+</ul>
+<p><strong><code>redact()</code> reads pixels and records what it read; <code>export(check_burned_in=True)</code> reads them too and records nothing</strong> (<a href="../export-output/#check_burned_intrue"><code>check_burned_in=True</code></a>). <code>redact()</code> reads every image that holds pixels, serial or not, after zeroing on a copy the zones its machine rules hold, so text a zone covers is not found again, and records on each image the boxes it found (never the text), the tesseract version and the threshold and zones it read under. An image already read under the same threshold and zones, whose pixels are still the ones it read, is not read again by OCR; <code>redact(force=True)</code> reads every image again and keeps the boxes recorded before. <code>redact()</code> with this key present and OCR unavailable raises <code>OcrUnavailableError</code> before anything, the zones included. <code>redact_by_machine()</code> does not run it.</p>
+<p><strong>The record names the pixels it read.</strong> Each image's record holds a sha256 digest of the pixels the read saw, after the zones (so a zone's own redaction leaves it current), and a redacted image's digest is moved to its redacted pixels by the read after redaction. Pixels set on an image afterwards, by <code>set_pixel_data()</code> or anything else, are pixels no read saw: the export treats the image as never checked, and the next <code>redact()</code> reads it again without <code>force</code>.</p>
+<p><strong>The export reads the record and runs no OCR</strong>, unless <code>check_burned_in=True</code>, which reads the pixels with OCR instead (<a href="../export-output/#check_burned_intrue"><code>check_burned_in=True</code></a>). It loads each image's frame once to check the record's digest. That check runs one image at a time in the calling process, while the export is planned and before any export worker starts. Under <code>redact</code> and <code>withhold</code>, an image that holds pixels and was never read under the policy's threshold and zones (<code>redact()</code> not called since <code>load_config()</code>, an image it could not read in full, or pixels changed since the read) is withheld, with a <code>WARNING</code> row saying to run <code>redact()</code>; under <code>report</code> it is not withheld, with that row. Under <code>redact</code>, an image with text is withheld until a redaction carrying its boxes has landed. The <code>EXPORT</code> row counts the images the policy withheld apart from the ones the pre-export scan withheld. An image with no pixels (an SR, an RT object, a waveform) is never read, gated or counted. Not seen: an <code>Instance</code> built by hand with only a <code>file_path</code>, never ingested or loaded, reads as holding no pixels.</p>
+<p><strong>The grade.</strong> A <code>redact</code> pass that blanked text does not cost the PASS by itself. The rows that do are text still found after redaction, images OCR could not read, and images the export gated as unchecked. Each pass writes one <code>REDACTION</code> row with its counts and the tesseract version, and section 5 of the report says what the passes of the session did.</p>
+<p>The key is not part of the <a href="#what-an-exported-file-says-about-itself">policy fingerprint</a>: adding it moves no <code>(0012,0063)</code> value and no recorded PHI status.</p>
 <h3 id="generating-configuration-templates">Generating Configuration Templates</h3>
-<p>You can generate a starter <code>isocenter_config.yaml</code> from the session's inventory. On a session that has loaded no configuration (the floor), it names <code>basic@2026c</code>, gives Study Date <code>JITTER</code> and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as <code>save()</code> does (the pinned profile, an external profile's path, or <code>none</code>) and writes every <code>phi_tags</code> rule that differs from the base's, value and name included, so the file loads to the policy the session holds (<a href="https://github.com/kvnlng/Isocenter/issues/741">#741</a>). It also carries over the session's current <code>date_jitter</code>, <code>remove_private_tags</code> and machine rules. A policy missing a rule its base supplies is refused with <code>save()</code>'s <code>ValueError</code>, and a failed write raises its <code>OSError</code>. Each machine's <code>redaction_zones</code> is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or <code>redact()</code> changes nothing for that machine.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Inspects data, finds all unique machine serials, and writes a config file</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"my_new_policy.yaml"</span><span class="p">)</span>
+<p>You can generate a starter <code>isocenter_config.yaml</code> from the session's inventory. On a session that has loaded no configuration (the floor), it names <code>basic@2026c</code>, gives Study Date <code>JITTER</code> and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as <code>save()</code> does (the pinned profile, an external profile's path, or <code>none</code>) and writes every <code>phi_tags</code> rule that differs from the base's, value and name included, so the file loads to the policy the session holds (<a href="https://github.com/kvnlng/Isocenter/issues/741">#741</a>). It also carries over the session's current <code>date_jitter</code>, <code>remove_private_tags</code> and machine rules. A series with no Device Serial Number gets no scaffolded rule; write <code>serial_number: ""</code> for it yourself. A policy missing a rule its base supplies is refused with <code>save()</code>'s <code>ValueError</code>, and a failed write raises its <code>OSError</code>. Each machine's <code>redaction_zones</code> is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or <code>redact()</code> changes nothing for that machine.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Inspects data, finds all unique machine serials, and writes a config file</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"my_new_policy.yaml"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="programmatic-configuration">Programmatic Configuration</h2>
 <p>In addition to YAML files, you can manage the configuration dynamically using Python code via the <code>session.configuration</code> property.</p>
 <h3 id="accessing-configuration">Accessing Configuration</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">rules</span><span class="p">)</span>    <span class="c1"># machine redaction rules</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">)</span> <span class="c1"># the full tag policy in force, floor included</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">rules</span><span class="p">)</span>    <span class="c1"># machine redaction rules</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">)</span> <span class="c1"># the full tag policy in force, floor included</span>
 </code></pre></div>
 <h3 id="methods">Methods</h3>
 <p>These methods change the configuration <strong>in memory</strong>. They do not write the file <code>load_config()</code> read; the first change after a load or a save prints one line saying the file is unchanged. Call <code>session.configuration.save()</code> to write it, or turn on auto-save for the session with <code>session.configuration.auto_save = True</code>, after which every change is written as it is made, to whichever file the session loaded last. <code>save()</code> raises <code>ValueError</code> when there is no file to write (a session that loaded none: set <code>session.configuration.config_path</code> first), and it raises the error of a write that fails. With auto-save on, a change whose write fails or is refused is undone, and with no file to write each method raises that <code>ValueError</code> before changing anything.</p>
@@ -3317,37 +3387,37 @@ section but does not change the grade.</p>
 <h4 id="add_rule">add_rule()</h4>
 <p><code>add_rule(serial_number, manufacturer="Unknown", model_name="Unknown", redaction_zones=None)</code></p>
 <p>Add a new machine redaction rule dynamically.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Add a rule for a specific ultrasound machine</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-5555"</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">"GE"</span><span class="p">,</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">model_name</span><span class="o">=</span><span class="s2">"Voluson"</span><span class="p">,</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">redaction_zones</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]]</span> <span class="c1"># [y1, y2, x1, x2]</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="p">)</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>  <span class="c1"># write it to the loaded file</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Add a rule for a specific ultrasound machine</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-5555"</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">"GE"</span><span class="p">,</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">model_name</span><span class="o">=</span><span class="s2">"Voluson"</span><span class="p">,</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">redaction_zones</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]]</span> <span class="c1"># [y1, y2, x1, x2]</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="p">)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>  <span class="c1"># write it to the loaded file</span>
 </code></pre></div>
 <h4 id="delete_rule">delete_rule()</h4>
 <p><code>delete_rule(serial_number)</code></p>
 <p>Remove a rule by serial number. Returns <code>True</code> if a rule was removed, <code>False</code> if none had that serial.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">removed</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">"US-5555"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">removed</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">"US-5555"</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="update_rule">update_rule()</h4>
 <p><code>update_rule(serial_number, updates)</code></p>
 <p>Update a rule by serial number. <code>updates</code> is a dict of the rule's keys and their new values; the serial number itself cannot be changed. A rule with no such serial raises <code>ValueError</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">update_rule</span><span class="p">(</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="s2">"US-5555"</span><span class="p">,</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="p">{</span><span class="s2">"redaction_zones"</span><span class="p">:</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]],</span> <span class="s2">"comment"</span><span class="p">:</span> <span class="s2">"banner is taller on v2 firmware"</span><span class="p">},</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">update_rule</span><span class="p">(</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="s2">"US-5555"</span><span class="p">,</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="p">{</span><span class="s2">"redaction_zones"</span><span class="p">:</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]],</span> <span class="s2">"comment"</span><span class="p">:</span> <span class="s2">"banner is taller on v2 firmware"</span><span class="p">},</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="p">)</span>
 </code></pre></div>
 <p><code>add_rule()</code> and <code>update_rule()</code> refuse, with <code>ValueError</code>, a rule <code>load_config()</code> would refuse -- an unknown key such as <code>redaction_zone</code>, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file <code>save()</code> writes always loads again.</p>
 <h4 id="set_phi_tag">set_phi_tag()</h4>
 <p><code>set_phi_tag(tag, action, value=None)</code></p>
 <p>Update the policy for a specific DICOM tag. <code>action</code> is one of the <a href="#phi-tags">actions</a>; <code>value</code> is stored as the rule's <code>value:</code>, which <code>REPLACE</code> writes. An unknown action, or a rule Isocenter cannot honour (see <a href="#phi-tags">PHI Tags</a>), raises <code>ValueError</code> and leaves the policy and its file unchanged.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Remove Manufacturer's Model Name, which basic@2026c keeps</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1090"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Keep Study Description, which basic@2026c empties</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1030"</span><span class="p">,</span> <span class="s2">"KEEP"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Remove Manufacturer's Model Name, which basic@2026c keeps</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1090"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Keep Study Description, which basic@2026c empties</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1030"</span><span class="p">,</span> <span class="s2">"KEEP"</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="what-to-keep">What to keep</h2>
 <p>A de-identification run depends on three things, and the configuration file is only one of them.</p>
@@ -3392,21 +3462,21 @@ candidates, not zones. <code>to_zones()</code> groups them, and each group's <co
 is the <code>[y1, y2, x1, x2]</code> list a rule stores; see
 <a href="../ocr/#setting-up-new-machines-zone-discovery">Zone Discovery</a> for filtering
 and tuning the grouping.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Discover potential redaction zones for a machine</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="p">)</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">z</span><span class="p">[</span><span class="s2">"zone"</span><span class="p">]</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">to_zones</span><span class="p">()]</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">zones</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="c1"># Apply these zones to your configuration</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>        <span class="n">redaction_zones</span><span class="o">=</span><span class="n">zones</span>
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>    <span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Discover potential redaction zones for a machine</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="p">)</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">z</span><span class="p">[</span><span class="s2">"zone"</span><span class="p">]</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">to_zones</span><span class="p">()]</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">zones</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># Apply these zones to your configuration</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>        <span class="n">redaction_zones</span><span class="o">=</span><span class="n">zones</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>    <span class="p">)</span>
 </code></pre></div>
 
 

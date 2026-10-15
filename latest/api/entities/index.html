@@ -4544,11 +4544,13 @@ Frozen=True allows hashing, enabling unique set generation.</p>
     <div class="doc doc-contents ">
 
         <p>Builds an <code>Equipment</code> from a file's or a row's three fields, or nothing.</p>
-<p>A series has equipment if and only if it has a manufacturer or a model
-name; the serial number is the optional field. A serial number alone is
-not equipment: the store keeps <code>device_serial_number</code> for such a series,
-and a reload discards it, so after a reload no machine rule matches
-that series by serial.</p>
+<p>A series has equipment if and only if it has a manufacturer, a model
+name or a Device Serial Number. A serial alone is equipment (review
+of #1111, owner ruling of 2026-10-14): every machine rule matches on
+the serial, and a series holding one with no equipment was reached
+by no exact rule, and by <code>serial_number: ""</code> though it has a serial.
+A store saved before that held such a series with no equipment and
+wrote <code>""</code> for its serial, so it reloads as a series with no serial.</p>
 <p>Positional, in field order, all three required. <strong>No normalisation:</strong>
 <code>None</code> stays <code>None</code>, so <code>from_parts("ACME", None, None)</code> equals
 <code>Equipment("ACME", None, None)</code>.</p>
@@ -4638,8 +4640,8 @@ that series by serial.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>the equipment, or <code>None</code> when neither
-identifying field is present.</p>
+                <p>the equipment, or <code>None</code> when none of the
+three is present.</p>
               </div>
             </td>
           </tr>

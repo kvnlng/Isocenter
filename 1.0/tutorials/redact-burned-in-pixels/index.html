@@ -1895,8 +1895,9 @@ from the cohort report:</p>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  <span class="n">PatientID</span> <span class="n">Modality</span> <span class="n">DeviceSerial</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="mi">0</span>      <span class="mi">4</span><span class="n">MR1</span>       <span class="n">MR</span>     <span class="o">-</span><span class="mi">0000200</span>
 </code></pre></div>
-<p>A series with no Device Serial Number matches no machine rule, so a zone
-never reaches it. Section 5 says what that means for the grade.</p>
+<p>A series with no Device Serial Number is reached by a rule written
+<code>serial_number: ""</code>, or by <code>"*"</code>, which covers every series
+(<a href="#what-a-rule-matches">What a rule matches</a>).</p>
 <h2 id="2-write-the-zone">2. Write the zone</h2>
 <p>The image is 64 by 64 pixels. Suppose this machine prints its text in
 the top-left corner: the first ten rows, the left half of the width. A
@@ -1981,10 +1982,13 @@ names.</p>
 <p><code>PASS</code> says the zones you wrote were applied. It does not say the rest
 of each image is free of text: nothing on this page read the pixels for
 text. <code>scan_pixel_content()</code> does, with OCR, over the images of every
-machine your configuration names by serial with zones, and reports text
-no zone covers (<a href="../../ocr/#checking-zones-verification">Checking Zones</a>).
-A series with no Device Serial Number is reached by neither a zone nor
-that scan, so check such a series yourself.</p>
+series a rule with zones covers (by exact serial, <code>""</code>, <code>"*"</code> or
+<code>match:</code>), and reports text no zone covers
+(<a href="../../ocr/#checking-zones-verification">Checking Zones</a>). Or configure
+<a href="../../configuration/#burned-in-text"><code>burned_in_text</code></a>, under which
+<code>redact()</code> reads every image that holds pixels with OCR and redacts,
+reports or withholds the text it finds, serial or not, whatever the
+rules.</p>
 <p>A zone is applied whether or not you call <code>redact()</code>: <code>export()</code> looks up
 every matching rule and zeroes a copy of each frame it writes. Calling
 <code>redact()</code> first is what puts the redacted pixels in the store, so the
@@ -2004,7 +2008,10 @@ shows how.</p>
 <h2 id="what-a-rule-matches">What a rule matches</h2>
 <ul>
 <li><strong><code>serial_number</code></strong> is compared exactly with Device Serial Number
-  <code>(0018,1000)</code>. <code>"*"</code> matches every series that has one.</li>
+  <code>(0018,1000)</code>. <code>""</code> matches every series with no serial, and <code>"*"</code>
+  every series.</li>
+<li><strong><code>match:</code></strong> selects by <code>manufacturer</code> and/or <code>model_name</code> instead of
+  a serial.</li>
 <li><strong>Every matching rule applies.</strong> An exact rule and a <code>"*"</code> rule both
   zero their zones.</li>
 <li><strong>A zone's end must be greater than its start</strong> on both axes. A zone
