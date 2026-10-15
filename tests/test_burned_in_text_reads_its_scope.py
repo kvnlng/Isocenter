@@ -172,7 +172,7 @@ def test_the_action_is_judged_before_the_scope(tmp_path):
 @pytest.mark.parametrize("scope", ["flagged", "all"])
 def test_a_scope_with_no_list_loads_with_no_modalities_key(tmp_path, scope):
     parts = _loaded(tmp_path, f"burned_in_text: {{action: report, scope: {scope}}}\n")
-    assert parts[5] == {"action": "report", "scope": scope, "min_confidence": 80}
+    assert parts[5] == {"action": "report", "scope": scope, "min_confidence": 80, "target": "any"}
 
 
 def test_the_modality_list_is_normalised_to_sorted_distinct_values(tmp_path):
@@ -181,14 +181,14 @@ def test_the_modality_list_is_normalised_to_sorted_distinct_values(tmp_path):
     parts = _loaded(tmp_path, "burned_in_text: {action: redact, scope: modalities, "
                               "modalities: [DX, CR, CR, ' MG ']}\n")
     assert parts[5] == {"action": "redact", "scope": "modalities",
-                        "modalities": ["CR", "DX", "MG"], "min_confidence": 80}
+                        "modalities": ["CR", "DX", "MG"], "min_confidence": 80, "target": "any"}
 
 
 @pytest.mark.parametrize("policy", [
-    {"action": "withhold", "scope": "flagged", "min_confidence": 70},
-    {"action": "report", "scope": "all", "min_confidence": 80},
+    {"action": "withhold", "scope": "flagged", "min_confidence": 70, "target": "any"},
+    {"action": "report", "scope": "all", "min_confidence": 80, "target": "any"},
     {"action": "redact", "scope": "modalities", "modalities": ["CR", "US"],
-     "min_confidence": 90},
+     "min_confidence": 90, "target": "any"},
 ], ids=["flagged", "all", "modalities"])
 def test_save_and_create_config_round_trip_each_scope(tmp_path, policy):
     path = _write(tmp_path, "burned_in_text: "
@@ -327,7 +327,7 @@ def test_redact_reads_only_the_images_in_scope(tmp_path, reads):
     assert services.BURNED_IN_TEXT_ATTR not in live[CT].attributes
     [row] = [r for r in audit_rows(db) if r[0] == "REDACTION"]
     assert row[2].startswith(
-        "burned_in_text (action withhold, scope modalities [CR], min_confidence "
+        "burned_in_text (action withhold, scope modalities [CR], target any, min_confidence "
         "80): read 2 of 2 in-scope instance(s) holding pixels (1 out of scope), "
         "0 could not be read, 0 already checked under this policy; text found "
         "on 2 (2 region(s)); 2 to be withheld at export.")
@@ -599,20 +599,28 @@ def _md5(key):
 
 
 #: Literal hashes of `_burned_in_text_policy_hash`, each md5 over the
-#: sorted-key JSON of `{"boxes": 2, "min_confidence": float, "zones":
-#: sorted}`, recomputed by hand when pinned. Red when a key is added,
-#: renamed or reordered without a decision; PRs B and C re-pin.
+#: sorted-key JSON of `{"boxes": 2, "min_confidence": float, "target":
+#: "any" | sorted kinds, "zones": sorted}`, plus `"kinds": 1` under a
+#: narrowed target (#1121, PR B), recomputed by hand when pinned. Red when
+#: a key is added, renamed or reordered without a decision; PR C re-pins.
+#: `names_by` is in no row: it lives in the record, not the hash (owner
+#: ruling (a) of 2026-10-15).
 _PINNED_POLICY_HASHES = [
-    (({"action": "redact", "scope": "all", "min_confidence": 80}, []),
-     "8b75880301e8e60408f2b496a42c4b0d"),
+    (({"action": "redact", "scope": "all", "min_confidence": 80,
+       "target": "any"}, []),
+     "748c53cfe74971327d642b07716931c6"),
     (({"action": "report", "scope": "modalities", "modalities": ["CR"],
-       "min_confidence": 62.5}, [(10, 20, 30, 40), (0, 4, 0, 4)]),
-     "db82a6638ac0013466165b08793d34bb"),
+       "min_confidence": 62.5, "target": "any"},
+      [(10, 20, 30, 40), (0, 4, 0, 4)]),
+     "40a5c200cf5867bd8fc644f571f8f413"),
+    (({"action": "redact", "scope": "all", "min_confidence": 80,
+       "target": ["names", "dates"]}, []),
+     "3010d495d43d86a2aa02463d3d110e93"),
 ]
 
 
 @pytest.mark.parametrize("args, expected", _PINNED_POLICY_HASHES,
-                         ids=["default", "zones-and-scope"])
+                         ids=["default", "zones-and-scope", "narrowed"])
 def test_the_policy_hash_is_pinned_as_literals(args, expected):
     policy, zones = args
     assert services._burned_in_text_policy_hash(policy, zones) == expected
@@ -625,10 +633,11 @@ def test_the_scope_is_not_in_the_policy_hash():
     hashes = {services._burned_in_text_policy_hash({**base, **extra}, [])
               for extra in ({"scope": "all"}, {"scope": "flagged"},
                             {"scope": "modalities", "modalities": ["CR"]})}
-    assert hashes == {_md5({"boxes": 2, "min_confidence": 80.0, "zones": []})}
+    assert hashes == {_md5({"boxes": 2, "min_confidence": 80.0,
+                            "target": "any", "zones": []})}
 
 
 def test_the_key_set_and_values_are_the_ones_the_schema_row_names():
     assert config_manager._BURNED_IN_TEXT_KEYS == frozenset(
-        {"action", "min_confidence", "scope", "modalities"})
+        {"action", "min_confidence", "scope", "modalities", "target"})
     assert config_manager.BURNED_IN_TEXT_SCOPES == ("flagged", "modalities", "all")

@@ -251,6 +251,11 @@ BURNED_IN_TEXT_ATTR = "_ISOCENTER_BURNED_IN_TEXT"
 #: the minimum itself: the two are both 2 by coincidence, and a later
 #: change to what a box is moves this whether or not it moves the count.
 BURNED_IN_TEXT_BOX_RULE = 2
+#: The version of the kind detectors a narrowed target reads with
+#: (`text_kinds`, #1121), in the policy hash beside the kinds: a change to
+#: what a date, an ID or a name is moves it, so every record read under a
+#: narrowed target is read again.
+BURNED_IN_TEXT_KINDS_RULE = 1
 
 
 def _burned_in_text_policy_hash(policy, zones) -> str:
@@ -280,6 +285,16 @@ def _burned_in_text_policy_hash(policy, zones) -> str:
     key = {"boxes": BURNED_IN_TEXT_BOX_RULE,
            "min_confidence": float(policy["min_confidence"]),
            "zones": sorted(list(zone) for zone in zones)}
+    # The target chooses boxes, so it is in (#1121): `any`, or the sorted
+    # kinds with the kind detectors' version. The names model's identity
+    # (`names_by`) is not: it lives in the record, and `redact()` reads an
+    # image again when it differs, so plain `export()` needs no model to
+    # judge a record current (owner ruling (a) of 2026-10-15). Nothing
+    # read is ever hashed.
+    target = policy.get("target", "any")
+    key["target"] = target if target == "any" else sorted(target)
+    if target != "any":
+        key["kinds"] = BURNED_IN_TEXT_KINDS_RULE
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
 
 

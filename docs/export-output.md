@@ -56,7 +56,7 @@ A source that was compressed lossily is re-encoded losslessly from its decoded s
 
 Without a [`burned_in_text`](configuration.md#burned-in-text) policy, it checks tags, not pixels. Burned-in text is then handled by redaction zones, and found by `scan_pixel_content()` ([Burned-in text (OCR)](ocr.md)).
 
-**With a `burned_in_text` policy, it also reads the pixels** ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)). Every planned instance in the policy's [`scope`](configuration.md#burned-in-text) ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)) is read with OCR as it is about to be written, after the configured zones, and that read decides it, whatever the last `redact()` recorded. An instance out of scope is not read and is written with no row:
+**With a `burned_in_text` policy, it also reads the pixels** ([#1108](https://github.com/kvnlng/Isocenter/issues/1108)). Every planned instance in the policy's [`scope`](configuration.md#burned-in-text) ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)) is read with OCR as it is about to be written, after the configured zones, and that read decides it, whatever the last `redact()` recorded. Under a narrowed [`target`](configuration.md#burned-in-text), "text" is text read as one of its kinds, and a target naming `names` needs the `nlp` extra and its model or the export raises `NlpUnavailableError` before the tag scan. An instance out of scope is not read and is written with no row:
 
 | The read | `report` | `redact` | `withhold` |
 | :--- | :--- | :--- | :--- |

@@ -3,12 +3,13 @@ import hashlib
 import re
 
 import numpy as np
-from typing import List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
 import logging
 import pydicom
 from pydicom.dataset import Dataset
 from pydicom.pixels import apply_voi_lut
+from isocenter import text_kinds
 from isocenter.entities import Instance
 from isocenter.logger import describe_exception, get_logger
 from isocenter.pixel_geometry import resolve_pixel_geometry
@@ -53,6 +54,47 @@ class OcrUnavailableError(RuntimeError):
     by name without matching message text, which is not frozen. `HAS_OCR`
     does not answer that question: it does not cover the binary.
     """
+
+
+class NlpUnavailableError(OcrUnavailableError):
+    """A `burned_in_text` target naming `names` was asked for, and spaCy
+    or its `en_core_web_sm` model cannot load; nothing was read (#1121).
+
+    Raised by `redact()` and `export(check_burned_in=True)` where their
+    OCR check sits, never by `load_config()`: a policy is portable, and
+    plain `export()` reads records and needs no model. An
+    `OcrUnavailableError`, so a script that treats OCR as optional
+    catches it by the parent's name. Tier 2. spaCy publishes no
+    free-threaded wheel, so on 3.14t every such call raises it.
+    """
+
+
+def _require_target_readers(operation: str, policy) -> None:
+    """Raise `NlpUnavailableError` naming `operation` when `policy`'s
+    target names `names` and the model cannot load.
+
+    Called after `_require_ocr`, in its places. A target of `[dates, ids]`
+    needs no model.
+
+    Args:
+        operation (str): The method name the message names.
+        policy (dict): The normalised `burned_in_text` policy.
+
+    Raises:
+        NlpUnavailableError: The message names the extra and the model,
+            and the load's own failure, which concerns loading and holds
+            no text read from any image.
+    """
+    target = policy.get("target", "any")
+    if target == "any" or "names" not in target:
+        return
+    reason = text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
+    if reason is None:
+        return
+    raise NlpUnavailableError(
+        f"{operation}: burned_in_text target names needs the nlp extra "
+        '(pip install "isocenter[nlp]") and its model (python -m spacy '
+        f"download en_core_web_sm): {reason}. Nothing was read.")
 
 
 class PixelScanError(RuntimeError):
@@ -164,6 +206,11 @@ class TextRegion:
     box: Tuple[int, int, int, int]  # x, y, w, h
     confidence: float
     frame_index: int = 0
+    #: tesseract's `(block_num, par_num, line_num)` for the word: the line
+    #: a narrowed `burned_in_text` target reads it in (#1121). Private,
+    #: and `(0, 0, 0)` where the reader gives none.
+    _line: Tuple[int, int, int] = field(default=(0, 0, 0), repr=False,
+                                        compare=False)
 
 
 def _get_voi_lut_dataset(instance: Instance) -> Dataset:
@@ -252,6 +299,10 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
 
     regions = []
     n_boxes = len(data['text'])
+    # The line each word sits on (#1121); a reader that gives none (a
+    # stand-in) puts every word of the frame on one line.
+    lines = [data.get(key) or [0] * n_boxes
+             for key in ("block_num", "par_num", "line_num")]
     for i in range(n_boxes):
         text = data['text'][i].strip()
         conf = int(data['conf'][i])
@@ -263,7 +314,8 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
                 text=text,
                 box=(x, y, w, h),
                 confidence=float(conf),
-                frame_index=frame_idx
+                frame_index=frame_idx,
+                _line=tuple(int(column[i]) for column in lines),
             ))
     return regions
 
@@ -507,6 +559,13 @@ class _InstanceBoxes:
     #: `_read_digest` of the array the read saw, the zones zeroed; None
     #: when nothing was loaded.
     pixels: Optional[str] = None
+    #: Under a narrowed target (#1121): how many regions were read as each
+    #: named kind (a region read as two kinds counts under each) and how
+    #: many were left in place, as `{kind: n, ..., "left": k}`; None under
+    #: `any`. Counts only.
+    counts: Optional[Dict[str, int]] = None
+    #: The frame of each region left in place under a narrowed target.
+    left_frames: List[int] = field(default_factory=list)
 
 
 def _read_digest(arr) -> str:
@@ -625,8 +684,62 @@ def _alnum_count(text: str) -> int:
     return sum(ch.isalnum() for ch in text)
 
 
+def _regions_of_kinds(regions: Sequence[TextRegion], target):
+    """Which regions a target redacts, and counts of what was read (#1121).
+
+    Under `any`, every region. Under a list of kinds, the regions are
+    grouped into lines (by frame and tesseract's block, paragraph and
+    line), each line's text is its words joined by single spaces, each
+    named kind's spans are found on it (`text_kinds.spans`), and a region
+    is redacted when a span of a named kind overlaps it: the words the
+    match covers, never the whole line (owner ruling Q-B15 (a)). So the
+    result is always a subset of `regions`, which is what makes a
+    narrowed target never redact more than `any` (the invariant).
+
+    A detector region (PR C) is a line of one region: its reading is the
+    line, and a span anywhere on it redacts it.
+
+    Nothing read leaves this function: it returns regions the caller
+    already holds and integer counts.
+
+    Args:
+        regions (Sequence[TextRegion]): The regions a box is made for
+            under `any` (at the threshold, two letters or digits).
+        target: `"any"` or a list of kinds.
+
+    Returns:
+        tuple: `(kept, counts, left_frames)`: the regions to redact;
+            None under `any`, else `{kind: n, ..., "left": k}`; and the
+            frame of each region left in place.
+    """
+    if target == "any":
+        return list(regions), None, []
+    counts = {kind: 0 for kind in target}
+    lines: Dict[tuple, List[TextRegion]] = {}
+    for region in regions:
+        lines.setdefault((region.frame_index, region._line), []).append(region)  # pylint: disable=protected-access
+    kept, left_frames = [], []
+    for words in lines.values():
+        offsets, cursor = [], 0
+        for word in words:
+            offsets.append((cursor, cursor + len(word.text)))
+            cursor += len(word.text) + 1
+        found = text_kinds.spans(" ".join(w.text for w in words), target)
+        for word, (start, end) in zip(words, offsets):
+            kinds = [kind for kind, spans in found.items()
+                     if any(s < end and start < e for s, e in spans)]
+            for kind in kinds:
+                counts[kind] += 1
+            if kinds:
+                kept.append(word)
+            else:
+                left_frames.append(int(word.frame_index))
+    counts["left"] = len(left_frames)
+    return kept, counts, left_frames
+
+
 def _text_boxes(instance: Instance, min_confidence: float,
-                zones=()) -> _InstanceBoxes:
+                zones=(), target="any") -> _InstanceBoxes:
     """The padded boxes OCR finds on each frame of `instance`, and nothing
     of what they say.
 
@@ -643,13 +756,24 @@ def _text_boxes(instance: Instance, min_confidence: float,
         instance (Instance): The instance to read.
         min_confidence (float): Keep regions at or above this.
         zones (Iterable[tuple]): `(y1, y2, x1, x2)` zones to zero first.
+        target: `"any"`, or the list of kinds a box must be read as
+            (`_regions_of_kinds`, #1121).
 
     Returns:
         _InstanceBoxes: The boxes, with whether the instance was read and
-            why not, when it was not.
+            why not, when it was not, and under a narrowed target the
+            counts of what was read and left.
     """
     zones = [tuple(z) for z in zones]
     size = {}
+    if target != "any" and "names" in target:
+        # Before the read, so a worker that cannot load the model when the
+        # caller could costs no OCR: a failure, no record, and the export
+        # gate withholds the image. The reason concerns loading only.
+        reason = text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
+        if reason is not None:
+            return _InstanceBoxes(
+                False, f"the names model could not be loaded: {reason}", [])
 
     def prepare(arr):
         arr, geometry = _zoned_for_reading(instance, arr, zones)
@@ -662,11 +786,13 @@ def _text_boxes(instance: Instance, min_confidence: float,
 
     ocr = _ocr_instance(instance, prepare)
     boxes = set()
-    for region in ocr.regions:
-        if region.confidence < min_confidence:
-            continue
-        if _alnum_count(region.text) < BURNED_IN_TEXT_MIN_ALNUM:
-            continue
+    regions = [region for region in ocr.regions
+               if region.confidence >= min_confidence
+               and _alnum_count(region.text) >= BURNED_IN_TEXT_MIN_ALNUM]
+    # Narrowing only takes regions away (#1121): the kinds are read over
+    # the regions `any` would box, and nothing else.
+    regions, counts, left_frames = _regions_of_kinds(regions, target)
+    for region in regions:
         x, y, w, h = (int(v) for v in region.box)
         pad = _padding(h)
         y1, y2 = max(0, y - pad), min(size["rows"], y + h + pad)
@@ -675,4 +801,5 @@ def _text_boxes(instance: Instance, min_confidence: float,
             boxes.add((int(region.frame_index), y1, y2, x1, x2))
     # The regions, and their text, end here: only coordinates leave.
     return _InstanceBoxes(ocr.read, _without_ocr_messages(ocr.failure),
-                          sorted(boxes), size.get("pixels"))
+                          sorted(boxes), size.get("pixels"), counts,
+                          sorted(left_frames))

@@ -76,6 +76,7 @@ from .profiles import FLOOR_POLICY
 from . import profiles
 from . import entities
 from . import pixel_analysis
+from . import text_kinds
 from .automation import ConfigAutomator
 
 def scan_worker(args):
@@ -297,6 +298,11 @@ class _BurnedInTextRead(NamedTuple):
             zones zeroed, or None when nothing was loaded.
         unchanged: True when the pixels still match the digest the
             caller handed in, so nothing was read by OCR.
+        counts: Under a narrowed target (#1121), `(kind, n)` pairs of
+            how many regions were read as each named kind, and `("left",
+            k)`; `()` under `any`. Counts only, never which word.
+        left: The frame of each region left in place under a narrowed
+            target.
     """
     entity_uid: Optional[str]
     read: bool
@@ -304,6 +310,8 @@ class _BurnedInTextRead(NamedTuple):
     boxes: Tuple[Tuple[int, int, int, int, int], ...]
     pixels: Optional[str] = None
     unchanged: bool = False
+    counts: Tuple[Tuple[str, int], ...] = ()
+    left: Tuple[int, ...] = ()
 
 
 def _burned_in_text_worker(args):
@@ -314,10 +322,11 @@ def _burned_in_text_worker(args):
 
     Args:
         args (tuple): `(instance, zones, min_confidence, tesseract_cmd,
-            expected)`: the `Instance`, the zones its series' rules hold
-            (zeroed on a copy before the read), the threshold, the
-            caller's `tesseract_cmd` (see `_caller_tesseract_cmd`), and
-            the pixel digest of the instance's current record, or None.
+            expected, target)`: the `Instance`, the zones its series'
+            rules hold (zeroed on a copy before the read), the threshold,
+            the caller's `tesseract_cmd` (see `_caller_tesseract_cmd`),
+            the pixel digest of the instance's current record, or None,
+            and the policy's target (`"any"` or a list of kinds, #1121).
             When the pixels still match `expected`, nothing is read by OCR
             and the outcome says `unchanged`.
 
@@ -330,7 +339,7 @@ def _burned_in_text_worker(args):
     # project secret and derives no UID: the redacted UID depends on the
     # boxes and is derived in the parent, under the secret, after this
     # returns (#1108).
-    instance, zones, min_confidence, tesseract_cmd, expected = args
+    instance, zones, min_confidence, tesseract_cmd, expected, target = args
     uid = instance.sop_instance_uid
     _adopt_tesseract_cmd(tesseract_cmd)
     # pylint: disable=protected-access
@@ -344,14 +353,19 @@ def _burned_in_text_worker(args):
             return _BurnedInTextRead(uid, False, None, (), now, True)
     # `_text_boxes` through the module, so a patch on `pixel_analysis`
     # reaches it; a boundary catch, for the reasons `_verify_worker` gives.
+    # Its class only, never its message: an exception raised while the
+    # kinds were read may quote the line it was reading (#1121).
     try:
-        found = pixel_analysis._text_boxes(instance, min_confidence, zones)
+        found = pixel_analysis._text_boxes(instance, min_confidence, zones,
+                                           target)
     except Exception as e:  # pylint: disable=broad-exception-caught
         return _BurnedInTextRead(
             uid, False, f"the read raised {type(e).__name__}", ())
     return _BurnedInTextRead(uid, found.read, found.failure,
                              tuple(tuple(box) for box in found.boxes),
-                             found.pixels)
+                             found.pixels, False,
+                             tuple(sorted((found.counts or {}).items())),
+                             tuple(found.left_frames))
 
 
 @contextlib.contextmanager
@@ -401,6 +415,32 @@ def _scope_named(policy) -> str:
     if policy["scope"] == "modalities":
         return f"modalities [{', '.join(policy['modalities'])}]"
     return policy["scope"]
+
+
+def _target_kinds(target) -> List[str]:
+    """A narrowed target's kinds in the order rows name them (names,
+    dates, ids), whatever order the normalised policy holds them in."""
+    return [kind for kind in config_manager.BURNED_IN_TEXT_KINDS
+            if kind in target]
+
+
+def _target_named(target) -> str:
+    """The policy's target as rows and section 5 name it: `any`, or
+    `[names, dates]` (#1121)."""
+    if target == "any":
+        return "any"
+    return f"[{', '.join(_target_kinds(target))}]"
+
+
+def _kinds_read(target, counts) -> str:
+    """What a narrowed target read, as rows and section 5 say it: `N
+    region(s) read as names, D as dates, K left in place`; "" under `any`.
+    A region read as two kinds is counted under each. Counts only."""
+    if target == "any":
+        return ""
+    parts = [f"{counts.get(kind, 0)} as {kind}" for kind in _target_kinds(target)]
+    parts[0] = parts[0].replace(" as ", " region(s) read as ", 1)
+    return ", ".join(parts) + f", {counts.get('left', 0)} left in place"
 
 
 def _says_burned_in_yes(value) -> bool:
@@ -6616,6 +6656,10 @@ class DicomSession:
         # all or nothing (#1108).
         if policy is not None:
             pixel_analysis._require_ocr("redact()")  # pylint: disable=protected-access
+            # And the names model, when the target names `names` (#1121,
+            # owner ruling Q-B11 (b)): here, not at load, so a policy
+            # stays portable to a machine without it.
+            pixel_analysis._require_target_readers("redact()", policy)  # pylint: disable=protected-access
 
         # Resolved here, once, and carried to the pool. The console line
         # a few lines into `_apply_redaction_rules` names the strategy
@@ -6950,13 +6994,17 @@ class DicomSession:
             raise RedactionError(failures, len(tasks))
         return applied
 
-    def _burned_in_text_entries(self, policy):
+    def _burned_in_text_entries(self, policy, names_by=None):
         """Every instance the `burned_in_text` policy covers, with the
         zones its series' rules hold and the policy hash its record must
         carry to be current.
 
         Args:
             policy (dict): The normalised policy.
+            names_by (Optional[str]): The names model loaded now, under a
+                target naming `names`: a record another model read is not
+                current (#1121, owner ruling (a): `names_by` lives in the
+                record, not the hash, so plain `export()` needs no model).
 
         Returns:
             tuple: `(entries, out_of_scope)`: one dict per instance in the
@@ -6982,7 +7030,10 @@ class DicomSession:
                                 out_of_scope += 1
                             continue
                         record = burned_in_text_record(inst)
-                        if record is not None and record.get("policy") != policy_hash:
+                        if record is not None and (
+                                record.get("policy") != policy_hash
+                                or (names_by is not None
+                                    and record.get("names_by") != names_by)):
                             record = None
                         entries.append({"instance": inst, "zones": zones,
                                         "policy": policy_hash,
@@ -7009,7 +7060,12 @@ class DicomSession:
         Returns:
             dict: The pass's state: `entries`, `failures`, `read`, `version`.
         """
-        entries, out_of_scope = self._burned_in_text_entries(policy)
+        target = policy["target"]
+        # The names model's identity, read in this process after
+        # `_require_target_readers` loaded it (#1121).
+        names_by = (text_kinds._names_by()  # pylint: disable=protected-access
+                    if target != "any" and "names" in target else None)
+        entries, out_of_scope = self._burned_in_text_entries(policy, names_by)
         # Every instance goes to a worker: one whose record is current
         # under this policy carries the record's pixel digest, and is read
         # by OCR only when its pixels no longer match it.
@@ -7031,13 +7087,14 @@ class DicomSession:
             reads = run_parallel(
                 _burned_in_text_worker,
                 [(e["instance"], e["zones"], policy["min_confidence"],
-                  tesseract_cmd, expected(e)) for e in to_read],
+                  tesseract_cmd, expected(e), target) for e in to_read],
                 strategy=dataclasses.replace(
                     strategy, desc="Reading burned-in text", total=len(to_read)),
                 ordered=True)
         failures = []
         read = 0
         skipped = 0
+        kind_counts = Counter()
         for entry, outcome in zip(to_read, reads):
             if outcome.unchanged:
                 skipped += 1
@@ -7068,6 +7125,14 @@ class DicomSession:
                       "boxes": sorted(list(box) for box in boxes),
                       "tesseract": version,
                       "pixels": outcome.pixels}
+            if target != "any":
+                # Counts only (#1121): how many regions this read took as
+                # each kind and left in place, never which or what.
+                record["counts"] = dict(outcome.counts)
+                kind_counts.update(dict(outcome.counts))
+                entry["left"] = outcome.left
+            if names_by is not None:
+                record["names_by"] = names_by
             inst = entry["instance"]
             captured = capture_phi_status_for_redaction(inst)
             write_burned_in_text_record(inst, record)
@@ -7078,7 +7143,8 @@ class DicomSession:
                 "attempted": len(entries), "out_of_scope": out_of_scope,
                 "skipped": skipped,
                 "version": version, "strategy": strategy,
-                "tesseract_cmd": tesseract_cmd}
+                "tesseract_cmd": tesseract_cmd, "names_by": names_by,
+                "kind_counts": kind_counts}
 
     def _fold_burned_in_text(self, service, tasks, burned, force, project_secret):
         """Join each instance's boxes to its zone task, or give it one.
@@ -7174,9 +7240,13 @@ class DicomSession:
         # is read once more under the same threshold. Read-only, and in
         # threads or processes as the pass ran; the redacted frame is what
         # the loader reads now, under both.
+        target = policy["target"]
         if landed:
+            # Under the pass's target (#1121): only text of a named kind
+            # still found counts, or every label a narrowed target left on
+            # purpose would come back as a `WARNING` row.
             items = [(e["instance"], e["zones"], policy["min_confidence"],
-                      burned["tesseract_cmd"], None) for e in landed]
+                      burned["tesseract_cmd"], None, target) for e in landed]
             residual = run_parallel(
                 _burned_in_text_worker, items,
                 strategy=dataclasses.replace(
@@ -7228,6 +7298,24 @@ class DicomSession:
                     details=(f"burned_in_text: {len(boxes)} text region(s) "
                              f"found on frame(s) {_frames_named(boxes)} of "
                              f"instance {uid}; not redacted (action: report)."))
+        if target != "any":
+            # One `RISK` row per image read in this pass with text left in
+            # place (owner ruling Q-B16 (a)); `RISK` does not grade. It
+            # names the target's kinds and the frames, never the text.
+            # `left` is set only on an entry read in this pass, so an
+            # image read before and skipped now writes no second row.
+            named = ", ".join(_target_kinds(target))
+            for entry in burned["entries"]:
+                left = entry.get("left")
+                if not left:
+                    continue
+                uid = entry["instance"].sop_instance_uid
+                frames = ", ".join(str(f) for f in sorted(set(left)))
+                self.store_backend.log_audit(
+                    action_type="RISK", entity_uid=uid,
+                    details=(f"burned_in_text: {len(left)} text region(s) on "
+                             f"frame(s) {frames} of instance {uid} were read "
+                             f"as none of {named} (target) and left in place."))
         failures = burned["failures"]
         _audit_unread_instances(self.store_backend, "redact()", failures)
         _warn_unread_instances("redact()", failures, len(failures) + burned["read"],
@@ -7237,14 +7325,19 @@ class DicomSession:
                  "withhold": f"{len(with_text)} to be withheld at export"}[action]
         regions = sum(len(e["record"]["boxes"]) for e in with_text)
         scope = _scope_named(policy)
-        details = (f"burned_in_text (action {action}, scope {scope}, "
-                   f"min_confidence {policy['min_confidence']:g}): read "
+        kinds = _kinds_read(target, burned["kind_counts"])
+        names_by = (f"; names by {burned['names_by']}"
+                    if burned["names_by"] else "")
+        details = (f"burned_in_text (action {action}, scope {scope}, target "
+                   f"{_target_named(target)}, min_confidence "
+                   f"{policy['min_confidence']:g}): read "
                    f"{burned['read']} of {burned['attempted']} in-scope "
                    f"instance(s) holding pixels ({burned['out_of_scope']} out "
                    f"of scope), {len(failures)} could not be read, {burned['skipped']} "
                    f"already checked under this policy; text found on "
-                   f"{len(with_text)} ({regions} region(s)); {acted}. OCR by "
-                   f"tesseract {burned['version']}.")
+                   f"{len(with_text)} ({regions} region(s)); {acted}"
+                   f"{'; ' + kinds if kinds else ''}. OCR by "
+                   f"tesseract {burned['version']}{names_by}.")
         # Through the one spelling of the pass row, under its own entity.
         service.record_redaction_pass(_BURNED_IN_TEXT_PASS, 0, 0, 0,
                                       details=details)
@@ -7255,7 +7348,9 @@ class DicomSession:
             unread=len(failures), skipped=burned["skipped"],
             with_text=len(with_text), regions=regions,
             acted=blanked if action == "redact" else len(with_text),
-            scope=scope, out_of_scope=burned["out_of_scope"]))
+            scope=scope, out_of_scope=burned["out_of_scope"],
+            target=_target_named(target) if target != "any" else "",
+            kinds=kinds))
         print(f"burned_in_text: {details}")
 
     @staticmethod
@@ -8124,6 +8219,8 @@ class DicomSession:
         read_pixels = bool(check_burned_in) and policy is not None
         if read_pixels:
             pixel_analysis._require_ocr("export(check_burned_in=True)")  # pylint: disable=protected-access
+            pixel_analysis._require_target_readers(  # pylint: disable=protected-access
+                "export(check_burned_in=True)", policy)
 
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them
@@ -8977,7 +9074,9 @@ class DicomSession:
                     source=BurnedInTextSummary.EXPORT_READ, action=action,
                     attempted=0, read=0, unread=0, skipped=0, with_text=0,
                     regions=0, acted=0, scope=_scope_named(policy),
-                    out_of_scope=out_of_scope))
+                    out_of_scope=out_of_scope,
+                    target=(_target_named(policy["target"])
+                            if policy["target"] != "any" else "")))
             return tasks, []
         hold = action != "report"
         verb = "withheld" if hold else "did not withhold"
@@ -9008,7 +9107,7 @@ class DicomSession:
             reads = run_parallel(
                 _burned_in_text_worker,
                 [(task.instance, task.redaction_zones, policy["min_confidence"],
-                  tesseract_cmd, None) for task in candidates],
+                  tesseract_cmd, None, policy["target"]) for task in candidates],
                 strategy=strategy, ordered=True)
         dropped = set()
         gated = []
@@ -9038,6 +9137,10 @@ class DicomSession:
         # `REDACTION` row and no `_actions_performed`: the export redacted
         # nothing.
         found = [o for o in reads if o.failure is None and o.boxes]
+        target = policy["target"]
+        counts = Counter()
+        for outcome in reads:
+            counts.update(dict(outcome.counts))
         self._burned_in_text_passes.append(BurnedInTextSummary(
             source=BurnedInTextSummary.EXPORT_READ, action=action,
             attempted=len(candidates),
@@ -9045,7 +9148,9 @@ class DicomSession:
             unread=sum(1 for o in reads if o.failure is not None),
             skipped=0, with_text=len(found),
             regions=sum(len(o.boxes) for o in found), acted=len(gated),
-            scope=_scope_named(policy), out_of_scope=out_of_scope))
+            scope=_scope_named(policy), out_of_scope=out_of_scope,
+            target=_target_named(target) if target != "any" else "",
+            kinds=_kinds_read(target, counts)))
         return [task for task in tasks if id(task) not in dropped], gated
 
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
