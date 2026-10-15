@@ -90,7 +90,13 @@ setup(
     # so what is at stake is the machine redaction knowledge base and the
     # CTP rules. The .yaml glob covers the ctp_rules.yaml that session.py
     # prefers over the .json when present.
-    package_data={"isocenter": ["resources/*.json", "resources/*.yaml"]},
+    #
+    # The .onnx and .NOTICE globs (#1121): the PP-OCRv3 text-detection
+    # model `burned_in_text: {detector: db}` reads, sha256-pinned in
+    # isocenter/text_detection.py, and its provenance and licence beside
+    # it. Shipped, never downloaded (owner ruling Q-C3 (a)).
+    package_data={"isocenter": ["resources/*.json", "resources/*.yaml",
+                                "resources/*.onnx", "resources/*.NOTICE"]},
     # Single source of truth for dependencies. There is deliberately no
     # requirements.txt: two lists drift, and `pip install isocenter` only ever
     # reads this one -- python-dotenv once lived only in requirements.txt
@@ -174,6 +180,26 @@ setup(
         # model with `python -m spacy download en_core_web_sm`.
         "nlp": [
             "spacy>=3.7.0"
+        ],
+        # Optional: isocenter/text_detection.py guards `import cv2` and
+        # sets HAS_DETECTOR=False when absent; `burned_in_text: {detector:
+        # db}` then raises TextDetectorUnavailableError (#1121, owner
+        # ruling Q-C1 (a)). Never in install_requires: +35-61 MB for
+        # every user, and OpenCV publishes no free-threaded wheel, so
+        # 3.14t could not install the package at all.
+        #
+        # Not in `tests` or `dev` either, for the same reason: `pip
+        # install -e ".[dev]"` must keep working on the 3.14t venv the
+        # release gate uses. tests.yml adds this extra on the jobs that
+        # are not free-threaded.
+        #
+        # >=5.0.0 because 5.0.0 is the release the detector spike measured
+        # (35 of 35 answer-key boxes, 0 of 82 false frames); nothing older
+        # was tried, and 4.x's DB post-processing may give other boxes.
+        # <6 as pydicom's <4.0 is capped: a major we cannot test against
+        # is not one we promise. Owner ruling of 2026-10-15.
+        "textdetect": [
+            "opencv-python-headless>=5.0.0,<6"
         ],
         "tests": [
             "pytest>=7.0.0",

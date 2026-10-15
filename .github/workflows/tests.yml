@@ -288,7 +288,16 @@ jobs:
         # (tests/test_pixel_analysis.py), and the Session methods'
         # refusal by patching HAS_OCR and pytesseract together
         # (tests/test_ocr_unavailable_refuses.py, #422).
-        pip install -e ".[tests,ocr]"
+        #
+        # `textdetect` (OpenCV, #1121) on every entry that is not
+        # free-threaded, and only there: OpenCV publishes no free-threaded
+        # wheel, so on 3.14t pip would try an 82 MB source build. The
+        # wheels are on PyPI and pip fetches them here, in this step,
+        # never at collection or in a test (#1118). The 3.14t jobs run
+        # the detector's tests through its stubbed seam; the real model
+        # runs on the others, where ISOCENTER_REQUIRE_TEXT_DETECTOR below
+        # makes a lost install a failure, not a skip (#44).
+        pip install -e ".[tests,ocr${{ !endsWith(matrix.python-version, 't') && ',textdetect' || '' }}]"
 
     - name: Run Tests
       id: suite
@@ -382,6 +391,12 @@ jobs:
         # instrumentation (test_packaging_contract.py pins both this
         # line and the 240 < 300 inequality).
         ISOCENTER_WORKER_FAULTHANDLER: "1"
+        # The real text-detector test fails instead of skipping when the
+        # detector cannot run (#1121, owner ruling Q-C4 (a)): on every
+        # entry that installed the `textdetect` extra above. Derived from
+        # the version as PYTHON_GIL is, and the order of `&&`/`||` is the
+        # one where the value after `&&` is never empty.
+        ISOCENTER_REQUIRE_TEXT_DETECTOR: ${{ endsWith(matrix.python-version, 't') && '0' || '1' }}
 
     - name: Upload the shard's timings
       # What tests/shard_timings.json is refreshed from at a release

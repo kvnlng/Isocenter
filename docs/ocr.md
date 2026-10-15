@@ -55,6 +55,9 @@ Without them, `redact()` and `export(check_burned_in=True)` raise
 `NlpUnavailableError`, an `OcrUnavailableError`, in the same places and before
 anything. spaCy publishes no free-threaded wheel, so on the free-threaded build
 (3.14t) `names` cannot be used; `dates` and `ids` need no model.
+`burned_in_text` with `detector: db` needs neither: it needs the `textdetect`
+extra (OpenCV) instead, which cannot be installed on the free-threaded build
+([below](#detecting-text-with-a-model-detector-db)).
 
 **When an image cannot be read.** `scan_pixel_content()` lists each instance
 whose pixels could not be loaded, or whose OCR failed on any frame, in
@@ -257,11 +260,43 @@ Measured on bundled images with text drawn on them, and on 35 MIDI-B validation 
 * **Faint or short text.** Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (`ICG`) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.
 * **Text over anatomy is read in fragments.** On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (`E`, `1970-`), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a `WARNING` row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing `NO`.
 * **Labels you may want are blanked too.** Technique labels (`PA`, `PORTABLE`, `ERECT`) and ultrasound measurement text were read at 95 and above, and `redact` blanks them. Single drawn `L`/`R` side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.
-* **Side markers carry laterality.** A radiograph's lead `L`/`R` marker is imaged with the patient, and technologist initials are often written on it. On MIDI-B, 25 of the 35 answer-key boxes were such initials; tilted 5 to 25 degrees and small in a 2500 to 3400 pixel image, they are what OCR misses most ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). When it does find them, `redact` blanks the box, and the `L` or `R` beside the initials usually goes with it: that is clinical information, and nothing in the row says a box sat on a marker, because the text is never kept. A lone `L` or `R` is one letter and is not a box.
+* **Side markers carry laterality.** A radiograph's lead `L`/`R` marker is imaged with the patient, and technologist initials are often written on it. On MIDI-B, 25 of the 35 answer-key boxes were such initials; tilted 5 to 25 degrees and small in a 2500 to 3400 pixel image, they are what OCR misses most ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). When it does find them, `redact` blanks the box, and the `L` or `R` beside the initials usually goes with it: that is clinical information, and nothing in the row says a box sat on a marker, because the text is never kept. Under tesseract a lone `L` or `R` is one letter and is not a box; under [`detector: db`](#detecting-text-with-a-model-detector-db), which reads no letters, it is.
 * **One stray character is not a box.** Every false box measured on 82 text-free MIDI-B frames was one character read over anatomy (`a` at 86 to 91 on an ultrasound frame), so a region needs two letters or digits; the rule lost no answer-key text.
 * **Palette-colour images** are read as their palette indices.
 
 A `PASS` after a `redact` pass says what OCR found was blanked, not that each image is free of text. Use `report` first on a cohort you have not looked at.
+
+### Detecting text with a model (`detector: db`)
+
+Tesseract decides "is this text?" by reading it, and misses what it cannot read: the tilted, small initials on side markers above. `detector: db` hands that decision to a text-detection model instead ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)):
+
+```yaml
+burned_in_text:
+  action: redact
+  scope: modalities
+  modalities: [CR, DX, MG]
+  detector: db           # tesseract (the default) | db
+  min_confidence: 80     # under db: the detector's box score x 100
+```
+
+The model is PP-OCRv3 English text detection (DB), from the OpenCV Model Zoo, shipped inside the package under Apache-2.0 (`isocenter/resources/text_detection_en_ppocrv3_2023may.onnx`, sha256 `03f550c6...6587`, with a NOTICE beside it giving its source, licence and training data). Nothing is downloaded. It runs under OpenCV, the optional `textdetect` extra:
+
+```bash
+pip install "isocenter[textdetect]"
+```
+
+**Not on the free-threaded build.** OpenCV publishes no free-threaded (3.14t) wheel, so the extra cannot be installed there, and `redact()` and `export(check_burned_in=True)` under `detector: db` raise `TextDetectorUnavailableError` (an `OcrUnavailableError`, so a `RuntimeError`) before anything, zones included. They raise it too where the extra is not installed, or where the model file is not the pinned one. `load_config()`, `save()` and a plain `export()` need neither OpenCV nor the model: a file is portable, and a plain export reads each image's record.
+
+How it reads:
+
+* **The whole frame, once.** A frame whose long side is over 1,280 pixels is read with that side brought to 1,280; a smaller one is read at its own size, never enlarged (enlarging small PET frames is what put boxes on text-free frames when this was measured).
+* **`min_confidence` is the detector's box score times 100**, default 80, inclusive. It is not tesseract's word confidence, and the two numbers do not mean the same thing.
+* **No tesseract.** The detector reads no text, so tesseract need not be installed, and the two-letters-or-digits rule does not apply: there is nothing to count. **A lone `L` or `R` side marker the detector finds is blanked**, like any other text.
+* **A box larger than a quarter of the frame is not text.** A box whose short side is more than 25% of the frame's short side is dropped before padding, and counted in the pass's row and in section 5 (`N box(es) over a quarter of the frame not redacted`). On ultrasound frames the detector scored whole-frame regions up to 0.98, and no threshold removes those; this rule does. Text taller than a quarter of a frame, such as a large title on a small secondary capture, is not redacted under `db`.
+* **Each box** is the detected region's straight bounding box, widened by 15% of the region's height on every side (at least 2 pixels). A tilted marker is blanked as its whole straight box, which is the safe direction.
+* **Nothing it found is kept but the boxes**, as under tesseract. The image's record names the model (its sha256) and the OpenCV version; the pass's `REDACTION` row says `detection by PP-OCRv3 (sha256 03f550c6b406fda8) on OpenCV V`. A record read by another OpenCV is read again by the next `redact()`; a plain `export()` still trusts it.
+
+Measured before it shipped, on a synthetic MIDI-B Validation sample with OpenCV 5.0.0: the detector found all 35 answer-key boxes (all 10 patient blocks and all 25 sets of initials, against 14 for tesseract at 80), put a box on none of 82 text-free frames, and took about 0.21 s per radiograph on one thread. It also found 55 other regions on those 35 radiographs: mostly overlay text outside the answer key (`PORTABLE`, `SUPINE`, counters), 3 lone laterality markers, 7 other marker glyphs, and 5 that were not text, 2 of which score above 80. Not measured: initials on frames far larger than 5,800 pixels, and images outside that sample, on which the box-size rule and the no-enlarging rule were chosen. The boxes come from floating-point inference and may differ between CPUs or OpenCV builds, as tesseract's differ between tesseract builds; another box set takes another UID, which is right.
 
 ## Checking Zones (Verification)
 

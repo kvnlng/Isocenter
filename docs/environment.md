@@ -18,6 +18,7 @@ Each variable's name, default and documented behaviour are part of the 1.0 freez
 | **`ISOCENTER_FORCE_THREADS`** | `0` | `1` runs `audit()`, `scan_pixel_content()` and `redact()` in threads. |
 | **`ISOCENTER_FORCE_PROCESSES`** | `0` | `1` runs in processes on a free-threaded build too. |
 | **`ISOCENTER_SHOW_PROGRESS`** | `1` | `0` turns every progress bar off. |
+| **`ISOCENTER_REQUIRE_TEXT_DETECTOR`** | `0` | Test suite only: `1` makes the real text-detector test fail instead of skip when the detector cannot run. |
 | **`ISOCENTER_WORKER_FAULTHANDLER`** | `0` | Diagnostic: `1` makes a worker process that is still alive after 240 s dump its stacks, and ends a worker whose exit has not finished 15 s after it began. |
 
 ## `ISOCENTER_LOG_LEVEL`
@@ -129,6 +130,12 @@ The three threads-or-processes levers have a fixed order:
 Set to `0` (or `false`, `off`, `no`) to disable every progress bar the library draws: the parallel passes (ingest, audit, pixel scan, redaction and export) and the bars of `anonymize()`, `release_memory()` (which every `export()` runs) and `lock_identities()`. Useful for cleaner logs in CI/CD environments.
 
 It can only switch a bar off: an explicit `show_progress=False`, where a call takes one, is honoured whatever this says, and `export(show_progress=False)` silences the memory-release bar too.
+
+## `ISOCENTER_REQUIRE_TEXT_DETECTOR`
+
+**Default:** `0`.
+
+Read by Isocenter's own test suite, never by the package. Set to `1` to make the real-model test of `burned_in_text: {detector: db}` fail, rather than skip, when the text detector cannot run (the `textdetect` extra is not installed, or the shipped model is not the pinned file). `tests.yml` sets it on every job that is not free-threaded, so a CI install that silently lost OpenCV is a red test and not a skip that reads as a pass (#44's shape, #1121). It stays `0` on the free-threaded build, where OpenCV publishes no wheel and the detector cannot run.
 
 ## `ISOCENTER_WORKER_FAULTHANDLER`
 

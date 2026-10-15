@@ -117,9 +117,10 @@ _PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
 #: px, and noise boxes on anatomy 9-62 px, so a height floor misses text
 #: and spares no noise.
 #: `target` (#1121, PR B) joined the same row before 1.0.0 by the same
-#: ruling: optional, default `any`, narrowed to kinds of text.
+#: ruling: optional, default `any`, narrowed to kinds of text. `detector`
+#: (#1121, PR C) joined it by the same ruling (Q-X1 (a)).
 _BURNED_IN_TEXT_KEYS = frozenset({"action", "min_confidence", "scope",
-                                  "modalities", "target"})
+                                  "modalities", "target", "detector"})
 #: What the policy does with text OCR finds on an image, in the order the
 #: refusal lists them. Compared exactly, never case-folded: no `action`
 #: is folded anywhere in a configuration (#754).
@@ -135,6 +136,14 @@ BURNED_IN_TEXT_SCOPES = ("flagged", "modalities", "all")
 #: detectors' copy, and a test keeps the two equal. `target: any` (the
 #: default) is every region, as before the key. Compared exactly.
 BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
+#: What decides "is this text?" (#1121, PR C), in the order the refusal
+#: lists them: `tesseract` (rc19's OCR, the default) or `db` (the
+#: PP-OCRv3 DB text detector run by OpenCV, the optional `textdetect`
+#: extra). Compared exactly, as `action` is. No `east`: its weights are
+#: GPL-3.0 (owner ruling Q-C2).
+BURNED_IN_TEXT_DETECTORS = ("tesseract", "db")
+#: The detector when the file names none: rc19's.
+BURNED_IN_TEXT_DEFAULT_DETECTOR = "tesseract"
 #: A Modality as DICOM writes it: a Code String of upper-case letters,
 #: digits, underscore and space, at most 16 characters (PS3.5 6.2).
 _MODALITY_CS = re.compile(r"[A-Z0-9_ ]{1,16}")
@@ -142,6 +151,14 @@ _MODALITY_CS = re.compile(r"[A-Z0-9_ ]{1,16}")
 #: anatomy-only images: no box at 80 or above, ten at 60 and above; the
 #: name blocks and most initials read at 86-96 (#1108, Q3).
 BURNED_IN_TEXT_DEFAULT_CONFIDENCE = 80
+#: The threshold when the file names none, by detector. Under `db` it is
+#: the DB box score times 100 (owner ruling Q-C5 (a)), and 80 was set by
+#: the spike (2026-10-15): the lowest best score on an answer-key box was
+#: 0.964 and the non-text boxes on radiographs scored 0.57-0.88, so 80
+#: removes 3 of those 5 with a 0.16 margin below the lowest hit; 90
+#: removes all 5 with 0.064; the zoo's 50 removes none.
+BURNED_IN_TEXT_DEFAULT_CONFIDENCE_BY_DETECTOR = {
+    "tesseract": BURNED_IN_TEXT_DEFAULT_CONFIDENCE, "db": 80}
 
 # Null is read as absent for the five optional metadata strings -- a rule's
 # `manufacturer`, `model_name` and `comment`, a zone's `note`, a phi rule's
@@ -597,14 +614,16 @@ def _refused_burned_in_text(policy: Any) -> Optional[str]:
     cannot disagree or be worded twice. The caller prefixes its source.
 
     Judged in one order, so a file gets one sentence: the mapping, its
-    keys, `action`, `scope`, `modalities`, `target`, `min_confidence`.
+    keys, `action`, `scope`, `modalities`, `target`, `detector`,
+    `min_confidence`.
 
     Args:
         policy: None (no policy), or a mapping with a required `action`
             (one of `BURNED_IN_TEXT_ACTIONS`), a required `scope` (one of
             `BURNED_IN_TEXT_SCOPES`), a `modalities` list required under
             `scope: modalities` and refused under any other, an optional
-            `target` (`any` or a list of `BURNED_IN_TEXT_KINDS`), and an
+            `target` (`any` or a list of `BURNED_IN_TEXT_KINDS`), an
+            optional `detector` (one of `BURNED_IN_TEXT_DETECTORS`), and an
             optional `min_confidence` (a number from 0 to 100, not a bool).
 
     Returns:
@@ -631,6 +650,12 @@ def _refused_burned_in_text(policy: Any) -> Optional[str]:
     reason = _refused_burned_in_text_target(policy)
     if reason is not None:
         return reason
+    if ("detector" in policy
+            and (not isinstance(policy["detector"], str)
+                 or policy["detector"] not in BURNED_IN_TEXT_DETECTORS)):
+        # A `null` is refused as a value, as `scope`'s is.
+        return (f"'burned_in_text' detector {policy['detector']!r} is not one "
+                f"of {', '.join(BURNED_IN_TEXT_DETECTORS)} (exact spelling)")
     if "min_confidence" in policy:
         conf = policy["min_confidence"]
         # A bool is not a number here, and a quoted "80" is text. NaN and
@@ -742,7 +767,9 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
             `session.configuration`.
 
     Returns:
-        Optional[Dict[str, Any]]: `{action, scope, min_confidence, target}`, plus
+        Optional[Dict[str, Any]]: `{action, scope, detector,
+            min_confidence, target}` (the threshold's default is the
+            detector's), plus
             `modalities` under `scope: modalities`; a new dict, or None.
 
     Raises:
@@ -753,9 +780,12 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
         raise ValueError(f"{source}: {reason}")
     if policy is None:
         return None
+    detector = policy.get("detector", BURNED_IN_TEXT_DEFAULT_DETECTOR)
     normalised = {"action": policy["action"], "scope": policy["scope"],
-                  "min_confidence": policy.get("min_confidence",
-                                               BURNED_IN_TEXT_DEFAULT_CONFIDENCE)}
+                  "detector": detector,
+                  "min_confidence": policy.get(
+                      "min_confidence",
+                      BURNED_IN_TEXT_DEFAULT_CONFIDENCE_BY_DETECTOR[detector])}
     if policy["scope"] == "modalities":
         normalised["modalities"] = sorted({item.strip()
                                            for item in policy["modalities"]})

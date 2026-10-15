@@ -691,6 +691,7 @@ def test_redact_by_machine_does_not_run_the_pass(tmp_path, ocr):
         session.redact_by_machine("SN-1", [0, 4, 0, 4])
         assert session.configuration.burned_in_text == {"action": "redact",
                                                         "scope": "all",
+                                                        "detector": "tesseract",
                                                         "min_confidence": 80,
                                                         "target": "any"}
         assert services.BURNED_IN_TEXT_ATTR not in _only_instance(session).attributes
@@ -737,7 +738,7 @@ def test_the_text_ocr_read_reaches_no_row_log_report_store_or_outcome(tmp_path, 
         ocr.sticky = True
         session.redact(show_progress=False)
         outcome = session_module._burned_in_text_worker(
-            (_only_instance(session), (), 80, None, None, "any"))
+            (_only_instance(session), (), 80, None, None, "any", "tesseract"))
         session.export(str(tmp_path / "out"), use_compression=False, show_progress=False)
         session.generate_report(str(tmp_path / "r.md"))
         session.save(sync=True)

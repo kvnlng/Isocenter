@@ -44,6 +44,14 @@ Without the extra or the binary, the two methods that read burned-in text, `scan
 
 ### Natural language processing (NLP)
 
+To find burned-in text with a text-detection model instead of tesseract (`burned_in_text: {detector: db}`), install the `textdetect` extra, which brings OpenCV; the model itself ships inside the package:
+
+```bash
+pip install "isocenter[textdetect]"
+```
+
+OpenCV publishes no free-threaded wheel, so this extra cannot be installed on Python 3.14t, and `detector: db` raises `TextDetectorUnavailableError` there ([OCR](ocr.md#detecting-text-with-a-model-detector-db)).
+
 `discover_redaction_zones()` can use spaCy to classify the text it finds as names. Install the `nlp` extra and the English model:
 
 ```bash
