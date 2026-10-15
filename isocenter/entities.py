@@ -721,11 +721,13 @@ class Equipment:
                    device_serial_number) -> Optional["Equipment"]:
         """Builds an `Equipment` from a file's or a row's three fields, or nothing.
 
-        A series has equipment if and only if it has a manufacturer or a model
-        name; the serial number is the optional field. A serial number alone is
-        not equipment: the store keeps `device_serial_number` for such a series,
-        and a reload discards it, so after a reload no machine rule matches
-        that series by serial.
+        A series has equipment if and only if it has a manufacturer, a model
+        name or a Device Serial Number. A serial alone is equipment (review
+        of #1111, owner ruling of 2026-10-14): every machine rule matches on
+        the serial, and a series holding one with no equipment was reached
+        by no exact rule, and by `serial_number: ""` though it has a serial.
+        A store saved before that held such a series with no equipment and
+        wrote `""` for its serial, so it reloads as a series with no serial.
 
         Positional, in field order, all three required. **No normalisation:**
         `None` stays `None`, so `from_parts("ACME", None, None)` equals
@@ -738,10 +740,10 @@ class Equipment:
                 (0018,1000).
 
         Returns:
-            Optional[Equipment]: the equipment, or `None` when neither
-                identifying field is present.
+            Optional[Equipment]: the equipment, or `None` when none of the
+                three is present.
         """
-        if not (manufacturer or model_name):
+        if not (manufacturer or model_name or device_serial_number):
             return None
         return cls(manufacturer, model_name, device_serial_number)
 

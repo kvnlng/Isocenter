@@ -2,7 +2,8 @@
 Services for Isocenter.
 
 This module contains the core service logic for:
-- MachinePixelIndex: Fast retrieval of instances by device serial number.
+- MachinePixelIndex: Fast retrieval of instances by device serial number
+  (`""` for every series with none).
 - RedactionService: Handling the application of redaction rules to pixel data.
 """
 
@@ -11,7 +12,7 @@ import json
 import traceback
 import gc
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import numpy as np
 
 from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
@@ -33,6 +34,9 @@ class MachinePixelIndex:
 
     def __init__(self):
         self._index: Dict[str, List[Instance]] = {}
+        # `(equipment, instances)` per series, in store order: what a
+        # `match:` rule is compared against (#1108).
+        self._series: List[tuple] = []
 
     def index_store(self, store: DicomStore):
         """
@@ -43,15 +47,20 @@ class MachinePixelIndex:
         Args:
             store (DicomStore): The store to index.
         """
+        # Every series, a serial-less one under `""` (#1108): one key for
+        # both kinds of "no serial", a series whose equipment holds `""`
+        # and one with no equipment at all (no manufacturer, no model and
+        # no serial, `Equipment.from_parts`; a serial alone is equipment).
+        # `rule_applies_to` reads `""` the same way, so `redact()` and the
+        # export's zones still agree.
         self._index.clear()
+        self._series = []
         for p in store.patients:
             for st in p.studies:
                 for se in st.series:
-                    if se.equipment and se.equipment.device_serial_number:
-                        sn = se.equipment.device_serial_number
-                        if sn not in self._index:
-                            self._index[sn] = []
-                        self._index[sn].extend(se.instances)
+                    sn = series_serial(se)
+                    self._index.setdefault(sn, []).extend(se.instances)
+                    self._series.append((se.equipment, se.instances))
 
     def get_by_machine(self, sn):
         """The instances of every series whose Device Serial Number is `sn`.
@@ -192,8 +201,9 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
     no serial key at all, which no zone-only input can equal.
 
     Args:
-        serials (Iterable[str]): The `serial_number` of each rule whose
-            zones are applied, duplicates allowed; empty for an instance
+        serials (Iterable): Each applied rule's selector, duplicates
+            allowed: its `serial_number`, or `{"match": {...}}` for a
+            `match:` rule (`rule_selector`, #1108); empty for an instance
             only the `burned_in_text` pass redacts.
         rois (Iterable): Every zone applied, `[y1, y2, x1, x2]`.
         ocr (tuple, optional): `(policy_hash, boxes)`, each box
@@ -202,13 +212,23 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
     Returns:
         str: 32 hex digits.
     """
-    distinct = sorted(set(serials))
-    if len(distinct) == 1:
-        key = {"serial": distinct[0]}
-    elif distinct:
-        key = {"serials": distinct}
-    else:
+    serials = list(serials)
+    if not serials:
         key = {}
+    elif all(isinstance(serial, str) for serial in serials):
+        distinct = sorted(set(serials))
+        key = {"serial": distinct[0]} if len(distinct) == 1 else {"serials": distinct}
+    else:
+        # A `match:` rule's selector (#1108) is `{"match": {...}}`: one
+        # alone is its own shape, and any mix is a `"selectors"` list,
+        # neither of which a serial-only input can equal, so no stored
+        # attestation moves.
+        distinct = {json.dumps(s, sort_keys=True): s for s in serials}
+        ordered = [distinct[k] for k in sorted(distinct)]
+        if len(ordered) == 1:
+            key = {"match": ordered[0]["match"]}
+        else:
+            key = {"selectors": ordered}
     key["rois"] = sorted(list(roi) for roi in rois)
     if ocr is not None and ocr[1]:
         key["ocr"] = {"policy": ocr[0],
@@ -599,6 +619,27 @@ def _withdraw_attestation(inst: Instance, attested_from: tuple) -> None:
     inst.mark_modified()
 
 
+#: The `REDACTION` row's entity for a `serial_number: ""` rule-pass
+#: (#1108): an empty entity would read as a missing one.
+NO_SERIAL_ENTITY = "(no serial)"
+
+
+def series_serial(series) -> str:
+    """A series' Device Serial Number as the rules read it: `""` for a
+    series with no serial, whether its equipment holds `""` or it has no
+    equipment at all, which means no manufacturer, no model and no serial
+    (`Equipment.from_parts`, #1108).
+
+    Args:
+        series (Series): The series.
+
+    Returns:
+        str: The serial, or `""`.
+    """
+    equipment = series.equipment
+    return (equipment.device_serial_number or "") if equipment else ""
+
+
 def rule_applies_to(rule_serial, serial) -> bool:
     """Does a redaction rule written for `rule_serial` cover a series whose
     Device Serial Number is `serial`?
@@ -608,40 +649,114 @@ def rule_applies_to(rule_serial, serial) -> bool:
 
     Args:
         rule_serial (Optional[str]): The rule's `serial_number`: an exact
-            serial, or `"*"` for every series.
-        serial (Optional[str]): The series' Device Serial Number.
+            serial, `""` for every series with no serial, or `"*"` for
+            every series.
+        serial (Optional[str]): The series' Device Serial Number; None or
+            `""` for a series with none.
 
     Returns:
-        bool: True for an exact match or `"*"`; False when `serial` is
-        empty or None, whatever the rule.
+        bool: True for `"*"`, and for a rule serial equal to the series'
+        (`""` included); False for a rule with no serial (None).
     """
-    # A serial-less series matches nothing because `MachinePixelIndex`
-    # indexes only series with equipment and a serial: `redact()` never
-    # reaches one, and the export must agree with it.
-    if not serial:
+    # Owner ruling on #1108: `"*"` covers every series, serial-less ones
+    # included, and `""` covers exactly the serial-less ones. Until then a
+    # serial-less series matched nothing, and a burned-in name on it was
+    # exported under a `"*"` zone. `MachinePixelIndex` keys such a series
+    # under `""`, so `redact()` reaches what this says the export zeroes.
+    if rule_serial is None:
         return False
-    return rule_serial in ("*", serial)
+    return rule_serial in ("*", serial or "")
 
 
-def rules_matching(rules, serial) -> List[dict]:
-    """Every rule that covers a series with this serial, in rule order.
+def _equipment_serial(equipment) -> str:
+    """`series_serial` for an equipment, None (no equipment) included."""
+    return (equipment.device_serial_number or "") if equipment else ""
+
+
+def rule_covers(rule, equipment) -> bool:
+    """Does `rule` cover a series with this equipment?
+
+    A `match:` rule (#1108) covers a series whose equipment holds every
+    field the match names, compared exactly (case and whitespace
+    significant), whatever its serial; never a series with no equipment.
+    Any other rule is read by its `serial_number` (`rule_applies_to`).
+
+    Args:
+        rule (dict): The machine rule.
+        equipment (Optional[Equipment]): The series' equipment, or None.
+
+    Returns:
+        bool: Whether the rule covers it.
+    """
+    # The loader holds a rule to exactly one selector, and `match` to
+    # `manufacturer` and/or `model_name`; a hand-built rule holding both
+    # selectors is read by `match`, and a match naming another field
+    # matches nothing rather than reading an attribute by that name.
+    if "match" in rule:
+        match = rule.get("match")
+        if not equipment or not isinstance(match, dict) or not match:
+            return False
+        held = {"manufacturer": equipment.manufacturer,
+                "model_name": equipment.model_name}
+        return all(key in held and held[key] == value
+                   for key, value in match.items())
+    return rule_applies_to(rule.get("serial_number"),
+                           _equipment_serial(equipment))
+
+
+def rule_selector(rule) -> Union[str, dict, None]:
+    """What identifies `rule`'s selection in its attestation hash and its
+    `REDACTION` row: its `serial_number`, or `{"match": {...}}` (#1108).
+
+    Args:
+        rule (dict): The machine rule.
+
+    Returns:
+        Union[str, dict, None]: The serial (None when the rule has none),
+        or a `{"match": dict}`.
+    """
+    if "match" in rule:
+        return {"match": dict(rule.get("match") or {})}
+    return rule.get("serial_number")
+
+
+def selector_label(selector) -> str:
+    """The `REDACTION` row's entity for a rule-pass's selector: the serial
+    as written (`"*"` included), `(no serial)` for `""`, and
+    `match:manufacturer=...;model_name=...` for a match (device names are
+    not PHI) (#1108).
+
+    Args:
+        selector (Union[str, dict, None]): As `rule_selector` returns it.
+
+    Returns:
+        str: The label.
+    """
+    if isinstance(selector, dict):
+        match = selector.get("match") or {}
+        return "match:" + ";".join(f"{key}={match[key]}" for key in sorted(match))
+    return selector if selector != "" else NO_SERIAL_ENTITY
+
+
+def rules_matching(rules, equipment) -> List[dict]:
+    """Every rule that covers a series with this equipment, in rule order.
 
     Every one, not the first: `redact()` runs each loaded rule as its own
-    pass, so an exact rule and a `"*"` rule, or two rules on one serial,
-    all apply to that series.
+    pass, so an exact rule and a `"*"` rule, a `match:` rule, or two
+    rules on one serial, all apply to that series (#908, #1108).
 
     Args:
         rules (Optional[List[dict]]): The machine rules, or None.
-        serial (Optional[str]): The series' Device Serial Number.
+        equipment (Optional[Equipment]): The series' equipment, or None
+            for a series with none.
 
     Returns:
-        List[dict]: The rules `rule_applies_to` accepts.
+        List[dict]: The rules `rule_covers` accepts.
     """
     # An export that took only the first match would leave the second
     # rule's zones unredacted. The session's `_redaction_zones_for` and,
     # through it, the store-wide icon gate read this.
-    return [rule for rule in (rules or ())
-            if rule_applies_to(rule.get("serial_number"), serial)]
+    return [rule for rule in (rules or ()) if rule_covers(rule, equipment)]
 
 
 def zone_rois(zones, on_invalid=None) -> List[tuple]:
@@ -765,8 +880,11 @@ class RedactionService:
         service has no store backend.
 
         Args:
-            machine_sn (str): The serial spelling the rule was configured
-                with, `"*"` included; the row's entity.
+            machine_sn: The rule's selector (`rule_selector`): the serial
+                spelling it was configured with, `"*"` included, or a
+                `{"match": ...}`. The row's entity is `selector_label`'s
+                spelling of it: `""` is written `(no serial)` and a match
+                `match:manufacturer=...;model_name=...` (#1108).
             zone_count (int): How many zones the rule applies.
             targeted (int): How many instances the pass targeted.
             applied (int): How many it redacted.
@@ -790,19 +908,27 @@ class RedactionService:
                        f"with {zone_count} zones")
         self.store_backend.log_audit(
             action_type="REDACTION",
-            entity_uid=machine_sn,
+            entity_uid=selector_label(machine_sn),
             details=details)
 
-    def _targets_for(self, rule_serial) -> List[Instance]:
-        """Every indexed instance a rule for `rule_serial` covers, in index order.
+    def _targets_for(self, rule) -> List[Instance]:
+        """Every indexed instance `rule` covers, in index order.
 
         Args:
-            rule_serial: The rule's `serial_number`, exact or `"*"`.
+            rule (dict): The machine rule: its `serial_number` (exact, `""`
+                or `"*"`) or its `match` selects (#1108).
 
         Returns:
-            List[Instance]: The covered instances (`rule_applies_to`).
+            List[Instance]: The covered instances (`rule_covers`).
         """
         targets = []
+        if "match" in rule:
+            # By equipment, series by series: a match is not a serial.
+            for equipment, instances in self.index._series:
+                if rule_covers(rule, equipment):
+                    targets.extend(instances)
+            return targets
+        rule_serial = rule.get("serial_number")
         for serial in self.index._index:
             if rule_applies_to(rule_serial, serial):
                 targets.extend(self.index.get_by_machine(serial))
@@ -838,28 +964,34 @@ class RedactionService:
                 secret to derive their UIDs under, as
                 `redact_machine_instances` raises.
         """
-        serial = machine_rules.get("serial_number")
+        # The rule's selector: its serial (`""` and `"*"` included), or its
+        # `match` (#1108). It keys the attestation hash and names the row.
+        serial = rule_selector(machine_rules)
         zones = machine_rules.get("redaction_zones", [])
 
-        if not serial:
+        # `is None`, never falsy: `""` is the serial-less selector (#1108).
+        if serial is None:
             if verbose:
                 self.logger.warning("Skipping rule with missing serial number.")
             return []
 
         if not zones:
             if verbose:
-                self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
+                self.logger.info(
+                    f"Machine {selector_label(serial)} has no redaction zones "
+                    f"configured. Skipping.")
             return []
 
-        # Every indexed serial this rule covers, by the one predicate the
-        # export's zones also ask. The index holds only series with
-        # a serial, so this is exact or "*" over those.
-        targets = self._targets_for(serial)
+        # Every indexed series this rule covers, by the one predicate the
+        # export's zones also ask: exact, `""` for the serial-less series,
+        # "*" over every series, or a match on the equipment (#1108).
+        targets = self._targets_for(machine_rules)
 
         if not targets:
             if verbose and serial != "*":
                 self.logger.warning(
-                    f"Config rule exists for {serial}, but no matching images found in Session.")
+                    f"Config rule exists for {selector_label(serial)}, but no "
+                    f"matching images found in Session.")
             return []
 
         valid_rois = zone_rois(
@@ -875,6 +1007,9 @@ class RedactionService:
         # `_one_task_per_instance` (#908).
         config_hash = _redaction_config_hash([serial], valid_rois)
 
+        # Before any task exists: a task run with nowhere to store its
+        # blanked frame would record a redaction it did not make (#1113).
+        self._require_backend()
         # The redacted UIDs are derived here, in the parent: the secret is
         # read once and never put on a task or on the service.
         secret = self._redaction_secret(project_secret)
@@ -1034,6 +1169,9 @@ class RedactionService:
         # *in* a `finally` replaces the return value.
 
         try:
+            # First, before the skip and the pixels: with nowhere to store
+            # the blanked frame, nothing may be written (#1113).
+            self._require_backend()
             # Skip if already redacted with the same configuration.
             #
             # `force` suppresses this and nothing else. The attestation is
@@ -1247,10 +1385,12 @@ class RedactionService:
             RuntimeError: Propagated from `redact_machine_instances` when
                 there is no project secret to derive a UID under.
         """
-        serial = machine_rules.get("serial_number")
+        # As `prepare_redaction_tasks` reads the rule (#1108).
+        serial = rule_selector(machine_rules)
         zones = machine_rules.get("redaction_zones", [])
 
-        if not serial:
+        # `is None`, never falsy: `""` is the serial-less selector (#1108).
+        if serial is None:
             if verbose:
                 self.logger.warning("Skipping rule with missing serial number.")
             return
@@ -1260,7 +1400,7 @@ class RedactionService:
                 self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
             return
 
-        targets = self._targets_for(serial)
+        targets = self._targets_for(machine_rules)
 
         if not targets:
             # Only warn if not wildcard (wildcard yielding 0 means empty store, which is fine)
@@ -1287,6 +1427,26 @@ class RedactionService:
                 show_progress=show_progress,
                 verbose=verbose,
                 project_secret=project_secret)
+
+    def _require_backend(self) -> None:
+        """Refuse to redact with no store backend to persist pixels to (#1113).
+
+        A redaction writes its record -- the new SOP Instance UID, the
+        hash, Image Type `DERIVED` and Burned In Annotation `NO` -- on the
+        promise that the blanked frame is stored. With no backend nothing
+        stores it, the loader keeps pointing at the original frame, and an
+        export writes the record over the original pixels.
+
+        Raises:
+            RuntimeError: When the service has no backend, or one that
+                cannot persist pixels.
+        """
+        if self.store_backend is None or not hasattr(
+                self.store_backend, "persist_pixel_data"):
+            raise RuntimeError(
+                "RedactionService has no store backend to persist the "
+                "redacted pixels to; nothing was redacted. Build it with "
+                "the session's store backend, or call Session.redact().")
 
     def _redaction_secret(self, project_secret: Optional[bytes]) -> bytes:
         """The project secret a redaction derives its UIDs under.
@@ -1342,7 +1502,8 @@ class RedactionService:
         (`record_redaction_pass`), before any raise.
 
         Args:
-            machine_sn (str): The serial number (for logging/auditing).
+            machine_sn: The rule's selector (`rule_selector`): its serial,
+                or `{"match": ...}` (#1108); hashed and audited.
             rois (List[tuple]): List of (y1, y2, x1, x2) ROIs.
             targets (List[Instance], optional): Pre-filtered list of instances.
             show_progress (bool): If True, shows progress bar.
@@ -1372,8 +1533,12 @@ class RedactionService:
         # `force` stays last in the signature and defaulted: callers pass
         # the first two arguments positionally.
         if targets is None:
-            targets = self.index.get_by_machine(machine_sn)
+            # A match selector is not an index key (#1108).
+            targets = (self._targets_for(machine_sn)
+                       if isinstance(machine_sn, dict)
+                       else self.index.get_by_machine(machine_sn))
         # Before the first instance, so a refusal changes nothing.
+        self._require_backend()
         secret = self._redaction_secret(project_secret)
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")

@@ -60,8 +60,9 @@ cohort = session.get_cohort_report()
 0      4MR1       MR     -0000200
 ```
 
-A series with no Device Serial Number matches no machine rule, so a zone
-never reaches it. Section 5 says what that means for the grade.
+A series with no Device Serial Number is reached by a rule written
+`serial_number: ""`, or by `"*"`, which covers every series
+([What a rule matches](#what-a-rule-matches)).
 
 ## 2. Write the zone
 
@@ -184,13 +185,13 @@ session.close()
 `PASS` says the zones you wrote were applied. It does not say the rest
 of each image is free of text: nothing on this page read the pixels for
 text. `scan_pixel_content()` does, with OCR, over the images of every
-machine your configuration names by serial with zones, and reports text
-no zone covers ([Checking Zones](../ocr.md#checking-zones-verification)).
-A series with no Device Serial Number is reached by neither a zone nor
-that scan, so check such a series yourself, or configure
+series a rule with zones covers (by exact serial, `""`, `"*"` or
+`match:`), and reports text no zone covers
+([Checking Zones](../ocr.md#checking-zones-verification)). Or configure
 [`burned_in_text`](../configuration.md#burned-in-text), under which
 `redact()` reads every image that holds pixels with OCR and redacts,
-reports or withholds the text it finds, serial or not.
+reports or withholds the text it finds, serial or not, whatever the
+rules.
 
 A zone is applied whether or not you call `redact()`: `export()` looks up
 every matching rule and zeroes a copy of each frame it writes. Calling
@@ -212,7 +213,10 @@ leaves that attribute as the source had it.
 ## What a rule matches
 
 - **`serial_number`** is compared exactly with Device Serial Number
-  `(0018,1000)`. `"*"` matches every series that has one.
+  `(0018,1000)`. `""` matches every series with no serial, and `"*"`
+  every series.
+- **`match:`** selects by `manufacturer` and/or `model_name` instead of
+  a serial.
 - **Every matching rule applies.** An exact rule and a `"*"` rule both
   zero their zones.
 - **A zone's end must be greater than its start** on both axes. A zone

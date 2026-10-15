@@ -26,6 +26,7 @@ from isocenter.io_handlers import (
 )
 from isocenter.services import RedactionService
 from isocenter.session import DicomSession
+from support.memory_backend import MemoryBackend
 from support.project_secret import FIXED_A
 
 
@@ -339,7 +340,7 @@ def test_redaction_zeroes_the_zone_in_every_frame():
     store = DicomStore()
     store.patients.append(build_graph(inst, machine_sn="SN-RED"))
 
-    service = RedactionService(store)
+    service = RedactionService(store, MemoryBackend())
     # Zone: rows 0-3, all four columns.
     service.redact_machine_instances("SN-RED", [(0, 3, 0, 4)], project_secret=FIXED_A,
                                      show_progress=False)

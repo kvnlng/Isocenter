@@ -38,7 +38,9 @@ from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
-                       _report_redaction_failures, rules_matching, zone_rois,
+                       _report_redaction_failures, rule_selector,
+                       rules_matching, selector_label, series_serial,
+                       zone_rois,
                        _burned_in_text_policy_hash, _redaction_config_hash,
                        _redacted_uid_for, burned_in_text_record,
                        write_burned_in_text_record)
@@ -3124,12 +3126,17 @@ class DicomSession:
         match_count = 0
 
         for rule in self.configuration.rules:
-            serial = rule.get("serial_number", "UNKNOWN")
+            serial = selector_label(rule_selector(rule)) if (
+                "serial_number" in rule or "match" in rule) else "UNKNOWN"
             model = rule.get("model_name", "Unknown Model")
             zones = rule.get("redaction_zones", [])
 
-            # check matches in store
-            targets = service.index.get_by_machine(serial)
+            # The instances `redact()` would reach for this rule, by the
+            # one predicate (`_targets_for`): `"*"` every series and `""`
+            # the serial-less ones (#1108). A lookup of the literal serial
+            # previewed a `"*"` rule as matching nothing.
+            targets = (service._targets_for(rule)  # pylint: disable=protected-access
+                       if "serial_number" in rule or "match" in rule else [])
 
             if targets:
                 count = len(targets)
@@ -3694,11 +3701,11 @@ class DicomSession:
                         continue
 
                     # The rules `redact()` and the export's zones read for
-                    # this series (`rules_matching`: exact or "*", and none
-                    # for a series with no serial), never a reading of its
-                    # own. Taking the first exact match missed "*" and
-                    # every rule after the first (#808).
-                    matched = rules_matching(current_rules, sn)
+                    # this series (`rules_matching`: exact, `""` for a
+                    # series with no serial, or "*", #1108), never a
+                    # reading of its own. Taking the first exact match
+                    # missed "*" and every rule after the first (#808).
+                    matched = rules_matching(current_rules, equip)
                     if not matched:
                         unconfigured += len(se.instances)
                         continue
@@ -3819,13 +3826,36 @@ class DicomSession:
 
         return count
 
+    def _discovery_targets(self, serial_number: str) -> list:
+        """Every instance of the series whose serial is `serial_number`.
+
+        Read through `series_serial`, so `""` names every series with no
+        Device Serial Number, an equipment-less one (no manufacturer, no
+        model, no serial) included, as a
+        `serial_number: ""` rule does (#1108). An exact compare: `"*"` is
+        a literal here, as it always was for discovery.
+
+        Args:
+            serial_number (str): The serial, or `""`.
+
+        Returns:
+            list: The instances, in store order.
+        """
+        return [inst
+                for p in self.store.patients
+                for st in p.studies
+                for se in st.series
+                if series_serial(se) == serial_number
+                for inst in se.instances]
+
     def discover_redaction_zones(self, serial_number: str, sample_size: int = 50, min_confidence: float = 80.0):
         """
         OCR a random sample of one machine's instances and collect where
         burned-in text appears.
 
         Args:
-            serial_number (str): The Device Serial Number of the machine.
+            serial_number (str): The Device Serial Number of the machine;
+                `""` for every series with no Device Serial Number.
             sample_size (int): The most instances to read; a machine with
                 more is sampled at random.
             min_confidence (float): The lowest OCR confidence, 0 to 100, a
@@ -3863,12 +3893,7 @@ class DicomSession:
         get_logger().info(f"Discovering zones for {serial_number}...")
 
         # 1. Gather instances
-        target_instances = []
-        for p in self.store.patients:
-            for st in p.studies:
-                for se in st.series:
-                    if se.equipment and se.equipment.device_serial_number == serial_number:
-                        target_instances.extend(se.instances)
+        target_instances = self._discovery_targets(serial_number)
 
         if not target_instances:
             print(f"No instances found for serial {serial_number}")
@@ -6601,7 +6626,7 @@ class DicomSession:
         zoned = {}
         for rule in self.configuration.rules:
             has_zone = bool(zone_rois(rule.get("redaction_zones")))
-            for inst in service._targets_for(rule.get("serial_number")):
+            for inst in service._targets_for(rule):
                 zoned[id(inst)] = zoned.get(id(inst), False) or has_zone
         if not zoned:
             return _NO_IMAGE_MATCHED
@@ -7402,7 +7427,9 @@ class DicomSession:
         this call runs no OCR (#1108).
 
         Args:
-            serial_number (str): The device serial number to target.
+            serial_number (str): The device serial number to target; `""`
+                for every series with no Device Serial Number, `"*"` for
+                every series, as in a rule (#1108).
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
 
         Raises:
@@ -9053,12 +9080,13 @@ class DicomSession:
     def _redaction_zones_for(self, series) -> list:
         """The configured pixel-redaction zones for a series' scanner.
 
-        Every matching rule's zones, exact or `"*"`, in rule order, each parsed
+        Every matching rule's zones, exact, `""` or `"*"`, in rule order, each parsed
         to a 4-tuple with the matcher and parser `redact()` uses. Logs nothing
         for an invalid zone.
 
         Args:
-            series (Series): The series whose equipment's serial is matched.
+            series (Series): The series whose equipment the rules are
+                matched against.
 
         Returns:
             list: `(y1, y2, x1, x2)` per zone; empty when no rule matches.
@@ -9066,13 +9094,12 @@ class DicomSession:
         # Not `Configuration.get_rule`, which is exact and first-match and
         # returns raw zones: through it a `"*"` rule or a second rule on the
         # same serial would export unredacted pixels, and a `{"roi": ...}` zone
-        # would fail the export. A series with no equipment or no serial is
-        # handed a `None` rather than answered here, so `rule_applies_to` stays
-        # the one answer.
-        serial = (series.equipment.device_serial_number
-                  if series.equipment else None)
+        # would fail the export. The series' equipment is handed over as
+        # held, None included, so `rule_covers` stays the one answer: a
+        # serial-less series reads as `""`, the key the index puts it under,
+        # and a `match:` rule reads the equipment (#1108).
         return [roi
-                for rule in rules_matching(self.configuration.rules, serial)
+                for rule in rules_matching(self.configuration.rules, series.equipment)
                 for roi in zone_rois(rule.get("redaction_zones", []))]
 
     @staticmethod

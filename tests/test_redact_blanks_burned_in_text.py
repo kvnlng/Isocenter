@@ -996,3 +996,60 @@ def test_eighty_and_eighty_point_zero_are_one_policy():
                 {"action": "redact", "min_confidence": 80}, [])
             == services._burned_in_text_policy_hash(
                 {"action": "redact", "min_confidence": 80.0}, []))
+
+
+# --- A zone task under a `""` or `match:` rule (#1108 parts A and C) -------
+
+#: Literal hashes, so a change to a key shape is red here rather than
+#: agreed with by a test that computes its expectation with the function
+#: under test (review of #1111, H1). Each is md5 over the sorted-key JSON
+#: of the shape named, recomputed by hand from the shape when pinned.
+_BOX = (0, 18, 32, 28, 62)
+_PINNED_HASHES = [
+    # OCR-only: no selector key at all, `{"rois": [], "ocr": {...}}`.
+    (([], [], ("pppppppp", [_BOX])), "f2a58833a679b2389fd9724e02998e56"),
+    # One serial, no boxes: the rc18 shape, `{"serial", "rois"}`.
+    ((["SN-1"], [[0, 4, 0, 4]], None), "bb4d8faadf083040d6082a077643281e"),
+    # One serial with boxes: the `ocr` key beside it.
+    ((["SN-1"], [[0, 4, 0, 4]], ("pppppppp", [_BOX])),
+     "c84735721a5f245ad52ce42d8d8ab20e"),
+]
+
+
+@pytest.mark.parametrize("args, expected", _PINNED_HASHES,
+                         ids=["ocr-only", "serial", "serial-and-ocr"])
+def test_the_hash_shapes_are_pinned_as_literals(args, expected):
+    """An OCR-only redacted UID derives from the first of these; a change
+    to it moves every such UID in a store. Kills dropping the empty
+    selector arm (which would hash `{"serials": []}`)."""
+    serials, rois, ocr = args
+    assert services._redaction_config_hash(serials, rois, ocr=ocr) == expected
+
+@pytest.mark.parametrize("rule, selector", [
+    ('  - serial_number: ""\n', ""),
+    ("  - match: {manufacturer: ACME}\n", {"match": {"manufacturer": "ACME"}}),
+], ids=["empty", "match"])
+def test_boxes_join_a_serial_less_zone_task_under_its_selector(tmp_path, ocr, rule, selector):
+    """The reconciliation of #1109 and #1111: a serial-less image a `""` or
+    `match:` rule zones, with text the zone misses. The boxes join that
+    rule's zone task, and the hash is over the rule's selector, the zone
+    and the boxes. Kills a `match` selector refused by the hash, and a
+    zone task under these selectors not found by the fold."""
+    zone = [0, 4, 0, 4]
+    extra = f"machines:\n{rule}    redaction_zones:\n      - {zone}\n"
+    with Session(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact", extra))
+        assert session.redact(show_progress=False) == 1
+        inst = _only_instance(session)
+        record = _record(inst)
+        assert record["boxes"]
+        expected_hash = services._redaction_config_hash(
+            [selector], [zone], ocr=(record["policy"], record["boxes"]))
+        assert inst.attributes["_ISOCENTER_REDACTION_HASH"] == expected_hash
+        assert inst.sop_instance_uid == privacy._redaction_uid_for(
+            ONE, expected_hash, FIXED_A)
+        live = inst.get_pixel_data()[None]
+        assert not _the_box(live).any()
+        assert not live[0, 0:4, 0:4].any()

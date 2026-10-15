@@ -104,7 +104,8 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
 | top level | `machines` | a list of machine rules | no rules |
 | top level | `burned_in_text` | a mapping of `action` (`report`, `redact` or `withhold`; required) and `min_confidence` (a number from 0 to 100); `null` is absent | no OCR |
-| machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits | required |
+| machine rule | `serial_number` | a string, **quoted** if it is all digits; `""` (quoted) for the series with no Device Serial Number, `"*"` for every series; not whitespace only | required, unless the rule has `match` |
+| machine rule | `match` | a mapping of `manufacturer` and/or `model_name`, each a non-blank string; a rule has exactly one of `match` and `serial_number` | none |
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
 | machine rule | `redaction_zones` | a list of zones | no zones |
 | zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) | |
@@ -636,8 +637,20 @@ machines:
       - [0, 100, 0, 500]
 ```
 
-* **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
-* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
+* **`serial_number`**: Exact match for `0018,1000`; `""` (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer, no model and no serial (it has no equipment); a series whose files carry a serial and nothing else is matched by that serial, not by `""`; or `"*"` for every series, with a serial or without. A bare `serial_number:` is null, and is refused as missing.
+* **`match`**: select by device instead of serial, for a machine whose files carry no serial number:
+
+    ```yaml
+    machines:
+      - match:
+          manufacturer: "FUJI PHOTO FILM CO. LTD."
+          model_name: IRS
+        redaction_zones:
+          - [60, 90, 60, 380]
+    ```
+
+    Give `manufacturer`, `model_name`, or both. Each is compared exactly with Manufacturer `(0008,0070)` and Manufacturer's Model Name `(0008,1090)` as the files spell them, case and spaces included, and the rule covers every series of that device whatever its serial, with one or without. A series whose files name neither is never matched. A rule has exactly one selector: `serial_number` or `match`, never both. The `manufacturer` and `model_name` keys beside `serial_number` are still labels, read by nothing, because `add_rule()` writes `Unknown` for both by default. `get_rule()`, `update_rule()` and `delete_rule()` look a rule up by its serial and do not see a `match` rule: write it in the file, or append it to `configuration.rules`.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule, a `match` rule, a `""` rule and a `"*"` rule, or two rules for one serial, each zero their zones. No rule takes precedence over another for what is zeroed. `redact()` redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in ([#908](https://github.com/kvnlng/Isocenter/issues/908)). The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
   * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
@@ -675,7 +688,7 @@ The key is not part of the [policy fingerprint](#what-an-exported-file-says-abou
 
 ### Generating Configuration Templates
 
-You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
+You can generate a starter `isocenter_config.yaml` from the session's inventory. On a session that has loaded no configuration (the floor), it names `basic@2026c`, gives Study Date `JITTER` and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as `save()` does (the pinned profile, an external profile's path, or `none`) and writes every `phi_tags` rule that differs from the base's, value and name included, so the file loads to the policy the session holds ([#741](https://github.com/kvnlng/Isocenter/issues/741)). It also carries over the session's current `date_jitter`, `remove_private_tags` and machine rules. A series with no Device Serial Number gets no scaffolded rule; write `serial_number: ""` for it yourself. A policy missing a rule its base supplies is refused with `save()`'s `ValueError`, and a failed write raises its `OSError`. Each machine's `redaction_zones` is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or `redact()` changes nothing for that machine.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file

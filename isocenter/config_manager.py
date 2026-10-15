@@ -86,8 +86,15 @@ _TOP_LEVEL_KEYS = frozenset({"version", "privacy_profile", "phi_tags",
 #: `create_config` and `save()` write; `manufacturer` is what `add_rule`
 #: writes. Both are metadata and nothing reads them, but refusing either
 #: would refuse the library's own output.
-_RULE_KEYS = frozenset({"serial_number", "manufacturer", "model_name",
-                        "redaction_zones", "comment"})
+#: `match` is the second selector (#1108): a rule has exactly one of it
+#: and `serial_number`. The two labels stay labels: `add_rule` writes
+#: `'Unknown'` for both, so reading them as selectors would stop every
+#: such rule matching.
+_RULE_KEYS = frozenset({"serial_number", "match", "manufacturer",
+                        "model_name", "redaction_zones", "comment"})
+#: What a `match:` selector compares, exactly, against a series'
+#: equipment (#1108).
+_MATCH_KEYS = frozenset({"manufacturer", "model_name"})
 #: `note` is written as data by `create_config` for every machine the
 #: knowledge base matches by serial, so it is a zone key.
 _ZONE_KEYS = frozenset({"roi", "note"})
@@ -1464,6 +1471,42 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
         f"moved, set privacy_profile to its path")
 
 
+def _refused_match(match, label) -> None:
+    """Refuse a `match:` selector that cannot be compared as written (#1108).
+
+    Args:
+        match: The rule's `match` value.
+        label (str): The rule's label, for the message.
+
+    Raises:
+        ValueError: In this order: not a mapping; an unknown key; no key;
+            a value that is not a string (null included); a blank value.
+    """
+    if not isinstance(match, dict):
+        raise ValueError(
+            f"{label}: 'match' must be a mapping of manufacturer and/or "
+            f"model_name, got {match!r} ({type(match).__name__})")
+    reason = _unknown_keys(match, _MATCH_KEYS, "", "A match's")
+    if reason is not None:
+        raise ValueError(f"{label}: {reason}")
+    if not match:
+        raise ValueError(
+            f"{label}: 'match' names no field; give manufacturer and/or "
+            f"model_name, as the files spell them")
+    for key in sorted(match):
+        value = match[key]
+        # Null is not absent here: leaving the key out is how a field is
+        # left unmatched, and a null would compare with nothing.
+        if not isinstance(value, str):
+            raise ValueError(
+                f"{label}: match {key!r} must be a string, got {value!r} "
+                f"({type(value).__name__})")
+        if not value.strip():
+            raise ValueError(
+                f"{label}: match {key!r} {value!r} is blank; leave the key "
+                f"out to match any {key}")
+
+
 class ConfigLoader:
     """Loads and validates unified YAML configuration files (schema
     version 2), through static methods.
@@ -1645,7 +1688,8 @@ class ConfigLoader:
 
         Raises:
             ValueError: In this order: an unknown key; a `serial_number`
-                that is missing or empty, not a `str`, or blank;
+                that is missing (null), not a `str`, or blank (whitespace
+                only; `""` is the serial-less selector, #1108);
                 `manufacturer`, `model_name` or `comment` present, not
                 null and not a string; `redaction_zones` not a list; per
                 zone, a zone neither a list nor a mapping, an unknown zone
@@ -1668,9 +1712,26 @@ class ConfigLoader:
         if reason is not None:
             raise ValueError(f"{label}: {reason}")
 
-        if sn is None or sn == "":
-            raise ValueError(f"Rule #{index}: Missing 'serial_number'.")
-        if not isinstance(sn, str):
+        # `""` is a selector, not a missing serial (#1108): it names every
+        # series with no Device Serial Number, which is what ingest holds
+        # for one. Null is still missing: YAML reads a bare
+        # `serial_number:` as null, and the author meant something.
+        if "match" in rule:
+            # The other selector (#1108); exactly one per rule, so which
+            # series a rule covers never depends on how two selectors in
+            # one rule would combine.
+            if "serial_number" in rule:
+                raise ValueError(
+                    f"{label}: a rule has exactly one of 'serial_number' and "
+                    f"'match'; write two rules to select by both")
+            _refused_match(rule["match"], label)
+        elif sn is None:
+            raise ValueError(
+                f"Rule #{index}: Missing 'serial_number'; write "
+                f"serial_number: \"\" (quoted) for the series with no Device "
+                f"Serial Number, \"*\" for every series, or match: with "
+                f"manufacturer and/or model_name to select by device.")
+        elif not isinstance(sn, str):
             # An unquoted serial is a YAML number -- `0123` loads as the
             # octal 83 -- and never equals a Device Serial Number, so the
             # rule would match nothing and the machine would not be redacted.
@@ -1680,12 +1741,15 @@ class ConfigLoader:
                 f"machine (serial_number: \"0123\", not serial_number: 0123), "
                 f"because YAML reads unquoted digits as a number, and a "
                 f"leading 0 as octal: 0123 loads as 83")
-        if not sn.strip():
-            # As an empty serial is: no Device Serial Number is blank, so
-            # the rule would match no machine and redact nothing.
+        elif sn and not sn.strip():
+            # No Device Serial Number is blank (ingest holds an absent one
+            # as `""`), so the rule would match no machine and redact
+            # nothing.
             raise ValueError(
                 f"Rule #{index}: 'serial_number' {sn!r} is blank; give the "
-                f"serial as it is written on the machine")
+                f"serial as it is written on the machine, or write "
+                f"serial_number: \"\" for the series with no Device Serial "
+                f"Number")
 
         for key in ("manufacturer", "model_name", "comment"):
             # Null is absent (the comment above `_VERSION_SHAPE`).
