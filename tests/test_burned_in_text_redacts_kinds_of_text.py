@@ -314,16 +314,25 @@ _READINGS = [
     (("JAN", 2, 4, 10, 8, 1), ("1970", 16, 4, 14, 8, 1),
      ("L", 40, 4, 4, 8, 1), ("120kV", 50, 4, 20, 8, 1),
      ("A1234567", 2, 30, 30, 8, 2), ("Doe", 40, 30, 12, 8, 2)),
+    # One-character words inside a match: `5 JAN 1970` is a date whose
+    # day is one digit, and `01 / 01 / 1970` read with the slashes as
+    # words of their own. Neither `5` nor `/` is a box under `any`.
+    (("5", 2, 4, 4, 8, 1), ("JAN", 10, 4, 12, 8, 1), ("1970", 26, 4, 16, 8, 1),
+     ("01", 2, 30, 8, 8, 2), ("/", 12, 30, 3, 8, 2), ("01", 18, 30, 8, 8, 2),
+     ("/", 28, 30, 3, 8, 2), ("1970", 34, 30, 16, 8, 2)),
 ]
 
 
-@pytest.mark.parametrize("words", _READINGS, ids=["block", "compact", "month"])
+@pytest.mark.parametrize("words", _READINGS,
+                         ids=["block", "compact", "month", "one-character"])
 def test_a_narrowed_target_never_boxes_what_any_would_not(tmp_path, monkeypatch, nlp, words):
     """The invariant (spec §4.1), over every subset of the kinds: the boxes
     a narrowed target keeps are a subset of the boxes `any` keeps, at the
     same threshold, above and below it. Red if classification ever adds a
-    region (a word under the threshold, or one the two-letters rule
-    drops: `L` here)."""
+    region: a word under the threshold (the reading at 79), or a word the
+    two-letters rule drops that sits inside a match (`5` in `5 JAN 1970`,
+    review X1 of #1124; the `L` of the month reading sits outside every
+    match and could not show it)."""
     fake = WordsTesseract(words)
     monkeypatch.setattr(pixel_analysis, "HAS_OCR", True)
     monkeypatch.setattr(pixel_analysis, "pytesseract", fake)
@@ -342,6 +351,58 @@ def test_a_narrowed_target_never_boxes_what_any_would_not(tmp_path, monkeypatch,
                         assert kept, "every reading holds a word of some kind"
             if conf == 96:
                 assert every
+
+
+# --- lines are grouped by where the words sit (review F3 of #1124) -----------
+
+def _region(text, x, y, w=10, h=8, frame=0):
+    return pixel_analysis.TextRegion(text=text, box=(x, y, w, h),
+                                     confidence=96.0, frame_index=frame)
+
+
+def _kept(regions, kinds):
+    kept, counts, _left = pixel_analysis._regions_of_kinds(regions, kinds)
+    return [r.text for r in kept], counts
+
+
+def test_a_line_tesseract_split_across_blocks_is_still_one_line(tmp_path, monkeypatch, nlp):
+    """`--psm 11` can put `DOE,` and `JANE` of one visual line in two
+    blocks; read apart, neither is a name and the name stays. Grouped by
+    where they sit, the name is redacted. Red under tesseract's
+    `(block, par, line)` grouping."""
+    fake = WordsTesseract(words=[("DOE,", 2, 4, 12, 8, 1), ("JANE", 18, 4, 16, 8, 2),
+                                 ("01/01/1970", 40, 4, 30, 8, 3)])
+    monkeypatch.setattr(pixel_analysis, "HAS_OCR", True)
+    monkeypatch.setattr(pixel_analysis, "pytesseract", fake)
+    with _session_with(tmp_path, fake.words) as session:
+        session.load_config(_cfg(tmp_path, target="[names]"))
+        session.redact(show_progress=False)
+        arr = _instance(session).get_pixel_data()
+        assert [_blank(arr, w) for w in fake.words] == [True, True, False]
+
+
+def test_words_on_different_frames_never_share_a_line():
+    """`JAN` on frame 0 and `1970` on frame 1, at one height: apart, no
+    date; joined across frames, a date that is on no frame (review X6)."""
+    regions = [_region("JAN", 2, 4, frame=0), _region("1970", 16, 4, frame=1)]
+    assert _kept(regions, ["dates"]) == ([], {"dates": 0, "left": 2})
+    one_frame = [_region("JAN", 2, 4), _region("1970", 16, 4)]
+    assert _kept(one_frame, ["dates"])[0] == ["JAN", "1970"]
+
+
+def test_a_line_is_read_left_to_right_whatever_order_tesseract_gave():
+    regions = [_region("1970", 40, 4), _region("JAN", 20, 5), _region("01", 2, 3)]
+    assert _kept(regions, ["dates"]) == (["01", "JAN", "1970"],
+                                         {"dates": 3, "left": 0})
+
+
+def test_words_share_a_line_only_when_their_heights_overlap_by_half():
+    """Overlapping by half the shorter height is one line; less is two.
+    `01 JAN` above `1970` is no date; beside it, it is."""
+    beside = [_region("01 JAN", 2, 4, w=20), _region("1970", 30, 8)]
+    assert _kept(beside, ["dates"])[0] == ["01 JAN", "1970"]
+    below = [_region("01 JAN", 2, 4, w=20), _region("1970", 30, 9)]
+    assert _kept(below, ["dates"])[0] == ["01 JAN"]
 
 
 def test_a_word_below_the_threshold_is_not_taken_by_its_kind(tmp_path, monkeypatch):
@@ -470,11 +531,13 @@ def test_a_model_upgrade_is_read_again_by_redact(tmp_path, words_ocr, nlp):
 
 def test_a_worker_that_cannot_load_the_model_leaves_no_record(tmp_path, words_ocr, monkeypatch):
     """The caller's model loaded and a worker's did not (a spawned
-    environment that differs): a failure for that instance, quoting the
-    load's failure only, no record, and the export withholds it."""
+    environment that differs): a failure for that instance, no record,
+    and the export withholds it. The row names the load's exception class
+    only, never its message, which is a third party's and differs between
+    interpreters (review F4 of #1124, as #747 and #1022 quote)."""
     answers = iter([None])
-    monkeypatch.setattr(text_kinds, "_nlp_unavailable_reason",
-                        lambda: next(answers, "OSError: no model here"))
+    monkeypatch.setattr(text_kinds, "_nlp_load_failure",
+                        lambda: next(answers, OSError("no model at /home/QZXJ")))
     monkeypatch.setattr(text_kinds, "_names_by", lambda: "spacy x en_core_web_sm y")
     db = tmp_path / "s.db"
     out = tmp_path / "out"
@@ -485,8 +548,10 @@ def test_a_worker_that_cannot_load_the_model_leaves_no_record(tmp_path, words_oc
         summary = session.export(str(out), use_compression=False, show_progress=False)
     assert summary.written == 0
     assert words_ocr.calls == 0
-    assert [r for r in audit_rows(db)
-            if "the names model could not be loaded: OSError: no model here" in r[2]]
+    rows = audit_rows(db)
+    assert [r for r in rows
+            if "the names model could not be loaded (OSError)" in r[2]]
+    assert not any("QZXJ" in str(cell) for row in rows for cell in row)
 
 
 # --- the residual read, the rows, section 5 ------------------------------------

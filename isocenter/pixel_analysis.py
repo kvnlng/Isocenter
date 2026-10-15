@@ -206,11 +206,6 @@ class TextRegion:
     box: Tuple[int, int, int, int]  # x, y, w, h
     confidence: float
     frame_index: int = 0
-    #: tesseract's `(block_num, par_num, line_num)` for the word: the line
-    #: a narrowed `burned_in_text` target reads it in (#1121). Private,
-    #: and `(0, 0, 0)` where the reader gives none.
-    _line: Tuple[int, int, int] = field(default=(0, 0, 0), repr=False,
-                                        compare=False)
 
 
 def _get_voi_lut_dataset(instance: Instance) -> Dataset:
@@ -299,10 +294,6 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
 
     regions = []
     n_boxes = len(data['text'])
-    # The line each word sits on (#1121); a reader that gives none (a
-    # stand-in) puts every word of the frame on one line.
-    lines = [data.get(key) or [0] * n_boxes
-             for key in ("block_num", "par_num", "line_num")]
     for i in range(n_boxes):
         text = data['text'][i].strip()
         conf = int(data['conf'][i])
@@ -314,8 +305,7 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
                 text=text,
                 box=(x, y, w, h),
                 confidence=float(conf),
-                frame_index=frame_idx,
-                _line=tuple(int(column[i]) for column in lines),
+                frame_index=frame_idx
             ))
     return regions
 
@@ -684,20 +674,63 @@ def _alnum_count(text: str) -> int:
     return sum(ch.isalnum() for ch in text)
 
 
+#: Two words share a line when their vertical extents overlap by at least
+#: this share of the shorter one's height (#1121, review F3 of #1124).
+LINE_OVERLAP = 0.5
+
+
+def _lines_of(regions: Sequence[TextRegion]) -> List[List[TextRegion]]:
+    """The regions grouped into lines by where they sit, never by
+    tesseract's `(block, par, line)`.
+
+    `--psm 11` reads sparse text and can put two words of one visual line
+    in different blocks: grouped by its numbers, `DOE,` and `JANE` were
+    read apart and a name was left (review F3 of #1124). So, within each
+    frame, a word joins a line when its vertical extent overlaps the
+    line's by at least `LINE_OVERLAP` of the shorter height, and each
+    line is ordered left to right. Words on different frames never share
+    a line. Tesseract's numbers are not read at all, not even as a
+    tiebreak: one rule, which a detector region (PR C) meets as well.
+    Two labels at either end of one row become one line: the safe
+    direction, since a span then has more words to overlap, never fewer.
+    """
+    by_frame: Dict[int, List[TextRegion]] = {}
+    for region in regions:
+        by_frame.setdefault(int(region.frame_index), []).append(region)
+    lines = []
+    for frame in sorted(by_frame):
+        bands = []  # [top, bottom, words]
+        for region in sorted(by_frame[frame],
+                             key=lambda r: (int(r.box[1]), int(r.box[0]))):
+            _x, y, _w, h = (int(v) for v in region.box)
+            for band in bands:
+                overlap = min(band[1], y + h) - max(band[0], y)
+                if overlap > 0 and overlap >= LINE_OVERLAP * min(h, band[1] - band[0]):
+                    band[0], band[1] = min(band[0], y), max(band[1], y + h)
+                    band[2].append(region)
+                    break
+            else:
+                bands.append([y, y + h, [region]])
+        lines.extend(sorted(words, key=lambda r: int(r.box[0]))
+                     for _top, _bottom, words in bands)
+    return lines
+
+
 def _regions_of_kinds(regions: Sequence[TextRegion], target):
     """Which regions a target redacts, and counts of what was read (#1121).
 
     Under `any`, every region. Under a list of kinds, the regions are
-    grouped into lines (by frame and tesseract's block, paragraph and
-    line), each line's text is its words joined by single spaces, each
+    grouped into lines by where they sit (`_lines_of`), each line's text
+    is its words joined by single spaces, each
     named kind's spans are found on it (`text_kinds.spans`), and a region
     is redacted when a span of a named kind overlaps it: the words the
     match covers, never the whole line (owner ruling Q-B15 (a)). So the
     result is always a subset of `regions`, which is what makes a
     narrowed target never redact more than `any` (the invariant).
 
-    A detector region (PR C) is a line of one region: its reading is the
-    line, and a span anywhere on it redacts it.
+    A detector region (PR C) is a region whose text is its crop's
+    reading; it joins a line by where it sits, as a word does, and a span
+    overlapping its reading redacts it.
 
     Nothing read leaves this function: it returns regions the caller
     already holds and integer counts.
@@ -715,11 +748,8 @@ def _regions_of_kinds(regions: Sequence[TextRegion], target):
     if target == "any":
         return list(regions), None, []
     counts = {kind: 0 for kind in target}
-    lines: Dict[tuple, List[TextRegion]] = {}
-    for region in regions:
-        lines.setdefault((region.frame_index, region._line), []).append(region)  # pylint: disable=protected-access
     kept, left_frames = [], []
-    for words in lines.values():
+    for words in _lines_of(regions):
         offsets, cursor = [], 0
         for word in words:
             offsets.append((cursor, cursor + len(word.text)))
@@ -769,11 +799,14 @@ def _text_boxes(instance: Instance, min_confidence: float,
     if target != "any" and "names" in target:
         # Before the read, so a worker that cannot load the model when the
         # caller could costs no OCR: a failure, no record, and the export
-        # gate withholds the image. The reason concerns loading only.
-        reason = text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
-        if reason is not None:
+        # gate withholds the image. The failure becomes an audit row, so
+        # its class only, never a third party's message, whose wording
+        # differs between 3.12 and 3.14t (as #747 and #1022 quote).
+        failure = text_kinds._nlp_load_failure()  # pylint: disable=protected-access
+        if failure is not None:
             return _InstanceBoxes(
-                False, f"the names model could not be loaded: {reason}", [])
+                False, "the names model could not be loaded "
+                f"({type(failure).__name__})", [])
 
     def prepare(arr):
         arr, geometry = _zoned_for_reading(instance, arr, zones)

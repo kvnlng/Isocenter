@@ -18,6 +18,7 @@ interpreters.
 import ast
 import inspect
 import threading
+import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -47,6 +48,9 @@ def test_a_date_shape_is_a_date(line):
     "32/01/1970", "01/02/1799", "01/02/2200", "17991231", "22000101", "1970/1/123",
     "01/02/197", "JAN", "MAY BE", "IS/IS/IS", "SOB-SOB-SOB", "01/02-1970",
     "MARCH", "120kV", "5.0MHz",
+    # Look-alikes alone, which read as a date once mapped (`01/01/58`,
+    # `18000101`): a candidate needs one real digit (review X3 of #1124).
+    "OI/OI/SB", "IBOOOIOI",
 ])
 def test_what_is_not_a_date(line):
     assert text_kinds.date_spans(line) == []
@@ -269,19 +273,35 @@ def test_spacy_is_imported_only_inside_the_loader():
                            for m in mods)
 
 
-def test_a_model_warning_is_not_let_out(nlp, recwarn):
-    import warnings
+def test_a_model_warning_is_not_let_out(monkeypatch, recwarn):
+    """Through the loader, as a real model is reached: the filter its load
+    inserts ignores what spaCy, thinc, or a `stacklevel` pointing into
+    this module, warn while a line is read; a warning from anywhere else
+    still shows (review F1 of #1124)."""
 
     class Noisy(FakeNlp):
         def __call__(self, text):
-            warnings.warn(f"W999 read {text}")
+            for module in ("spacy.language", "thinc.api",
+                           "isocenter.text_kinds"):
+                warnings.warn_explicit(f"W999 read {text}", UserWarning,
+                                       "model.py", 1, module=module)
             return super().__call__(text)
-    noisy = Noisy({})
-    import isocenter.text_kinds as module
-    original = module._nlp
-    module._nlp = lambda: noisy
-    try:
-        text_kinds.name_spans("QZXJ7SENTINEL")
-    finally:
-        module._nlp = original
+    monkeypatch.setattr(text_kinds, "_MODEL", None)
+    monkeypatch.setattr(text_kinds, "_load_model", lambda: Noisy({}))
+    text_kinds.name_spans("QZXJ7SENTINEL")
     assert not [w for w in recwarn if "QZXJ7SENTINEL" in str(w.message)]
+    warnings.warn_explicit("from elsewhere", UserWarning, "x.py", 1,
+                           module="spacyish")
+    assert [w for w in recwarn if "from elsewhere" in str(w.message)]
+
+
+def test_the_module_never_opens_catch_warnings():
+    """`catch_warnings` on a threaded path mutates the process-global
+    filters on 3.12, dropping sibling threads' warnings (review F1 of
+    #1124; the repo's rule beside `imagecodecs_handler`'s fragment walk
+    and `io_handlers`' IS read)."""
+    tree = ast.parse(inspect.getsource(text_kinds))
+    named = {node.attr for node in ast.walk(tree)
+             if isinstance(node, ast.Attribute)}
+    named |= {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert "catch_warnings" not in named

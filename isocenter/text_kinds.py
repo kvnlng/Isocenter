@@ -187,6 +187,28 @@ def _spacy_version() -> str:
     return str(spacy.__version__)
 
 
+#: Warnings spaCy and thinc raise, and any attributed to this module by a
+#: `stacklevel` that walks out of them, are ignored: nothing promises a
+#: model warning never quotes its input, which is read text.
+_MODEL_WARNINGS = r"(spacy|thinc|isocenter\.text_kinds)(\..*)?\Z"
+
+
+def _ignore_model_warnings() -> None:
+    """Insert one `ignore` filter for the model's warnings (#1121).
+
+    A one-shot insert at load, never `warnings.catch_warnings()` around
+    each call: on 3.12 that context manager saves and restores the
+    process-global filter list, so on a threaded path it drops sibling
+    threads' warnings while it is open and can undo another thread's
+    filters, its own included, when it closes. The repo forbids it on
+    threaded paths for that reason (`imagecodecs_handler.py`, above the
+    excess-fragment walk; `io_handlers.py`, the IS overflow read and the
+    encapsulated-length window). `filterwarnings` replaces an identical
+    entry rather than adding a second, so a reload inserts nothing new.
+    """
+    warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)
+
+
 def _loaded_model():
     """The model, loading it if needed; raises what the load raises."""
     global _MODEL  # pylint: disable=global-statement
@@ -194,7 +216,9 @@ def _loaded_model():
         if _MODEL is None:
             # Under the lock so two threads do not load twice. The load
             # imports, which takes the import lock: nothing that holds it
-            # waits on this lock, so the order cannot invert.
+            # waits on this lock, so the order cannot invert. The filter
+            # first, so the load's own warnings are ignored too.
+            _ignore_model_warnings()
             _MODEL = _load_model()
         return _MODEL
 
@@ -204,17 +228,23 @@ def _nlp():
     return _loaded_model()
 
 
-def _nlp_unavailable_reason() -> Optional[str]:
-    """None when the `names` kind can run here, otherwise why not.
-
-    Loads the model (caching success only). The reason is the load's
-    failure, which concerns loading and never holds read text.
-    """
+def _nlp_load_failure() -> Optional[BaseException]:
+    """None when the `names` kind can run here, otherwise the load's
+    exception. Loads the model (caching success only)."""
     try:
         _nlp()
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        return _described(exc)
+        return exc
     return None
+
+
+def _nlp_unavailable_reason() -> Optional[str]:
+    """None when the `names` kind can run here, otherwise why not, for
+    the caller's exception message. The reason is the load's failure,
+    which concerns loading and never holds read text; an audit row
+    quotes its class only (`pixel_analysis._text_boxes`)."""
+    exc = _nlp_load_failure()
+    return None if exc is None else _described(exc)
 
 
 def _described(exc: BaseException) -> str:
@@ -263,9 +293,9 @@ def name_spans(line: str) -> List[Span]:
     """
     model = _nlp()
     found = {m.span() for m in _CARET_NAME.finditer(line)}
-    with _NLP_LOCK, warnings.catch_warnings():
-        # Nothing promises a model warning never quotes its input.
-        warnings.simplefilter("ignore")
+    # The model's warnings are ignored by the filter its load inserted
+    # (`_ignore_model_warnings`), not by a context manager here.
+    with _NLP_LOCK:
         found.update(_person_spans(model, line))
         titled = _title_cased(line)
         if titled != line:
