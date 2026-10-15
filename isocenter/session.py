@@ -444,8 +444,8 @@ def _kinds_read(target, counts) -> str:
 
 
 def _says_burned_in_yes(value) -> bool:
-    """Whether a Burned In Annotation value says `YES`: a `str` whose
-    `strip().upper()` equals `YES`, or a list, tuple or `MultiValue` any
+    """Whether a Burned In Annotation value says `YES`: a `str` stripped and
+    upper-cased, then compared with `YES`, or a list, tuple or `MultiValue` any
     `str` value of which does. Not seen: a value held as `bytes`, which
     reads as not YES.
 
