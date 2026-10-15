@@ -67,6 +67,24 @@ def test_the_rule_path_refuses_before_writing_anything(session):
     _untouched(inst)
 
 
+class _RowsOnly:
+    """A backend that can write rows but cannot persist pixels."""
+
+    def log_audit(self, *args, **kwargs):
+        """Accept the row."""
+
+
+def test_a_backend_that_cannot_persist_pixels_is_refused(session):
+    """Review of #1111, H7: a backend with no `persist_pixel_data` stores
+    the blanked frame nowhere either. Kills a gate that asks only whether
+    a backend is present."""
+    inst = _instance(session)
+    with pytest.raises(RuntimeError, match="store backend"):
+        RedactionService(session.store, _RowsOnly()).redact_machine_instances(
+            SERIAL, [tuple(OVER)], show_progress=False, project_secret=FIXED_A)
+    _untouched(inst)
+
+
 def test_task_preparation_refuses(session):
     with pytest.raises(RuntimeError, match="store backend"):
         RedactionService(session.store).prepare_redaction_tasks(

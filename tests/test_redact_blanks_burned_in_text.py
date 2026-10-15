@@ -1000,6 +1000,31 @@ def test_eighty_and_eighty_point_zero_are_one_policy():
 
 # --- A zone task under a `""` or `match:` rule (#1108 parts A and C) -------
 
+#: Literal hashes, so a change to a key shape is red here rather than
+#: agreed with by a test that computes its expectation with the function
+#: under test (review of #1111, H1). Each is md5 over the sorted-key JSON
+#: of the shape named, recomputed by hand from the shape when pinned.
+_BOX = (0, 18, 32, 28, 62)
+_PINNED_HASHES = [
+    # OCR-only: no selector key at all, `{"rois": [], "ocr": {...}}`.
+    (([], [], ("pppppppp", [_BOX])), "f2a58833a679b2389fd9724e02998e56"),
+    # One serial, no boxes: the rc18 shape, `{"serial", "rois"}`.
+    ((["SN-1"], [[0, 4, 0, 4]], None), "bb4d8faadf083040d6082a077643281e"),
+    # One serial with boxes: the `ocr` key beside it.
+    ((["SN-1"], [[0, 4, 0, 4]], ("pppppppp", [_BOX])),
+     "c84735721a5f245ad52ce42d8d8ab20e"),
+]
+
+
+@pytest.mark.parametrize("args, expected", _PINNED_HASHES,
+                         ids=["ocr-only", "serial", "serial-and-ocr"])
+def test_the_hash_shapes_are_pinned_as_literals(args, expected):
+    """An OCR-only redacted UID derives from the first of these; a change
+    to it moves every such UID in a store. Kills dropping the empty
+    selector arm (which would hash `{"serials": []}`)."""
+    serials, rois, ocr = args
+    assert services._redaction_config_hash(serials, rois, ocr=ocr) == expected
+
 @pytest.mark.parametrize("rule, selector", [
     ('  - serial_number: ""\n', ""),
     ("  - match: {manufacturer: ACME}\n", {"match": {"manufacturer": "ACME"}}),
