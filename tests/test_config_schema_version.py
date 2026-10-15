@@ -325,7 +325,16 @@ SCHEMA_BY_VERSION = {
         "match": {"manufacturer", "model_name"},
         "zone": {"roi", "note"},
         "phi_rule": {"action", "name", "value"},
-        "burned_in_text": {"action", "min_confidence"},
+        # `scope` and `modalities` (#1121) joined the same unshipped row
+        # before 1.0.0, by the same ruling (Q9 on #782; Q-X1 (a) of
+        # 2026-10-15): the key shipped only in rc19.
+        "burned_in_text": {"action", "min_confidence", "scope", "modalities"},
+        # The values a `burned_in_text` key takes where they are a closed
+        # set: a new one is a new value, like a new profile name.
+        "burned_in_text_values": {
+            "action": {"report", "redact", "withhold"},
+            "scope": {"flagged", "modalities", "all"},
+        },
         # Every `privacy_profile` value a built-in resolves, pinned names
         # and bare aliases alike (#714). A later PS3.15 edition is a new
         # value, so it comes with a new minor like a new key does.
@@ -343,6 +352,14 @@ def test_a_key_added_to_the_schema_bumps_the_minor():
     assert set(config_manager._ZONE_KEYS) == expected["zone"]
     assert set(config_manager._PHI_RULE_KEYS) == expected["phi_rule"]
     assert set(config_manager._BURNED_IN_TEXT_KEYS) == expected["burned_in_text"]
+
+
+def test_a_new_burned_in_text_value_comes_with_a_schema_minor():
+    """Kills an `action` or `scope` value added under an unchanged
+    `CONFIG_VERSION`, for the reason a profile name is (#1121)."""
+    values = SCHEMA_BY_VERSION[CONFIG_VERSION]["burned_in_text_values"]
+    assert set(config_manager.BURNED_IN_TEXT_ACTIONS) == values["action"]
+    assert set(config_manager.BURNED_IN_TEXT_SCOPES) == values["scope"]
 
 
 def test_a_new_profile_name_comes_with_a_schema_minor():

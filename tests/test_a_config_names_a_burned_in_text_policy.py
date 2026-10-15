@@ -9,6 +9,10 @@ The owner's ruling of 2026-10-14 adds one top-level key,
       action: redact        # report | redact | withhold (required)
       min_confidence: 80    # 0..100, optional, default 80
 
+and #1121 (owner ruling of 2026-10-15) makes `scope` required beside
+`action`; `test_burned_in_text_reads_its_scope.py` holds those rules, and
+the policies here name `scope: all` (rc19's reading) or `flagged`.
+
 with `null` read as absent, kept out of the PHI policy fingerprint, held
 on the tier-2 attribute `IsocenterConfiguration.burned_in_text`, and
 added to the unshipped 2.0 schema row rather than a 2.1 (Q7).
@@ -40,14 +44,14 @@ def _loaded(tmp_path, text):
 def test_each_action_loads_with_the_default_confidence_filled_in(tmp_path, action):
     """Kills an action missing from the accepted set, and the default
     left unfilled (two spellings of one policy would then hash apart)."""
-    parts = _loaded(tmp_path, f"burned_in_text:\n  action: {action}\n")
-    assert parts[5] == {"action": action, "min_confidence": 80}
+    parts = _loaded(tmp_path, f"burned_in_text:\n  action: {action}\n  scope: all\n")
+    assert parts[5] == {"action": action, "scope": "all", "min_confidence": 80}
 
 
 def test_a_stated_confidence_is_kept(tmp_path):
     parts = _loaded(tmp_path,
-                    "burned_in_text: {action: report, min_confidence: 62.5}\n")
-    assert parts[5] == {"action": "report", "min_confidence": 62.5}
+                    "burned_in_text: {action: report, scope: all, min_confidence: 62.5}\n")
+    assert parts[5] == {"action": "report", "scope": "all", "min_confidence": 62.5}
 
 
 @pytest.mark.parametrize("text", ["machines: []\n", "burned_in_text:\n",
@@ -63,12 +67,12 @@ def test_absent_and_null_are_no_policy(tmp_path, text):
     ("burned_in_text: {action: Redact}\n", "'Redact'"),
     ("burned_in_text: {action: blank}\n", "report, redact, withhold"),
     ("burned_in_text: {action: null}\n", "needs an 'action'"),
-    ("burned_in_text: {action: redact, min_confidence: true}\n", "min_confidence"),
-    ("burned_in_text: {action: redact, min_confidence: '80'}\n", "min_confidence"),
-    ("burned_in_text: {action: redact, min_confidence: -1}\n", "0 to 100"),
-    ("burned_in_text: {action: redact, min_confidence: 101}\n", "0 to 100"),
-    ("burned_in_text: {action: redact, min_confidence: .nan}\n", "0 to 100"),
-    ("burned_in_text: {action: redact, min_box_height: 20}\n", "'min_box_height'"),
+    ("burned_in_text: {action: redact, scope: all, min_confidence: true}\n", "min_confidence"),
+    ("burned_in_text: {action: redact, scope: all, min_confidence: '80'}\n", "min_confidence"),
+    ("burned_in_text: {action: redact, scope: all, min_confidence: -1}\n", "0 to 100"),
+    ("burned_in_text: {action: redact, scope: all, min_confidence: 101}\n", "0 to 100"),
+    ("burned_in_text: {action: redact, scope: all, min_confidence: .nan}\n", "0 to 100"),
+    ("burned_in_text: {action: redact, scope: all, min_box_height: 20}\n", "'min_box_height'"),
     ("burned_in_text: redact\n", "must be a mapping"),
     ("burned_in_text: [redact]\n", "must be a mapping"),
 ])
@@ -83,14 +87,15 @@ def test_a_policy_this_library_cannot_apply_is_refused_by_name(tmp_path, text, w
 
 
 def test_a_refused_file_leaves_the_sessions_policy_as_it_was(tmp_path):
-    good = _write(tmp_path, "burned_in_text: {action: withhold}\n", "good.yaml")
+    good = _write(tmp_path, "burned_in_text: {action: withhold, scope: flagged}\n",
+                  "good.yaml")
     bad = _write(tmp_path, "burned_in_text: {action: wipe}\n", "bad.yaml")
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(str(good))
         with pytest.raises(ValueError):
             session.load_config(str(bad))
         assert session.configuration.burned_in_text == {
-            "action": "withhold", "min_confidence": 80}
+            "action": "withhold", "scope": "flagged", "min_confidence": 80}
 
 
 def test_load_config_assigns_it_and_a_file_without_it_clears_it(tmp_path):
@@ -99,24 +104,25 @@ def test_load_config_assigns_it_and_a_file_without_it_clears_it(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         assert session.configuration.burned_in_text is None
         session.load_config(str(_write(
-            tmp_path, "burned_in_text: {action: redact, min_confidence: 90}\n",
+            tmp_path, "burned_in_text: {action: redact, scope: all, min_confidence: 90}\n",
             "a.yaml")))
         assert session.configuration.burned_in_text == {
-            "action": "redact", "min_confidence": 90}
+            "action": "redact", "scope": "all", "min_confidence": 90}
         session.load_config(str(_write(tmp_path, "machines: []\n", "b.yaml")))
         assert session.configuration.burned_in_text is None
 
 
 def test_save_writes_the_policy_and_reloads_to_it(tmp_path):
-    path = _write(tmp_path, "burned_in_text: {action: report, min_confidence: 70}\n")
+    path = _write(tmp_path,
+                  "burned_in_text: {action: report, scope: all, min_confidence: 70}\n")
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(str(path))
         session.configuration.save()
         assert yaml.safe_load(path.read_text())["burned_in_text"] == {
-            "action": "report", "min_confidence": 70}
+            "action": "report", "scope": "all", "min_confidence": 70}
         session.load_config(str(path))
         assert session.configuration.burned_in_text == {
-            "action": "report", "min_confidence": 70}
+            "action": "report", "scope": "all", "min_confidence": 70}
 
 
 def test_save_writes_no_line_when_there_is_no_policy(tmp_path):
@@ -132,12 +138,13 @@ def test_save_writes_no_line_when_there_is_no_policy(tmp_path):
 def test_create_config_carries_the_policy(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         session.configuration.burned_in_text = {"action": "withhold",
+                                                "scope": "flagged",
                                                 "min_confidence": 85}
         out = tmp_path / "scaffold.yaml"
         session.create_config(str(out))
         session.load_config(str(out))
         assert session.configuration.burned_in_text == {
-            "action": "withhold", "min_confidence": 85}
+            "action": "withhold", "scope": "flagged", "min_confidence": 85}
 
 
 def test_create_config_refuses_a_policy_assigned_in_code_that_would_not_load(tmp_path):
@@ -155,12 +162,14 @@ def test_the_policy_is_not_in_the_phi_policy_fingerprint():
     `(0012,0063)` short hash must not move when the key is added."""
     plain = IsocenterConfiguration()
     with_policy = IsocenterConfiguration()
-    with_policy.burned_in_text = {"action": "redact", "min_confidence": 80}
+    with_policy.burned_in_text = {"action": "redact", "scope": "all",
+                                  "min_confidence": 80}
     assert plain._scan_policy() == with_policy._scan_policy()
 
 
 def test_the_key_set_is_the_one_the_schema_row_names():
     """`tests/test_config_schema_version.py` pins the row; this pins that
     the sub-keys are one frozenset beside the others."""
-    assert config_manager._BURNED_IN_TEXT_KEYS == frozenset({"action", "min_confidence"})
+    assert config_manager._BURNED_IN_TEXT_KEYS == frozenset(
+        {"action", "min_confidence", "scope", "modalities"})
     assert "burned_in_text" in config_manager._TOP_LEVEL_KEYS
