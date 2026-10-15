@@ -50,8 +50,7 @@ from .privacy import (PhiInspector, PhiFinding, PhiReport,
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, BurnedInTextSummary,
                         get_renderer, GAP_REMOVED,
-                        GAP_RETAINED, GAP_UNRESOLVED,
-                        _EXPORT_READ_SOURCE)
+                        GAP_RETAINED, GAP_UNRESOLVED, _EXPORT_READ_SOURCE)
 from .manifest import Manifest, ManifestItem, get_manifest_renderer
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore, _network_filesystem_type
