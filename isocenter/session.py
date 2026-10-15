@@ -29,7 +29,8 @@ from pydicom.datadict import dictionary_VR
 from pydicom.multival import MultiValue
 
 from .io_handlers import (DicomImporter, DicomExporter, DeidMarkers, ExportContext,
-                          ExportError, ExportSummary, SidecarPixelLoader,
+                          ExportError, ExportSummary, REDACTION_HASH_ATTR,
+                          SidecarPixelLoader,
                           SidecarWaveformLoader, export_output_path,
                           export_folder_names, export_stamp_attributes, GRADED_LOSS_SCOPES,
                           normalize_id_filter, redaction_in_effect, select_patient_ids,
@@ -375,7 +376,8 @@ def _one_tesseract_thread():
 
 
 def _holds_pixels(instance) -> bool:
-    """Whether the `burned_in_text` policy reads and gates this instance.
+    """Whether the instance holds pixels: the half of
+    `_in_burned_in_text_scope` that every scope asks.
 
     A resident frame or a pixel loader: every image `ingest()` stores has
     a sidecar loader, and an SR, RT object or waveform has none. Asked
@@ -391,6 +393,79 @@ def _holds_pixels(instance) -> bool:
     """
     # pylint: disable=protected-access
     return instance.pixel_array is not None or instance._pixel_loader is not None
+
+
+def _scope_named(policy) -> str:
+    """The policy's scope as rows and section 5 name it: `flagged`, `all`,
+    or `modalities [CR, DX]`. Modality values are not PHI."""
+    if policy["scope"] == "modalities":
+        return f"modalities [{', '.join(policy['modalities'])}]"
+    return policy["scope"]
+
+
+def _says_burned_in_yes(value) -> bool:
+    """Whether a Burned In Annotation value says `YES`: a `str` that,
+    stripped and upper-cased, is `YES`, or a list, tuple or `MultiValue`
+    any `str` value of which is. Case-insensitive, as the `COMPLIANCE_CHECK`
+    reader is. Not seen: a value held as `bytes`, which reads as not YES.
+    """
+    values = value if isinstance(value, (list, tuple, MultiValue)) else [value]
+    return any(isinstance(v, str) and v.strip().upper() == "YES" for v in values)
+
+
+def _in_burned_in_text_scope(instance, modality, policy) -> bool:
+    """Whether the `burned_in_text` policy reads and gates this instance
+    (#1121): the one answer the `redact()` pass, the plain-export gate
+    and `export(check_burned_in=True)`'s read all ask, so the three
+    cannot disagree.
+
+    The instance must hold pixels (`_holds_pixels`). Then, by `scope`:
+
+    - `all`: every such instance (rc19's reading).
+    - `flagged`: one whose Burned In Annotation `(0028,0301)` says `YES`
+      (`_says_burned_in_yes`); **or** that carries this store's redaction
+      attestation; **or** whose `burned_in_text` record, under any policy,
+      holds a box (owner ruling Q-A1 (a)).
+    - `modalities`: what `flagged` reads, and every instance of a series
+      one of whose Modality values is in `policy["modalities"]`.
+
+    **Why the two extra `flagged` arms.** A zone redaction writes `(0028,
+    0301) NO` beside the attestation, in the same `redact()` that runs the
+    pass. Under `action: withhold` the pass reads a `YES` image and records
+    text the zone missed; the zone then writes `NO`. Read by the flag
+    alone, the next `export()` would find the image out of scope, not gate
+    it, and write the text `withhold` promised to keep out. The same holds
+    for an image a zone redacted before the policy was loaded, whose source
+    `YES` can no longer be read. The attestation closes both; the record
+    arm keeps text once found gated whatever rewrites the flag later. A
+    record with no box does not keep an image in scope: a text-free image
+    read under `all` would otherwise be read under a narrower scope forever.
+
+    Args:
+        instance (Instance): The instance.
+        modality (Optional[str]): Its series' Modality as held: one value,
+            or several backslash-joined (#985); None or empty is in no
+            list. A string rather than the series, so the export's read
+            can ask it of an `ExportContext`, which carries the source's
+            Modality and must not carry a `Series` to its worker.
+        policy (dict): The normalised policy.
+
+    Returns:
+        bool: True when the policy reads and gates the instance.
+    """
+    if not _holds_pixels(instance):
+        return False
+    scope = policy["scope"]
+    if scope == "all":
+        return True
+    if (_says_burned_in_yes(instance.attributes.get("0028,0301"))
+            or REDACTION_HASH_ATTR in instance.attributes
+            or (burned_in_text_record(instance) or {}).get("boxes")):
+        return True
+    if scope != "modalities" or not isinstance(modality, str):
+        return False
+    listed = set(policy["modalities"])
+    return any(part.strip() in listed for part in modality.split("\\"))
 
 
 def _warn_unread_instances(operation, failures, attempted, where):
@@ -6398,9 +6473,11 @@ class DicomSession:
 
         **The `burned_in_text` policy** (`configuration.burned_in_text`,
         #1108). When the configuration holds one, this call also reads
-        every instance that holds pixels with OCR, serial or not, after
-        the zones its rules hold, and records the boxes of the text it
-        finds at `min_confidence` or above (never the text). The policy's
+        every instance in the policy's `scope` with OCR (#1121: `flagged`,
+        `modalities` or `all`; one out of scope is neither read nor gated
+        at export), serial or not, after the zones its rules hold, and
+        records the boxes of the text it finds at `min_confidence` or
+        above with two letters or digits (never the text). The policy's
         `action` decides the rest: `redact` blanks each box, padded, on
         its own frame, in the same task as the zones, and the instance's
         UID is derived from the zones and the boxes; `report` writes one
@@ -6869,11 +6946,14 @@ class DicomSession:
             policy (dict): The normalised policy.
 
         Returns:
-            list: One dict per instance holding pixels: `instance`,
+            tuple: `(entries, out_of_scope)`: one dict per instance in the
+                policy's scope (`_in_burned_in_text_scope`): `instance`,
                 `zones`, `policy` (the hash), `record` (its current
-                record, or None).
+                record, or None); and how many instances holding pixels
+                the scope left out.
         """
         entries = []
+        out_of_scope = 0
         for patient in self.store.patients:
             for study in patient.studies:
                 for series in study.series:
@@ -6883,7 +6963,10 @@ class DicomSession:
                     zones = self._redaction_zones_for(series)
                     policy_hash = _burned_in_text_policy_hash(policy, zones)
                     for inst in series.instances:
-                        if not _holds_pixels(inst):
+                        if not _in_burned_in_text_scope(
+                                inst, series.modality, policy):
+                            if _holds_pixels(inst):
+                                out_of_scope += 1
                             continue
                         record = burned_in_text_record(inst)
                         if record is not None and record.get("policy") != policy_hash:
@@ -6891,13 +6974,13 @@ class DicomSession:
                         entries.append({"instance": inst, "zones": zones,
                                         "policy": policy_hash,
                                         "record": record})
-        return entries
+        return entries, out_of_scope
 
     def _read_burned_in_text(self, policy, strategy, force):
         """Phase 1 of the `burned_in_text` pass: read, then record (#1108).
 
-        Reads every instance holding pixels whose record is not current
-        under this policy (every one under `force`), in workers that hand
+        Reads every instance in the policy's scope whose record is not
+        current under this policy (every one under `force`), in workers that hand
         back boxes and never text, and writes each read instance's record
         in this process, carrying its PHI status across the write as a
         redaction carries it. An instance a frame of which could not be
@@ -6913,7 +6996,7 @@ class DicomSession:
         Returns:
             dict: The pass's state: `entries`, `failures`, `read`, `version`.
         """
-        entries = self._burned_in_text_entries(policy)
+        entries, out_of_scope = self._burned_in_text_entries(policy)
         # Every instance goes to a worker: one whose record is current
         # under this policy carries the record's pixel digest, and is read
         # by OCR only when its pixels no longer match it.
@@ -6979,7 +7062,8 @@ class DicomSession:
             entry["record"] = record
             entry["found_now"] = True
         return {"entries": entries, "failures": failures, "read": read,
-                "attempted": len(entries), "skipped": skipped,
+                "attempted": len(entries), "out_of_scope": out_of_scope,
+                "skipped": skipped,
                 "version": version, "strategy": strategy,
                 "tesseract_cmd": tesseract_cmd}
 
@@ -7139,10 +7223,12 @@ class DicomSession:
                  "report": f"{len(with_text)} reported, not redacted",
                  "withhold": f"{len(with_text)} to be withheld at export"}[action]
         regions = sum(len(e["record"]["boxes"]) for e in with_text)
-        details = (f"burned_in_text (action {action}, min_confidence "
-                   f"{policy['min_confidence']:g}): read {burned['read']} of "
-                   f"{burned['attempted']} instance(s) holding pixels, "
-                   f"{len(failures)} could not be read, {burned['skipped']} "
+        scope = _scope_named(policy)
+        details = (f"burned_in_text (action {action}, scope {scope}, "
+                   f"min_confidence {policy['min_confidence']:g}): read "
+                   f"{burned['read']} of {burned['attempted']} in-scope "
+                   f"instance(s) holding pixels ({burned['out_of_scope']} out "
+                   f"of scope), {len(failures)} could not be read, {burned['skipped']} "
                    f"already checked under this policy; text found on "
                    f"{len(with_text)} ({regions} region(s)); {acted}. OCR by "
                    f"tesseract {burned['version']}.")
@@ -7155,7 +7241,8 @@ class DicomSession:
             attempted=burned["attempted"], read=burned["read"],
             unread=len(failures), skipped=burned["skipped"],
             with_text=len(with_text), regions=regions,
-            acted=blanked if action == "redact" else len(with_text)))
+            acted=blanked if action == "redact" else len(with_text),
+            scope=scope, out_of_scope=burned["out_of_scope"]))
         print(f"burned_in_text: {details}")
 
     @staticmethod
@@ -8834,7 +8921,8 @@ class DicomSession:
     def _read_before_export(self, tasks, policy, folder, show_progress):
         """`export(check_burned_in=True)`'s read of what it will write (#1108).
 
-        Reads every planned instance that holds pixels with `redact()`'s
+        Reads every planned instance in the policy's scope (#1121; one
+        out of it is written with no row) with `redact()`'s
         phase-1 worker, after the zones the export applies (zeroed on a
         copy), and decides each from that read alone, never its record:
         text found is written with a row under `report` and withheld with
@@ -8860,10 +8948,24 @@ class DicomSession:
             tuple: `(tasks, gated)`: the tasks still to write, and
                 `(sop_instance_uid, detail, withheld)` per row.
         """
-        candidates = [task for task in tasks if _holds_pixels(task.instance)]
-        if not candidates:
-            return tasks, []
+        # The one scope predicate the pass and the plain gate ask (#1121),
+        # over the Modality the context carries: a context never carries
+        # its `Series`, which would pickle to every export worker.
+        candidates = [task for task in tasks if _in_burned_in_text_scope(
+            task.instance, task.source_modality, policy)]
+        out_of_scope = sum(1 for task in tasks if _holds_pixels(task.instance)) \
+            - len(candidates)
         action = policy["action"]
+        if not candidates:
+            if out_of_scope:
+                # Section 5 still says the read ran and what it left out,
+                # so a scope that selected nothing is visible (Q-A2).
+                self._burned_in_text_passes.append(BurnedInTextSummary(
+                    source=BurnedInTextSummary.EXPORT_READ, action=action,
+                    attempted=0, read=0, unread=0, skipped=0, with_text=0,
+                    regions=0, acted=0, scope=_scope_named(policy),
+                    out_of_scope=out_of_scope))
+            return tasks, []
         hold = action != "report"
         verb = "withheld" if hold else "did not withhold"
         # A withheld instance comes with its way out where there is one.
@@ -8929,7 +9031,8 @@ class DicomSession:
             read=sum(1 for o in reads if o.failure is None and o.read),
             unread=sum(1 for o in reads if o.failure is not None),
             skipped=0, with_text=len(found),
-            regions=sum(len(o.boxes) for o in found), acted=len(gated)))
+            regions=sum(len(o.boxes) for o in found), acted=len(gated),
+            scope=_scope_named(policy), out_of_scope=out_of_scope))
         return [task for task in tasks if id(task) not in dropped], gated
 
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
@@ -9001,14 +9104,17 @@ class DicomSession:
                         # The `burned_in_text` gate (#1108), after the
                         # subset and the scan: an instance not asked for,
                         # or already withheld, gets no second row. Only an
-                        # instance holding pixels; the verdict reads its
-                        # record and runs no OCR, and loads the frame only
-                        # for a record otherwise current, to check its
-                        # pixel digest. Under `check_burned_in=True` a
-                        # fresh read decides instead.
+                        # instance in the policy's scope (#1121): one out
+                        # of it is written with no row, as one holding no
+                        # pixels is. The verdict reads its record and runs
+                        # no OCR, and loads the frame only for a record
+                        # otherwise current, to check its pixel digest.
+                        # Under `check_burned_in=True` a fresh read
+                        # decides instead.
                         if (policy is not None
                                 and not options.read_burned_in_text
-                                and _holds_pixels(instance)):
+                                and _in_burned_in_text_scope(
+                                    instance, series.modality, policy)):
                             verdict = _burned_in_text_verdict(
                                 instance, policy, policy_hash, zones,
                                 options.folder)

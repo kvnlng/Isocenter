@@ -177,9 +177,10 @@ def test_an_instance_the_read_cannot_read_is_unchecked(tmp_path, ocr, action, wr
     # Section 5 counts the read that failed as not read (review of #1110:
     # `unread=0` and `read=len(reads)` survived without this).
     done = "written" if written else "withheld"
-    assert (f"export(check_burned_in=True) under action {action} read 0 of 1 "
-            f"planned instance(s) holding pixels (1 could not be read) and "
-            f"found text on 0 (0 region(s)); 1 {done}, with a row."
+    assert (f"export(check_burned_in=True) under action {action} and scope "
+            f"all read 0 of 1 planned in-scope instance(s) holding pixels (1 "
+            f"could not be read; 0 out of scope, not read) and found text on 0 "
+            f"(0 region(s)); 1 {done}, with a row."
             ) in _section_5_line((tmp_path / "r.md").read_text())
     verb = "did not withhold" if written else "withheld"
     assert [r for r in audit_rows(db) if r[0] == "WARNING"] == [(
@@ -338,9 +339,10 @@ def test_a_clean_read_grades_pass_and_section_5_says_it_ran(tmp_path, ocr):
     assert summary.written == 1
     report = (tmp_path / "r.md").read_text()
     assert PASS_LINE in report, report
-    assert ("export(check_burned_in=True) under action withhold read 1 of 1 "
-            "planned instance(s) holding pixels (0 could not be read) and "
-            "found text on 0 (0 region(s)); 0 withheld, with a row."
+    assert ("export(check_burned_in=True) under action withhold and scope "
+            "all read 1 of 1 planned in-scope instance(s) holding pixels (0 "
+            "could not be read; 0 out of scope, not read) and found text on 0 "
+            "(0 region(s)); 0 withheld, with a row."
             ) in _section_5_line(report)
     assert "does not say burned-in text was checked by OCR" not in report
 
@@ -359,9 +361,10 @@ def test_section_5_counts_what_the_read_found_and_never_says_redacted(
     report = (tmp_path / "r.md").read_text()
     assert REVIEW_LINE in report
     line = _section_5_line(report)
-    assert (f"export(check_burned_in=True) under action {action} read 2 of 2 "
-            f"planned instance(s) holding pixels (0 could not be read) and "
-            f"found text on 1 (1 region(s)); 1 {done}, with a row.") in line
+    assert (f"export(check_burned_in=True) under action {action} and scope "
+            f"all read 2 of 2 planned in-scope instance(s) holding pixels (0 "
+            f"could not be read; 0 out of scope, not read) and found text on 1 "
+            f"(1 region(s)); 1 {done}, with a row.") in line
     assert "redacted" not in line
 
 

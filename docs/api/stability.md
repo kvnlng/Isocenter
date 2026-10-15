@@ -699,8 +699,9 @@ CHANGELOG entry naming both spellings:
   `load_state()`. Its `patients` list is frozen (above); what else the
   store object offers is not.
 - **`IsocenterConfiguration.burned_in_text`**, the `burned_in_text`
-  policy a configuration file holds (`{"action": ..., "min_confidence":
-  ...}` or `None`), as `load_config()` sets it. The file key and what
+  policy a configuration file holds (`{"action": ..., "scope": ...,
+  "min_confidence": ...}`, plus `"modalities"` under `scope: modalities`,
+  or `None`), as `load_config()` sets it. The file key and what
   each action does are documented on the
   [Configuration](../configuration.md#burned-in-text) page; the
   attribute's name and shape are not frozen.

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **A `burned_in_text` policy must name its `scope`; a block without one is refused (#1121, owner ruling of 2026-10-15).** A configuration file that loaded under 1.0.0rc19 with `burned_in_text: {action: redact}` now raises `ValueError: <file>: 'burned_in_text' needs a 'scope': one of flagged, modalities, all` from `load_config()`. A policy assigned in code (`session.configuration.burned_in_text = {...}`) raises the same sentence prefixed `session.configuration: ` from `redact()`, `export()`, `save()` and `create_config()`.
+  - **Why the old behaviour was wrong.** rc19 read every image that holds pixels. On the MIDI-B Validation set that is about 24,000 images, nearly all CT, MR and PET slices. `redact()` went from 0.1 s to 24 s on a 66-file sample, about 2.5 hours projected over the set. Two of the four text-free images it blanked at the default threshold were a CT scout and a PET slice. A default that reads everything is a cost and a risk the author should choose on purpose, so there is no default.
+  - **No final release is broken.** The key shipped only in 1.0.0rc19, and no final 1.x reads a file without `scope`. Adding a required key after 1.0.0 would refuse files 1.0.0 loads, which is why it lands now.
+  - **Every rc19 record is read again.** The box rule changed (Changed, below), and the policy hash each record carries now holds the box rule's version (`services.BURNED_IN_TEXT_BOX_RULE = 2`). So the first `redact()` reads every in-scope image again, with no `force`. Until it does, plain `export()` withholds those images under `redact` and `withhold`, with the existing "not checked … run redact()" row.
+
+### Added
+
+- **`burned_in_text` takes `scope: flagged | modalities | all`, and `modalities: [...]` (#1121, owner rulings of 2026-10-15).** Each is spelled exactly. Every scope reads only images that hold pixels.
+  - **`flagged`** reads an image whose Burned In Annotation `(0028,0301)` says `YES` (stripped, any case; a value held as `bytes` is not read). It also reads an image that carries this store's redaction attestation, and one whose `burned_in_text` record, under any policy, holds a box (owner ruling Q-A1 (a)).
+  - **Why the two extra arms.** They close a fail-open. A zone redaction writes `(0028,0301) NO` beside the attestation. Under `action: withhold`, the pass reads a `YES` image and records text the zone missed, and the zone then writes `NO`. Read by the flag alone, the next `export()` would find the image out of scope and write the text `withhold` promised to keep out. The same holds for an image a zone redacted before the policy was loaded. A record with no box does not keep an image in scope: a text-free image read under `all` follows a narrower scope instead of being read forever.
+  - **`modalities`** reads what `flagged` reads, plus every image of a series one of whose Modality values is listed. A multi-valued Modality, held backslash-joined (#985), is split. `modalities` is required under `scope: modalities` and refused under any other scope. Each value must be an upper-case Code String (letters, digits, `_`, space, at most 16); lower case is refused, not folded. Repeats are dropped and the list is held sorted.
+  - **`all`** reads every image that holds pixels, as rc19 did.
+  - **One predicate for the three readers.** The `redact()` pass, the plain-export gate and `export(check_burned_in=True)`'s read all ask `session._in_burned_in_text_scope`. An out-of-scope image is not read, and the export writes it with no row, as it writes an image with no pixels.
+  - **The rows and section 5.** The pass's `REDACTION` row reads `burned_in_text (action A, scope S, min_confidence C): read R of N in-scope instance(s) holding pixels (O out of scope), …`; under `modalities` the scope is written `modalities [CR, DX]`. Section 5's line for a pass, and for an export's read, names the scope and the out-of-scope count. `BurnedInTextSummary` (tier 2) gains `scope` and `out_of_scope`, both with defaults, so one built by hand still builds and renders as before.
+  - **The grade.** A pass that selects nothing costs no `PASS` (owner ruling Q-A2 (a)); its row and section 5 say how many images were read and how many were out of scope. No grade condition is added.
+  - **MIDI-B.** No file of 53,581 says `YES`, so `flagged` reads nothing there. `modalities: [CR, DX, MG, US]` reads 258 of the Validation set's 23,921 instances.
+  - **`scope` and `modalities` are not in the policy hash.** They choose which images are read, not which boxes a read finds, so a record read under `all` is current under `flagged`.
+  - **`CONFIG_VERSION` stays `"2.0"`** (owner ruling Q-X1 (a), after Q9 on #782: rows freeze at final tags, and the key shipped only in rc19). `scope` and `modalities` are added to the 2.0 row of `SCHEMA_BY_VERSION`. The row also gains `burned_in_text_values` (the `action` and `scope` value sets), so a new value is red as a new profile name is. `BEHAVIOUR_BY_VERSION` does not move. Neither do the three `_redaction_config_hash` literals: the hash shape is unchanged. `_burned_in_text_policy_hash` moves on purpose and is pinned by new literals.
+  - **Output:** none for the golden cohort; no member holds the key, and `fingerprint/output.json` is unchanged (the `check` result is in the PR).
+
+### Changed
+
+- **A text region needs two letters or digits to be a `burned_in_text` box (#1121, owner ruling Q-A3 (a)).** rc19 kept every region at the threshold "whatever its length". On the 82 text-free MIDI-B frames measured, every false box was one character (`a` read at 86 to 91 on an ultrasound frame), and the rule lost no answer-key text. Letters and digits are counted by `str.isalnum()`, so punctuation does not count. Two characters are still text: initials such as `JT` stay boxes, as #1108's Q3 ruled. A lone `L` or `R` side marker is not a box. The two is fixed (`pixel_analysis.BURNED_IN_TEXT_MIN_ALNUM`); there is no key for it.
+  - **Output:** none for the golden cohort. With the key, a one-character region is no longer blanked, reported or withheld.
+- **Docs: side markers and laterality (#1121, owner ruling Q-A4 (a): documented only).** A radiograph's lead `L`/`R` marker is imaged with the patient, and technologist initials on it are text. On MIDI-B, 25 of the 35 answer-key boxes were such initials. Under `action: redact`, the box over them usually blanks the `L` or `R` beside them, which is clinical information. No row says a box sat on a marker, because the text is never kept. The [OCR page](docs/ocr.md#what-ocr-misses) and [Configuration](docs/configuration.md#burned-in-text) say so.
+
 ## [1.0.0rc19] - 2026-10-15
 
 ### Breaking

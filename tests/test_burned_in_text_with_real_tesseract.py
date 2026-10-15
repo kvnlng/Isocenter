@@ -5,7 +5,8 @@ MONOCHROME1, no Device Serial Number) with a name and a date drawn into
 its pixels at the stored maximum, on the unexposed border. On f31758d3
 every ink pixel reached the export under `export()` and under
 `export(check_burned_in=True)`, and the report graded PASS. With only
-`burned_in_text: {action: redact}` configured (no machine rule, no zone),
+`burned_in_text: {action: redact, scope: modalities, modalities: [CR]}`
+configured (no machine rule, no zone; `scope` since #1121),
 `redact()` must blank it and the export must carry no ink there; under
 `report` the pixels are written with rows; under `withhold` the instance
 is not written and is reported.
@@ -72,7 +73,10 @@ def _run(tmp_path, action, name="run", secret=False):
     src = tmp_path / f"{name}-in"
     ink, value = _burned_cr(str(src))
     cfg = tmp_path / f"{name}.yaml"
-    cfg.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n",
+    # `scope: modalities` names the CR's Modality (#1121), so the real
+    # path reaches the image through the modality arm of the scope.
+    cfg.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n"
+                   f"  scope: modalities\n  modalities: [CR]\n",
                    encoding="utf-8")
     db = tmp_path / f"{name}.db"
     out = tmp_path / f"{name}-out"
@@ -152,7 +156,8 @@ def test_check_burned_in_reads_the_name_in_a_spawned_worker(tmp_path, monkeypatc
     src = tmp_path / "in"
     _burned_cr(str(src))
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n",
+    cfg.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n"
+                   f"  scope: modalities\n  modalities: [CR]\n",
                    encoding="utf-8")
     db = tmp_path / "s.db"
     out = tmp_path / "out"
