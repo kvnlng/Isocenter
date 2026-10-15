@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc19] - 2026-10-15
+
 ### Breaking
 
 - **A `serial_number: "*"` machine rule now covers series with no Device Serial Number too; it covered only series with one (#1108, owner ruling of 2026-10-14).** No call raises and no signature changes. The same configuration file now zeroes its `"*"` zones on every serial-less series, in `redact()` (which also gives each such image a new SOP Instance UID, Image Type `DERIVED` and Burned In Annotation `NO`, as for any redacted image) and in the export's zones, and `scan_pixel_content()` reads those series where it skipped them as "machines no rule names". A CT or MR stack whose files carry no serial is now redacted by a `"*"` rule its author wrote with serial-numbered devices in mind: read your `"*"` zones before the next `redact()` or `export()`.
