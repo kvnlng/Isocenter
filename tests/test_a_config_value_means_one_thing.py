@@ -90,9 +90,11 @@ def test_a_canonical_version_loads(tmp_path, monkeypatch, version):
     ConfigLoader.load_unified_config(_write(tmp_path, f'version: "{version}"\n'))
 
 
-@pytest.mark.parametrize("serial", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
+@pytest.mark.parametrize("serial", ["   ", "\t"], ids=["spaces", "tab"])
 def test_a_blank_serial_is_refused_by_the_loader(tmp_path, serial):
-    """Kills the blank serial loaded (only `""` was refused)."""
+    """Kills the blank serial loaded (only `""` was refused). `""` itself
+    is the serial-less selector since #1108
+    (`test_a_rule_can_name_series_with_no_serial.py`)."""
     path = _write(tmp_path, f'machines:\n  - serial_number: "{serial}"\n')
     with pytest.raises(ValueError, match="serial_number"):
         ConfigLoader.load_unified_config(path)

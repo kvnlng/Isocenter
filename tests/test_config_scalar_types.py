@@ -106,10 +106,11 @@ def test_a_quoted_numeric_serial_loads_as_written(tmp_path):
     assert rules[0]["serial_number"] == "0123"
 
 
-@pytest.mark.parametrize("line", ["serial_number:", 'serial_number: ""'])
-def test_an_empty_serial_is_still_missing(tmp_path, line):
-    """The existing refusal, kept for null and the empty string."""
-    message = _refused(tmp_path, f"machines:\n  - {line}\n")
+def test_a_null_serial_is_still_missing(tmp_path):
+    """The existing refusal, kept for null. The empty string is the
+    serial-less selector since #1108
+    (`test_a_rule_can_name_series_with_no_serial.py`)."""
+    message = _refused(tmp_path, "machines:\n  - serial_number:\n")
     assert "Missing 'serial_number'" in message, message
 
 

@@ -3,7 +3,50 @@ from typing import List, Dict, Any, Tuple
 from isocenter.entities import Instance
 from isocenter.privacy import PhiFinding
 from isocenter.pixel_analysis import analyze_pixels
-from isocenter.services import rule_applies_to, rules_matching, zone_rois
+from isocenter.services import rule_covers, rules_matching, zone_rois
+
+def _serial_of(equipment) -> str:
+    """The serial the rules read for `equipment`: `""` for none (#1108)."""
+    return (equipment.device_serial_number or "") if equipment else ""
+
+
+def _rule_names(rule):
+    """`(rule_serial, rule_match)` for a finding's metadata: a serial
+    rule's `serial_number` and None, or None and a `match:` rule's match
+    (#1108)."""
+    if "match" in rule:
+        return None, dict(rule.get("match") or {})
+    return rule.get("serial_number"), None
+
+
+def _rule_a_new_zone_goes_to(covering, serial):
+    """The rule a NEW_LEAK's zone is suggested for, as `_rule_names` names
+    it: narrowest first (owner ruling on #1108). An exact serial rule;
+    else the first `match:` rule; else, for a series with no serial, a
+    `""` rule; else `"*"`, which `ConfigAutomator` turns into a rule for
+    the machine's serial (`""` for one with none) rather than a zone on
+    `"*"`, which every machine reads (owner ruling Q2-B). `(None, None)`
+    when no rule covers it (a direct `verify_instance` call), as before.
+
+    Args:
+        covering (list): The rules covering the series, in rule order.
+        serial (str): The series' serial, `""` for none.
+
+    Returns:
+        tuple: `(rule_serial, rule_match)`.
+    """
+    if serial:
+        if any(r.get("serial_number") == serial and "match" not in r
+               for r in covering):
+            return serial, None
+    for rule in covering:
+        if "match" in rule:
+            return _rule_names(rule)
+    if not serial and any(r.get("serial_number") == "" and "match" not in r
+                          for r in covering):
+        return "", None
+    return ("*", None) if covering else (None, None)
+
 
 class RedactionVerifier:
     """
@@ -23,26 +66,24 @@ class RedactionVerifier:
         Finds the first redaction rule that applies to this equipment.
 
         A rule applies when its `serial_number` is the equipment's Device
-        Serial Number or `"*"`, as `redact()` reads it
-        (`services.rule_applies_to`); the first in rule order wins, so a
-        `"*"` rule listed before an exact one is returned. Until #808 only
-        an exact serial matched. The scan itself reads every applying
+        Serial Number, `""` for equipment with none (no equipment
+        included), or `"*"`, or when its `match:` names the equipment's
+        manufacturer and/or model, as `redact()` reads it
+        (`services.rule_covers`, #1108); the first in rule order wins,
+        so a `"*"` rule listed before an exact one is returned. Until #808
+        only an exact serial matched. The scan itself reads every applying
         rule's zones, not this one rule's.
 
         Args:
             equipment (Equipment): The instance's equipment, or None.
 
         Returns:
-            Dict[str, Any]: The rule dictionary, or None when there is no
-                equipment, no serial, or no rule for it.
+            Dict[str, Any]: The rule dictionary, or None when no rule
+                covers it.
         """
-        if not equipment:
-            return None
-        target_serial = equipment.device_serial_number
         for rule in self.rules:
-            if rule_applies_to(rule.get("serial_number"), target_serial):
+            if rule_covers(rule, equipment):
                 return rule
-        # No model/manufacturer fallback.
         return None
 
     def _covering_zones(self, equipment: Any) -> List[Tuple[dict, list]]:
@@ -60,9 +101,8 @@ class RedactionVerifier:
         Returns:
             List[Tuple[dict, list]]: `(rule, [y1, y2, x1, x2])` per zone.
         """
-        serial = equipment.device_serial_number if equipment else None
         return [(rule, list(roi))
-                for rule in rules_matching(self.rules, serial)
+                for rule in rules_matching(self.rules, equipment)
                 for roi in zone_rois(rule.get("redaction_zones"))]
 
     def _coverage(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int]) -> float:
@@ -166,17 +206,9 @@ class RedactionVerifier:
         # applies them (#808, #814). `best_zone` is the ROI as a 4-list,
         # never the rule's raw entry, which may be a dict.
         zones = self._covering_zones(equipment)
-        serial = equipment.device_serial_number if equipment else None
-        # The rule a new zone for this machine goes to: its exact rule,
-        # else "*" when only the wildcard covers it, and `ConfigAutomator`
-        # then suggests a rule for the serial rather than a zone on "*",
-        # which every machine reads (owner ruling Q2-B). None when no rule
-        # covers it (a direct `verify_instance` call), as before.
-        covering = rules_matching(self.rules, serial)
-        exact = next((r for r in covering
-                      if r.get("serial_number") == serial), None)
-        new_leak_serial = (exact.get("serial_number") if exact
-                           else "*" if covering else None)
+        serial = _serial_of(equipment)
+        new_leak_rule = _rule_a_new_zone_goes_to(
+            rules_matching(self.rules, equipment), serial)
 
         findings = []
 
@@ -209,14 +241,16 @@ class RedactionVerifier:
             # It's a finding. `rule_serial` names the rule a suggestion
             # edits: the one whose zone is grown for a partial leak, the
             # exact rule that takes a new zone for a new one.
+            # A `match:` rule is named by `rule_match`, with `rule_serial`
+            # None (#1108).
             if best_coverage > 0.0:
                 reason = "Partial Leak"
                 f_type = "PARTIAL_LEAK"
-                rule_serial = best_rule.get("serial_number")
+                rule_serial, rule_match = _rule_names(best_rule)
             else:
                 reason = "New Leak (Uncovered)"
                 f_type = "NEW_LEAK"
-                rule_serial = new_leak_serial
+                rule_serial, rule_match = new_leak_rule
 
             f = PhiFinding(
                 entity_uid=instance.sop_instance_uid,
@@ -231,6 +265,7 @@ class RedactionVerifier:
                     "text_box": region.box,  # (x, y, w, h)
                     "best_zone": best_zone,
                     "rule_serial": rule_serial,
+                    "rule_match": rule_match,
                     # Plain strings, so they cross a process boundary;
                     # what a rule created for this machine is written
                     # with (`create_config()`'s shape).

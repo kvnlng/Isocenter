@@ -563,9 +563,11 @@ class IsocenterConfiguration:
         Returns:
             bool: Whether a rule was removed.
         """
+        # A `match:` rule has no serial and is never removed by one (#1108).
         before = len(configuration.rules)
         configuration.rules = [r for r in configuration.rules
-                               if r.get("serial_number") != serial_number]
+                               if "match" in r
+                               or r.get("serial_number") != serial_number]
         return len(configuration.rules) < before
 
     def add_rule(self, serial_number: str, manufacturer: str = "Unknown",
@@ -745,15 +747,19 @@ class IsocenterConfiguration:
         not a copy.
 
         Exact spelling, first match. Redaction does not use this: `redact()`
-        and the export apply every matching rule, `"*"` included.
+        and the export apply every matching rule, `"*"` included. A
+        `match:` rule (#1108) has no serial, and is not returned here; nor
+        do `update_rule` and `delete_rule` see one. Write it in the file,
+        or append it to `rules`.
 
         Args:
-            serial_number (str): The serial number to find.
+            serial_number (str): The serial number to find; `""` finds the
+                rule for series with no Device Serial Number.
 
         Returns:
             Optional[Dict[str, Any]]: The rule dictionary if found, else None.
         """
         for r in self.rules:
-            if r.get("serial_number") == serial_number:
+            if "match" not in r and r.get("serial_number") == serial_number:
                 return r
         return None

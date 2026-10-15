@@ -221,25 +221,23 @@ def test_the_facade_dispatches_its_worker_and_applies_its_four_filters(
     | series | equipment            | rule                  | expected |
     | ------ | -------------------- | --------------------- | -------- |
     | S1     | serial `SN-A`        | zones                 | scanned  |
-    | S2     | serial `""`          | zones, blank serial   | skipped  |
+    | S2     | serial `""`          | zones, `""` selector  | scanned  |
     | S3     | serial `SN-C`        | none                  | skipped  |
     | S4     | serial `SN-D`        | rule, `zones: []`     | skipped  |
 
-    S2 is the arm that makes the second half of `if not equip or not
-    equip.device_serial_number` load-bearing, and it needs the blank-serial
-    *rule* to do it: without a rule that a blank serial matches, dropping
-    that clause changes nothing, because S2 would then be skipped one
-    filter later for having no matching rule. With the rule present,
-    dropping the clause scans a device whose serial the config never
-    named -- which is the thing the clause prevents.
+    S2 was skipped until #1108: a serial-less series matched no rule.
+    `serial_number: ""` now selects every series with no Device Serial
+    Number (owner ruling of 2026-10-14), so S2 is scanned, as `redact()`
+    redacts it; the boundary is pinned both ways in
+    `test_a_rule_can_name_series_with_no_serial.py`.
 
     Set equality in both directions: a superset assertion is green when a
     filter stops filtering.
     """
-    scanned = ["1.1", "1.2"]
+    scanned = ["1.1", "1.2", "2.1", "2.2"]
     session = _session_with(tmp_path, "filters", [
-        _series("SE_1", 1, "SN-A", scanned),
-        _series("SE_2", 2, "", ["2.1", "2.2"]),
+        _series("SE_1", 1, "SN-A", scanned[:2]),
+        _series("SE_2", 2, "", scanned[2:]),
         _series("SE_3", 3, "SN-C", ["3.1", "3.2"]),
         _series("SE_4", 4, "SN-D", ["4.1", "4.2"]),
     ], [

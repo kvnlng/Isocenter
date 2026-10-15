@@ -289,12 +289,18 @@ def test_the_serial_filter_is_applied_before_anything_is_counted(tmp_path, capsy
             "instance(s) whose rules have no redaction zones)\n") in out
 
 
-def test_a_series_with_no_serial_is_not_scanned_by_the_wildcard(tmp_path, capsys):
-    """6: `rule_applies_to` matches no serial-less series, as `redact()` reads it."""
+def test_a_series_with_no_serial_is_scanned_by_the_wildcard(tmp_path, capsys):
+    """6: `rule_applies_to` matches a serial-less series under `"*"`, as
+    `redact()` reads it (owner ruling on #1108; until then it was skipped as
+    a machine no rule names). An exact rule still does not reach it."""
     session = _session(tmp_path, serials=("",))
     try:
-        findings, summary, out = _scan(
+        findings, summary, _ = _scan(
             session, [{"serial_number": "*", "redaction_zones": [ELSEWHERE]}],
+            capsys)
+        assert _leaks(findings) == ["NEW_LEAK"] and summary.attempted == 1
+        findings, summary, out = _scan(
+            session, [{"serial_number": SERIAL, "redaction_zones": [ELSEWHERE]}],
             capsys)
     finally:
         session.close()

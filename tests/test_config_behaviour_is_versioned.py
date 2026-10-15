@@ -57,15 +57,19 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: again for a second pass, an ID-less subject and a legacy patient (#903),
 #: and again on the B4 PR (#899) when the `"*"` zone scenario was added
 #: for #808, #814 and the PARTIAL_LEAK ruling, and again when that scenario
-#: redacted under the rules its suggestions leave, two on one image (#908).
+#: redacted under the rules its suggestions leave, two on one image (#908),
+#: and again on the #1108 PR: `"*"` now covers the serial-less CT_small
+#: images too (owner ruling, a behaviour change of the 2.0 row before 1.0.0),
+#: a leak's metadata names a `match:` rule (`rule_match`), and a `match:`
+#: scenario was added.
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
+    "2.0": "f40834034c154ce10bfacd3acb659bff249111b16972230bd34ac712f31cb4be",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "07701925eb22e1e0d1d699da2373d69a03c4c672f4e5e9b94c89ba51c90ddd49",
+    "2.0": "f40834034c154ce10bfacd3acb659bff249111b16972230bd34ac712f31cb4be",
 }
 
 _WHAT_TO_DO = (

@@ -1,6 +1,7 @@
 from isocenter.services import MachinePixelIndex, RedactionService
 from isocenter.io_handlers import DicomStore
 import numpy as np
+from support.memory_backend import MemoryBackend
 from support.project_secret import FIXED_A
 
 
@@ -20,7 +21,7 @@ def test_redaction_service(dummy_patient):
     store = DicomStore()
     store.patients.append(dummy_patient)
 
-    svc = RedactionService(store)
+    svc = RedactionService(store, MemoryBackend())
 
     # Original pixel check (top left is 0)
     inst = store.patients[0].studies[0].series[0].instances[0]

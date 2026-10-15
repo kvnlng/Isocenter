@@ -23,6 +23,7 @@ from isocenter.privacy import _redaction_uid_for, _replacement_uid_for, _uid_is_
 from isocenter.services import RedactionService
 from isocenter.session import DicomSession
 
+from support.memory_backend import MemoryBackend
 from support.project_secret import FIXED_A, FIXED_B, load_fixed_secret
 
 SOURCE_SOP = "1.2.3.99.30"
@@ -205,11 +206,15 @@ def test_a_service_with_no_store_is_given_the_secret_or_refuses(tmp_path, src):
     """`redact_machine_instances` is public, and a `RedactionService` built
     with no store backend has nowhere to read a secret: it takes
     `project_secret=`, and without one it raises rather than draw a random
-    UID (owner ruling Q-A on #544). Kills a random fallback."""
+    UID (owner ruling Q-A on #544). Kills a random fallback.
+
+    Since #1113 a service with no backend at all refuses first, so this
+    one is given a backend that persists but holds no secret
+    (`MemoryBackend`, which has no `_project_secret_for_use`)."""
     with DicomSession(str(tmp_path / "s.db")) as session:
         session.ingest(str(src))
         inst = session.store.patients[0].studies[0].series[0].instances[0]
-        service = RedactionService(session.store)
+        service = RedactionService(session.store, MemoryBackend())
         with pytest.raises(RuntimeError, match="No project secret"):
             service.redact_machine_instances(SERIAL, ZONES)
         assert inst.sop_instance_uid == SOURCE_SOP

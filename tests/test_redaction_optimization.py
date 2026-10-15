@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from isocenter.services import RedactionService
 from isocenter.io_handlers import DicomStore
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
+from support.memory_backend import MemoryBackend
 from support.project_secret import FIXED_A
 
 @pytest.fixture
@@ -60,7 +61,7 @@ def test_process_valid_zones(mock_store):
 def test_redact_feedback_tqdm(mock_tqdm, mock_store, monkeypatch):
     """Verify tqdm is initialized during redaction."""
     monkeypatch.delenv("ISOCENTER_SHOW_PROGRESS", raising=False)
-    service = RedactionService(mock_store)
+    service = RedactionService(mock_store, MemoryBackend())
 
     # Actual logic calls tqdm(targets, ...)
     # targets will be [inst]
@@ -92,7 +93,7 @@ def test_redact_feedback_tqdm_can_be_silenced(mock_tqdm, mock_store,
         monkeypatch.delenv("ISOCENTER_SHOW_PROGRESS", raising=False)
     else:
         monkeypatch.setenv("ISOCENTER_SHOW_PROGRESS", env)
-    service = RedactionService(mock_store)
+    service = RedactionService(mock_store, MemoryBackend())
 
     service.redact_machine_instances("M1", [(0, 10, 0, 10)], project_secret=FIXED_A,
                                      show_progress=show_progress)

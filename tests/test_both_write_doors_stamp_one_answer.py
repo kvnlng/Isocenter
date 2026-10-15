@@ -301,8 +301,9 @@ def test_the_builder_puts_equipment_on_its_instances(tmp_path):
 
 
 def test_the_builder_writes_only_the_parts_it_was_given(tmp_path):
-    """An empty part is not written, and a call with neither manufacturer
-    nor model builds no `Equipment` (#290) and writes nothing. The latest
+    """An empty part is not written. A call with a serial alone builds
+    equipment and writes the serial only (review of #1111: a serial alone
+    is equipment); a call with none of the three builds none (#290). The latest
     call wins over an earlier `set_attribute`, and a later
     `set_attribute` wins over it. Killing mutation: empty parts written
     as zero-length elements."""
@@ -322,8 +323,17 @@ def test_the_builder_writes_only_the_parts_it_was_given(tmp_path):
              .add_series("1.2.826.0.3.573", "OT", 1))
     lone = other.add_instance("1.2.826.0.1.573.1", OT_STORAGE, 1).instance
     other.set_equipment("", "", "SN-ONLY")
-    assert other.series.equipment is None
-    assert not {"0008,0070", "0008,1090", "0018,1000"} & set(lone.attributes)
+    assert other.series.equipment.device_serial_number == "SN-ONLY"
+    assert lone.attributes["0018,1000"] == "SN-ONLY"
+    assert not {"0008,0070", "0008,1090"} & set(lone.attributes)
+
+    bare = (Builder.start_patient("PAT574", "Doe^Jim")
+            .add_study("1.2.826.0.2.574", "20230102")
+            .add_series("1.2.826.0.3.574", "OT", 1))
+    none = bare.add_instance("1.2.826.0.1.574.1", OT_STORAGE, 1).instance
+    bare.set_equipment("", "", "")
+    assert bare.series.equipment is None
+    assert not {"0008,0070", "0008,1090", "0018,1000"} & set(none.attributes)
 
     context.set_attribute("0018,1000", "SN-EARLIER")
     series.set_equipment("ACME", "Model-9", "SN-LATER")

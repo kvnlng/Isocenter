@@ -318,8 +318,11 @@ SCHEMA_BY_VERSION = {
         # Q7 on 2026-10-14, after Q9 on #782: rows freeze at final tags).
         "top": {"version", "privacy_profile", "phi_tags", "date_jitter",
                 "remove_private_tags", "machines", "burned_in_text"},
-        "rule": {"serial_number", "manufacturer", "model_name",
+        # `match` (#1108, before 1.0.0, so the 2.0 row is edited: owner
+        # ruling Q9 on #782, rows freeze at final tags).
+        "rule": {"serial_number", "match", "manufacturer", "model_name",
                  "redaction_zones", "comment"},
+        "match": {"manufacturer", "model_name"},
         "zone": {"roi", "note"},
         "phi_rule": {"action", "name", "value"},
         "burned_in_text": {"action", "min_confidence"},
@@ -336,6 +339,7 @@ def test_a_key_added_to_the_schema_bumps_the_minor():
     expected = SCHEMA_BY_VERSION[CONFIG_VERSION]
     assert set(config_manager._TOP_LEVEL_KEYS) == expected["top"]
     assert set(config_manager._RULE_KEYS) == expected["rule"]
+    assert set(config_manager._MATCH_KEYS) == expected["match"]
     assert set(config_manager._ZONE_KEYS) == expected["zone"]
     assert set(config_manager._PHI_RULE_KEYS) == expected["phi_rule"]
     assert set(config_manager._BURNED_IN_TEXT_KEYS) == expected["burned_in_text"]
