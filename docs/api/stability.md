@@ -463,7 +463,9 @@ otherwise.
 - `redact()`, when the configuration holds a `burned_in_text` policy:
   `RuntimeError` when the `ocr` extra or the `tesseract` binary is
   unavailable to the calling process, after the entry drain and before
-  anything is redacted, the configured zones included. An instance the
+  anything is redacted, the configured zones included. So does
+  `export(check_burned_in=True)` under that policy, before its pre-export
+  scan and its save. An instance the
   pass cannot read is a `WARNING` row, not a raise.
 - `generate_report()` and `generate_manifest()`: `ValueError` for a
   `format` other than the spellings above, naming them; no file is

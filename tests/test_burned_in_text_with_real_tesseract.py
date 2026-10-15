@@ -12,7 +12,8 @@ is not written and is reported.
 
 The real binary, under threads and under processes: a spawned worker
 must run the caller's tesseract and hand back boxes, and the redacted UID
-is still derived in the parent. And determinism: two stores under one
+is still derived in the parent; `export(check_burned_in=True)`'s own read
+runs in a spawned process too. And determinism: two stores under one
 fixed secret give the same boxes, the same UID and the same exported
 bytes, on whichever interpreter runs this (the free-threaded build runs
 the pass in threads).
@@ -137,3 +138,36 @@ def test_two_runs_give_the_same_boxes_uid_and_bytes(tmp_path):
     assert first["uid"] == second["uid"]
     [a], [b] = first["files"], second["files"]
     assert pydicom.dcmread(a).PixelData == pydicom.dcmread(b).PixelData
+
+
+@pytest.mark.parametrize("action, written", [("withhold", 0), ("report", 1)])
+def test_check_burned_in_reads_the_name_in_a_spawned_worker(tmp_path, monkeypatch,
+                                                            action, written):
+    """`export(check_burned_in=True)` with no `redact()`: the export's own
+    read, in a spawned process running the caller's tesseract, finds the
+    name and acts on it by the action, and quotes nothing it read (review
+    of #1110)."""
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    src = tmp_path / "in"
+    _burned_cr(str(src))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n",
+                   encoding="utf-8")
+    db = tmp_path / "s.db"
+    out = tmp_path / "out"
+    with Session(str(db)) as session:
+        session.ingest(str(src))
+        session.load_config(str(cfg))
+        session.anonymize()
+        summary = session.export(str(out), use_compression=False,
+                                 show_progress=False, check_burned_in=True)
+    assert summary.written == written
+    with sqlite3.connect(str(db)) as conn:
+        rows = conn.execute("SELECT action_type, entity_uid, details "
+                            "FROM audit_log").fetchall()
+    assert [r for r in rows if r[0] == "WARNING"
+            and "the pre-export read (check_burned_in=True) found" in r[2]
+            and f"(action: {action})" in r[2]]
+    assert "JANE" not in str(rows).upper()
+    assert "1970-01-01" not in str(rows)

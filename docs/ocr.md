@@ -12,7 +12,7 @@ And, for text that moves from image to image, or images whose series carry no De
 
 4. **Redact, report or withhold** the text found on each image: the [`burned_in_text`](configuration.md#burned-in-text) configuration key, applied by `redact()` ([below](#redacting-the-text-ocr-finds-on-each-image)).
 
-OCR runs only when you call one of the first three, or `redact()` with `burned_in_text` configured. `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. `export(check_burned_in=True)` re-runs the tag scan (`audit()`); it does not look for text in the pixels.
+OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
 
 ## Prerequisites
 
@@ -38,7 +38,8 @@ and the Tesseract binary, which pip cannot install:
 Without either, `scan_pixel_content()` and `discover_redaction_zones()` raise
 `OcrUnavailableError`, a `RuntimeError`, naming what is missing, before they scan
 anything. So does `redact()` when the configuration holds `burned_in_text`,
-before it redacts anything, the zones included; `load_config()` still loads
+before it redacts anything, the zones included, and
+`export(check_burned_in=True)`, before its tag scan; `load_config()` still loads
 such a file, so one file serves machines with and without OCR. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
 does not check the binary. If you point `pytesseract.pytesseract.tesseract_cmd`
 at a tesseract that is not on `PATH`, the scan uses that one.
