@@ -77,8 +77,8 @@ class BurnedInTextSummary:
         source (str): The call that ran it: `redact()`, or
             `BurnedInTextSummary.EXPORT_READ`.
         action (str): `report`, `redact` or `withhold`.
-        attempted (int): Instances holding pixels (planned, for the
-            export's read).
+        attempted (int): Instances holding pixels in the policy's scope
+            (planned, for the export's read).
         read (int): Of those, read in this pass.
         unread (int): Could not be read in full.
         skipped (int): Already checked under this policy, not read again.
@@ -87,6 +87,11 @@ class BurnedInTextSummary:
         regions (int): Boxes across them.
         acted (int): Redacted, reported or to be withheld, by action; for
             the export's read, withheld or written with a row.
+        scope (str): The policy's scope as the pass row names it
+            (`flagged`, `all`, `modalities [CR, DX]`), or `""` for a
+            summary built without one, which renders as before #1121.
+        out_of_scope (int): Instances holding pixels the scope left out,
+            neither read nor gated (#1121).
     """
     #: The `source` of an `export(check_burned_in=True)` read's summary,
     #: which the section 5 line reads to say withheld or written, never
@@ -104,6 +109,9 @@ class BurnedInTextSummary:
     with_text: int
     regions: int
     acted: int
+    # Defaults, so a summary built before #1121 (tier 2) still builds.
+    scope: str = ""
+    out_of_scope: int = 0
 
 
 #: Closes section 5, after the grade basis and the metadata, PHI-scan and
@@ -273,21 +281,28 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
         return ""
     runs = []
     for run in report.burned_in_text_passes:
+        # Under a scope (#1121) the counts are of the images it read, and
+        # what it left out is said beside them, so a `flagged` pass that
+        # read nothing says so on its face (owner ruling Q-A2).
+        under = f" and scope {run.scope}" if run.scope else ""
+        held = "in-scope instance(s)" if run.scope else "instance(s)"
+        left = (f"; {run.out_of_scope} out of scope, not read"
+                if run.scope else "")
         if run.source == BurnedInTextSummary.EXPORT_READ:
             done = "written" if run.action == "report" else "withheld"
             runs.append(
-                f"{run.source} under action {run.action} read {run.read} of "
-                f"{run.attempted} planned instance(s) holding pixels "
-                f"({run.unread} could not be read) and found text on "
+                f"{run.source} under action {run.action}{under} read "
+                f"{run.read} of {run.attempted} planned {held} holding pixels "
+                f"({run.unread} could not be read{left}) and found text on "
                 f"{run.with_text} ({run.regions} region(s)); {run.acted} "
                 f"{done}, with a row")
             continue
         runs.append(
-            f"{run.source} under action {run.action} read {run.read} of "
-            f"{run.attempted} instance(s) holding pixels ({run.skipped} "
-            f"already checked, {run.unread} could not be read) and found text "
-            f"on {run.with_text} ({run.regions} region(s)); {run.acted} "
-            f"{_BURNED_IN_TEXT_ACTED[run.action]}")
+            f"{run.source} under action {run.action}{under} read {run.read} "
+            f"of {run.attempted} {held} holding pixels ({run.skipped} "
+            f"already checked, {run.unread} could not be read{left}) and "
+            f"found text on {run.with_text} ({run.regions} region(s)); "
+            f"{run.acted} {_BURNED_IN_TEXT_ACTED[run.action]}")
     label = "*   **Burned-in Text (`burned_in_text`):** "
     tail = (" Text OCR did not find is not described here: OCR misses "
             "faint and short text, and reads text over anatomy in "

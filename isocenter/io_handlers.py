@@ -6843,8 +6843,11 @@ class ExportContext:
     #: whose policy was not applied in full.
     deid_markers: Optional[DeidMarkers] = None
     #: The source's Modality, `Series.modality` as ingested (#869), for
-    #: the worker's "Pixels missing for Image Modality" guard and nothing
-    #: else: never merged into the file. The guard must not read the
+    #: two readers and never merged into the file: the worker's "Pixels
+    #: missing for Image Modality" guard, and, in the parent,
+    #: `export(check_burned_in=True)`'s `burned_in_text` scope check
+    #: under `scope: modalities` (#1121), which reads it here so no
+    #: `Series` rides a context to a worker. The guard must not read the
     #: Modality the file will carry, because a configuration's rule sets
     #: that one: an EMPTY or a REPLACE with a non-image code let a CT
     #: Image Storage instance with unreachable pixels be written with no

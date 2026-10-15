@@ -12,7 +12,7 @@ And, for text that moves from image to image, or images whose series carry no De
 
 4. **Redact, report or withhold** the text found on each image: the [`burned_in_text`](configuration.md#burned-in-text) configuration key, applied by `redact()` ([below](#redacting-the-text-ocr-finds-on-each-image)).
 
-OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
+OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image in the policy's scope it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
 
 ## Prerequisites
 
@@ -201,10 +201,14 @@ A zone is a rectangle on every image of one machine. Text that moves (a technolo
 ```yaml
 burned_in_text:
   action: redact        # report | redact | withhold
+  scope: modalities     # flagged | modalities | all
+  modalities: [CR, DX, MG]
   min_confidence: 80
 ```
 
-With it loaded, `redact()` reads every image that holds pixels with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more, whatever its length, and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
+`scope` is required ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). `flagged` reads the images whose Burned In Annotation says `YES`, plus any image this store has redacted or found text on before; `modalities` reads those and every image of the listed modalities; `all` reads every image that holds pixels. Reading everything is slow on a large cohort: on a 66-file MIDI-B sample `redact()` under `all` took 24 s against 0.1 s without the key, about 2.5 hours projected over the Validation set's ~24,000 images, nearly all CT, MR and PET slices that rarely carry burned-in text. `modalities: [CR, DX, MG, US]` reads 258 of them. No MIDI-B file says Burned In Annotation `YES`, so `flagged` alone reads nothing there.
+
+With it loaded, `redact()` reads every image in scope with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more whose text holds at least two letters or digits (a single `a` or `4` is not a box; `JT` is), and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
 
 Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.
 
@@ -217,6 +221,8 @@ Measured on bundled images with text drawn on them, and on 35 MIDI-B validation 
 * **Faint or short text.** Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (`ICG`) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.
 * **Text over anatomy is read in fragments.** On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (`E`, `1970-`), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a `WARNING` row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing `NO`.
 * **Labels you may want are blanked too.** Technique labels (`PA`, `PORTABLE`, `ERECT`) and ultrasound measurement text were read at 95 and above, and `redact` blanks them. Single drawn `L`/`R` side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.
+* **Side markers carry laterality.** A radiograph's lead `L`/`R` marker is imaged with the patient, and technologist initials are often written on it. On MIDI-B, 25 of the 35 answer-key boxes were such initials; tilted 5 to 25 degrees and small in a 2500 to 3400 pixel image, they are what OCR misses most ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). When it does find them, `redact` blanks the box, and the `L` or `R` beside the initials usually goes with it: that is clinical information, and nothing in the row says a box sat on a marker, because the text is never kept. A lone `L` or `R` is one letter and is not a box.
+* **One stray character is not a box.** Every false box measured on 82 text-free MIDI-B frames was one character read over anatomy (`a` at 86 to 91 on an ultrasound frame), so a region needs two letters or digits; the rule lost no answer-key text.
 * **Palette-colour images** are read as their palette indices.
 
 A `PASS` after a `redact` pass says what OCR found was blanked, not that each image is free of text. Use `report` first on a cohort you have not looked at.

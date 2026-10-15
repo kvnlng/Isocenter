@@ -10,12 +10,15 @@ The owner's rulings of 2026-10-14, which these tests hold:
 
 - a top-level `burned_in_text: {action, min_confidence}` (default 80);
   `redact()` is the one verb that runs it, over every instance that holds
-  pixels, serial or not;
+  pixels, serial or not (since #1121 a `scope` is required too, and every
+  policy here says `scope: all`, which reads exactly that;
+  `test_burned_in_text_reads_its_scope.py` holds the narrower scopes);
 - two phases: workers OCR and return boxes only, never text; the parent
   derives the redacted UID from the boxes under the project secret, which
   never reaches a worker; the redaction workers blank each box on its own
   frame, padded by `max(2, round(0.15 * height))`; then a residual read;
-- no two-character filter (initials such as `JT` are text);
+- no two-character filter (initials such as `JT` are text); since #1121
+  a region needs two letters or digits, so one character is not a box;
 - `report` writes rows, `redact` blanks, `withhold` keeps the instance out
   of the export; an instance with pixels the policy never checked is
   withheld under `redact`/`withhold` and written with a row under `report`;
@@ -69,7 +72,8 @@ REVIEW_LINE = "| **Validation Status** | **REVIEW_REQUIRED** |"
 
 
 def write_image(path, *, sop_uid, ink=(), frames=1, burned_in=None,
-                patient_id="PID-1108", series_uid=SERIES, serial=None):
+                patient_id="PID-1108", series_uid=SERIES, serial=None,
+                modality="OT"):
     """Write an 8-bit image with ink at each `(frame, y1, y2, x1, x2)`.
 
     8-bit, no windowing tags: `pixel_analysis` hands it to OCR unscaled,
@@ -87,7 +91,7 @@ def write_image(path, *, sop_uid, ink=(), frames=1, burned_in=None,
     ds.PatientID = patient_id
     ds.PatientName = "DOE^JANE"
     ds.StudyDate = "20240102"
-    ds.Modality = "OT"
+    ds.Modality = modality
     ds.Manufacturer = "ACME"
     if serial is not None:
         ds.DeviceSerialNumber = serial
@@ -206,10 +210,10 @@ def ocr(monkeypatch):
     return fake
 
 
-def _config(tmp_path, action, extra="", name="c.yaml"):
+def _config(tmp_path, action, extra="", name="c.yaml", scope="all"):
     path = tmp_path / name
     path.write_text(f"privacy_profile: basic\nburned_in_text:\n  action: {action}\n"
-                    f"{extra}", encoding="utf-8")
+                    f"  scope: {scope}\n{extra}", encoding="utf-8")
     return str(path)
 
 
@@ -341,6 +345,25 @@ def test_two_letters_are_text(tmp_path, ocr):
         assert session.redact(show_progress=False) == 1
 
 
+@pytest.mark.parametrize("text, conf, boxed", [
+    ("a", 91, False), ("4", 95, False), ("L", 99, False),
+    ("|.", 99, False), ("a.", 99, False),
+    ("JT", 91, True), ("A1", 85, True), ("12", 80, True),
+], ids=["a", "4", "L", "pipe-dot", "a-dot", "JT", "A1", "12"])
+def test_a_box_needs_two_letters_or_digits(tmp_path, ocr, text, conf, boxed):
+    """#1121 (Q-A3 (a), fixed at 2, no key): every false box measured on
+    MIDI-B was one character, and the rule lost no answer-key text.
+    Punctuation does not count. Kills the filter dropped (`a` boxed), a
+    `< 3` (`JT` dropped) and a count of characters rather than letters
+    and digits (`a.` boxed)."""
+    ocr.text, ocr.conf = text, conf
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        assert session.redact(show_progress=False) == int(boxed)
+        assert bool(_record(_only_instance(session))["boxes"]) is boxed
+
+
 def test_a_box_blanks_only_its_own_frame(tmp_path, ocr):
     """Per-frame boxes: `apply_redaction_to_array` zeroes a zone on every
     frame, so a box applied through it would blank across the cine."""
@@ -429,10 +452,10 @@ def test_one_redaction_row_per_pass_naming_counts_and_tesseract(tmp_path, ocr):
     rows = [r for r in audit_rows(db) if r[0] == "REDACTION"]
     assert rows == [(
         "REDACTION", "burned_in_text",
-        "burned_in_text (action redact, min_confidence 80): read 2 of 2 "
-        "instance(s) holding pixels, 0 could not be read, 0 already checked "
-        "under this policy; text found on 1 (1 region(s)); 1 redacted. OCR by "
-        "tesseract 5.5.3.")]
+        "burned_in_text (action redact, scope all, min_confidence 80): read 2 "
+        "of 2 in-scope instance(s) holding pixels (0 out of scope), 0 could not "
+        "be read, 0 already checked under this policy; text found on 1 (1 "
+        "region(s)); 1 redacted. OCR by tesseract 5.5.3.")]
 
 
 # --- report and withhold ----------------------------------------------------
@@ -667,6 +690,7 @@ def test_redact_by_machine_does_not_run_the_pass(tmp_path, ocr):
         session.load_config(_config(tmp_path, "redact"))
         session.redact_by_machine("SN-1", [0, 4, 0, 4])
         assert session.configuration.burned_in_text == {"action": "redact",
+                                                        "scope": "all",
                                                         "min_confidence": 80}
         assert services.BURNED_IN_TEXT_ATTR not in _only_instance(session).attributes
     assert ocr.calls == 0
@@ -820,7 +844,8 @@ def test_a_zone_added_over_zeros_still_reads_again(tmp_path, ocr):
         session.redact(show_progress=False)
     passes = [r[2] for r in audit_rows(db) if r[0] == "REDACTION"
               and r[1] == "burned_in_text"]
-    assert "read 1 of 1 instance(s) holding pixels, 0 could not be read, 0 already" in passes[-1]
+    assert ("read 1 of 1 in-scope instance(s) holding pixels (0 out of scope), "
+            "0 could not be read, 0 already") in passes[-1]
 
 
 def test_the_padding_is_fifteen_percent_of_the_box_height(tmp_path, ocr):

@@ -612,16 +612,32 @@ def _padding(height: int) -> int:
     return max(2, round(0.15 * height))
 
 
+#: How many letters or digits a region's text needs to be a box (#1121,
+#: owner ruling Q-A3: fixed, no key). On MIDI-B every false box measured
+#: was one character (`a` read at 86-91 on ultrasound), and two (initials
+#: such as `JT`) lost no answer-key text.
+BURNED_IN_TEXT_MIN_ALNUM = 2
+
+
+def _alnum_count(text: str) -> int:
+    """How many letters or digits `text` holds, by `str.isalnum()`:
+    Unicode-aware, so punctuation, `|`, `\\` and spaces do not count."""
+    return sum(ch.isalnum() for ch in text)
+
+
 def _text_boxes(instance: Instance, min_confidence: float,
                 zones=()) -> _InstanceBoxes:
     """The padded boxes OCR finds on each frame of `instance`, and nothing
     of what they say.
 
     The configured zones are zeroed on a copy first, so text a zone
-    already covers is not found again. Every region whose confidence is
-    `min_confidence` or more is kept, **whatever its length**: the
-    two-character filter `RedactionVerifier` applies to its own findings
-    would drop initials such as `JT` (#1108, Q3).
+    already covers is not found again. A region is kept when its
+    confidence is `min_confidence` or more **and** its text holds at
+    least two letters or digits (`BURNED_IN_TEXT_MIN_ALNUM`, #1121): two
+    (`JT`, `A1`, `12`) are text, one (`a`, `4`, a lone side-marker `L`)
+    is not. That is not the filter `RedactionVerifier` applies to its own
+    findings, which drops two characters too and would lose initials
+    such as `JT` (#1108, Q3, which this rule keeps).
 
     Args:
         instance (Instance): The instance to read.
@@ -648,6 +664,8 @@ def _text_boxes(instance: Instance, min_confidence: float,
     boxes = set()
     for region in ocr.regions:
         if region.confidence < min_confidence:
+            continue
+        if _alnum_count(region.text) < BURNED_IN_TEXT_MIN_ALNUM:
             continue
         x, y, w, h = (int(v) for v in region.box)
         pad = _padding(h)

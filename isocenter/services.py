@@ -245,20 +245,31 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
 #: read is never kept anywhere.
 BURNED_IN_TEXT_ATTR = "_ISOCENTER_BURNED_IN_TEXT"
 
+#: The version of the rule that turns OCR regions into boxes, hashed into
+#: every record's policy. rc19's rule (no key: every region at the
+#: threshold) is 1; 2 is #1121's "two letters or digits". A version, not
+#: the minimum itself: the two are both 2 by coincidence, and a later
+#: change to what a box is moves this whether or not it moves the count.
+BURNED_IN_TEXT_BOX_RULE = 2
+
 
 def _burned_in_text_policy_hash(policy, zones) -> str:
     """What a `burned_in_text` record is current under: what the boxes
-    depend on, the threshold and the zones zeroed before the read.
+    depend on, the box rule, the threshold and the zones zeroed before
+    the read.
 
     The zones are in it because a zone added later covers text the record
     still names, and a zone removed uncovers text the record never saw.
-    The action is not: it decides what is done with the boxes, not which
-    boxes are found, so a store read under `report` is not read again
-    when the file says `redact`; `redact()` then blanks what the record
-    holds, and until it does the export withholds it.
+    The box rule is, so a record a different rule wrote (every rc19
+    record) is read again. The action is not: it decides what is done
+    with the boxes, not which boxes are found, so a store read under
+    `report` is not read again when the file says `redact`; `redact()`
+    then blanks what the record holds, and until it does the export
+    withholds it. Neither are `scope` and `modalities`: they choose which
+    images are read, not which boxes a read finds (#1121).
 
     Args:
-        policy (dict): The normalised policy, `{action, min_confidence}`.
+        policy (dict): The normalised policy.
         zones (Iterable): The `(y1, y2, x1, x2)` zones of the rules that
             cover the instance's series.
 
@@ -266,7 +277,8 @@ def _burned_in_text_policy_hash(policy, zones) -> str:
         str: 32 hex digits.
     """
     # A float, so `80` and `80.0` are one threshold and one hash (O4).
-    key = {"min_confidence": float(policy["min_confidence"]),
+    key = {"boxes": BURNED_IN_TEXT_BOX_RULE,
+           "min_confidence": float(policy["min_confidence"]),
            "zones": sorted(list(zone) for zone in zones)}
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
 
