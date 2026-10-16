@@ -3,12 +3,13 @@ import hashlib
 import re
 
 import numpy as np
-from typing import List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
 import logging
 import pydicom
 from pydicom.dataset import Dataset
 from pydicom.pixels import apply_voi_lut
+from isocenter import text_kinds
 from isocenter.entities import Instance
 from isocenter.logger import describe_exception, get_logger
 from isocenter.pixel_geometry import resolve_pixel_geometry
@@ -53,6 +54,47 @@ class OcrUnavailableError(RuntimeError):
     by name without matching message text, which is not frozen. `HAS_OCR`
     does not answer that question: it does not cover the binary.
     """
+
+
+class NlpUnavailableError(OcrUnavailableError):
+    """A `burned_in_text` target naming `names` was asked for, and spaCy
+    or its `en_core_web_sm` model cannot load; nothing was read (#1121).
+
+    Raised by `redact()` and `export(check_burned_in=True)` where their
+    OCR check sits, never by `load_config()`: a policy is portable, and
+    plain `export()` reads records and needs no model. An
+    `OcrUnavailableError`, so a script that treats OCR as optional
+    catches it by the parent's name. Tier 2. spaCy publishes no
+    free-threaded wheel, so on 3.14t every such call raises it.
+    """
+
+
+def _require_target_readers(operation: str, policy) -> None:
+    """Raise `NlpUnavailableError` naming `operation` when `policy`'s
+    target names `names` and the model cannot load.
+
+    Called after `_require_ocr`, in its places. A target of `[dates, ids]`
+    needs no model.
+
+    Args:
+        operation (str): The method name the message names.
+        policy (dict): The normalised `burned_in_text` policy.
+
+    Raises:
+        NlpUnavailableError: The message names the extra and the model,
+            and the load's own failure, which concerns loading and holds
+            no text read from any image.
+    """
+    target = policy.get("target", "any")
+    if target == "any" or "names" not in target:
+        return
+    reason = text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
+    if reason is None:
+        return
+    raise NlpUnavailableError(
+        f"{operation}: burned_in_text target names needs the nlp extra "
+        '(pip install "isocenter[nlp]") and its model (python -m spacy '
+        f"download en_core_web_sm): {reason}. Nothing was read.")
 
 
 class PixelScanError(RuntimeError):
@@ -507,6 +549,13 @@ class _InstanceBoxes:
     #: `_read_digest` of the array the read saw, the zones zeroed; None
     #: when nothing was loaded.
     pixels: Optional[str] = None
+    #: Under a narrowed target (#1121): how many regions were read as each
+    #: named kind (a region read as two kinds counts under each) and how
+    #: many were left in place, as `{kind: n, ..., "left": k}`; None under
+    #: `any`. Counts only.
+    counts: Optional[Dict[str, int]] = None
+    #: The frame of each region left in place under a narrowed target.
+    left_frames: List[int] = field(default_factory=list)
 
 
 def _read_digest(arr) -> str:
@@ -625,8 +674,126 @@ def _alnum_count(text: str) -> int:
     return sum(ch.isalnum() for ch in text)
 
 
+#: A word joins a line when their vertical extents overlap by at least
+#: this share of the shorter of the word's height and the line's first
+#: word's (#1121, review F3 of #1124; `_lines_of`).
+LINE_OVERLAP = 0.5
+
+
+def _lines_of(regions: Sequence[TextRegion]) -> List[List[TextRegion]]:
+    """The regions grouped into lines by where they sit, never by
+    tesseract's `(block, par, line)`.
+
+    `--psm 11` reads sparse text and can put two words of one visual line
+    in different blocks: grouped by its numbers, `DOE,` and `JANE` were
+    read apart and a name was left (review F3 of #1124). So, within each
+    frame, words are taken top to bottom and a word joins a line when
+    both hold:
+
+    - its vertical extent overlaps the line's by at least `LINE_OVERLAP`
+      of the shorter of its own height and the height of the line's
+      first word. The line's extent grows with each word it takes, so a
+      tilted line is followed word by word; the height the overlap is
+      measured against does not, so a line grown tall asks no more of a
+      tall word than its first word did;
+    - it overlaps no word already on the line horizontally (touching
+      edges do not count). Two words of one line sit side by side; a
+      word under another is on another line. Without this a small
+      `PORTABLE` reaching into a large `DOE, JANE` was read between the
+      two names, `DOE, PORTABLE JANE`, which is no name, and the name
+      was left (review of #1124 at bc02c116).
+
+    A word one line refuses is offered to the next, and starts a line of
+    its own only when every line refuses it. Each line is ordered left
+    to right. Words on different frames never share a line. Tesseract's
+    numbers are not read at all, not even as a tiebreak: one rule, which
+    a detector region (PR C) meets as well.
+
+    Joining is not the safe direction: a word read into a line it is not
+    on can break a span. One that sits in a gap of another line,
+    overlapping none of its words, still joins it and is read between
+    them. That residue is known and not fixed.
+    """
+    by_frame: Dict[int, List[TextRegion]] = {}
+    for region in regions:
+        by_frame.setdefault(int(region.frame_index), []).append(region)
+    lines = []
+    for frame in sorted(by_frame):
+        bands = []  # [top, bottom, words, first word's height]
+        for region in sorted(by_frame[frame],
+                             key=lambda r: (int(r.box[1]), int(r.box[0]))):
+            x, y, w, h = (int(v) for v in region.box)
+            for band in bands:
+                overlap = min(band[1], y + h) - max(band[0], y)
+                if not (overlap > 0 and overlap >= LINE_OVERLAP * min(h, band[3])):
+                    continue
+                if any(min(x + w, int(o.box[0]) + int(o.box[2])) > max(x, int(o.box[0]))
+                       for o in band[2]):
+                    continue
+                band[0], band[1] = min(band[0], y), max(band[1], y + h)
+                band[2].append(region)
+                break
+            else:
+                bands.append([y, y + h, [region], h])
+        lines.extend(sorted(band[2], key=lambda r: int(r.box[0]))
+                     for band in bands)
+    return lines
+
+
+def _regions_of_kinds(regions: Sequence[TextRegion], target):
+    """Which regions a target redacts, and counts of what was read (#1121).
+
+    Under `any`, every region. Under a list of kinds, the regions are
+    grouped into lines by where they sit (`_lines_of`), each line's text
+    is its words joined by single spaces, each
+    named kind's spans are found on it (`text_kinds.spans`), and a region
+    is redacted when a span of a named kind overlaps it: the words the
+    match covers, never the whole line (owner ruling Q-B15 (a)). So the
+    result is always a subset of `regions`, which is what makes a
+    narrowed target never redact more than `any` (the invariant).
+
+    A detector region (PR C) is a region whose text is its crop's
+    reading; it joins a line by where it sits, as a word does, and a span
+    overlapping its reading redacts it.
+
+    Nothing read leaves this function: it returns regions the caller
+    already holds and integer counts.
+
+    Args:
+        regions (Sequence[TextRegion]): The regions a box is made for
+            under `any` (at the threshold, two letters or digits).
+        target: `"any"` or a list of kinds.
+
+    Returns:
+        tuple: `(kept, counts, left_frames)`: the regions to redact;
+            None under `any`, else `{kind: n, ..., "left": k}`; and the
+            frame of each region left in place.
+    """
+    if target == "any":
+        return list(regions), None, []
+    counts = {kind: 0 for kind in target}
+    kept, left_frames = [], []
+    for words in _lines_of(regions):
+        offsets, cursor = [], 0
+        for word in words:
+            offsets.append((cursor, cursor + len(word.text)))
+            cursor += len(word.text) + 1
+        found = text_kinds.spans(" ".join(w.text for w in words), target)
+        for word, (start, end) in zip(words, offsets):
+            kinds = [kind for kind, spans in found.items()
+                     if any(s < end and start < e for s, e in spans)]
+            for kind in kinds:
+                counts[kind] += 1
+            if kinds:
+                kept.append(word)
+            else:
+                left_frames.append(int(word.frame_index))
+    counts["left"] = len(left_frames)
+    return kept, counts, left_frames
+
+
 def _text_boxes(instance: Instance, min_confidence: float,
-                zones=()) -> _InstanceBoxes:
+                zones=(), target="any") -> _InstanceBoxes:
     """The padded boxes OCR finds on each frame of `instance`, and nothing
     of what they say.
 
@@ -643,13 +810,27 @@ def _text_boxes(instance: Instance, min_confidence: float,
         instance (Instance): The instance to read.
         min_confidence (float): Keep regions at or above this.
         zones (Iterable[tuple]): `(y1, y2, x1, x2)` zones to zero first.
+        target: `"any"`, or the list of kinds a box must be read as
+            (`_regions_of_kinds`, #1121).
 
     Returns:
         _InstanceBoxes: The boxes, with whether the instance was read and
-            why not, when it was not.
+            why not, when it was not, and under a narrowed target the
+            counts of what was read and left.
     """
     zones = [tuple(z) for z in zones]
     size = {}
+    if target != "any" and "names" in target:
+        # Before the read, so a worker that cannot load the model when the
+        # caller could costs no OCR: a failure, no record, and the export
+        # gate withholds the image. The failure becomes an audit row, so
+        # its class only, never a third party's message, whose wording
+        # differs between 3.12 and 3.14t (as #747 and #1022 quote).
+        failure = text_kinds._nlp_load_failure()  # pylint: disable=protected-access
+        if failure is not None:
+            return _InstanceBoxes(
+                False, "the names model could not be loaded "
+                f"({type(failure).__name__})", [])
 
     def prepare(arr):
         arr, geometry = _zoned_for_reading(instance, arr, zones)
@@ -662,11 +843,13 @@ def _text_boxes(instance: Instance, min_confidence: float,
 
     ocr = _ocr_instance(instance, prepare)
     boxes = set()
-    for region in ocr.regions:
-        if region.confidence < min_confidence:
-            continue
-        if _alnum_count(region.text) < BURNED_IN_TEXT_MIN_ALNUM:
-            continue
+    regions = [region for region in ocr.regions
+               if region.confidence >= min_confidence
+               and _alnum_count(region.text) >= BURNED_IN_TEXT_MIN_ALNUM]
+    # Narrowing only takes regions away (#1121): the kinds are read over
+    # the regions `any` would box, and nothing else.
+    regions, counts, left_frames = _regions_of_kinds(regions, target)
+    for region in regions:
         x, y, w, h = (int(v) for v in region.box)
         pad = _padding(h)
         y1, y2 = max(0, y - pad), min(size["rows"], y + h + pad)
@@ -675,4 +858,5 @@ def _text_boxes(instance: Instance, min_confidence: float,
             boxes.add((int(region.frame_index), y1, y2, x1, x2))
     # The regions, and their text, end here: only coordinates leave.
     return _InstanceBoxes(ocr.read, _without_ocr_messages(ocr.failure),
-                          sorted(boxes), size.get("pixels"))
+                          sorted(boxes), size.get("pixels"), counts,
+                          sorted(left_frames))

@@ -463,7 +463,9 @@ otherwise.
 - `redact()`, when the configuration holds a `burned_in_text` policy:
   `RuntimeError` when the `ocr` extra or the `tesseract` binary is
   unavailable to the calling process, after the entry drain and before
-  anything is redacted, the configured zones included. So does
+  anything is redacted, the configured zones included; and, the same
+  way, when the policy's `target` names `names` and spaCy or its model
+  cannot load (#1121). So does
   `export(check_burned_in=True)` under that policy, before its pre-export
   scan and its save. An instance the
   pass cannot read is a `WARNING` row, not a raise.
@@ -719,7 +721,8 @@ CHANGELOG entry naming both spellings:
   `verify_instance`), `ConfigAutomator.suggest_config_updates`,
   `pixel_analysis.analyze_pixels`, `pixel_analysis.detect_text_regions`,
   `pixel_analysis.TextRegion`, `pixel_analysis.HAS_OCR`,
-  `pixel_analysis.OcrUnavailableError`, `pixel_analysis.PixelScanError`;
+  `pixel_analysis.OcrUnavailableError`, `pixel_analysis.NlpUnavailableError`
+  (an `OcrUnavailableError`, #1121), `pixel_analysis.PixelScanError`;
   `DiscoveryResult.get_density_matrix`, `visualize_heatmap`,
   `analyze_temporal_stability`, `inspect_clusters`, and its attributes
   `candidates` and `n_sources`.

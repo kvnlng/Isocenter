@@ -92,6 +92,9 @@ class BurnedInTextSummary:
             summary built without one, which renders as before #1121.
         out_of_scope (int): Instances holding pixels the scope left out,
             neither read nor gated (#1121).
+        target (str): A narrowed target as rows name it, or `""` under
+            `any` (#1121).
+        kinds (str): What a narrowed target read, counts only, or `""`.
     """
     #: The `source` of an `export(check_burned_in=True)` read's summary,
     #: which the section 5 line reads to say withheld or written, never
@@ -112,6 +115,12 @@ class BurnedInTextSummary:
     # Defaults, so a summary built before #1121 (tier 2) still builds.
     scope: str = ""
     out_of_scope: int = 0
+    #: A narrowed target as rows name it (`[names, dates]`), or `""` under
+    #: `any`, which renders as before the key (#1121, PR B).
+    target: str = ""
+    #: What a narrowed target read, counts only (`N region(s) read as
+    #: names, D as dates, K left in place`), or `""`.
+    kinds: str = ""
 
 
 #: Closes section 5, after the grade basis and the metadata, PHI-scan and
@@ -285,6 +294,10 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
         # what it left out is said beside them, so a `flagged` pass that
         # read nothing says so on its face (owner ruling Q-A2).
         under = f" and scope {run.scope}" if run.scope else ""
+        if run.target:
+            under += f" and target {run.target}"
+        # The counts of a narrowed target ride after what was acted on.
+        tail_kinds = f"; {run.kinds}" if run.kinds else ""
         held = "in-scope instance(s)" if run.scope else "instance(s)"
         left = (f"; {run.out_of_scope} out of scope, not read"
                 if run.scope else "")
@@ -295,14 +308,14 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
                 f"{run.read} of {run.attempted} planned {held} holding pixels "
                 f"({run.unread} could not be read{left}) and found text on "
                 f"{run.with_text} ({run.regions} region(s)); {run.acted} "
-                f"{done}, with a row")
+                f"{done}, with a row{tail_kinds}")
             continue
         runs.append(
             f"{run.source} under action {run.action}{under} read {run.read} "
             f"of {run.attempted} {held} holding pixels ({run.skipped} "
             f"already checked, {run.unread} could not be read{left}) and "
             f"found text on {run.with_text} ({run.regions} region(s)); "
-            f"{run.acted} {_BURNED_IN_TEXT_ACTED[run.action]}")
+            f"{run.acted} {_BURNED_IN_TEXT_ACTED[run.action]}{tail_kinds}")
     label = "*   **Burned-in Text (`burned_in_text`):** "
     tail = (" Text OCR did not find is not described here: OCR misses "
             "faint and short text, and reads text over anatomy in "
