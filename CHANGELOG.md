@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **docs: `RELEASING.md`'s skip counts for 3.14t include the 17 real text-detector tests (#1121).** "Cutting a release", step 4, gave 3.14t one skip fewer than 3.12, 3.13 and 3.14: 23 in a rehearsal, 22 in the publish run and 21 in a dispatch from `main`. Since #1123, `tests.yml` installs the `textdetect` extra and sets `ISOCENTER_REQUIRE_TEXT_DETECTOR=1` only on the entries that are not free-threaded, because OpenCV publishes no free-threaded wheel. So every test of `test_burned_in_text_with_the_real_text_detector.py` (17) skips on 3.14t: 16 for `No module named 'cv2'`, one because the variable is not 1. 1.0.0rc20's runs showed it. Read from the last line of each shard's `Run Tests` step and added over a version's twelve shards, the rehearsal from `release/1.0` (run 38914679748) skipped 24 on each of 3.12, 3.13 and 3.14 and 40 on 3.14t. The publish run from the tag (38917913905) skipped 23 on each and 39 on 3.14t. The step's list now names the 17, and its totals for 3.14t are 40, 39 and 38. The figures for the other three versions do not change. The dispatch's figures (22, and 38 on 3.14t) are still derived, and the step says so. **Output:** none.
+
 ## [1.0.0rc20] - 2026-10-16
 
 ### Breaking
