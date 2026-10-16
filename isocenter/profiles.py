@@ -8,10 +8,11 @@ overridden by the user's specific "phi_tags" configuration.
 
 `BASIC_PROFILE` is the Basic Prof. column of DICOM PS3.15 Annex E, Table
 E.1-1, edition 2026c: one rule per row, apart from a few documented
-departures. Its `U` rows replace each UID with one derived from the
-project secret. It is not the whole of Annex E: the attributes that
-record de-identification are not rules here; the export writes them. See
-docs/configuration.md.
+departures, plus rules on two keys the table has no row for (the overlay
+group, `60xx,xxxx`, and Referenced File ID, `0004,1500`). Its `U` rows
+replace each UID with one derived from the project secret. It is not the
+whole of Annex E: the attributes that record de-identification are not
+rules here; the export writes them. See docs/configuration.md.
 
 A profile's name is pinned to the PS3.15 edition its table was taken
 from: `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
@@ -57,7 +58,9 @@ from: `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
 # `50xx,xxxx` and `60xx,xxxx` are repeating-group keys: every
 # element of every even group 5000-501E or 6000-601E. The overlay group
 # rule is not a table row; the table's Overlay Data and Overlay Comments
-# rows are folded into it.
+# rows are folded into it. Nor is Referenced File ID (`0004,1500`): a
+# DICOMDIR element with no row, removed by a rule of its own (#1133;
+# `ADDED_RULES` in `tests/support/annex_e.py`).
 #
 # A rule on a sequence tag removes the sequence or leaves it with zero
 # items; identifiers inside any sequence are scanned wherever they sit.
@@ -72,6 +75,12 @@ BASIC_PROFILE = {
     "0000,1000": {"action": "REMOVE", "name": "Affected SOP Instance UID"},  # X
     "0000,1001": {"action": "REPLACE", "name": "Requested SOP Instance UID"},  # U
     "0002,0003": {"action": "REPLACE", "name": "Media Storage SOP Instance UID"},  # U
+    # Not a table row (#1133): a Directory Record element of the Basic
+    # Directory IOD (the DICOMDIR, PS3.3 Annex F), not of a composite
+    # instance, and its value is a file-set path, which sites build from
+    # MRNs, accession numbers or dates. Only this element; 0004,1511
+    # keeps its U row. No rule through 1.0.0rc20; REMOVE since.
+    "0004,1500": {"action": "REMOVE", "name": "Referenced File ID"},  # not a row (#1133)
     "0004,1511": {"action": "REPLACE", "name": "Referenced SOP Instance UID in File"},  # U
     "0008,0012": {"action": "REPLACE", "name": "Instance Creation Date"},  # X/D
     "0008,0013": {"action": "REPLACE", "name": "Instance Creation Time"},  # X/Z/D

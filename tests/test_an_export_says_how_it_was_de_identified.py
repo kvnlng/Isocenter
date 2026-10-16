@@ -40,11 +40,11 @@ f54deaa1, after L10's U rows moved `basic@2026c`'s canonical form, and
 re-measured for #762, which put `CONFIG_VERSION` ("2.0") in it, and
 again when Content Sequence and Graphic Annotation Sequence gained their
 rules in `basic@2026c` (1.0.0rc4), and when those rules became REMOVE
-(#848, 1.0.0rc5).
+(#848, 1.0.0rc5), and when Referenced File ID gained a rule (#1133).
 A minor bump, or a change to a profile's rules, moves them, and each is
 re-measured then:
-`floor over basic@2026c` is `v1:729f4bbf`, `basic@2026c` is
-`v1:d04ffd6e`, `none` is `v1:7182a219`. The version is read from
+`floor over basic@2026c` is `v1:b2d62bec`, `basic@2026c` is
+`v1:80408ecf`, `none` is `v1:7182a219`. The version is read from
 `isocenter/_version.py` as text, never from `isocenter`, so a release bump
 moves nothing here and a formatter that spelled the tool differently (the
 fingerprint's N2 substitution reads exactly `isocenter/<version>`) is red.
@@ -77,9 +77,9 @@ REPO = Path(__file__).resolve().parents[1]
 VERSION = re.search(r'__version__ = "([^"]+)"',
                     (REPO / "isocenter" / "_version.py").read_text()).group(1)
 
-#: Measured at f54deaa1, re-measured for #762, at 1.0.0rc4 and for #848 (see the module docstring).
-FLOOR = ("floor over basic@2026c", "v1:729f4bbf")
-BASIC = ("basic@2026c", "v1:d04ffd6e")
+#: Measured at f54deaa1, re-measured for #762, at 1.0.0rc4, for #848 and for #1133 (see the module docstring).
+FLOOR = ("floor over basic@2026c", "v1:b2d62bec")
+BASIC = ("basic@2026c", "v1:80408ecf")
 NONE = ("none", "v1:7182a219")
 
 REMOVED_TAG, METHOD, CODES, TEMPORAL = (0x00120062, 0x00120063, 0x00120064,
@@ -508,16 +508,16 @@ def test_an_external_profile_is_named_not_located(tmp_path):
 
 
 #: The floor with one override is its own policy. Each prefix measured at
-#: f54deaa1 and re-measured for #762, at 1.0.0rc4 and for #848 (see the module docstring); the label is the floor's, since the file names no profile.
+#: f54deaa1 and re-measured for #762, at 1.0.0rc4, for #848 and for #1133 (see the module docstring); the label is the floor's, since the file names no profile.
 @pytest.mark.parametrize("rule, expected", [
     ({"0012,0063": {"action": "REMOVE"}},
      {"removed": "YES", "method": None}),
     ({"0012,0062": {"action": "EMPTY"}},
-     {"removed": "", "method": "v1:e0c93bcc"}),
+     {"removed": "", "method": "v1:f78f1066"}),
     ({"0012,0062": {"action": "KEEP"}},
-     {"removed": "NO", "method": "v1:63834fc8"}),
+     {"removed": "NO", "method": "v1:5360eeab"}),
     ({"0028,0303": {"action": "KEEP"}},
-     {"removed": "YES", "method": "v1:32e31f46", "temporal": None}),
+     {"removed": "YES", "method": "v1:d900b2bd", "temporal": None}),
 ], ids=["remove_method", "empty_removed", "keep_a_source_no", "keep_temporal"])
 def test_a_rule_on_a_marker_tag_decides(tmp_path, rule, expected):
     """M7. The user's configuration decides: any rule on a marker tag, KEEP

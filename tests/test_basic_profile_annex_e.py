@@ -19,9 +19,10 @@ import re
 
 from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 
-from pydicom.datadict import dictionary_VM, dictionary_VR
+from pydicom.datadict import dictionary_description, dictionary_VM, dictionary_VR
 
-from support.annex_e import (ACTION_FOR_CODE, DEVIATIONS, EDITION, GROUP_RULES,
+from support.annex_e import (ACTION_FOR_CODE, ADDED_RULES, DEVIATIONS, EDITION,
+                             GROUP_RULES,
                              NO_ENTRY, NO_ENTRY_CODES, derive, load_table,
                              render_literal)
 
@@ -69,11 +70,13 @@ def test_basic_profile_is_derived_from_annex_e():
     # no value, which on a UI is the keyed UID. 648 since 1.0.0rc4:
     # Content Sequence's and Graphic Annotation Sequence's D became
     # EMPTY, two more. 1.0.0rc5 moved those two from EMPTY to REMOVE
-    # (#848): EMPTY 59 -> 57, REMOVE 412 -> 414. Literal numbers, checked
-    # against the arithmetic by hand, never computed.
-    assert len(BASIC_PROFILE) == 648
+    # (#848): EMPTY 59 -> 57, REMOVE 412 -> 414. 649 since #1133:
+    # Referenced File ID (0004,1500), which the table has no row for,
+    # gained REMOVE (REMOVE 414 -> 415). Literal numbers, checked against
+    # the arithmetic by hand, never computed.
+    assert len(BASIC_PROFILE) == 649
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
-        "REMOVE": 414, "EMPTY": 57, "REPLACE": 177}
+        "REMOVE": 415, "EMPTY": 57, "REPLACE": 177}
 
 
 #: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
@@ -144,7 +147,7 @@ def test_the_floor_overrides_three_basic_rules_and_adds_none():
     """Patient's Age is a basic rule since 0.9.8, so all three research
     defaults override one and the floor is the profile's size."""
     assert set(RESEARCH_DEFAULTS) <= set(BASIC_PROFILE)
-    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 648
+    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 649
 
 
 def test_every_departure_is_a_row_and_is_a_departure():
@@ -181,6 +184,22 @@ def test_every_departure_is_a_row_and_is_a_departure():
         assert rule["name"].strip() and rule["reason"].strip(), key
         assert re.fullmatch(r"#\d+", rule["authority"]), key
         assert rule["authority"] in rule["reason"], key
+
+    # An added rule is a group rule's sibling on one concrete element
+    # (#1133): a key the table has no row for, not a mask, named as
+    # pydicom's dictionary names it. Were the key to become a row, it
+    # would belong in DEVIATIONS, where the departure check sees it.
+    assert ADDED_RULES, "the Referenced File ID rule is gone"
+    for key, rule in ADDED_RULES.items():
+        assert key not in rows, f"ADDED_RULES names {key}, which is a table row"
+        assert key not in GROUP_RULES and key not in DEVIATIONS, key
+        assert re.fullmatch(r"[0-9a-f]{4},[0-9a-f]{4}", key), key
+        assert int(key[:4], 16) % 2 == 0, f"{key} is a private group"
+        assert rule["action"] in ("REMOVE", "EMPTY", "REPLACE", "KEEP"), key
+        assert rule["name"].strip() and rule["reason"].strip(), key
+        assert re.fullmatch(r"#\d+", rule["authority"]), key
+        assert rule["authority"] in rule["reason"], key
+        assert rule["name"] == dictionary_description(int(key.replace(",", ""), 16)), key
 
 
 def test_every_deviation_names_its_reason_and_issue():
