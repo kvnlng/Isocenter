@@ -245,20 +245,41 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
 #: read is never kept anywhere.
 BURNED_IN_TEXT_ATTR = "_ISOCENTER_BURNED_IN_TEXT"
 
+#: The version of the rule that turns OCR regions into boxes, hashed into
+#: every record's policy. rc19's rule (no key: every region at the
+#: threshold) is 1; 2 is #1121's "two letters or digits". A version, not
+#: the minimum itself: the two are both 2 by coincidence, and a later
+#: change to what a box is moves this whether or not it moves the count.
+BURNED_IN_TEXT_BOX_RULE = 2
+#: The version of the kind detectors a narrowed target reads with
+#: (`text_kinds`, #1121), in the policy hash beside the kinds: a change to
+#: what a date, an ID or a name is moves it, so every record read under a
+#: narrowed target is read again.
+BURNED_IN_TEXT_KINDS_RULE = 1
+#: The version of how `detector: db` reads a region under a narrowed
+#: target (`pixel_analysis._read_crop`, #1121): the crop's padding, the
+#: deskew, the upscale, the border and tesseract `--psm 7`. In the hash only
+#: under `db` with a narrowed target.
+BURNED_IN_TEXT_CROP_READ_RULE = 1
+
 
 def _burned_in_text_policy_hash(policy, zones) -> str:
     """What a `burned_in_text` record is current under: what the boxes
-    depend on, the threshold and the zones zeroed before the read.
+    depend on, the box rule, the detector, the threshold and the zones
+    zeroed before the read.
 
     The zones are in it because a zone added later covers text the record
     still names, and a zone removed uncovers text the record never saw.
-    The action is not: it decides what is done with the boxes, not which
-    boxes are found, so a store read under `report` is not read again
-    when the file says `redact`; `redact()` then blanks what the record
-    holds, and until it does the export withholds it.
+    The box rule is, so a record a different rule wrote (every rc19
+    record) is read again. The action is not: it decides what is done
+    with the boxes, not which boxes are found, so a store read under
+    `report` is not read again when the file says `redact`; `redact()`
+    then blanks what the record holds, and until it does the export
+    withholds it. Neither are `scope` and `modalities`: they choose which
+    images are read, not which boxes a read finds (#1121).
 
     Args:
-        policy (dict): The normalised policy, `{action, min_confidence}`.
+        policy (dict): The normalised policy.
         zones (Iterable): The `(y1, y2, x1, x2)` zones of the rules that
             cover the instance's series.
 
@@ -266,8 +287,34 @@ def _burned_in_text_policy_hash(policy, zones) -> str:
         str: 32 hex digits.
     """
     # A float, so `80` and `80.0` are one threshold and one hash (O4).
-    key = {"min_confidence": float(policy["min_confidence"]),
+    # `detector` (#1121, PR C): tesseract and the DB detector find
+    # different boxes at one number, which also means another thing under
+    # each. Its build (the model's sha256, the OpenCV version) is not
+    # here: it is in the record, and only `redact()` reads an image again
+    # when it changes, so a plain `export()` trusts a current record with
+    # no OpenCV installed (owner ruling of 2026-10-15, as for PR B's
+    # `names_by`). `.get`, so a policy built by hand before the key
+    # existed reads as rc19's detector, which it is.
+    key = {"boxes": BURNED_IN_TEXT_BOX_RULE,
+           "detector": policy.get("detector", "tesseract"),
+           "min_confidence": float(policy["min_confidence"]),
            "zones": sorted(list(zone) for zone in zones)}
+    # The target chooses boxes, so it is in (#1121): `any`, or the sorted
+    # kinds with the kind detectors' version. The names model's identity
+    # (`names_by`) is not: it lives in the record, and `redact()` reads an
+    # image again when it differs, so plain `export()` needs no model to
+    # judge a record current (owner ruling (a) of 2026-10-15). Nothing
+    # read is ever hashed.
+    target = policy.get("target", "any")
+    key["target"] = target if target == "any" else sorted(target)
+    if target != "any":
+        key["kinds"] = BURNED_IN_TEXT_KINDS_RULE
+        if key["detector"] == "db":
+            # How a detected region is cut and read before it is
+            # classified (#1121, owner ruling (b)): a change to the crop,
+            # the deskew, the upscale or the page mode reads other text,
+            # so other boxes.
+            key["crop_read"] = BURNED_IN_TEXT_CROP_READ_RULE
     return hashlib.md5(json.dumps(key, sort_keys=True).encode('utf-8')).hexdigest()
 
 

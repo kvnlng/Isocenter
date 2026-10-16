@@ -277,8 +277,10 @@ class IsocenterConfiguration:
     #: session's choice, not the file's, and a later load is written to.
     auto_save: bool = False
     #: The `burned_in_text` policy (#1108): `{"action": "report" |
-    #: "redact" | "withhold", "min_confidence": 0..100}`, or None for no
-    #: OCR anywhere. Tier 2. Set by `load_config()` on every load, with
+    #: "redact" | "withhold", "scope": "flagged" | "modalities" | "all",
+    #: "min_confidence": 0..100, "target": "any" | [kinds]}`, plus a
+    #: sorted `"modalities"` list under `scope: modalities` (#1121), or
+    #: None for no OCR anywhere. Tier 2. Set by `load_config()` on every load, with
     #: the default confidence filled in; assigned by hand, it is judged
     #: by the loader's rule where it is used. Not in the PHI policy
     #: fingerprint, as zones are not. Not a constructor parameter, so the

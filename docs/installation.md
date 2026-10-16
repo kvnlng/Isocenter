@@ -42,6 +42,16 @@ Without the extra or the binary, the two methods that read burned-in text, `scan
 
 `isocenter.pixel_analysis.HAS_OCR` is `False` when `pytesseract` did not import. It does not check the binary.
 
+### Text detection
+
+To find burned-in text with a text-detection model instead of tesseract (`burned_in_text: {detector: db}`), install the `textdetect` extra, which brings OpenCV; the model itself ships inside the package. With `target: any` it needs no tesseract; with a narrowed target each detected region is read by tesseract too, so the `ocr` extra and the binary above are needed as well:
+
+```bash
+pip install "isocenter[textdetect]"
+```
+
+OpenCV publishes no free-threaded wheel, so this extra cannot be installed on Python 3.14t, and `detector: db` raises `TextDetectorUnavailableError` there ([OCR](ocr.md#detecting-text-with-a-model-detector-db)).
+
 ### Natural language processing (NLP)
 
 `discover_redaction_zones()` can use spaCy to classify the text it finds as names. Install the `nlp` extra and the English model:
@@ -52,6 +62,8 @@ python -m spacy download en_core_web_sm
 ```
 
 The model download is a separate step because the model is not published on PyPI. Without the model, discovery classifies text with regular expressions.
+
+A [`burned_in_text`](configuration.md#burned-in-text) `target` naming `names` needs the extra and the model too, and has no fallback: without them `redact()` and `export(check_burned_in=True)` raise `NlpUnavailableError`. spaCy publishes no free-threaded wheel, so on the free-threaded build (3.14t) neither discovery's spaCy arm nor the `names` kind can be used. No CI job installs the model.
 
 ## Codecs
 

@@ -12,7 +12,7 @@ And, for text that moves from image to image, or images whose series carry no De
 
 4. **Redact, report or withhold** the text found on each image: the [`burned_in_text`](configuration.md#burned-in-text) configuration key, applied by `redact()` ([below](#redacting-the-text-ocr-finds-on-each-image)).
 
-OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
+OCR runs only when you call one of the first three, or, with `burned_in_text` configured, `redact()` or `export(check_burned_in=True)`. Plain `export()` and the compliance grade never run OCR: without `burned_in_text`, a `PASS` says the zones you wrote were applied, not that the rest of each image is free of text. Without `burned_in_text`, `export(check_burned_in=True)` re-runs the tag scan (`audit()`) and does not look for text in the pixels; with it, it also reads every image in the policy's scope it is about to write ([`check_burned_in=True`](export-output.md#check_burned_intrue)).
 
 ## Prerequisites
 
@@ -43,6 +43,23 @@ before it redacts anything, the zones included, and
 such a file, so one file serves machines with and without OCR. `pixel_analysis.HAS_OCR` says only whether `pytesseract` imported; it
 does not check the binary. If you point `pytesseract.pytesseract.tesseract_cmd`
 at a tesseract that is not on `PATH`, the scan uses that one.
+
+A `burned_in_text` target naming `names` ([below](#redacting-only-some-kinds-of-text)) needs one thing more: the `nlp` extra and spaCy's English model, which pip cannot install from the extra:
+
+```bash
+pip install "isocenter[nlp]"
+python -m spacy download en_core_web_sm
+```
+
+Without them, `redact()` and `export(check_burned_in=True)` raise
+`NlpUnavailableError`, an `OcrUnavailableError`, in the same places and before
+anything. spaCy publishes no free-threaded wheel, so on the free-threaded build
+(3.14t) `names` cannot be used; `dates` and `ids` need no model.
+`burned_in_text` with `detector: db` needs the `textdetect` extra (OpenCV),
+which cannot be installed on the free-threaded build
+([below](#detecting-text-with-a-model-detector-db)). Under `target: any` it
+needs no tesseract; under a narrowed target it needs tesseract too, and the
+names model under `names`.
 
 **When an image cannot be read.** `scan_pixel_content()` lists each instance
 whose pixels could not be loaded, or whose OCR failed on any frame, in
@@ -201,14 +218,42 @@ A zone is a rectangle on every image of one machine. Text that moves (a technolo
 ```yaml
 burned_in_text:
   action: redact        # report | redact | withhold
+  scope: modalities     # flagged | modalities | all
+  modalities: [CR, DX, MG]
   min_confidence: 80
 ```
 
-With it loaded, `redact()` reads every image that holds pixels with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more, whatever its length, and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
+`scope` is required ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). `flagged` reads the images whose Burned In Annotation says `YES`, plus any image this store has redacted or found text on before; `modalities` reads those and every image of the listed modalities; `all` reads every image that holds pixels. Reading everything is slow on a large cohort: on a 66-file MIDI-B sample `redact()` under `all` took 24 s against 0.1 s without the key, about 2.5 hours projected over the Validation set's ~24,000 images, nearly all CT, MR and PET slices that rarely carry burned-in text. `modalities: [CR, DX, MG, US]` reads 258 of them. No MIDI-B file says Burned In Annotation `YES`, so `flagged` alone reads nothing there.
+
+With it loaded, `redact()` reads every image in scope with OCR, after zeroing (on a copy) the zones its machine rules hold, keeps every box tesseract reports at `min_confidence` or more whose text holds at least two letters or digits (a single `a` or `4` is not a box; `JT` is), and records the boxes on the image, never the text. Under `redact` it blanks each box on its own frame, widened by 15% of the box's height on every side (at least 2 pixels), gives the image a new SOP Instance UID derived from the boxes, and reads it once more. Under `report` and `withhold` it changes no pixel, and the export writes the image with a row, or leaves it out with a row. [Configuration](configuration.md#burned-in-text) has the whole contract: the export gate, the rows, the grade.
 
 Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.
 
 The boxes depend on the tesseract build and its language data. The same image, threshold and zones under the same tesseract give the same boxes, and so the same UID and the same pixels; another tesseract may find other boxes, and then the image takes another UID, which is right, since its pixels differ. The version is in each image's record and in the pass's `REDACTION` row.
+
+### Redacting only some kinds of text
+
+Under `target: any` (the default) every box is acted on, labels included. A list of kinds acts only on the text read as one of them ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)):
+
+```yaml
+burned_in_text:
+  action: redact
+  scope: modalities
+  modalities: [CR, DX, MG, US]
+  target: [names, dates, ids]
+```
+
+The words tesseract reads at `min_confidence` or more with two letters or digits (the boxes `any` would take) are grouped into lines by where they sit: on one frame, a word joins a line when its height overlaps the line's by at least half the shorter of its own and the line's first word's, and it sits beside the line's words rather than under one of them; each line is read left to right. A line's extent grows with each word it takes, so a slightly tilted line is followed. A word sitting in a gap of another line, under none of its words, still joins it and is read between them, which can break a match. Tesseract's own line numbers are not used, because its sparse-text mode can put two words of one line in different blocks, and a name read word by word is no name. Each line is read for the named kinds, and a word is acted on when a match overlaps it: `DOE, JANE  F  01/01/1970` under `[names, dates]` loses the name and the date, and a `PORTABLE` on the line below stays. Nothing is compared with the patient's own values, which a burned-in name may misspell; the source file is not read again.
+
+* **`names`**: what spaCy's `en_core_web_sm` reads as a person, on the line as read and title-cased (the small model misses most upper-case names), plus a word holding `^` between letters. An institution is not a name. It needs the [`nlp` extra and the model](#prerequisites); there is no fallback when they are missing, and on the free-threaded build (3.14t) it cannot be used. Once the model has loaded, Isocenter ignores spaCy's two warnings that quote the text they were given, W030 and W102, for the rest of the process (in `discover_redaction_zones()` and your own use of spaCy too), because that text is what the image says. Every other spaCy and thinc warning reaches your application as usual. The model runs in no CI job: this arm is tested with a stand-in model only, and its reading of short upper-case OCR lines was measured only on the MIDI-B crops below.
+* **`dates`**: day, month and year with one separator, either order or year first, 2- or 4-digit years from 1800 to 2199; `YYYYMMDD`; an English month name beside a day or a year. `O`, `I`, `l`, `|`, `S` and `B` inside a candidate are read as digits, so `0I/O2/197O` is a date. Times of day (`12:34`) are not dates, and `12.5` or `3/4` are not.
+* **`ids`**: a run of letters and digits, `-` or `_` allowed inside, of 6 or more characters holding 5 or more digits. `MRN0012345` and `00123456` are IDs; `120kV`, `5.0MHz`, `1024`, `10cm` and `L5-S1` are not.
+
+A narrowed target never redacts a box `target: any` would not: the kinds are read over the boxes `any` keeps, so `min_confidence` has one meaning under every target, and a name read below it is missed under both. Each image with text left in place gets one `RISK` audit row naming the target's kinds and the frames (it does not grade), and the pass's `REDACTION` row and section 5 count the regions read as each kind and the regions left. The read after redaction counts only text of a named kind, so a label left on purpose writes no `WARNING` row. `export(check_burned_in=True)` reads the same way, and needs no identifier, so it reads as well after `anonymize()`. Nothing read is kept: the record holds counts, and under `names` the spaCy and model versions; a record another model read is read again by the next `redact()`, and plain `export()` needs no model.
+
+What it misses: a name the model does not read as a person (on MIDI-B crops it missed one upper-case surname and given name pair, even title-cased); a date in a shape not listed, including two OCR artefacts measured on MIDI-B crops: a space read inside a year (two digits, a space, two digits), and a colon read as the separator between day, month and year (a colon is never a date separator, because a time of day is not a date); an ID shorter than six characters or with fewer than five digits; any word tesseract read below `min_confidence`.
+
+Measured on synthetic MIDI-B Validation crops: under `[names, dates]` all 10 patient blocks were redacted, and `dates` and `ids` matched none of 52 other text boxes. What it takes that is not what you meant: three numbers on one line that read as a date (`10 12 20`, or `10 IS 2020` once `IS` is read as `15`), so a technique or measurement label can be blanked under `[dates]`; and a matrix size such as `1024x1024` under `[ids]`. Both are the safe direction.
 
 ### What OCR misses
 
@@ -217,9 +262,47 @@ Measured on bundled images with text drawn on them, and on 35 MIDI-B validation 
 * **Faint or short text.** Text drawn at a third of the image's range above its background was never found; two- and three-letter initials were found at confidence 86 to 96, and one (`ICG`) only at 44 to 72, below the default. In the owner's MIDI-B measurement OCR found text in 31 of 35 answer-key boxes.
 * **Text over anatomy is read in fragments.** On a uniform border every word found had all its ink inside its box. Over tissue, a name block was often read as pieces (`E`, `1970-`), and blanking the pieces left the rest readable; the read after redaction catches some of it, as a `WARNING` row. This is why an OCR-only redaction leaves Burned In Annotation as the source had it rather than writing `NO`.
 * **Labels you may want are blanked too.** Technique labels (`PA`, `PORTABLE`, `ERECT`) and ultrasound measurement text were read at 95 and above, and `redact` blanks them. Single drawn `L`/`R` side markers were not detected. On 23 bundled anatomy-only images nothing was found at 80 or above; ten boxes were at 60 or above.
+* **Side markers carry laterality.** A radiograph's lead `L`/`R` marker is imaged with the patient, and technologist initials are often written on it. On MIDI-B, 25 of the 35 answer-key boxes were such initials; tilted 5 to 25 degrees and small in a 2500 to 3400 pixel image, they are what OCR misses most ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)). When it does find them, `redact` blanks the box, and the `L` or `R` beside the initials usually goes with it: that is clinical information, and nothing in the row says a box sat on a marker, because the text is never kept. Under tesseract a lone `L` or `R` is one letter and is not a box; under [`detector: db`](#detecting-text-with-a-model-detector-db), which reads no letters, it is.
+* **One stray character is not a box.** Every false box measured on 82 text-free MIDI-B frames was one character read over anatomy (`a` at 86 to 91 on an ultrasound frame), so a region needs two letters or digits; the rule lost no answer-key text.
 * **Palette-colour images** are read as their palette indices.
 
 A `PASS` after a `redact` pass says what OCR found was blanked, not that each image is free of text. Use `report` first on a cohort you have not looked at.
+
+### Detecting text with a model (`detector: db`)
+
+Tesseract decides "is this text?" by reading it, and misses what it cannot read: the tilted, small initials on side markers above. `detector: db` hands that decision to a text-detection model instead ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)):
+
+```yaml
+burned_in_text:
+  action: redact
+  scope: modalities
+  modalities: [CR, DX, MG]
+  detector: db           # tesseract (the default) | db
+  min_confidence: 80     # under db: the detector's box score x 100
+```
+
+The model is PP-OCRv3 English text detection (DB), from the OpenCV Model Zoo, shipped inside the package under Apache-2.0 (`isocenter/resources/text_detection_en_ppocrv3_2023may.onnx`, sha256 `03f550c6...6587`, with a NOTICE beside it giving its source, licence and training data). Nothing is downloaded. It runs under OpenCV, the optional `textdetect` extra:
+
+```bash
+pip install "isocenter[textdetect]"
+```
+
+**Not on the free-threaded build.** OpenCV publishes no free-threaded (3.14t) wheel, so the extra cannot be installed there, and `redact()` and `export(check_burned_in=True)` under `detector: db` raise `TextDetectorUnavailableError` (an `OcrUnavailableError`, so a `RuntimeError`) before anything, zones included. They raise it too where the extra is not installed, or where the model file is not the pinned one. `load_config()`, `save()` and a plain `export()` need neither OpenCV nor the model: a file is portable, and a plain export reads each image's record.
+
+How it reads:
+
+* **The whole frame, once.** A frame whose long side is over 1,280 pixels is read with that side brought to 1,280; a smaller one is read at its own size, never enlarged (enlarging small PET frames is what put boxes on text-free frames when this was measured).
+* **Inside a border.** Each frame is read inside a 16-pixel border of black (0 on the frame scaled to 8 bits), and the boxes are moved back onto the frame. Without it, text touching the frame's edge was missed. On the MIDI-B sample the border found the same 35 of 35 answer-key boxes and put a box on none of the 82 text-free frames, at the same time per image; a border of the frame's median value put a box on an ultrasound frame, so black is used.
+* **At most 1,999 regions per frame.** OpenCV is asked for every region on a frame (it is given no limit of its own, because a limit there cuts the list before small regions are dropped, so the cut cannot be seen in what comes back). A frame on which it returns 2,000 or more is treated as a frame that could not be read: the image gets no record, the row says `text detection failed on frame N: 2000 text regions, the detector's limit of 2000 per frame`, and the export withholds the image under `redact` and `withhold`. It is never redacted part-way. The count includes regions below `min_confidence`. 2,000 is not measured on real dense frames; no image in the sample came near 200.
+* **One OpenCV thread.** Each worker runs OpenCV on one thread (`cv2.setNumThreads(1)`). That setting is process-wide: when the pass runs in threads (the free-threaded build, a `:memory:` store, or `ISOCENTER_FORCE_THREADS`), it also reaches any OpenCV your own code uses in the same process.
+* **`min_confidence` is the detector's box score times 100**, default 80, inclusive. It is not tesseract's word confidence, and the two numbers do not mean the same thing.
+* **No tesseract under `target: any`.** The detector reads no text, so tesseract need not be installed, and the two-letters-or-digits rule does not apply: there is nothing to count. **A lone `L` or `R` side marker the detector finds is blanked**, like any other text.
+* **Under a [narrowed target](#redacting-only-some-kinds-of-text), each box is read.** The detector says where text is; to say what kind it is, each detected region is cut out with padding of 0.30 of its height, levelled by its angle, enlarged 2×, and read by tesseract as one line (`--psm 7`). The reading is classified as a tesseract line is, and the region is redacted when a named kind is found on it. **A region whose reading holds fewer than two letters or digits cannot be classified and is redacted**, counted as `unreadable redacted` in the pass's row and section 5: the direction that fails safe. So tesseract is needed here (`OcrUnavailableError` before anything without it), and the names model too under `names`; a narrowed target never redacts a box `any` would not. On the MIDI-B sample below, under `[names, dates]`, every line of all 10 patient blocks was redacted, and 12 of the 25 sets of initials (11 of them as unreadable; the other 13 read as two or more characters no kind matched, and were left); `dates` and `ids` matched none of the 52 other regions; reading added about 0.085 s per box, about 0.25 s per radiograph. The padding, the enlargement and the levelling were the measurement's pick among variants whose results differed by 1 to 4 counts, which is noise, not an optimum.
+* **A box larger than a quarter of the frame is not text.** A box whose short side is more than 25% of the frame's short side is dropped, and counted. The box measured is the one that would be blanked: the region's straight box, padded and clipped to the frame, so a tilted region is measured by its straight box in the pass's row and in section 5 (`N box(es) over a quarter of the frame not redacted`). On ultrasound frames the detector scored whole-frame regions up to 0.98, and no threshold removes those; this rule does. Under `db`, large text such as a title on a small secondary capture is dropped and counted, not redacted. DB widens each region to about 1.5 to 2 times the text's height before it is padded, so the rule reaches smaller text than a quarter of the frame. Measured with the shipped model on synthetic text: horizontal text from about an eighth of the frame's short side (11 to 15%) is dropped and counted, and so is a long line tilted about 15 to 25 degrees or more on frames of 512 px or less.
+* **Each box** is the detected region's straight bounding box, widened by 15% of the region's height on every side (at least 2 pixels). A tilted marker is blanked as its whole straight box, which is the safe direction.
+* **Nothing it found is kept but the boxes**, as under tesseract. The image's record names the model (its sha256) and the OpenCV version; the pass's `REDACTION` row says `detection by PP-OCRv3 (sha256 03f550c6b406fda8) on OpenCV V`. A record read by another OpenCV is read again by the next `redact()`; a plain `export()` still trusts it.
+
+Measured before it shipped, on a synthetic MIDI-B Validation sample with OpenCV 5.0.0: the detector found all 35 answer-key boxes (all 10 patient blocks and all 25 sets of initials, against 14 for tesseract at 80), put a box on none of 82 text-free frames, and took about 0.21 s per radiograph on one thread. It also found 55 other regions on those 35 radiographs: mostly overlay text outside the answer key (`PORTABLE`, `SUPINE`, counters), 3 lone laterality markers, 7 other marker glyphs, and 5 that were not text, 2 of which score above 80. Not measured: initials on frames far larger than 5,800 pixels, and images outside that sample, on which the box-size rule and the no-enlarging rule were chosen. The boxes come from floating-point inference and may differ between CPUs or OpenCV builds, as tesseract's differ between tesseract builds; another box set takes another UID, which is right.
 
 ## Checking Zones (Verification)
 
