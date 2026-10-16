@@ -834,3 +834,13 @@ def test_a_box_in_the_far_border_is_clipped_to_the_frame(detector, monkeypatch):
     # The quad maps to (84, 54)..(109, 68): 14 tall, past both far edges.
     assert (y2, x2) == (64, 96)
     assert (y1, x1) == (54 - pixel_analysis._padding(14), 84 - pixel_analysis._padding(14))
+
+
+def test_a_quad_wholly_inside_the_border_yields_no_box(detector, monkeypatch):
+    """A quad the detector puts in the border alone maps to (-14, -14)..(-6,
+    -6), and its padded box clipped to the frame is empty: no region, not
+    counted as oversized, and no error (review of #1123, P6). Kills the
+    empty-box guard removed, which records an inverted box."""
+    monkeypatch.setattr(text_detection, "_detect_boxes",
+                        lambda image, size, score: [(_quad(2, 2, 10, 10), 0.97)])
+    assert text_detection._frame_regions(np.zeros((64, 96), np.uint8), 0, 80) == ([], 0)
