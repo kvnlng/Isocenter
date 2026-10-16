@@ -428,16 +428,14 @@ def test_a_small_label_below_a_large_date_does_not_split_it():
                                          {"dates": 3, "left": 1})
 
 
-def test_a_line_set_tight_under_another_stays_its_own(nlp):
-    """Same height, the second line 4 px lower (6 of 10 px shared): `SE`
-    landed between a name and an ID and split `DOE^JANE MRN0012345`'s
-    reading. Read apart, both are taken."""
-    regions = [_region("DOE^JANE", 0, 0, w=40, h=10),
-               _region("MRN0012345", 50, 0, w=40, h=10),
-               _region("SE", 20, 4, w=10, h=10)]
-    assert _kept(regions, ["ids"]) == (["MRN0012345"], {"ids": 1, "left": 2})
-    kept = pixel_analysis._regions_of_kinds(regions, ["names", "ids"])[0]
-    assert [r.text for r in kept] == ["DOE^JANE", "MRN0012345"]
+def test_a_line_set_tight_under_another_stays_its_own():
+    """Same height, the second line 4 px lower (6 of 10 px shared), its
+    `SE` starting under `01`: joined, the line read `01 SE JAN 1970` and
+    the day was left. Read apart, the whole date is taken."""
+    regions = [_region("01", 0, 0, w=10, h=10), _region("JAN", 14, 0, w=15, h=10),
+               _region("1970", 33, 0, w=20, h=10), _region("SE", 5, 4, w=10, h=10)]
+    assert _kept(regions, ["dates"]) == (["01", "JAN", "1970"],
+                                         {"dates": 3, "left": 1})
 
 
 def test_a_tilted_line_is_followed_and_the_line_below_kept_apart():
