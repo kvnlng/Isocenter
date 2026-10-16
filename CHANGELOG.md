@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc20] - 2026-10-16
+
 ### Breaking
 
 - **A `burned_in_text` policy must name its `scope`; a block without one is refused (#1121, owner ruling of 2026-10-15).** A configuration file that loaded under 1.0.0rc19 with `burned_in_text: {action: redact}` now raises `ValueError: <file>: 'burned_in_text' needs a 'scope': one of flagged, modalities, all` from `load_config()`. A policy assigned in code (`session.configuration.burned_in_text = {...}`) raises the same sentence prefixed `session.configuration: ` from `redact()`, `export()`, `save()` and `create_config()`.
