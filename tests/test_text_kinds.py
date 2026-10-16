@@ -318,6 +318,31 @@ def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
     assert [w for w in recwarn if "from elsewhere" in str(w.message)]
 
 
+def test_the_filter_is_looked_for_in_the_list_in_force(monkeypatch):
+    """On the free-threaded build warnings are context-aware: inside a
+    `catch_warnings()` block the filters in force are the block's, and
+    `warnings.filters` is another list. Here the module list holds the
+    filter and the block has dropped it (`resetwarnings`); a check that
+    read `warnings.filters` saw it, inserted nothing, and the model's
+    warning showed. Red only on 3.14t; on 3.12 the two lists are one."""
+
+    class Noisy(FakeNlp):
+        def __call__(self, text):
+            warnings.warn_explicit(f"W999 read {text}", UserWarning,
+                                   "model.py", 1, module="spacy.language")
+            return super().__call__(text)
+    monkeypatch.setattr(text_kinds, "_MODEL", Noisy({}))
+    monkeypatch.setattr(warnings, "filters",
+                        [text_kinds._MODEL_WARNINGS_FILTER, *warnings.filters])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.resetwarnings()
+        warnings.simplefilter("always")
+        text_kinds.name_spans("QZXJ7RESET")
+        warnings.warn_explicit("from elsewhere", UserWarning, "x.py", 1,
+                               module="spacyish")
+    assert [str(w.message) for w in caught] == ["from elsewhere"]
+
+
 def test_the_module_never_opens_catch_warnings():
     """`catch_warnings` on a threaded path mutates the process-global
     filters on 3.12, dropping sibling threads' warnings (review F1 of
