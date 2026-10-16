@@ -70,12 +70,15 @@ class RegionDetector:
 
     def __call__(self, image, input_size, min_score):
         self.calls += 1
-        grey = image[:, :, 0]
+        # The seam is handed the frame inside its border, and answers in
+        # that image's coordinates.
+        b = text_detection.DETECTION_BORDER
+        grey = image[b:-b, b:-b, 0]
         found = []
         for x1, y1, x2, y2 in self.regions:
             if (grey[y1:y2, x1:x2] == INK).any():
                 found.append((np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
-                                       dtype=float), 0.97))
+                                       dtype=float) + b, 0.97))
         return found
 
 

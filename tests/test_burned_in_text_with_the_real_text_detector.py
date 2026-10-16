@@ -174,3 +174,34 @@ def test_a_narrowed_target_reads_the_region_with_the_real_tesseract(tmp_path, mo
     # Redacted only when a region could not be read (Q-B10 (a)).
     assert redacted == (1 if counts["unread"] else 0)
     assert len(glob.glob(str(out / "**" / "*.dcm"), recursive=True)) == 1
+
+
+def _edge_text(rows, cols, corner, size):
+    """A line of synthetic text touching the frame's edge at `corner`, on
+    noise, and its ink (adapted from the review of #1123's corners.py)."""
+    layer = Image.new("L", (cols, rows), 0)
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.load_default(size=size)
+    left, top, right, bottom = draw.textbbox((0, 0), "SMITH JOHN 12345", font=font)
+    x = 0 if corner[0] == "l" else cols - (right - left)
+    y = 0 if corner[1] == "t" else rows - (bottom - top)
+    draw.text((x - left, y - top), "SMITH JOHN 12345", fill=255, font=font)
+    ink = np.array(layer) > 127
+    arr = np.random.default_rng(1).normal(60, 15, (rows, cols)).clip(0, 255).astype(np.uint8)
+    arr[ink] = 240
+    return arr, ink
+
+
+@pytest.mark.parametrize("rows, cols, size", [(512, 512, 13), (480, 640, 9)])
+@pytest.mark.parametrize("corner", ["lt", "rt", "lb", "rb"])
+def test_text_touching_the_frame_edge_is_covered_whole(rows, cols, size, corner):
+    """With the 16 px border every pixel of the line is inside a box.
+    Without it, when this was written, these lines were not covered whole
+    (most were not found at all)."""
+    arr, ink = _edge_text(rows, cols, corner, size)
+    regions, _ = text_detection._frame_regions(arr, 0, 80)
+    covered = np.zeros(ink.shape, bool)
+    for region in regions:
+        y1, y2, x1, x2 = region.box
+        covered[y1:y2, x1:x2] = True
+    assert not (ink & ~covered).any()

@@ -439,7 +439,8 @@ def test_a_box_still_found_after_redaction_writes_a_residual_row(tmp_path, ocr):
     assert residual == [(
         "WARNING", uid,
         f"burned_in_text: 1 text region(s) still found after redaction on "
-        f"frame(s) 0 of instance {uid}.")]
+        f"frame(s) 0 of instance {uid}. Run redact(force=True) to read it "
+        f"again and redact what is found.")]
 
 
 def test_one_redaction_row_per_pass_naming_counts_and_tesseract(tmp_path, ocr):

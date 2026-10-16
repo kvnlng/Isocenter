@@ -7384,7 +7384,8 @@ class DicomSession:
                         details=(f"burned_in_text: {len(outcome.boxes)} text "
                                  f"region(s) still found after redaction on "
                                  f"frame(s) {_frames_named(outcome.boxes)} of "
-                                 f"instance {uid}."))
+                                 f"instance {uid}. Run redact(force=True) to "
+                                 f"read it again and redact what is found."))
         with_text = [e for e in burned["entries"]
                      if e["record"] is not None and e["record"]["boxes"]]
         if action == "report":

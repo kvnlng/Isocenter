@@ -56,7 +56,10 @@ STUB_OPENCV = "5.0.0-stub"
 
 
 class FakeDetector:
-    """`text_detection._detect_boxes` that finds ink, for threads only."""
+    """`text_detection._detect_boxes` that finds ink, for threads only.
+
+    Ink is found on the bordered image the seam is handed, so its quads are
+    in that image's coordinates, which `_frame_regions` maps back."""
 
     def __init__(self, score=0.97):
         self.score = score
@@ -70,7 +73,11 @@ class FakeDetector:
         if self.fail is not None:
             raise self.fail
         assert image.dtype == np.uint8 and image.ndim == 3 and image.shape[2] == 3
-        found = list(self.extra)
+        # `extra` is given in the frame's coordinates; the seam answers in
+        # those of the bordered image it is handed, as OpenCV does.
+        border = text_detection.DETECTION_BORDER
+        found = [(np.asarray(quad, dtype=float) + border, score)
+                 for quad, score in self.extra]
         ys, xs = np.nonzero(image[:, :, 0] == INK)
         if len(ys):
             x1, y1, x2, y2 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
@@ -189,11 +196,14 @@ def test_no_opencv_is_unavailable_and_names_the_extra(monkeypatch):
 
 # --- the frame: size, the box-size rule, boxes ---------------------------------
 
+# Sizes of the frame with its 16 px border on each side, by hand: the
+# bordered 2080 x 2592 brought to 1280 on its long side, 1027 rounded to
+# 1024; 380 rounds to 384; the bordered 1280 x 1032 is exactly 1280.
 @pytest.mark.parametrize("rows, cols, size", [
     (2048, 2560, (1280, 1024)),     # long side brought to 1280
-    (348, 348, (352, 352)),         # native, rounded to 32: never 1280
-    (128, 128, (128, 128)),
-    (1280, 1000, (992, 1280)),      # exactly 1280: not resized
+    (348, 348, (384, 384)),         # native, rounded to 32: never 1280
+    (128, 128, (160, 160)),
+    (1248, 1000, (1024, 1280)),     # bordered, exactly 1280: not resized
     (5800, 2000, (448, 1280)),
 ])
 def test_the_frame_is_read_whole_and_never_upscaled(detector, rows, cols, size):
@@ -202,9 +212,11 @@ def test_the_frame_is_read_whole_and_never_upscaled(detector, rows, cols, size):
     upscale of small frames (the spike's false PT frames) and tiling."""
     text_detection._frame_regions(np.zeros((rows, cols), np.uint8), 0, 80)
     [(shape, input_size, min_score)] = detector.calls
-    assert shape == (rows, cols, 3)
+    assert shape == (rows + 32, cols + 32, 3)
     assert input_size == size
-    assert min_score == pytest.approx(0.80)
+    # Every candidate is asked for, whatever its score, so the region cap
+    # counts them all; the policy's threshold is applied after.
+    assert min_score == 0.0
 
 
 @pytest.mark.parametrize("short, kept", [(100, True), (101, False)])
@@ -237,7 +249,14 @@ def test_the_model_settings_are_the_ones_the_spike_measured():
     assert text_detection.INPUT_MEAN == (122.67891434, 116.66876762, 104.00698793)
     assert text_detection.INPUT_SCALE == 1.0 / 255.0
     assert (text_detection.BINARY_THRESHOLD, text_detection.UNCLIP_RATIO,
-            text_detection.MAX_CANDIDATES, text_detection.LONG_SIDE) == (0.3, 2.0, 200, 1280)
+            text_detection.LONG_SIDE) == (0.3, 2.0, 1280)
+    # The region cap (2,000, owner ruling of 2026-10-16) and the border
+    # (16, spike follow-up 2) were set after it: `test_the_cap_is_2000`
+    # and `test_the_border_is_16`.
+
+
+def test_the_border_is_16():
+    assert text_detection.DETECTION_BORDER == 16
 
 
 def test_the_seam_hands_opencv_the_spikes_settings(monkeypatch):
@@ -491,6 +510,20 @@ def test_a_record_read_by_another_opencv_is_read_again_by_redact(tmp_path, detec
         assert _record(_only_instance(session))["opencv"] == "5.1.0"
 
 
+def test_a_record_read_by_another_model_is_read_again_by_redact(tmp_path, detector, monkeypatch):
+    """The model's sha256 is in the comparison as well as OpenCV's
+    version. Kills it left out (review of #1123, R13)."""
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "withhold"))
+        session.redact(show_progress=False)
+        first = len(detector.calls)
+        monkeypatch.setattr(text_detection, "MODEL_SHA256", "f" * 64)
+        session.redact(show_progress=False)
+        assert len(detector.calls) == first + 1
+        assert _record(_only_instance(session))["model"] == "f" * 16
+
+
 def test_plain_export_trusts_a_current_record_with_no_opencv(tmp_path, detector, monkeypatch):
     """Owner ruling: a plain `export()` reads records, never pixels, and
     must not need the detector's packages to trust a current one. Kills
@@ -568,7 +601,7 @@ def test_the_default_threshold_under_db_is_80(tmp_path, detector):
         session.load_config(_config(tmp_path, "withhold"))
         session.redact(show_progress=False)
         assert _record(_only_instance(session))["boxes"] == []
-    assert detector.calls[0][2] == pytest.approx(0.80)
+    assert detector.calls[0][2] == 0.0
 
 
 def test_a_detector_failure_quotes_no_message(tmp_path, detector, caplog):
@@ -608,3 +641,153 @@ def test_the_require_variable_is_documented():
     registry = (pathlib.Path(__file__).resolve().parent.parent / "docs"
                 / "environment.md").read_text(encoding="utf-8")
     assert "| **`ISOCENTER_REQUIRE_TEXT_DETECTOR`** |" in registry
+
+
+# --- the region cap (review of #1123, F1; owner ruling of 2026-10-16) ------
+
+def _tiny(i):
+    """A small region inside the 64 x 96 test frame, one per index."""
+    x, y = 2 + (i % 40), 2 + (i // 40) % 40
+    return (_quad(x, y, x + 3, y + 3), 0.97)
+
+
+def test_a_frame_denser_than_the_region_cap_is_withheld(tmp_path, detector):
+    """A frame on which the detector returns `MAX_CANDIDATES` regions may
+    hold more it never returned: it is a frame failure, so the image gets
+    no record and the export withholds it. The row says why as counts."""
+    cap = text_detection.MAX_CANDIDATES
+    detector.extra = [_tiny(i) for i in range(cap - 1)]   # + the ink: cap
+    db = tmp_path / "s.db"
+    with Session(str(db)) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        assert session.redact(show_progress=False) == 0
+        assert _record(_only_instance(session)) is None
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 show_progress=False)
+    assert ONE not in summary.written_uids
+    assert exported_files(tmp_path / "out") == []
+    assert any(f"text detection failed on frame 0: {cap} text regions, the "
+               f"detector's limit of {cap} per frame" in r[2]
+               for r in audit_rows(db))
+
+
+def test_one_region_under_the_cap_is_redacted_as_usual(tmp_path, detector):
+    cap = text_detection.MAX_CANDIDATES
+    detector.extra = [_tiny(i) for i in range(cap - 2)]   # + the ink: cap - 1
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        assert session.redact(show_progress=False) == 1
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False)
+    [path] = exported_files(tmp_path / "out")
+    y1, y2, x1, x2 = PADDED
+    assert not pixels_of(path)[0, y1:y2, x1:x2].any()
+
+
+def test_regions_below_the_threshold_count_toward_the_cap(detector):
+    """The cap counts every candidate the detector returned, not only those
+    the policy keeps: OpenCV stops at the cap before it scores, so a dense
+    frame of faint candidates hides strong ones the same way."""
+    cap = text_detection.MAX_CANDIDATES
+    detector.extra = [(_quad(2, 2, 5, 5), 0.10)] * cap
+    with pytest.raises(text_detection.TooManyTextRegions) as raised:
+        text_detection._frame_regions(np.zeros((64, 96), np.uint8), 0, 80)
+    assert str(raised.value) == (f"{cap} text regions, the detector's limit "
+                                 f"of {cap} per frame")
+
+
+def test_the_cap_is_2000_and_the_network_is_built_with_it(monkeypatch):
+    """Owner ruling: raised from 200, with the frame failing closed at it.
+    Kills the network built with another cap than the one counted."""
+    assert text_detection.MAX_CANDIDATES == 2000
+    seen = []
+
+    class Model:
+        def __init__(self, net):
+            seen.append(("net", net))
+
+        def __getattr__(self, name):
+            return lambda *args: seen.append((name, *args))
+
+    monkeypatch.setattr(text_detection, "cv2", SimpleNamespace(
+        setNumThreads=lambda n: seen.append(("threads", n)),
+        dnn=SimpleNamespace(readNet=lambda path: "net"),
+        dnn_TextDetectionModel_DB=Model))
+    monkeypatch.setattr(text_detection, "_LOCAL", type(text_detection._LOCAL)())
+    text_detection._model()
+    assert ("setMaxCandidates", 2000) in seen
+    assert ("threads", 1) in seen
+
+
+# --- multi-frame (review of #1123, F2) ---------------------------------------
+
+def test_a_box_on_the_third_frame_is_recorded_and_blanked_there(tmp_path, detector):
+    """Kills the box's frame forced to 0 and the reader always handed frame
+    0 (review R1, R2)."""
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(_cohort(tmp_path, (ONE, {"frames": 3, "ink": [(2, *INK_BOX)]})))
+        session.load_config(_config(tmp_path, "redact"))
+        assert session.redact(show_progress=False) == 1
+        assert _record(_only_instance(session))["boxes"] == [[2, *PADDED]]
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False)
+    [path] = exported_files(tmp_path / "out")
+    frames = pixels_of(path)
+    y1, y2, x1, x2 = PADDED
+    assert frames.shape[0] == 3
+    assert not frames[2, y1:y2, x1:x2].any()
+    assert not (frames[:2] == INK).any()
+    assert (frames[:2, y1:y2, x1:x2] != 0).all()
+
+
+# --- clipping (review of #1123, F5) ------------------------------------------
+
+def test_a_quad_past_the_top_left_corner_is_clipped_to_the_frame(detector):
+    """Kills the lower clip on `y1` dropped (review R5)."""
+    detector.extra = [(_quad(-5, -7, 10, 10), 0.97)]
+    [region], _ = text_detection._frame_regions(np.zeros((100, 100), np.uint8), 0, 80)
+    y1, y2, x1, x2 = region.box
+    assert (y1, x1) == (0, 0)
+    assert y2 > 10 and x2 > 10
+
+
+# --- the border (review of #1123, F4; spike follow-up 2) ---------------------
+
+def test_the_frame_is_read_inside_a_border_of_zero_and_mapped_back(detector, monkeypatch):
+    """The seam sees the frame inside 16 px of 0; a quad it returns in that
+    image's coordinates is moved back by 16 before the box is made. Kills
+    the border not added and the border not subtracted."""
+    seen = []
+
+    def seam(image, input_size, min_score):
+        seen.append(image.copy())
+        # The ink at (10..20, 30..40) of the frame is at (26..36, 46..56).
+        return [(_quad(46, 26, 56, 36), 0.97)]
+
+    monkeypatch.setattr(text_detection, "_detect_boxes", seam)
+    frame = np.full((64, 96), 7, np.uint8)
+    frame[0, 0] = 0
+    frame[10:20, 30:40] = 255
+    [region], _ = text_detection._frame_regions(frame, 0, 80)
+    [image] = seen
+    assert image.shape == (96, 128, 3)
+    assert not image[:16].any() and not image[-16:].any()
+    assert not image[:, :16].any() and not image[:, -16:].any()
+    assert (image[16:-16, 16:-16, 0] == text_detection._as_bgr8(frame)[:, :, 0]).all()
+    pad = pixel_analysis._padding(10)
+    assert region.box == (10 - pad, 20 + pad, 30 - pad, 40 + pad)
+    assert region.quad[0] == (30.0, 10.0)
+
+
+def test_a_box_in_the_border_is_clipped_to_the_frame(detector, monkeypatch):
+    """A quad reaching into the border maps to coordinates below 0, and the
+    box is clipped at the frame's edge."""
+    monkeypatch.setattr(text_detection, "_detect_boxes",
+                        lambda image, size, score: [(_quad(10, 10, 40, 24), 0.97)])
+    [region], _ = text_detection._frame_regions(np.zeros((64, 96), np.uint8), 0, 80)
+    y1, y2, x1, x2 = region.box
+    # The quad maps to (-6, -6)..(24, 8): 14 tall.
+    assert (y1, x1) == (0, 0)
+    assert (y2, x2) == (8 + pixel_analysis._padding(14), 24 + pixel_analysis._padding(14))

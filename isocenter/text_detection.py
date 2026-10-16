@@ -89,7 +89,38 @@ INPUT_SCALE = 1.0 / 255.0
 INPUT_MEAN = (122.67891434, 116.66876762, 104.00698793)
 BINARY_THRESHOLD = 0.3
 UNCLIP_RATIO = 2.0
-MAX_CANDIDATES = 200
+#: How many regions OpenCV's DB post-processing returns from one frame at
+#: most: it stops at this many candidates and silently drops the rest
+#: (review of #1121 PR C, F1). The spike's 200 left a 300-word frame
+#: part-redacted. Raised to 2,000 by owner ruling of 2026-10-16, which is
+#: not measured on real dense frames (none of the spike's sample comes
+#: near 200), and a frame on which the detector returns this many is a
+#: frame failure (`TooManyTextRegions`), so a frame denser than the cap is
+#: withheld, never redacted part-way.
+MAX_CANDIDATES = 2000
+#: Pixels of value 0 around each frame before it is read (the frame is
+#: 8-bit and min-max scaled, so 0 is its own minimum). Text touching the
+#: frame's edge was missed without it (review of #1121 PR C, F4); the
+#: spike's follow-up 2 measured 16 px of 0 on its set: 35 of 35 answer-key
+#: boxes and 0 of 82 text-free frames as before, at the same time, where a
+#: border of the frame's median put a box on an ultrasound frame. The
+#: `LONG_SIDE` limit applies to the bordered frame; boxes are mapped back
+#: by subtracting it, then clipped to the frame.
+DETECTION_BORDER = 16
+
+
+class TooManyTextRegions(RuntimeError):
+    """The detector returned `MAX_CANDIDATES` regions from one frame, so it
+    may have dropped more: the frame fails, and its image is withheld.
+
+    The message is counts only, and is the reason a row gives for the
+    frame (`frame_failure`)."""
+
+    def __init__(self, count: int):
+        self.count = count
+        self.frame_failure = (f"{count} text regions, the detector's limit "
+                              f"of {MAX_CANDIDATES} per frame")
+        super().__init__(self.frame_failure)
 
 
 class TextDetectorUnavailableError(OcrUnavailableError):
@@ -309,14 +340,24 @@ def _frame_regions(frame: np.ndarray, frame_index: int,
     """
     image = _as_bgr8(frame)
     rows, cols = image.shape[:2]
+    border = DETECTION_BORDER
+    bordered = np.pad(image, ((border, border), (border, border), (0, 0)),
+                      mode="constant", constant_values=0)
     limit = MAX_TEXT_BOX_FRACTION * min(rows, cols)
     threshold = float(min_confidence) / 100.0
     regions = []
     oversized = 0
-    for quad, score in _detect_boxes(image, _input_size(rows, cols), threshold):
+    # Every candidate is asked for (polygon threshold 0) and the policy's
+    # threshold applied here: OpenCV stops at `MAX_CANDIDATES` before it
+    # scores, so the cap must count the faint candidates too, or a frame
+    # dense with them would hide strong ones under a count below the cap.
+    found = _detect_boxes(bordered, _input_size(*bordered.shape[:2]), 0.0)
+    if len(found) >= MAX_CANDIDATES:
+        raise TooManyTextRegions(len(found))
+    for quad, score in found:
         if score < threshold:
             continue
-        quad = np.asarray(quad, dtype=float).reshape(-1, 2)
+        quad = np.asarray(quad, dtype=float).reshape(-1, 2) - border
         short = _quad_short_side(quad)
         # Before padding, against the frame's short side; exactly a
         # quarter is kept.

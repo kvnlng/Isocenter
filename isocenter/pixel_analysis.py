@@ -532,8 +532,11 @@ def _load_and_ocr(instance: Instance, prepare=None, reader=None) -> _InstanceOcr
                 frame_failures.append(
                     f"OCR failed on frame {i}: {describe_exception(e)}")
             else:
-                frame_failures.append(
-                    f"{reader.failed} on frame {i}: {type(e).__name__}")
+                # The class only, never the message, which may quote what
+                # was read; an exception of ours that says why in counts
+                # (`text_detection.TooManyTextRegions`) gives that.
+                why = getattr(e, "frame_failure", None) or type(e).__name__
+                frame_failures.append(f"{reader.failed} on frame {i}: {why}")
     return _InstanceOcr(regions, read, "; ".join(frame_failures) or None)
 
 
