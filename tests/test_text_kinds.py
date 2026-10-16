@@ -329,6 +329,27 @@ def test_a_text_quoting_code_from_another_library_reaches_the_host(monkeypatch, 
     assert [str(w.message) for w in recwarn] == [message]
 
 
+def test_a_host_filter_added_after_the_load_keeps_its_place(monkeypatch):
+    """The filter is inserted only when missing, so a filter the host adds
+    after the model has loaded stays ahead of it: here the host turns
+    W030 into an error, and the next line read raises it. A presence
+    check that never matched the entry `filterwarnings` writes would put
+    the filter back in front on every call and hide the host's choice."""
+
+    class Noisy(FakeNlp):
+        def __call__(self, text):
+            warnings.warn_explicit(W030.format(text="x"), UserWarning,
+                                   "model.py", 1, module="spacy.language")
+            return super().__call__(text)
+    monkeypatch.setattr(text_kinds, "_MODEL", None)
+    monkeypatch.setattr(text_kinds, "_load_model", lambda: Noisy({}))
+    with warnings.catch_warnings():
+        text_kinds.name_spans("QZXJ7")
+        warnings.filterwarnings("error", message=r"\[W030\]")
+        with pytest.raises(UserWarning):
+            text_kinds.name_spans("QZXJ7")
+
+
 def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
         monkeypatch, recwarn):
     """A filter inserted inside someone else's `catch_warnings()` block
