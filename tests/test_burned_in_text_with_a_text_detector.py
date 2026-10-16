@@ -18,8 +18,9 @@ The owner's rulings of 2026-10-15 these tests hold:
   `test_burned_in_text_detector_reads_its_regions.py`;
 - the whole frame, its long side brought to 1280 only when larger, never
   upscaled, each side rounded to 32 (design 1, after the spike);
-- a box whose short side is more than a quarter of the frame's short side
-  is dropped before padding and counted (fixed, no key);
+- a box whose padded straight box, clipped to the frame, has a short side
+  more than a quarter of the frame's short side is dropped and counted
+  (fixed, no key; measured that way by the spike);
 - the model's identity lives in the record, never the policy hash: only
   `redact()` reads an image again when it changes, and a plain `export()`
   trusts a current record with no OpenCV (the ruling made for PR B's
@@ -219,23 +220,49 @@ def test_the_frame_is_read_whole_and_never_upscaled(detector, rows, cols, size):
     assert min_score == 0.0
 
 
-@pytest.mark.parametrize("short, kept", [(100, True), (101, False)])
-def test_a_box_over_a_quarter_of_the_frame_is_dropped_and_counted(detector, short, kept):
-    """On a 400x400 frame exactly 25% is kept and one pixel more is not."""
-    detector.extra = [(_quad(10, 10, 300, 10 + short), 0.99)]
+@pytest.mark.parametrize("height, kept", [(87, True), (88, False)])
+def test_a_box_over_a_quarter_of_the_frame_is_dropped_and_counted(detector, height, kept):
+    """On a 400x400 frame a padded box exactly 25% tall is kept and one
+    pixel more is not. The quad sits on the top edge, so its box is
+    clipped there and grows by one padding: 87 + `_padding(87)` (13) is
+    100, and 88 + 13 is 101. The quad itself is under 100 both times."""
+    assert pixel_analysis._padding(87) == pixel_analysis._padding(88) == 13
+    detector.extra = [(_quad(10, 0, 300, height), 0.99)]
     regions, oversized = text_detection._frame_regions(
         np.zeros((400, 400), np.uint8), 0, 80)
     assert (len(regions), oversized) == ((1, 0) if kept else (0, 1))
+    if kept:
+        [region] = regions
+        assert region.box[:2] == (0, 100)
 
 
 def test_the_box_size_rule_measures_the_frames_short_side(detector):
-    """A 400x1000 frame measures against 400: 101 is dropped though it is
-    a tenth of the long side."""
-    detector.extra = [(_quad(10, 10, 300, 111), 0.99), (_quad(10, 200, 300, 300), 0.99)]
+    """A 400x1000 frame measures against 400: a padded box 126 tall is
+    dropped though it is an eighth of the long side, and one 98 tall is
+    kept."""
+    detector.extra = [(_quad(10, 10, 300, 111), 0.99), (_quad(10, 200, 300, 276), 0.99)]
     regions, oversized = text_detection._frame_regions(
         np.zeros((400, 1000), np.uint8), 0, 80)
     assert oversized == 1
-    assert [r.box[:2] for r in regions] == [(200 - 15, 300 + 15)]
+    assert [r.box[:2] for r in regions] == [(200 - 11, 276 + 11)]
+
+
+def test_a_tilted_box_is_measured_by_its_padded_straight_box(detector):
+    """A quad 20 px high tilted 30 degrees on a 200x300 frame: its own
+    short side is 20, under the limit of 50, but its straight box is about
+    67 tall before padding, so it is dropped and counted. The rule is
+    measured on the padded straight box, as the spike measured it (spike
+    follow-up 3: a tilted 0.88 box on a 348 px IVUS frame, quad 69 px
+    against 87, padded box 107)."""
+    angle = np.deg2rad(30)
+    corners = np.array([[0, 0], [100.0, 0], [100.0, 20.0], [0, 20.0]])
+    rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    quad = corners @ rot.T + [120.0, 60.0]
+    assert text_detection._quad_short_side(quad) == pytest.approx(20.0)
+    detector.extra = [(quad, 0.88)]
+    regions, oversized = text_detection._frame_regions(
+        np.zeros((200, 300), np.uint8), 0, 80)
+    assert (regions, oversized) == ([], 1)
 
 
 def test_the_box_size_rule_is_a_quarter():
@@ -296,7 +323,8 @@ def test_a_tilted_quad_becomes_its_padded_straight_box_clipped(detector):
     rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
     quad = corners @ rot.T + [1.0, 30.0]
     detector.extra = [(quad, 0.95)]
-    [region] = text_detection._frame_regions(np.zeros((200, 300), np.uint8), 4, 80)[0]
+    # 300 rows: the padded box is 52 tall, over a quarter of 200.
+    [region] = text_detection._frame_regions(np.zeros((300, 400), np.uint8), 4, 80)[0]
     assert region.frame == 4
     assert text_detection._quad_short_side(quad) == pytest.approx(20.0)
     y1 = int(np.floor(quad[:, 1].min())) - 3

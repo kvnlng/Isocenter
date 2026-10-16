@@ -72,7 +72,11 @@ MODEL_BYTES = 2423490
 LONG_SIDE = 1280
 
 #: A box whose short side is more than this fraction of the frame's short
-#: side is not text (owner ruling of 2026-10-15, fixed, no key). On the
+#: side is not text (owner ruling of 2026-10-15, fixed, no key). The box is
+#: the padded straight box clipped to the frame, which is what the spike
+#: measured; the quad's own short side is laxer on a tilted quad, and kept
+#: a 0.88 box on an IVUS frame the spike had dropped (spike follow-up 3,
+#: owner ruling of 2026-10-16). On the
 #: spike's set the largest box on real text was 14.8% of the frame's
 #: short side, and the false boxes on IVUS ultrasound frames over 40%,
 #: scored up to 0.98, so no score threshold removes them; this does, from
@@ -365,19 +369,19 @@ def _frame_regions(frame: np.ndarray, frame_index: int,
         if score < threshold:
             continue
         quad = np.asarray(quad, dtype=float).reshape(-1, 2) - border
-        short = _quad_short_side(quad)
-        # Before padding, against the frame's short side; exactly a
-        # quarter is kept.
-        if short > limit:
-            oversized += 1
-            continue
-        pad = _padding(int(round(short)))
+        pad = _padding(int(round(_quad_short_side(quad))))
         x1 = max(0, int(np.floor(quad[:, 0].min())) - pad)
         y1 = max(0, int(np.floor(quad[:, 1].min())) - pad)
         x2 = min(cols, int(np.ceil(quad[:, 0].max())) + pad)
         y2 = min(rows, int(np.ceil(quad[:, 1].max())) + pad)
-        if y2 > y1 and x2 > x1:
-            regions.append(DetectedRegion(
-                frame_index, tuple((float(x), float(y)) for x, y in quad),
-                float(score), (y1, y2, x1, x2)))
+        if y2 <= y1 or x2 <= x1:
+            continue
+        # The padded straight box, clipped, against the frame's short
+        # side, as the spike measured it; exactly a quarter is kept.
+        if min(y2 - y1, x2 - x1) > limit:
+            oversized += 1
+            continue
+        regions.append(DetectedRegion(
+            frame_index, tuple((float(x), float(y)) for x, y in quad),
+            float(score), (y1, y2, x1, x2)))
     return regions, oversized
