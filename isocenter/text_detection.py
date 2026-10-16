@@ -89,15 +89,22 @@ INPUT_SCALE = 1.0 / 255.0
 INPUT_MEAN = (122.67891434, 116.66876762, 104.00698793)
 BINARY_THRESHOLD = 0.3
 UNCLIP_RATIO = 2.0
-#: How many regions OpenCV's DB post-processing returns from one frame at
-#: most: it stops at this many candidates and silently drops the rest
-#: (review of #1121 PR C, F1). The spike's 200 left a 300-word frame
-#: part-redacted. Raised to 2,000 by owner ruling of 2026-10-16, which is
-#: not measured on real dense frames (none of the spike's sample comes
-#: near 200), and a frame on which the detector returns this many is a
-#: frame failure (`TooManyTextRegions`), so a frame denser than the cap is
-#: withheld, never redacted part-way.
-MAX_CANDIDATES = 2000
+#: Our limit: a frame on which the detector returns this many regions is a
+#: frame failure (`TooManyTextRegions`), so a frame denser than it is
+#: withheld, never redacted part-way (owner ruling of 2026-10-16, after
+#: the spike's 200 left a 300-word frame part-redacted). 2,000 is not
+#: measured on real dense frames; none of the spike's sample comes near
+#: 200. Counted over every candidate OpenCV returns, before
+#: `min_confidence`.
+MAX_TEXT_REGIONS = 2000
+#: OpenCV's own limit, handed to `setMaxCandidates`: 0, which OpenCV 5.0.0
+#: reads as no limit. Never capped, because OpenCV truncates its contour
+#: list to this many *before* it drops contours that are too small or fail
+#: to unclip: capped at 2,000, a frame of 4,000 small glyphs returned
+#: 1,708 regions (2,199 uncapped), so a count of returned regions could
+#: never see that it had been cut (review of #1121 PR C, re-review). Our
+#: limit is checked on the full list instead.
+OPENCV_MAX_CANDIDATES = 0
 #: Pixels of value 0 around each frame before it is read (the frame is
 #: 8-bit and min-max scaled, so 0 is its own minimum). Text touching the
 #: frame's edge was missed without it (review of #1121 PR C, F4); the
@@ -110,8 +117,8 @@ DETECTION_BORDER = 16
 
 
 class TooManyTextRegions(RuntimeError):
-    """The detector returned `MAX_CANDIDATES` regions from one frame, so it
-    may have dropped more: the frame fails, and its image is withheld.
+    """The detector returned `MAX_TEXT_REGIONS` regions or more from one
+    frame: the frame fails, and its image is withheld.
 
     The message is counts only, and is the reason a row gives for the
     frame (`frame_failure`)."""
@@ -119,7 +126,7 @@ class TooManyTextRegions(RuntimeError):
     def __init__(self, count: int):
         self.count = count
         self.frame_failure = (f"{count} text regions, the detector's limit "
-                              f"of {MAX_CANDIDATES} per frame")
+                              f"of {MAX_TEXT_REGIONS} per frame")
         super().__init__(self.frame_failure)
 
 
@@ -230,7 +237,7 @@ def _model():
         model = cv2.dnn_TextDetectionModel_DB(cv2.dnn.readNet(model_path()))
         model.setBinaryThreshold(BINARY_THRESHOLD)
         model.setUnclipRatio(UNCLIP_RATIO)
-        model.setMaxCandidates(MAX_CANDIDATES)
+        model.setMaxCandidates(OPENCV_MAX_CANDIDATES)
         _LOCAL.model = model
     return model
 
@@ -347,12 +354,12 @@ def _frame_regions(frame: np.ndarray, frame_index: int,
     threshold = float(min_confidence) / 100.0
     regions = []
     oversized = 0
-    # Every candidate is asked for (polygon threshold 0) and the policy's
-    # threshold applied here: OpenCV stops at `MAX_CANDIDATES` before it
-    # scores, so the cap must count the faint candidates too, or a frame
-    # dense with them would hide strong ones under a count below the cap.
+    # Every candidate is asked for (polygon threshold 0, and OpenCV
+    # uncapped: `OPENCV_MAX_CANDIDATES`) and the policy's threshold applied
+    # here, so `MAX_TEXT_REGIONS` counts the whole list, faint candidates
+    # included: a frame that dense fails however strong its regions are.
     found = _detect_boxes(bordered, _input_size(*bordered.shape[:2]), 0.0)
-    if len(found) >= MAX_CANDIDATES:
+    if len(found) >= MAX_TEXT_REGIONS:
         raise TooManyTextRegions(len(found))
     for quad, score in found:
         if score < threshold:

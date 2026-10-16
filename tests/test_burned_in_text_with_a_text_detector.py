@@ -652,10 +652,10 @@ def _tiny(i):
 
 
 def test_a_frame_denser_than_the_region_cap_is_withheld(tmp_path, detector):
-    """A frame on which the detector returns `MAX_CANDIDATES` regions may
-    hold more it never returned: it is a frame failure, so the image gets
+    """A frame on which the detector returns `MAX_TEXT_REGIONS` regions is
+    denser than the limit: it is a frame failure, so the image gets
     no record and the export withholds it. The row says why as counts."""
-    cap = text_detection.MAX_CANDIDATES
+    cap = text_detection.MAX_TEXT_REGIONS
     detector.extra = [_tiny(i) for i in range(cap - 1)]   # + the ink: cap
     db = tmp_path / "s.db"
     with Session(str(db)) as session:
@@ -673,7 +673,7 @@ def test_a_frame_denser_than_the_region_cap_is_withheld(tmp_path, detector):
 
 
 def test_one_region_under_the_cap_is_redacted_as_usual(tmp_path, detector):
-    cap = text_detection.MAX_CANDIDATES
+    cap = text_detection.MAX_TEXT_REGIONS
     detector.extra = [_tiny(i) for i in range(cap - 2)]   # + the ink: cap - 1
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(_cohort(tmp_path, (ONE, {"ink": [(0, *INK_BOX)]})))
@@ -687,10 +687,10 @@ def test_one_region_under_the_cap_is_redacted_as_usual(tmp_path, detector):
 
 
 def test_regions_below_the_threshold_count_toward_the_cap(detector):
-    """The cap counts every candidate the detector returned, not only those
-    the policy keeps: OpenCV stops at the cap before it scores, so a dense
-    frame of faint candidates hides strong ones the same way."""
-    cap = text_detection.MAX_CANDIDATES
+    """The limit counts every candidate the detector returned, not only
+    those the policy keeps: a frame that dense fails however strong its
+    regions are."""
+    cap = text_detection.MAX_TEXT_REGIONS
     detector.extra = [(_quad(2, 2, 5, 5), 0.10)] * cap
     with pytest.raises(text_detection.TooManyTextRegions) as raised:
         text_detection._frame_regions(np.zeros((64, 96), np.uint8), 0, 80)
@@ -698,10 +698,13 @@ def test_regions_below_the_threshold_count_toward_the_cap(detector):
                                  f"of {cap} per frame")
 
 
-def test_the_cap_is_2000_and_the_network_is_built_with_it(monkeypatch):
-    """Owner ruling: raised from 200, with the frame failing closed at it.
-    Kills the network built with another cap than the one counted."""
-    assert text_detection.MAX_CANDIDATES == 2000
+def test_the_limit_is_2000_and_opencv_is_never_capped(monkeypatch):
+    """Owner ruling: 2,000 regions per frame, failing closed at it. OpenCV
+    is handed 0 (no limit in OpenCV 5.0.0), because it truncates before it
+    drops small contours, so a cap there hides a cut under a count below
+    it. Kills OpenCV handed 2000 (or 200) again."""
+    assert text_detection.MAX_TEXT_REGIONS == 2000
+    assert text_detection.OPENCV_MAX_CANDIDATES == 0
     seen = []
 
     class Model:
@@ -717,7 +720,7 @@ def test_the_cap_is_2000_and_the_network_is_built_with_it(monkeypatch):
         dnn_TextDetectionModel_DB=Model))
     monkeypatch.setattr(text_detection, "_LOCAL", type(text_detection._LOCAL)())
     text_detection._model()
-    assert ("setMaxCandidates", 2000) in seen
+    assert ("setMaxCandidates", 0) in seen
     assert ("threads", 1) in seen
 
 
@@ -791,3 +794,15 @@ def test_a_box_in_the_border_is_clipped_to_the_frame(detector, monkeypatch):
     # The quad maps to (-6, -6)..(24, 8): 14 tall.
     assert (y1, x1) == (0, 0)
     assert (y2, x2) == (8 + pixel_analysis._padding(14), 24 + pixel_analysis._padding(14))
+
+
+def test_a_box_in_the_far_border_is_clipped_to_the_frame(detector, monkeypatch):
+    """The right and bottom edges clip to the frame's 96 x 64, not the
+    bordered 128 x 96 (re-review of #1123, N12)."""
+    monkeypatch.setattr(text_detection, "_detect_boxes",
+                        lambda image, size, score: [(_quad(100, 70, 125, 84), 0.97)])
+    [region], _ = text_detection._frame_regions(np.zeros((64, 96), np.uint8), 0, 80)
+    y1, y2, x1, x2 = region.box
+    # The quad maps to (84, 54)..(109, 68): 14 tall, past both far edges.
+    assert (y2, x2) == (64, 96)
+    assert (y1, x1) == (54 - pixel_analysis._padding(14), 84 - pixel_analysis._padding(14))

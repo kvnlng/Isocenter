@@ -205,3 +205,23 @@ def test_text_touching_the_frame_edge_is_covered_whole(rows, cols, size, corner)
         y1, y2, x1, x2 = region.box
         covered[y1:y2, x1:x2] = True
     assert not (ink & ~covered).any()
+
+
+def test_a_frame_dense_with_small_glyphs_is_withheld_not_cut():
+    """4,000 small glyphs on a 1,248-pixel frame: OpenCV returns 2,199
+    regions uncapped, so the frame fails as too dense. Capped at 2,000,
+    OpenCV returned 1,708 (it truncates before it drops small contours),
+    the limit never fired and the frame was redacted part-way (re-review
+    of #1123). Kills OpenCV handed a cap again."""
+    rng = np.random.default_rng(5)
+    layer = Image.new("L", (1248, 1248), 0)
+    draw = ImageDraw.Draw(layer)
+    font = ImageFont.load_default(size=10)
+    for _ in range(4000):
+        draw.text((int(rng.integers(0, 1236)), int(rng.integers(0, 1236))),
+                  "x", fill=255, font=font)
+    arr = np.full((1248, 1248), 20, np.uint8)
+    arr[np.array(layer) > 127] = 240
+    with pytest.raises(text_detection.TooManyTextRegions) as raised:
+        text_detection._frame_regions(arr, 0, 80)
+    assert raised.value.count >= text_detection.MAX_TEXT_REGIONS
