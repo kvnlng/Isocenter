@@ -33,7 +33,7 @@ forbidden. A later edition is added beside it:
    page names every shipped edition".
 
 Before the v1.0.0 tag the 2026c table may still change (#544, #557): edit
-the mapping or a departure here, regenerate the literal by pasting
+the mapping or a departure or an added rule here, regenerate the literal by pasting
 `render_literal(load_table())` over it, and update the pinned digests in
 `tests/test_profile_editions.py` with a CHANGELOG entry.
 
@@ -228,10 +228,35 @@ GROUP_RULES = {
                   "invalid module (#556)"},
 }
 
+#: Rules on single elements the table has no row for (#1133). Not a
+#: departure from a code -- there is no code -- and not a mask: one
+#: concrete key each, added because the element is outside every
+#: composite IOD and carries site data the table never anticipated in an
+#: instance. Only this element, not its group: Referenced SOP Instance UID
+#: in File (0004,1511) keeps its own `U` row, and the other Directory
+#: Structuring elements keep no rule (owner ruling, 2026-10-16).
+ADDED_RULES = {
+    "0004,1500": {
+        "action": "REMOVE", "name": "Referenced File ID", "authority": "#1133",
+        "reason": "a Directory Record element of the Basic Directory IOD "
+                  "(the DICOMDIR, PS3.3 Annex F), not part of any composite "
+                  "instance, whose value is a file-set path, which sites "
+                  "build from MRNs, accession numbers or dates; Table "
+                  "E.1-1 has no row for it, so an image instance carrying "
+                  "one exported it as written (#1133)"},
+}
+
 #: Comment lines `render_literal` writes above a rule in the literal, by
 #: rule key: history and cross-references a reader of `profiles.py` needs
 #: at the entry. A departure's reason belongs in `DEVIATIONS`.
 LITERAL_COMMENTS = {
+    "0004,1500": [
+        "Not a table row (#1133): a Directory Record element of the Basic",
+        "Directory IOD (the DICOMDIR, PS3.3 Annex F), not of a composite",
+        "instance, and its value is a file-set path, which sites build from",
+        "MRNs, accession numbers or dates. Only this element; 0004,1511",
+        "keeps its U row. No rule through 1.0.0rc20; REMOVE since.",
+    ],
     "0008,0018": [
         "U in the table, as every UI row below is. REPLACE with no value on a",
         "UI is the keyed UID (#544): one value, one replacement, wherever it",
@@ -339,14 +364,16 @@ def derive(table):
         profile[key] = {"action": action, "name": rule_name(row)}
     for key, rule in GROUP_RULES.items():
         profile[key] = {"action": rule["action"], "name": rule["name"]}
+    for key, rule in ADDED_RULES.items():
+        profile[key] = {"action": rule["action"], "name": rule["name"]}
     return profile
 
 
 def render_literal(table):
     """The `BASIC_PROFILE = {...}` block of `isocenter/profiles.py`, as
     text: `derive(table)` in key order, each entry's table code as a
-    trailing comment (`group rule (#556)` for a `GROUP_RULES` key, which
-    has no row), and `LITERAL_COMMENTS` above the entries they name.
+    trailing comment (`group rule (#556)` for a `GROUP_RULES` key,
+    `not a row (#1133)` for an `ADDED_RULES` key; neither has a row), and `LITERAL_COMMENTS` above the entries they name.
     Paste it over the block to regenerate; the test compares it with the
     file character for character."""
     rows = {row["key"]: row for row in table["rows"]}
@@ -354,8 +381,12 @@ def render_literal(table):
     for key, rule in sorted(derive(table).items()):
         for comment in LITERAL_COMMENTS.get(key, []):
             lines.append(f"    # {comment}")
-        code = (rows[key]["basic"] if key in rows
-                else f"group rule ({GROUP_RULES[key]['authority']})")
+        if key in rows:
+            code = rows[key]["basic"]
+        elif key in GROUP_RULES:
+            code = f"group rule ({GROUP_RULES[key]['authority']})"
+        else:
+            code = f"not a row ({ADDED_RULES[key]['authority']})"
         name = json.dumps(rule["name"], ensure_ascii=False)
         lines.append(f'    "{key}": {{"action": "{rule["action"]}", '
                      f'"name": {name}}},  # {code}')
