@@ -462,6 +462,24 @@ def test_the_overlap_needed_is_half_the_bands_first_word_not_the_grown_band():
     assert [len(line) for line in pixel_analysis._lines_of(regions)] == [3]
 
 
+def test_a_word_one_line_refuses_is_offered_to_the_next():
+    """`JAN` and `1970` sit inside a tall `SCOUT`'s height, under it:
+    the first line refuses both, and `1970` joins `JAN`'s line rather
+    than starting a third, so the two are read together."""
+    regions = [_region("SCOUT", 0, 0, w=40, h=20), _region("JAN", 10, 10, w=20, h=10),
+               _region("1970", 35, 12, w=10, h=10)]
+    assert [[r.text for r in line] for line in pixel_analysis._lines_of(regions)] == [
+        ["SCOUT"], ["JAN", "1970"]]
+
+
+def test_words_whose_boxes_touch_side_by_side_share_a_line():
+    """Touching edges are not an overlap: `01` ending where `JAN` starts
+    is one line."""
+    regions = [_region("01", 0, 0, w=10), _region("JAN", 10, 0, w=15),
+               _region("1970", 25, 0, w=20)]
+    assert _kept(regions, ["dates"]) == (["01", "JAN", "1970"], {"dates": 3, "left": 0})
+
+
 def test_a_word_below_the_threshold_is_not_taken_by_its_kind(tmp_path, monkeypatch):
     """`min_confidence` has one meaning (Q-B17 (a)): a date read at 79 is
     no box under `[dates]`, as it is none under `any`."""
