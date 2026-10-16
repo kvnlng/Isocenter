@@ -189,13 +189,26 @@ def test_every_departure_is_a_row_and_is_a_departure():
     # (#1133): a key the table has no row for, not a mask, named as
     # pydicom's dictionary names it. Were the key to become a row, it
     # would belong in DEVIATIONS, where the departure check sees it.
+    # A concrete key inside a mask row's range (`6000,0022` under
+    # `60xx,xxxx`) is that row's element, not one the table lacks: the
+    # mask's rule or a departure on it is where it belongs.
+    masks = [mask for mask in set(rows) | set(GROUP_RULES)
+             if re.fullmatch(r"[0-9a-fx]{4},[0-9a-fx]{4}", mask) and "x" in mask]
     assert ADDED_RULES, "the Referenced File ID rule is gone"
     for key, rule in ADDED_RULES.items():
         assert key not in rows, f"ADDED_RULES names {key}, which is a table row"
         assert key not in GROUP_RULES and key not in DEVIATIONS, key
         assert re.fullmatch(r"[0-9a-f]{4},[0-9a-f]{4}", key), key
         assert int(key[:4], 16) % 2 == 0, f"{key} is a private group"
-        assert rule["action"] in ("REMOVE", "EMPTY", "REPLACE", "KEEP"), key
+        covering = [mask for mask in masks
+                    if all(m in ("x", k) for m, k in zip(mask, key))]
+        assert not covering, f"ADDED_RULES names {key}, which the row {covering} covers"
+        # tests/test_annex_e_end_to_end.py checks an added rule only by
+        # the element's absence. Another action would pass unchecked
+        # there: widen that walk before allowing one here.
+        assert rule["action"] == "REMOVE", (
+            f"{key}: an added rule must be REMOVE, the only action the "
+            "end-to-end walk checks")
         assert rule["name"].strip() and rule["reason"].strip(), key
         assert re.fullmatch(r"#\d+", rule["authority"]), key
         assert rule["authority"] in rule["reason"], key

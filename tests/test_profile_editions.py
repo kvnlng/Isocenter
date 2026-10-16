@@ -52,9 +52,9 @@ PINNED_DIGESTS = {
     # 1.0.0rc5: both moved from EMPTY to REMOVE (#848): a zero-item one
     # breaks PS3.3's one-or-more-items rule, which an absent one keeps
     # (648 rules still).
-    # 1.0.0rc21: Referenced File ID (0004,1500), which Table E.1-1 has no
-    # row for, gained REMOVE (#1133): a DICOMDIR element whose value is a
-    # file path (648 -> 649).
+    # After 1.0.0rc20: Referenced File ID (0004,1500), which Table E.1-1
+    # has no row for, gained REMOVE (#1133): a DICOMDIR element whose
+    # value is a file path (648 -> 649).
     "basic@2026c": "62bd0e6744e50cf93d469cb1d8858c365774a6165aaf6715fd5c0a1bfe20aebf",
     "floor": "32a7cc5b14ce86aab8ad3b7ed61075abd4f9169089197971f0bdb1141e344152",
 }

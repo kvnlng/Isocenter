@@ -192,7 +192,7 @@ A path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) inher
 
 #### What basic@2026c contains
 
-`basic@2026c` (short form `basic`) is the Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c**: 649 tag rules: one per row of the table, less the departures below, plus two rules on keys the table has no row for. Each row maps to a rule:
+`basic@2026c` (short form `basic`) is the Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c**, as 649 tag rules. The table has 656 rows, and 647 of them give a rule. The other nine give none: the two `X/Z/U*` sequences, Referenced Image Sequence and Source Image Sequence, which are kept while the UIDs inside them are replaced as rows of their own; the private-attribute row `gggg,eeee`, which is the `remove_private_tags` sweep; the four sequences listed below as having no rule (Verifying Observer, Flow Identifier, Waveform Annotation and Icon Image); and Overlay Data and Overlay Comments, which are folded into the overlay group rule. The other two rules are on keys the table has no row for: the overlay group `60xx,xxxx` and Referenced File ID `(0004,1500)`. A row's code maps to a rule as follows:
 
 * `X` removes the attribute.
 * `Z` and `X/Z` empty it, so a Type 2 attribute stays present.
