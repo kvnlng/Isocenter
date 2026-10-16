@@ -4322,9 +4322,11 @@ Instance UID, derived from its source SOP Instance UID and the zones
 of every rule that matches it, whatever order the work runs in.</p>
 <p><strong>The <code>burned_in_text</code> policy</strong> (<code>configuration.burned_in_text</code>,</p>
 <h4 id="isocenter.session.DicomSession.redact--1108-when-the-configuration-holds-one-this-call-also-reads">1108). When the configuration holds one, this call also reads</h4>
-<p>every instance that holds pixels with OCR, serial or not, after
-the zones its rules hold, and records the boxes of the text it
-finds at <code>min_confidence</code> or above (never the text). The policy's
+<p>every instance in the policy's <code>scope</code> with OCR (#1121: <code>flagged</code>,
+<code>modalities</code> or <code>all</code>; one out of scope is neither read nor gated
+at export), serial or not, after the zones its rules hold, and
+records the boxes of the text it finds at <code>min_confidence</code> or
+above with two letters or digits (never the text). The policy's
 <code>action</code> decides the rest: <code>redact</code> blanks each box, padded, on
 its own frame, in the same task as the zones, and the instance's
 UID is derived from the zones and the boxes; <code>report</code> writes one

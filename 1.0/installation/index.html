@@ -569,6 +569,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#text-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#natural-language-processing-nlp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1738,6 +1749,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#text-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#natural-language-processing-nlp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1878,12 +1900,18 @@
 </code></pre></div>
 <p>Without the extra or the binary, the two methods that read burned-in text, <code>scan_pixel_content()</code> and <code>discover_redaction_zones()</code>, raise <code>OcrUnavailableError</code>, a <code>RuntimeError</code>, naming what is missing, before they scan anything. Once the check passes, <code>scan_pixel_content()</code> lists each instance whose pixels could not be loaded or read in <code>report.failures</code> and warns with the count; <code>discover_redaction_zones()</code> warns the same way and counts only the instances it read. Either one raises <code>PixelScanError</code>, also a <code>RuntimeError</code>, when it could read none of the instances it tried.</p>
 <p><code>isocenter.pixel_analysis.HAS_OCR</code> is <code>False</code> when <code>pytesseract</code> did not import. It does not check the binary.</p>
+<h3 id="text-detection">Text detection</h3>
+<p>To find burned-in text with a text-detection model instead of tesseract (<code>burned_in_text: {detector: db}</code>), install the <code>textdetect</code> extra, which brings OpenCV; the model itself ships inside the package. With <code>target: any</code> it needs no tesseract; with a narrowed target each detected region is read by tesseract too, so the <code>ocr</code> extra and the binary above are needed as well:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[textdetect]"</span>
+</code></pre></div>
+<p>OpenCV publishes no free-threaded wheel, so this extra cannot be installed on Python 3.14t, and <code>detector: db</code> raises <code>TextDetectorUnavailableError</code> there (<a href="../ocr/#detecting-text-with-a-model-detector-db">OCR</a>).</p>
 <h3 id="natural-language-processing-nlp">Natural language processing (NLP)</h3>
 <p><code>discover_redaction_zones()</code> can use spaCy to classify the text it finds as names. Install the <code>nlp</code> extra and the English model:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[nlp]"</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </span>download<span class="w"> </span>en_core_web_sm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[nlp]"</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </span>download<span class="w"> </span>en_core_web_sm
 </code></pre></div>
 <p>The model download is a separate step because the model is not published on PyPI. Without the model, discovery classifies text with regular expressions.</p>
+<p>A <a href="../configuration/#burned-in-text"><code>burned_in_text</code></a> <code>target</code> naming <code>names</code> needs the extra and the model too, and has no fallback: without them <code>redact()</code> and <code>export(check_burned_in=True)</code> raise <code>NlpUnavailableError</code>. spaCy publishes no free-threaded wheel, so on the free-threaded build (3.14t) neither discovery's spaCy arm nor the <code>names</code> kind can be used. No CI job installs the model.</p>
 <h2 id="codecs">Codecs</h2>
 <p>The decoders for every compressed transfer syntax Isocenter reads install with it: <code>imagecodecs</code> and Pillow for JPEG Baseline and Extended, JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000, and pydicom itself for RLE. Where one of pydicom's own decoding plugins is installed for a syntax, it is tried first. A decode cannot catch every damaged stream; <a href="../codecs/">Codec support</a> lists what reads each syntax and the limits.</p>
 <h2 id="system-requirements">System requirements</h2>

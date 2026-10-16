@@ -2432,8 +2432,12 @@ otherwise.</p>
   read some instances returns its report with the others in <code>failures</code>.</li>
 <li><code>redact()</code>, when the configuration holds a <code>burned_in_text</code> policy:
   <code>RuntimeError</code> when the <code>ocr</code> extra or the <code>tesseract</code> binary is
-  unavailable to the calling process, after the entry drain and before
-  anything is redacted, the configured zones included. So does
+  unavailable to the calling process, or under <code>detector: db</code> when the
+  <code>textdetect</code> extra (OpenCV) or the shipped model is (always, on the
+  free-threaded build), after the entry drain and before
+  anything is redacted, the configured zones included; and, the same
+  way, when the policy's <code>target</code> names <code>names</code> and spaCy or its model
+  cannot load (#1121). So does
   <code>export(check_burned_in=True)</code> under that policy, before its pre-export
   scan and its save. An instance the
   pass cannot read is a <code>WARNING</code> row, not a raise.</li>
@@ -2666,8 +2670,9 @@ CHANGELOG entry naming both spellings:</p>
   <code>load_state()</code>. Its <code>patients</code> list is frozen (above); what else the
   store object offers is not.</li>
 <li><strong><code>IsocenterConfiguration.burned_in_text</code></strong>, the <code>burned_in_text</code>
-  policy a configuration file holds (<code>{"action": ..., "min_confidence":
-  ...}</code> or <code>None</code>), as <code>load_config()</code> sets it. The file key and what
+  policy a configuration file holds (<code>{"action": ..., "scope": ...,
+  "min_confidence": ...}</code>, plus <code>"modalities"</code> under <code>scope: modalities</code>,
+  or <code>None</code>), as <code>load_config()</code> sets it. The file key and what
   each action does are documented on the
   <a href="../../configuration/#burned-in-text">Configuration</a> page; the
   attribute's name and shape are not frozen.</li>
@@ -2685,7 +2690,10 @@ CHANGELOG entry naming both spellings:</p>
   <code>verify_instance</code>), <code>ConfigAutomator.suggest_config_updates</code>,
   <code>pixel_analysis.analyze_pixels</code>, <code>pixel_analysis.detect_text_regions</code>,
   <code>pixel_analysis.TextRegion</code>, <code>pixel_analysis.HAS_OCR</code>,
-  <code>pixel_analysis.OcrUnavailableError</code>, <code>pixel_analysis.PixelScanError</code>;
+  <code>pixel_analysis.OcrUnavailableError</code>, <code>pixel_analysis.NlpUnavailableError</code>
+  (an <code>OcrUnavailableError</code>, #1121), <code>pixel_analysis.PixelScanError</code>,
+  <code>text_detection.TextDetectorUnavailableError</code> (an <code>OcrUnavailableError</code>,
+  #1121);
   <code>DiscoveryResult.get_density_matrix</code>, <code>visualize_heatmap</code>,
   <code>analyze_temporal_stability</code>, <code>inspect_clusters</code>, and its attributes
   <code>candidates</code> and <code>n_sources</code>.</li>
