@@ -187,13 +187,26 @@ def _spacy_version() -> str:
     return str(spacy.__version__)
 
 
-#: Warnings spaCy and thinc raise, and any attributed to this module by a
-#: `stacklevel` that walks out of them, are ignored: nothing promises a
-#: model warning never quotes its input, which is read text.
+#: The model's warnings this module ignores: W030 and W102 only, the two
+#: of `spacy.errors.Warnings` whose text quotes the text read (a line of
+#: burned-in text is identifying, and nothing read may reach a log). A
+#: library does not silence a dependency's diagnostics for its host: the
+#: 0.9.x ruling that took `filterwarnings("ignore", module="pydicom.*")`
+#: out of `isocenter/__init__.py` (CHANGELOG, "importing Isocenter no
+#: longer silences pydicom's warnings"). So every other spaCy and thinc
+#: warning reaches the host, by owner ruling of 2026-10-15. Not covered:
+#: a text-quoting warning a later spaCy adds under another code. The
+#: record's `names_by` ties each read to the spaCy and model versions it
+#: was made with, so such a change is a known version, not a silent one.
+#: The module arm holds spaCy, thinc, and this module, which a
+#: `stacklevel` walking out of spaCy can name.
+_MODEL_WARNING_TEXT = r"\[W030\]|\[W102\]"
 _MODEL_WARNINGS = r"(spacy|thinc|isocenter\.text_kinds)(\..*)?\Z"
-#: The entry `warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)`
-#: puts in the filter list (compiled patterns compare by pattern and flags).
-_MODEL_WARNINGS_FILTER = ("ignore", None, Warning, re.compile(_MODEL_WARNINGS), 0)
+#: The entry `_ignore_model_warnings`' `filterwarnings` puts in the filter
+#: list: the message compiled case-insensitively, as `filterwarnings`
+#: compiles it (compiled patterns compare by pattern and flags).
+_MODEL_WARNINGS_FILTER = ("ignore", re.compile(_MODEL_WARNING_TEXT, re.I), Warning,
+                          re.compile(_MODEL_WARNINGS), 0)
 
 
 def _filters_in_force() -> list:
@@ -214,8 +227,9 @@ def _filters_in_force() -> list:
 
 
 def _ignore_model_warnings() -> None:
-    """Make sure one `ignore` filter for the model's warnings is in force
-    (#1121).
+    """Make sure one `ignore` filter for the model's two text-quoting
+    warnings is in force (#1121; `_MODEL_WARNING_TEXT` says which and
+    why only those).
 
     An insert, never `warnings.catch_warnings()` around each call: on
     3.12 that context manager saves and restores the process-global
@@ -231,12 +245,13 @@ def _ignore_model_warnings() -> None:
     or pytest's around each test) goes with the block, and the model,
     loaded there and cached, warned again afterwards (review of #1124 at
     bc02c116). Inserted only when missing, so a caller's own filters keep
-    their order otherwise. Once in force it stays for the process: the
-    model's warnings are silenced for everyone, `discover_redaction_zones()`
-    and the caller's own spaCy use included.
+    their order otherwise. Once in force it stays for the process, so
+    W030 and W102 are ignored in `discover_redaction_zones()` and the
+    caller's own spaCy use too; every other warning reaches the host.
     """
     if _MODEL_WARNINGS_FILTER not in _filters_in_force():
-        warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)
+        warnings.filterwarnings("ignore", message=_MODEL_WARNING_TEXT,
+                                module=_MODEL_WARNINGS)
 
 
 def _loaded_model():
@@ -323,8 +338,9 @@ def name_spans(line: str) -> List[Span]:
     """
     model = _nlp()
     found = {m.span() for m in _CARET_NAME.finditer(line)}
-    # The model's warnings are ignored by the filter its load inserted
-    # (`_ignore_model_warnings`), not by a context manager here.
+    # The model's two text-quoting warnings are ignored by the filter
+    # `_nlp()` keeps in force (`_ignore_model_warnings`), not by a
+    # context manager here.
     with _NLP_LOCK:
         found.update(_person_spans(model, line))
         titled = _title_cased(line)

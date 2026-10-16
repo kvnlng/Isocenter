@@ -273,26 +273,49 @@ def test_spacy_is_imported_only_inside_the_loader():
                            for m in mods)
 
 
-def test_a_model_warning_is_not_let_out(monkeypatch, recwarn):
-    """Through the loader, as a real model is reached: the filter its load
-    inserts ignores what spaCy, thinc, or a `stacklevel` pointing into
-    this module, warn while a line is read; a warning from anywhere else
-    still shows (review F1 of #1124)."""
+#: spaCy's two warnings that quote text, as `spacy.errors.Warnings` spells
+#: them: the code in brackets, then the message.
+W030 = '[W030] Some entities could not be aligned in the text "{text}" with entities "x".'
+W102 = "[W102] Skipping unsupported user data '{text}: 1' while merging docs."
+
+
+@pytest.mark.parametrize("module", ["spacy.language", "spacy.training.iob_utils",
+                                    "thinc.api", "isocenter.text_kinds"])
+@pytest.mark.parametrize("shape", [W030, W102])
+def test_a_text_quoting_model_warning_is_not_let_out(monkeypatch, recwarn,
+                                                     shape, module):
+    """Through the loader, as a real model is reached: W030 and W102, the
+    two spaCy warnings that quote text, are ignored while a line is read,
+    from spaCy, thinc, or a `stacklevel` pointing into this module
+    (review F1 of #1124; owner ruling of 2026-10-15)."""
 
     class Noisy(FakeNlp):
         def __call__(self, text):
-            for module in ("spacy.language", "thinc.api",
-                           "isocenter.text_kinds"):
-                warnings.warn_explicit(f"W999 read {text}", UserWarning,
-                                       "model.py", 1, module=module)
+            warnings.warn_explicit(shape.format(text=text), UserWarning,
+                                   "model.py", 1, module=module)
             return super().__call__(text)
     monkeypatch.setattr(text_kinds, "_MODEL", None)
     monkeypatch.setattr(text_kinds, "_load_model", lambda: Noisy({}))
     text_kinds.name_spans("QZXJ7SENTINEL")
     assert not [w for w in recwarn if "QZXJ7SENTINEL" in str(w.message)]
-    warnings.warn_explicit("from elsewhere", UserWarning, "x.py", 1,
-                           module="spacyish")
-    assert [w for w in recwarn if "from elsewhere" in str(w.message)]
+
+
+@pytest.mark.parametrize("module", ["spacy.language", "thinc.api", "spacyish"])
+@pytest.mark.parametrize("message", [
+    "[W999] a diagnostic that quotes nothing",
+    "[W095] Model 'en_core_web_sm' was trained with another version",
+    "W030 without its brackets"])
+def test_every_other_model_warning_reaches_the_host(monkeypatch, recwarn,
+                                                    message, module):
+    """A library does not silence a dependency's diagnostics for its host
+    (the 0.9.x pydicom ruling): with the model loaded, every spaCy or
+    thinc warning but the two that quote text is shown (owner ruling of
+    2026-10-15)."""
+    monkeypatch.setattr(text_kinds, "_MODEL", None)
+    monkeypatch.setattr(text_kinds, "_load_model", lambda: FakeNlp({}))
+    text_kinds.name_spans("QZXJ7")
+    warnings.warn_explicit(message, UserWarning, "model.py", 1, module=module)
+    assert [str(w.message) for w in recwarn] == [message]
 
 
 def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
@@ -304,7 +327,7 @@ def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
 
     class Noisy(FakeNlp):
         def __call__(self, text):
-            warnings.warn_explicit(f"W999 read {text}", UserWarning,
+            warnings.warn_explicit(W030.format(text=text), UserWarning,
                                    "model.py", 1, module="spacy.language")
             return super().__call__(text)
     monkeypatch.setattr(text_kinds, "_MODEL", None)
@@ -328,12 +351,13 @@ def test_the_filter_is_looked_for_in_the_list_in_force(monkeypatch):
 
     class Noisy(FakeNlp):
         def __call__(self, text):
-            warnings.warn_explicit(f"W999 read {text}", UserWarning,
+            warnings.warn_explicit(W030.format(text=text), UserWarning,
                                    "model.py", 1, module="spacy.language")
             return super().__call__(text)
     monkeypatch.setattr(text_kinds, "_MODEL", Noisy({}))
     monkeypatch.setattr(warnings, "filters",
                         [text_kinds._MODEL_WARNINGS_FILTER, *warnings.filters])
+    assert text_kinds._MODEL_WARNINGS_FILTER[1] is not None
     with warnings.catch_warnings(record=True) as caught:
         warnings.resetwarnings()
         warnings.simplefilter("always")
