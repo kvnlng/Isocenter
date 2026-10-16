@@ -439,7 +439,8 @@ def test_a_box_still_found_after_redaction_writes_a_residual_row(tmp_path, ocr):
     assert residual == [(
         "WARNING", uid,
         f"burned_in_text: 1 text region(s) still found after redaction on "
-        f"frame(s) 0 of instance {uid}.")]
+        f"frame(s) 0 of instance {uid}. Run redact(force=True) to read it "
+        f"again and redact what is found.")]
 
 
 def test_one_redaction_row_per_pass_naming_counts_and_tesseract(tmp_path, ocr):
@@ -691,6 +692,7 @@ def test_redact_by_machine_does_not_run_the_pass(tmp_path, ocr):
         session.redact_by_machine("SN-1", [0, 4, 0, 4])
         assert session.configuration.burned_in_text == {"action": "redact",
                                                         "scope": "all",
+                                                        "detector": "tesseract",
                                                         "min_confidence": 80,
                                                         "target": "any"}
         assert services.BURNED_IN_TEXT_ATTR not in _only_instance(session).attributes
@@ -737,7 +739,7 @@ def test_the_text_ocr_read_reaches_no_row_log_report_store_or_outcome(tmp_path, 
         ocr.sticky = True
         session.redact(show_progress=False)
         outcome = session_module._burned_in_text_worker(
-            (_only_instance(session), (), 80, None, None, "any"))
+            (_only_instance(session), (), 80, None, None, "any", "tesseract"))
         session.export(str(tmp_path / "out"), use_compression=False, show_progress=False)
         session.generate_report(str(tmp_path / "r.md"))
         session.save(sync=True)

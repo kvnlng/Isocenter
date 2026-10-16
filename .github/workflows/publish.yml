@@ -204,6 +204,31 @@ jobs:
               f"resolved {ctp}, which is not the installed wheel -- this "
               "check is reading the source tree")
           print(f"CTP rules present in the wheel: {ctp}")
+          #
+          # The text-detection model and its NOTICE (#1121). Without the
+          # model `detector: db` refuses on every machine; without the
+          # NOTICE the wheel redistributes Apache-2.0 weights with no
+          # notice. Read without OpenCV, which this venv does not install:
+          # `text_detection` imports with the extra missing.
+          import hashlib
+          from isocenter import text_detection
+          model = text_detection.model_path()
+          assert os.path.isfile(model), (
+              f"the built wheel ships no {model} -- detector: db would "
+              "refuse on every machine")
+          assert "site-packages" in model, (
+              f"resolved {model}, which is not the installed wheel -- this "
+              "check is reading the source tree")
+          with open(model, "rb") as fh:
+              digest = hashlib.sha256(fh.read()).hexdigest()
+          assert digest == text_detection.MODEL_SHA256, (
+              f"the built wheel's {model} is not the pinned model "
+              f"(sha256 {digest})")
+          notice = os.path.join(os.path.dirname(model),
+                                text_detection.MODEL_NOTICE)
+          assert os.path.isfile(notice) and os.path.getsize(notice) > 0, (
+              f"the built wheel ships the model without {notice}")
+          print(f"text-detection model and NOTICE present in the wheel: {model}")
           PY
 
       - uses: actions/upload-artifact@v7

@@ -328,15 +328,17 @@ SCHEMA_BY_VERSION = {
         # `scope` and `modalities` (#1121) joined the same unshipped row
         # before 1.0.0, by the same ruling (Q9 on #782; Q-X1 (a) of
         # 2026-10-15): the key shipped only in rc19.
-        # `target` (#1121, PR B) too, by the same ruling.
+        # `target` (#1121, PR B) and `detector` (PR C) too, by the same
+        # ruling.
         "burned_in_text": {"action", "min_confidence", "scope", "modalities",
-                           "target"},
+                           "target", "detector"},
         # The values a `burned_in_text` key takes where they are a closed
         # set: a new one is a new value, like a new profile name.
         "burned_in_text_values": {
             "action": {"report", "redact", "withhold"},
             "scope": {"flagged", "modalities", "all"},
             "target": {"any", "names", "dates", "ids"},
+            "detector": {"tesseract", "db"},
         },
         # Every `privacy_profile` value a built-in resolves, pinned names
         # and bare aliases alike (#714). A later PS3.15 edition is a new
@@ -364,6 +366,7 @@ def test_a_new_burned_in_text_value_comes_with_a_schema_minor():
     assert set(config_manager.BURNED_IN_TEXT_ACTIONS) == values["action"]
     assert set(config_manager.BURNED_IN_TEXT_SCOPES) == values["scope"]
     assert set(config_manager.BURNED_IN_TEXT_KINDS) | {"any"} == values["target"]
+    assert set(config_manager.BURNED_IN_TEXT_DETECTORS) == values["detector"]
 
 
 def test_a_new_profile_name_comes_with_a_schema_minor():
