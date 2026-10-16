@@ -50,7 +50,13 @@ TESTS = ROOT / "tests"
 # without it, and a contributor's `.[dev]` is one with it --
 # `tests/test_coverage_keeps_worker_data_under_chdir.py` runs in the
 # second and skips in the first.
-OPTIONAL_EXTRAS = {"ocr", "nlp", "docs", "dev"}
+#
+# `textdetect` (#1121): OpenCV for `burned_in_text: {detector: db}`. It
+# has no free-threaded wheel, so the 3.14t gate is a documented
+# environment without it; `tests.yml` installs it on the other jobs and
+# sets ISOCENTER_REQUIRE_TEXT_DETECTOR=1 there, which turns the real-model
+# test's skip into a failure.
+OPTIONAL_EXTRAS = {"ocr", "nlp", "docs", "dev", "textdetect"}
 
 # Import name != distribution name for a handful of packages. Only the
 # ones that could plausibly gate a skip need listing; an unknown name
@@ -58,6 +64,7 @@ OPTIONAL_EXTRAS = {"ocr", "nlp", "docs", "dev"}
 DISTRIBUTION_TO_MODULE = {
     "pyyaml": "yaml",
     "pillow": "PIL",
+    "opencv-python-headless": "cv2",
 }
 
 SKIP_TOKENS = re.compile(

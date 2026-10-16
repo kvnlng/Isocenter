@@ -172,7 +172,7 @@ def test_the_action_is_judged_before_the_scope(tmp_path):
 @pytest.mark.parametrize("scope", ["flagged", "all"])
 def test_a_scope_with_no_list_loads_with_no_modalities_key(tmp_path, scope):
     parts = _loaded(tmp_path, f"burned_in_text: {{action: report, scope: {scope}}}\n")
-    assert parts[5] == {"action": "report", "scope": scope, "min_confidence": 80, "target": "any"}
+    assert parts[5] == {"action": "report", "scope": scope, "detector": "tesseract", "min_confidence": 80, "target": "any"}
 
 
 def test_the_modality_list_is_normalised_to_sorted_distinct_values(tmp_path):
@@ -181,14 +181,14 @@ def test_the_modality_list_is_normalised_to_sorted_distinct_values(tmp_path):
     parts = _loaded(tmp_path, "burned_in_text: {action: redact, scope: modalities, "
                               "modalities: [DX, CR, CR, ' MG ']}\n")
     assert parts[5] == {"action": "redact", "scope": "modalities",
-                        "modalities": ["CR", "DX", "MG"], "min_confidence": 80, "target": "any"}
+                        "modalities": ["CR", "DX", "MG"], "detector": "tesseract", "min_confidence": 80, "target": "any"}
 
 
 @pytest.mark.parametrize("policy", [
-    {"action": "withhold", "scope": "flagged", "min_confidence": 70, "target": "any"},
-    {"action": "report", "scope": "all", "min_confidence": 80, "target": "any"},
+    {"action": "withhold", "scope": "flagged", "detector": "tesseract", "min_confidence": 70, "target": "any"},
+    {"action": "report", "scope": "all", "detector": "tesseract", "min_confidence": 80, "target": "any"},
     {"action": "redact", "scope": "modalities", "modalities": ["CR", "US"],
-     "min_confidence": 90, "target": "any"},
+     "detector": "tesseract", "min_confidence": 90, "target": "any"},
 ], ids=["flagged", "all", "modalities"])
 def test_save_and_create_config_round_trip_each_scope(tmp_path, policy):
     path = _write(tmp_path, "burned_in_text: "
@@ -222,7 +222,7 @@ def _image(**attributes):
     return inst
 
 
-FLAGGED = {"action": "withhold", "scope": "flagged", "min_confidence": 80}
+FLAGGED = {"action": "withhold", "scope": "flagged", "detector": "tesseract", "min_confidence": 80}
 
 
 @pytest.mark.parametrize("value, inside", [
@@ -264,7 +264,7 @@ def test_modalities_reads_each_listed_value_of_a_multi_valued_modality(modality,
     writing its Modality in lower case is read upper-cased, so it falls in
     the list rather than silently leaving the scope (review of #1122)."""
     policy = {"action": "withhold", "scope": "modalities",
-              "modalities": ["DX"], "min_confidence": 80}
+              "modalities": ["DX"], "detector": "tesseract", "min_confidence": 80}
     if modality == "CR":
         policy = {**policy, "modalities": ["CR", "DX"]}
     assert session_module._in_burned_in_text_scope(_image(), modality, policy) is inside
@@ -272,13 +272,13 @@ def test_modalities_reads_each_listed_value_of_a_multi_valued_modality(modality,
 
 def test_modalities_also_reads_what_flagged_reads():
     policy = {"action": "withhold", "scope": "modalities",
-              "modalities": ["DX"], "min_confidence": 80}
+              "modalities": ["DX"], "detector": "tesseract", "min_confidence": 80}
     assert session_module._in_burned_in_text_scope(
         _image(**{"0028,0301": "YES"}), "CT", policy)
 
 
 def test_all_reads_every_image_and_no_scope_reads_one_without_pixels():
-    policy = {"action": "withhold", "scope": "all", "min_confidence": 80}
+    policy = {"action": "withhold", "scope": "all", "detector": "tesseract", "min_confidence": 80}
     assert session_module._in_burned_in_text_scope(_image(), "CT", policy)
     no_pixels = Instance(sop_instance_uid="1.2.3.5")
     no_pixels.attributes["0028,0301"] = "YES"
@@ -599,28 +599,38 @@ def _md5(key):
 
 
 #: Literal hashes of `_burned_in_text_policy_hash`, each md5 over the
-#: sorted-key JSON of `{"boxes": 2, "min_confidence": float, "target":
-#: "any" | sorted kinds, "zones": sorted}`, plus `"kinds": 1` under a
-#: narrowed target (#1121, PR B), recomputed by hand when pinned. Red when
-#: a key is added, renamed or reordered without a decision; PR C re-pins.
-#: `names_by` is in no row: it lives in the record, not the hash (owner
-#: ruling (a) of 2026-10-15).
+#: sorted-key JSON of `{"boxes": 2, "detector": str, "min_confidence":
+#: float, "target": "any" | sorted kinds, "zones": sorted}`, plus `"kinds":
+#: 1` under a narrowed target (#1121, PR B) and `"crop_read": 1` under
+#: `detector: db` with a narrowed target (PR C), recomputed by hand when
+#: pinned. Red when a key is added, renamed or reordered without a
+#: decision. `names_by`, the detector's model and its OpenCV version are
+#: in no row: they live in the record, not the hash (owner ruling (a) of
+#: 2026-10-15). A policy built by hand without `detector` hashes as
+#: `tesseract`.
 _PINNED_POLICY_HASHES = [
-    (({"action": "redact", "scope": "all", "min_confidence": 80,
-       "target": "any"}, []),
-     "748c53cfe74971327d642b07716931c6"),
+    (({"action": "redact", "scope": "all", "detector": "tesseract",
+       "min_confidence": 80, "target": "any"}, []),
+     "0445b206caba00fc44be76366786ca45"),
     (({"action": "report", "scope": "modalities", "modalities": ["CR"],
        "min_confidence": 62.5, "target": "any"},
       [(10, 20, 30, 40), (0, 4, 0, 4)]),
-     "40a5c200cf5867bd8fc644f571f8f413"),
-    (({"action": "redact", "scope": "all", "min_confidence": 80,
-       "target": ["names", "dates"]}, []),
-     "3010d495d43d86a2aa02463d3d110e93"),
+     "6557fe509d866a72bfe34dfd36667cc8"),
+    (({"action": "redact", "scope": "all", "detector": "tesseract",
+       "min_confidence": 80, "target": ["names", "dates"]}, []),
+     "642fd151cacf74f10b0cd9a5b9fd6181"),
+    (({"action": "redact", "scope": "all", "detector": "db",
+       "min_confidence": 80, "target": "any"}, []),
+     "d3cdd351cecd12282665a5f90daf4ff5"),
+    (({"action": "redact", "scope": "all", "detector": "db",
+       "min_confidence": 80, "target": ["names", "dates"]}, []),
+     "c5b171a3869a18df021a760b364923ed"),
 ]
 
 
 @pytest.mark.parametrize("args, expected", _PINNED_POLICY_HASHES,
-                         ids=["default", "zones-and-scope", "narrowed"])
+                         ids=["default", "zones-and-scope", "narrowed", "db",
+                              "db-narrowed"])
 def test_the_policy_hash_is_pinned_as_literals(args, expected):
     policy, zones = args
     assert services._burned_in_text_policy_hash(policy, zones) == expected
@@ -633,11 +643,12 @@ def test_the_scope_is_not_in_the_policy_hash():
     hashes = {services._burned_in_text_policy_hash({**base, **extra}, [])
               for extra in ({"scope": "all"}, {"scope": "flagged"},
                             {"scope": "modalities", "modalities": ["CR"]})}
-    assert hashes == {_md5({"boxes": 2, "min_confidence": 80.0,
+    assert hashes == {_md5({"boxes": 2, "detector": "tesseract", "min_confidence": 80.0,
                             "target": "any", "zones": []})}
 
 
 def test_the_key_set_and_values_are_the_ones_the_schema_row_names():
     assert config_manager._BURNED_IN_TEXT_KEYS == frozenset(
-        {"action", "min_confidence", "scope", "modalities", "target"})
+        {"action", "min_confidence", "scope", "modalities", "target",
+         "detector"})
     assert config_manager.BURNED_IN_TEXT_SCOPES == ("flagged", "modalities", "all")

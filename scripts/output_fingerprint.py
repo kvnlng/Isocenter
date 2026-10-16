@@ -179,6 +179,8 @@ NOT_OUTPUT_ENV = {
                          "this tool always gives one",
     "ISOCENTER_SHOW_PROGRESS": "progress bars; this tool sets it to 0",
     "ISOCENTER_WORKER_FAULTHANDLER": "a diagnostic traceback dump",
+    "ISOCENTER_REQUIRE_TEXT_DETECTOR": "read by the test suite only, "
+                                       "never by the package",
 }
 
 #: Audit rows left out of the accounting, and only these: each records

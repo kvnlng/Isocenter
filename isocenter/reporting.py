@@ -95,6 +95,10 @@ class BurnedInTextSummary:
         target (str): A narrowed target as rows name it, or `""` under
             `any` (#1121).
         kinds (str): What a narrowed target read, counts only, or `""`.
+        detector (str): `tesseract` or `db` (#1121, PR C), or `""` for a
+            summary built without one, which renders as before.
+        oversized (int): Under `db`, boxes dropped as larger than a
+            quarter of the frame, not redacted.
     """
     #: The `source` of an `export(check_burned_in=True)` read's summary,
     #: which the section 5 line reads to say withheld or written, never
@@ -121,6 +125,9 @@ class BurnedInTextSummary:
     #: What a narrowed target read, counts only (`N region(s) read as
     #: names, D as dates, K left in place`), or `""`.
     kinds: str = ""
+    # Defaults, so a summary built before PR C of #1121 still builds.
+    detector: str = ""
+    oversized: int = 0
 
 
 #: Closes section 5, after the grade basis and the metadata, PHI-scan and
@@ -298,9 +305,16 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
             under += f" and target {run.target}"
         # The counts of a narrowed target ride after what was acted on.
         tail_kinds = f"; {run.kinds}" if run.kinds else ""
+        if run.detector == "db":
+            # Which reader decided, and what the box-size rule left
+            # (#1121, PR C): counts only.
+            under += " with the db text detector"
         held = "in-scope instance(s)" if run.scope else "instance(s)"
         left = (f"; {run.out_of_scope} out of scope, not read"
                 if run.scope else "")
+        if run.detector == "db":
+            left += (f"; {run.oversized} box(es) over a quarter of the "
+                     f"frame not redacted")
         if run.source == BurnedInTextSummary.EXPORT_READ:
             done = "written" if run.action == "report" else "withheld"
             runs.append(

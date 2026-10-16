@@ -42,7 +42,7 @@ Release candidates: `pip install --pre isocenter`.
 python -c "import isocenter; print(isocenter.__version__)"
 ```
 
-The OCR and NLP extras, and what each needs, are on the [installation page](https://kvnlng.github.io/Isocenter/latest/installation/).
+The OCR, text-detection and NLP extras, and what each needs, are on the [installation page](https://kvnlng.github.io/Isocenter/latest/installation/).
 
 ## Example
 

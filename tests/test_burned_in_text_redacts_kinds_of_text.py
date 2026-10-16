@@ -119,13 +119,15 @@ def test_the_target_is_normalised(tmp_path, target, normalised):
     parts = ConfigLoader.load_unified_config(
         str(_write(tmp_path, f"burned_in_text: {body}\n")))
     assert parts[5] == {"action": "redact", "scope": "all",
-                        "min_confidence": 80, "target": normalised}
+                        "detector": "tesseract", "min_confidence": 80,
+                        "target": normalised}
 
 
 @pytest.mark.parametrize("policy", [
-    {"action": "redact", "scope": "all", "min_confidence": 80, "target": "any"},
-    {"action": "report", "scope": "flagged", "min_confidence": 70,
-     "target": ["dates", "ids"]},
+    {"action": "redact", "scope": "all", "detector": "tesseract",
+     "min_confidence": 80, "target": "any"},
+    {"action": "report", "scope": "flagged", "detector": "tesseract",
+     "min_confidence": 70, "target": ["dates", "ids"]},
 ], ids=["any", "narrowed"])
 def test_save_and_create_config_write_the_target(tmp_path, policy):
     path = _write(tmp_path, "burned_in_text: " + json.dumps(policy) + "\n")
@@ -758,7 +760,8 @@ def test_nothing_read_reaches_a_row_log_warning_report_store_or_outcome(
             session.load_config(_cfg(tmp_path, target=target))
             session.redact(show_progress=False)
             outcome = session_module._burned_in_text_worker(
-                (_instance(session), (), 80, None, None, ["dates", "ids", "names"]))
+                (_instance(session), (), 80, None, None, ["dates", "ids", "names"],
+                 "tesseract"))
             session.export(str(tmp_path / "out"), use_compression=False,
                            show_progress=False)
             session.export(str(tmp_path / "out2"), use_compression=False,

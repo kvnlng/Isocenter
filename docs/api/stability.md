@@ -462,7 +462,9 @@ otherwise.
   read some instances returns its report with the others in `failures`.
 - `redact()`, when the configuration holds a `burned_in_text` policy:
   `RuntimeError` when the `ocr` extra or the `tesseract` binary is
-  unavailable to the calling process, after the entry drain and before
+  unavailable to the calling process, or under `detector: db` when the
+  `textdetect` extra (OpenCV) or the shipped model is (always, on the
+  free-threaded build), after the entry drain and before
   anything is redacted, the configured zones included; and, the same
   way, when the policy's `target` names `names` and spaCy or its model
   cannot load (#1121). So does
@@ -722,7 +724,9 @@ CHANGELOG entry naming both spellings:
   `pixel_analysis.analyze_pixels`, `pixel_analysis.detect_text_regions`,
   `pixel_analysis.TextRegion`, `pixel_analysis.HAS_OCR`,
   `pixel_analysis.OcrUnavailableError`, `pixel_analysis.NlpUnavailableError`
-  (an `OcrUnavailableError`, #1121), `pixel_analysis.PixelScanError`;
+  (an `OcrUnavailableError`, #1121), `pixel_analysis.PixelScanError`,
+  `text_detection.TextDetectorUnavailableError` (an `OcrUnavailableError`,
+  #1121);
   `DiscoveryResult.get_density_matrix`, `visualize_heatmap`,
   `analyze_temporal_stability`, `inspect_clusters`, and its attributes
   `candidates` and `n_sources`.

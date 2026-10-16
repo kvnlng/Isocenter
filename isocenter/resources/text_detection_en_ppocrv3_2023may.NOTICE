@@ -1,0 +1,78 @@
+NOTICE for text_detection_en_ppocrv3_2023may.onnx
+=================================================
+
+This file is not part of Isocenter's own source code. It is a third-party
+model shipped unmodified beside this NOTICE, and it is read by
+isocenter/text_detection.py when a configuration says
+`burned_in_text: {detector: db}` (#1121).
+
+What it is
+----------
+PP-OCRv3 English text detection (DB, Differentiable Binarization), fp32,
+converted to ONNX by the OpenCV Model Zoo.
+
+  File:    text_detection_en_ppocrv3_2023may.onnx
+  Size:    2,423,490 bytes
+  sha256:  03f550c6b406fda8bf54bd8327815f6c7e2edd98cea02348c93d879254366587
+
+Isocenter refuses to load any file under this name whose sha256 is not the
+one above (isocenter/text_detection.py, MODEL_SHA256), and a test holds the
+file, that constant and this NOTICE together.
+
+Where it comes from
+-------------------
+  Source:   OpenCV Model Zoo, models/text_detection_ppocr
+            https://github.com/opencv/opencv_zoo/tree/main/models/text_detection_ppocr
+            (the Git LFS object of the file named above)
+  Upstream: PaddleOCR, https://github.com/PaddlePaddle/PaddleOCR
+            The zoo's README names the original Paddle model as
+            en_PP-OCRv3_det_infer:
+            https://paddleocr.bj.bcebos.com/PP-OCRv3/english/en_PP-OCRv3_det_infer.tar
+
+Licence
+-------
+Apache License, Version 2.0.
+
+The zoo's README for that directory says: "All files in this directory are
+licensed under Apache 2.0 License". The directory's LICENSE file begins:
+
+  Copyright (c) 2016 PaddlePaddle Authors. All Rights Reserved
+
+and is the Apache License, Version 2.0, January 2004, whose full text is at
+https://www.apache.org/licenses/LICENSE-2.0 and in Isocenter's own LICENSE
+file at the root of the source distribution. PaddleOCR itself is
+Apache-2.0.
+
+Training data
+-------------
+As PaddleOCR documents it for PP-OCRv3 detection, quoted from the paper
+(Li et al., "PP-OCRv3: More Attempts for the Improvement of Ultra
+Lightweight OCR System", arXiv:2206.03001v2, section "DataSets",
+https://arxiv.org/abs/2206.03001):
+
+  "For text detection, there are 127k training images and 200 validation
+  images. The training images consist of 68K real scene images and 59K
+  synthetic images. The real scene images are collected from Baidu image
+  search and public datasets, including LSVT (Sun et al. 2019), RCTW-17
+  (Shi et al. 2017), MTWI 2018 (He and Yang 2018), CASIA-10K (He et al.
+  2018), SROIE (Huang et al. 2019), MLT 2019 (Nayef et al. 2019), BDI
+  (Karatzas et al. 2011), MSRA-TD500 (Yao et al. 2012) and CCPD 2019 (Xu et
+  al. 2018). The synthetic images mainly focus on the scenarios for long
+  texts, multi-direction texts and texts in table. The validation images
+  are all from real scenes."
+
+The paper describes the PP-OCRv3 system as a whole and does not
+separate the English detection model's training set from the Chinese one.
+The zoo's README also says "`IC15` in the filename means the model is
+trained on IC15 dataset" and "`TD500` in the filename means the model is
+trained on TD500 dataset"; neither appears in this file's name, so that note
+does not describe this file. The datasets carry their own terms; the owner
+ruled on shipping this model on 2026-10-15 (Q-C2 of #1121).
+
+How Isocenter runs it
+---------------------
+Through OpenCV's cv2.dnn.TextDetectionModel_DB (the optional `textdetect`
+extra), with binary threshold 0.3, unclip ratio 2.0, input scale 1/255 and
+input mean (122.68, 116.67, 104.00), the settings measured on synthetic
+MIDI-B data before this file was shipped. Isocenter does not change the
+weights.
