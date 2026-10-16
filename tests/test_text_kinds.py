@@ -295,6 +295,29 @@ def test_a_model_warning_is_not_let_out(monkeypatch, recwarn):
     assert [w for w in recwarn if "from elsewhere" in str(w.message)]
 
 
+def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
+        monkeypatch, recwarn):
+    """A filter inserted inside someone else's `catch_warnings()` block
+    goes with the block. The model, loaded there, warned again on the
+    next call (review of #1124 at bc02c116). The filter is put back
+    whenever it is missing from the filters in force."""
+
+    class Noisy(FakeNlp):
+        def __call__(self, text):
+            warnings.warn_explicit(f"W999 read {text}", UserWarning,
+                                   "model.py", 1, module="spacy.language")
+            return super().__call__(text)
+    monkeypatch.setattr(text_kinds, "_MODEL", None)
+    monkeypatch.setattr(text_kinds, "_load_model", lambda: Noisy({}))
+    with warnings.catch_warnings():
+        text_kinds.name_spans("QZXJ7FIRST")
+    text_kinds.name_spans("QZXJ7SECOND")
+    assert not [w for w in recwarn if "QZXJ7" in str(w.message)]
+    warnings.warn_explicit("from elsewhere", UserWarning, "x.py", 1,
+                           module="spacyish")
+    assert [w for w in recwarn if "from elsewhere" in str(w.message)]
+
+
 def test_the_module_never_opens_catch_warnings():
     """`catch_warnings` on a threaded path mutates the process-global
     filters on 3.12, dropping sibling threads' warnings (review F1 of

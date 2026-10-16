@@ -405,6 +405,63 @@ def test_words_share_a_line_only_when_their_heights_overlap_by_half():
     assert _kept(below, ["dates"])[0] == ["01 JAN"]
 
 
+def test_a_word_of_the_line_below_does_not_land_inside_a_name(nlp):
+    """A large-font `DOE, JANE` and a small `PORTABLE` below whose box
+    reaches into it by more than half its own height: joined as one band
+    the line read `DOE, PORTABLE JANE`, which is no name, and the name
+    was left (review of #1124 at bc02c116). `PORTABLE` sits under the
+    row's words, so it is another line."""
+    nlp.ents_by_text["DOE, JANE"] = [("PERSON", "DOE, JANE")]
+    regions = [_region("DOE,", 0, 0, w=40, h=30), _region("JANE", 60, 0, w=40, h=30),
+               _region("PORTABLE", 30, 24, w=25, h=8)]
+    assert _kept(regions, ["names"]) == (["DOE,", "JANE"], {"names": 2, "left": 1})
+
+
+def test_a_small_label_below_a_large_date_does_not_split_it():
+    """Mixed sizes: `01 JAN 1970` 30 px high, `PORTABLE` 8 px high
+    reaching 5 px into it; the band read `01 PORTABLE JAN 1970` and the
+    `01` was left."""
+    regions = [_region("01", 0, 0, w=30, h=30), _region("JAN", 40, 0, w=30, h=30),
+               _region("1970", 80, 0, w=40, h=30),
+               _region("PORTABLE", 20, 25, w=40, h=8)]
+    assert _kept(regions, ["dates"]) == (["01", "JAN", "1970"],
+                                         {"dates": 3, "left": 1})
+
+
+def test_a_line_set_tight_under_another_stays_its_own(nlp):
+    """Same height, the second line 4 px lower (6 of 10 px shared): `SE`
+    landed between a name and an ID and split `DOE^JANE MRN0012345`'s
+    reading. Read apart, both are taken."""
+    regions = [_region("DOE^JANE", 0, 0, w=40, h=10),
+               _region("MRN0012345", 50, 0, w=40, h=10),
+               _region("SE", 20, 4, w=10, h=10)]
+    assert _kept(regions, ["ids"]) == (["MRN0012345"], {"ids": 1, "left": 2})
+    kept = pixel_analysis._regions_of_kinds(regions, ["names", "ids"])[0]
+    assert [r.text for r in kept] == ["DOE^JANE", "MRN0012345"]
+
+
+def test_a_tilted_line_is_followed_and_the_line_below_kept_apart():
+    """Each word of `01 JAN 1970` 4 px lower than the last, and `CHEST`
+    12 px below `01`. The band grows with each word it takes, so `1970`,
+    8 px below `01`, still joins it (kills review X13: a band that does
+    not grow leaves `1970` to `CHEST`'s line and the year in place);
+    `CHEST`, under `01`, does not."""
+    regions = [_region("01", 0, 0, w=10, h=10), _region("JAN", 12, 4, w=15, h=10),
+               _region("1970", 30, 8, w=20, h=10), _region("CHEST", 0, 12, w=25, h=10)]
+    assert _kept(regions, ["dates"]) == (["01", "JAN", "1970"],
+                                         {"dates": 3, "left": 1})
+
+
+def test_the_overlap_needed_is_half_the_bands_first_word_not_the_grown_band():
+    """The overlap a word needs is half the shorter of its own height and
+    the band's first word's, never of the band as it has grown: the
+    tilted band below is 14 px tall once `JAN` joins, and would ask the
+    20 px `1970`, 6 px into it, for 7."""
+    regions = [_region("01", 0, 0, w=10, h=10), _region("JAN", 12, 4, w=15, h=10),
+               _region("1970", 30, 8, w=20, h=20)]
+    assert [len(line) for line in pixel_analysis._lines_of(regions)] == [3]
+
+
 def test_a_word_below_the_threshold_is_not_taken_by_its_kind(tmp_path, monkeypatch):
     """`min_confidence` has one meaning (Q-B17 (a)): a date read at 79 is
     no box under `[dates]`, as it is none under `any`."""

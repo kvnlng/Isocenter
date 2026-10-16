@@ -191,34 +191,64 @@ def _spacy_version() -> str:
 #: `stacklevel` that walks out of them, are ignored: nothing promises a
 #: model warning never quotes its input, which is read text.
 _MODEL_WARNINGS = r"(spacy|thinc|isocenter\.text_kinds)(\..*)?\Z"
+#: The entry `warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)`
+#: puts in the filter list (compiled patterns compare by pattern and flags).
+_MODEL_WARNINGS_FILTER = ("ignore", None, Warning, re.compile(_MODEL_WARNINGS), 0)
+
+
+def _filters_in_force() -> list:
+    """The warning filter list `filterwarnings` writes to here and now.
+
+    On 3.12, and on 3.14 with the GIL, that is `warnings.filters`. On the
+    free-threaded 3.14 build warnings are context-aware by default
+    (`sys.flags.context_aware_warnings`): inside a `catch_warnings()`
+    block `filterwarnings` writes to the block's own list, which
+    `warnings.filters` does not show, so a presence check reading
+    `warnings.filters` there would insert again on every call or miss a
+    filter that is gone. `warnings._get_filters` is that interpreter's
+    own reader; absent before 3.14, where `warnings.filters` is the one
+    list. Measured on 3.14.7t.
+    """
+    get = getattr(warnings, "_get_filters", None)
+    return get() if get is not None else warnings.filters
 
 
 def _ignore_model_warnings() -> None:
-    """Insert one `ignore` filter for the model's warnings (#1121).
+    """Make sure one `ignore` filter for the model's warnings is in force
+    (#1121).
 
-    A one-shot insert at load, never `warnings.catch_warnings()` around
-    each call: on 3.12 that context manager saves and restores the
-    process-global filter list, so on a threaded path it drops sibling
-    threads' warnings while it is open and can undo another thread's
-    filters, its own included, when it closes. The repo forbids it on
-    threaded paths for that reason (`imagecodecs_handler.py`, above the
-    excess-fragment walk; `io_handlers.py`, the IS overflow read and the
-    encapsulated-length window). `filterwarnings` replaces an identical
-    entry rather than adding a second, so a reload inserts nothing new.
+    An insert, never `warnings.catch_warnings()` around each call: on
+    3.12 that context manager saves and restores the process-global
+    filter list, so on a threaded path it drops sibling threads' warnings
+    while it is open and can undo another thread's filters, its own
+    included, when it closes. The repo forbids it on threaded paths for
+    that reason (`imagecodecs_handler.py`, above the excess-fragment
+    walk; `io_handlers.py`, the IS overflow read and the
+    encapsulated-length window).
+
+    Checked on every use of the model, not only at its load: a filter
+    inserted inside someone else's `catch_warnings()` block (a caller's,
+    or pytest's around each test) goes with the block, and the model,
+    loaded there and cached, warned again afterwards (review of #1124 at
+    bc02c116). Inserted only when missing, so a caller's own filters keep
+    their order otherwise. Once in force it stays for the process: the
+    model's warnings are silenced for everyone, `discover_redaction_zones()`
+    and the caller's own spaCy use included.
     """
-    warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)
+    if _MODEL_WARNINGS_FILTER not in _filters_in_force():
+        warnings.filterwarnings("ignore", module=_MODEL_WARNINGS)
 
 
 def _loaded_model():
     """The model, loading it if needed; raises what the load raises."""
     global _MODEL  # pylint: disable=global-statement
     with _NLP_LOCK:
+        # The filter first, so the load's own warnings are ignored too.
+        _ignore_model_warnings()
         if _MODEL is None:
             # Under the lock so two threads do not load twice. The load
             # imports, which takes the import lock: nothing that holds it
-            # waits on this lock, so the order cannot invert. The filter
-            # first, so the load's own warnings are ignored too.
-            _ignore_model_warnings()
+            # waits on this lock, so the order cannot invert.
             _MODEL = _load_model()
         return _MODEL
 

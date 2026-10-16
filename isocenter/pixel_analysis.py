@@ -674,8 +674,9 @@ def _alnum_count(text: str) -> int:
     return sum(ch.isalnum() for ch in text)
 
 
-#: Two words share a line when their vertical extents overlap by at least
-#: this share of the shorter one's height (#1121, review F3 of #1124).
+#: A word joins a line when their vertical extents overlap by at least
+#: this share of the shorter of the word's height and the line's first
+#: word's (#1121, review F3 of #1124; `_lines_of`).
 LINE_OVERLAP = 0.5
 
 
@@ -686,33 +687,56 @@ def _lines_of(regions: Sequence[TextRegion]) -> List[List[TextRegion]]:
     `--psm 11` reads sparse text and can put two words of one visual line
     in different blocks: grouped by its numbers, `DOE,` and `JANE` were
     read apart and a name was left (review F3 of #1124). So, within each
-    frame, a word joins a line when its vertical extent overlaps the
-    line's by at least `LINE_OVERLAP` of the shorter height, and each
-    line is ordered left to right. Words on different frames never share
-    a line. Tesseract's numbers are not read at all, not even as a
-    tiebreak: one rule, which a detector region (PR C) meets as well.
-    Two labels at either end of one row become one line: the safe
-    direction, since a span then has more words to overlap, never fewer.
+    frame, words are taken top to bottom and a word joins a line when
+    both hold:
+
+    - its vertical extent overlaps the line's by at least `LINE_OVERLAP`
+      of the shorter of its own height and the height of the line's
+      first word. The line's extent grows with each word it takes, so a
+      tilted line is followed word by word; the height the overlap is
+      measured against does not, so a line grown tall asks no more of a
+      tall word than its first word did;
+    - it overlaps no word already on the line horizontally (touching
+      edges do not count). Two words of one line sit side by side; a
+      word under another is on another line. Without this a small
+      `PORTABLE` reaching into a large `DOE, JANE` was read between the
+      two names, `DOE, PORTABLE JANE`, which is no name, and the name
+      was left (review of #1124 at bc02c116).
+
+    A word one line refuses is offered to the next, and starts a line of
+    its own only when every line refuses it. Each line is ordered left
+    to right. Words on different frames never share a line. Tesseract's
+    numbers are not read at all, not even as a tiebreak: one rule, which
+    a detector region (PR C) meets as well.
+
+    Joining is not the safe direction: a word read into a line it is not
+    on can break a span. One that sits in a gap of another line,
+    overlapping none of its words, still joins it and is read between
+    them. That residue is known and not fixed.
     """
     by_frame: Dict[int, List[TextRegion]] = {}
     for region in regions:
         by_frame.setdefault(int(region.frame_index), []).append(region)
     lines = []
     for frame in sorted(by_frame):
-        bands = []  # [top, bottom, words]
+        bands = []  # [top, bottom, words, first word's height]
         for region in sorted(by_frame[frame],
                              key=lambda r: (int(r.box[1]), int(r.box[0]))):
-            _x, y, _w, h = (int(v) for v in region.box)
+            x, y, w, h = (int(v) for v in region.box)
             for band in bands:
                 overlap = min(band[1], y + h) - max(band[0], y)
-                if overlap > 0 and overlap >= LINE_OVERLAP * min(h, band[1] - band[0]):
-                    band[0], band[1] = min(band[0], y), max(band[1], y + h)
-                    band[2].append(region)
-                    break
+                if not (overlap > 0 and overlap >= LINE_OVERLAP * min(h, band[3])):
+                    continue
+                if any(min(x + w, int(o.box[0]) + int(o.box[2])) > max(x, int(o.box[0]))
+                       for o in band[2]):
+                    continue
+                band[0], band[1] = min(band[0], y), max(band[1], y + h)
+                band[2].append(region)
+                break
             else:
-                bands.append([y, y + h, [region]])
-        lines.extend(sorted(words, key=lambda r: int(r.box[0]))
-                     for _top, _bottom, words in bands)
+                bands.append([y, y + h, [region], h])
+        lines.extend(sorted(band[2], key=lambda r: int(r.box[0]))
+                     for band in bands)
     return lines
 
 
