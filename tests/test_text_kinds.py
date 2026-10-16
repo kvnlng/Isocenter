@@ -318,6 +318,17 @@ def test_every_other_model_warning_reaches_the_host(monkeypatch, recwarn,
     assert [str(w.message) for w in recwarn] == [message]
 
 
+def test_a_text_quoting_code_from_another_library_reaches_the_host(monkeypatch, recwarn):
+    """The filter is narrowed by module as well as message: a `[W030]`
+    another library raises is that library's diagnostic, and is shown."""
+    monkeypatch.setattr(text_kinds, "_MODEL", None)
+    monkeypatch.setattr(text_kinds, "_load_model", lambda: FakeNlp({}))
+    text_kinds.name_spans("QZXJ7")
+    message = W030.format(text="not read by us")
+    warnings.warn_explicit(message, UserWarning, "x.py", 1, module="spacyish")
+    assert [str(w.message) for w in recwarn] == [message]
+
+
 def test_a_model_first_loaded_inside_a_callers_catch_warnings_stays_quiet(
         monkeypatch, recwarn):
     """A filter inserted inside someone else's `catch_warnings()` block
