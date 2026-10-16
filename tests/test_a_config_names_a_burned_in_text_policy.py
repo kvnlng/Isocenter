@@ -45,13 +45,13 @@ def test_each_action_loads_with_the_default_confidence_filled_in(tmp_path, actio
     """Kills an action missing from the accepted set, and the default
     left unfilled (two spellings of one policy would then hash apart)."""
     parts = _loaded(tmp_path, f"burned_in_text:\n  action: {action}\n  scope: all\n")
-    assert parts[5] == {"action": action, "scope": "all", "min_confidence": 80}
+    assert parts[5] == {"action": action, "scope": "all", "min_confidence": 80, "target": "any"}
 
 
 def test_a_stated_confidence_is_kept(tmp_path):
     parts = _loaded(tmp_path,
                     "burned_in_text: {action: report, scope: all, min_confidence: 62.5}\n")
-    assert parts[5] == {"action": "report", "scope": "all", "min_confidence": 62.5}
+    assert parts[5] == {"action": "report", "scope": "all", "min_confidence": 62.5, "target": "any"}
 
 
 @pytest.mark.parametrize("text", ["machines: []\n", "burned_in_text:\n",
@@ -95,7 +95,7 @@ def test_a_refused_file_leaves_the_sessions_policy_as_it_was(tmp_path):
         with pytest.raises(ValueError):
             session.load_config(str(bad))
         assert session.configuration.burned_in_text == {
-            "action": "withhold", "scope": "flagged", "min_confidence": 80}
+            "action": "withhold", "scope": "flagged", "min_confidence": 80, "target": "any"}
 
 
 def test_load_config_assigns_it_and_a_file_without_it_clears_it(tmp_path):
@@ -107,7 +107,7 @@ def test_load_config_assigns_it_and_a_file_without_it_clears_it(tmp_path):
             tmp_path, "burned_in_text: {action: redact, scope: all, min_confidence: 90}\n",
             "a.yaml")))
         assert session.configuration.burned_in_text == {
-            "action": "redact", "scope": "all", "min_confidence": 90}
+            "action": "redact", "scope": "all", "min_confidence": 90, "target": "any"}
         session.load_config(str(_write(tmp_path, "machines: []\n", "b.yaml")))
         assert session.configuration.burned_in_text is None
 
@@ -119,10 +119,10 @@ def test_save_writes_the_policy_and_reloads_to_it(tmp_path):
         session.load_config(str(path))
         session.configuration.save()
         assert yaml.safe_load(path.read_text())["burned_in_text"] == {
-            "action": "report", "scope": "all", "min_confidence": 70}
+            "action": "report", "scope": "all", "min_confidence": 70, "target": "any"}
         session.load_config(str(path))
         assert session.configuration.burned_in_text == {
-            "action": "report", "scope": "all", "min_confidence": 70}
+            "action": "report", "scope": "all", "min_confidence": 70, "target": "any"}
 
 
 def test_save_writes_no_line_when_there_is_no_policy(tmp_path):
@@ -144,7 +144,7 @@ def test_create_config_carries_the_policy(tmp_path):
         session.create_config(str(out))
         session.load_config(str(out))
         assert session.configuration.burned_in_text == {
-            "action": "withhold", "scope": "flagged", "min_confidence": 85}
+            "action": "withhold", "scope": "flagged", "min_confidence": 85, "target": "any"}
 
 
 def test_create_config_refuses_a_policy_assigned_in_code_that_would_not_load(tmp_path):
@@ -171,5 +171,5 @@ def test_the_key_set_is_the_one_the_schema_row_names():
     """`tests/test_config_schema_version.py` pins the row; this pins that
     the sub-keys are one frozenset beside the others."""
     assert config_manager._BURNED_IN_TEXT_KEYS == frozenset(
-        {"action", "min_confidence", "scope", "modalities"})
+        {"action", "min_confidence", "scope", "modalities", "target"})
     assert "burned_in_text" in config_manager._TOP_LEVEL_KEYS

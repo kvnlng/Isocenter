@@ -44,6 +44,18 @@ such a file, so one file serves machines with and without OCR. `pixel_analysis.H
 does not check the binary. If you point `pytesseract.pytesseract.tesseract_cmd`
 at a tesseract that is not on `PATH`, the scan uses that one.
 
+A `burned_in_text` target naming `names` ([below](#redacting-only-some-kinds-of-text)) needs one thing more: the `nlp` extra and spaCy's English model, which pip cannot install from the extra:
+
+```bash
+pip install "isocenter[nlp]"
+python -m spacy download en_core_web_sm
+```
+
+Without them, `redact()` and `export(check_burned_in=True)` raise
+`NlpUnavailableError`, an `OcrUnavailableError`, in the same places and before
+anything. spaCy publishes no free-threaded wheel, so on the free-threaded build
+(3.14t) `names` cannot be used; `dates` and `ids` need no model.
+
 **When an image cannot be read.** `scan_pixel_content()` lists each instance
 whose pixels could not be loaded, or whose OCR failed on any frame, in
 `report.failures` and warns with the count. `discover_redaction_zones()` warns the
@@ -213,6 +225,30 @@ With it loaded, `redact()` reads every image in scope with OCR, after zeroing (o
 Nothing OCR read is kept: the workers hand back box coordinates and drop the text, so no audit row, log line, report, store or exception holds it. The rows give counts, frame numbers and the tesseract version.
 
 The boxes depend on the tesseract build and its language data. The same image, threshold and zones under the same tesseract give the same boxes, and so the same UID and the same pixels; another tesseract may find other boxes, and then the image takes another UID, which is right, since its pixels differ. The version is in each image's record and in the pass's `REDACTION` row.
+
+### Redacting only some kinds of text
+
+Under `target: any` (the default) every box is acted on, labels included. A list of kinds acts only on the text read as one of them ([#1121](https://github.com/kvnlng/Isocenter/issues/1121)):
+
+```yaml
+burned_in_text:
+  action: redact
+  scope: modalities
+  modalities: [CR, DX, MG, US]
+  target: [names, dates, ids]
+```
+
+The words tesseract reads at `min_confidence` or more with two letters or digits (the boxes `any` would take) are grouped into lines by where they sit: on one frame, a word joins a line when its height overlaps the line's by at least half the shorter of its own and the line's first word's, and it sits beside the line's words rather than under one of them; each line is read left to right. A line's extent grows with each word it takes, so a slightly tilted line is followed. A word sitting in a gap of another line, under none of its words, still joins it and is read between them, which can break a match. Tesseract's own line numbers are not used, because its sparse-text mode can put two words of one line in different blocks, and a name read word by word is no name. Each line is read for the named kinds, and a word is acted on when a match overlaps it: `DOE, JANE  F  01/01/1970` under `[names, dates]` loses the name and the date, and a `PORTABLE` on the line below stays. Nothing is compared with the patient's own values, which a burned-in name may misspell; the source file is not read again.
+
+* **`names`**: what spaCy's `en_core_web_sm` reads as a person, on the line as read and title-cased (the small model misses most upper-case names), plus a word holding `^` between letters. An institution is not a name. It needs the [`nlp` extra and the model](#prerequisites); there is no fallback when they are missing, and on the free-threaded build (3.14t) it cannot be used. Once the model has loaded, Isocenter ignores spaCy's two warnings that quote the text they were given, W030 and W102, for the rest of the process (in `discover_redaction_zones()` and your own use of spaCy too), because that text is what the image says. Every other spaCy and thinc warning reaches your application as usual. The model runs in no CI job: this arm is tested with a stand-in model only, and its reading of short upper-case OCR lines was measured only on the MIDI-B crops below.
+* **`dates`**: day, month and year with one separator, either order or year first, 2- or 4-digit years from 1800 to 2199; `YYYYMMDD`; an English month name beside a day or a year. `O`, `I`, `l`, `|`, `S` and `B` inside a candidate are read as digits, so `0I/O2/197O` is a date. Times of day (`12:34`) are not dates, and `12.5` or `3/4` are not.
+* **`ids`**: a run of letters and digits, `-` or `_` allowed inside, of 6 or more characters holding 5 or more digits. `MRN0012345` and `00123456` are IDs; `120kV`, `5.0MHz`, `1024`, `10cm` and `L5-S1` are not.
+
+A narrowed target never redacts a box `target: any` would not: the kinds are read over the boxes `any` keeps, so `min_confidence` has one meaning under every target, and a name read below it is missed under both. Each image with text left in place gets one `RISK` audit row naming the target's kinds and the frames (it does not grade), and the pass's `REDACTION` row and section 5 count the regions read as each kind and the regions left. The read after redaction counts only text of a named kind, so a label left on purpose writes no `WARNING` row. `export(check_burned_in=True)` reads the same way, and needs no identifier, so it reads as well after `anonymize()`. Nothing read is kept: the record holds counts, and under `names` the spaCy and model versions; a record another model read is read again by the next `redact()`, and plain `export()` needs no model.
+
+What it misses: a name the model does not read as a person (on MIDI-B crops it missed one upper-case surname and given name pair, even title-cased); a date in a shape not listed, including two OCR artefacts measured on MIDI-B crops: a space read inside a year (two digits, a space, two digits), and a colon read as the separator between day, month and year (a colon is never a date separator, because a time of day is not a date); an ID shorter than six characters or with fewer than five digits; any word tesseract read below `min_confidence`.
+
+Measured on synthetic MIDI-B Validation crops: under `[names, dates]` all 10 patient blocks were redacted, and `dates` and `ids` matched none of 52 other text boxes. What it takes that is not what you meant: three numbers on one line that read as a date (`10 12 20`, or `10 IS 2020` once `IS` is read as `15`), so a technique or measurement label can be blanked under `[dates]`; and a matrix size such as `1024x1024` under `[ids]`. Both are the safe direction.
 
 ### What OCR misses
 

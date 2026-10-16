@@ -53,6 +53,8 @@ python -m spacy download en_core_web_sm
 
 The model download is a separate step because the model is not published on PyPI. Without the model, discovery classifies text with regular expressions.
 
+A [`burned_in_text`](configuration.md#burned-in-text) `target` naming `names` needs the extra and the model too, and has no fallback: without them `redact()` and `export(check_burned_in=True)` raise `NlpUnavailableError`. spaCy publishes no free-threaded wheel, so on the free-threaded build (3.14t) neither discovery's spaCy arm nor the `names` kind can be used. No CI job installs the model.
+
 ## Codecs
 
 The decoders for every compressed transfer syntax Isocenter reads install with it: `imagecodecs` and Pillow for JPEG Baseline and Extended, JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000, and pydicom itself for RLE. Where one of pydicom's own decoding plugins is installed for a syntax, it is tried first. A decode cannot catch every damaged stream; [Codec support](codecs.md) lists what reads each syntax and the limits.

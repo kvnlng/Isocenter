@@ -452,7 +452,7 @@ def test_one_redaction_row_per_pass_naming_counts_and_tesseract(tmp_path, ocr):
     rows = [r for r in audit_rows(db) if r[0] == "REDACTION"]
     assert rows == [(
         "REDACTION", "burned_in_text",
-        "burned_in_text (action redact, scope all, min_confidence 80): read 2 "
+        "burned_in_text (action redact, scope all, target any, min_confidence 80): read 2 "
         "of 2 in-scope instance(s) holding pixels (0 out of scope), 0 could not "
         "be read, 0 already checked under this policy; text found on 1 (1 "
         "region(s)); 1 redacted. OCR by tesseract 5.5.3.")]
@@ -691,7 +691,8 @@ def test_redact_by_machine_does_not_run_the_pass(tmp_path, ocr):
         session.redact_by_machine("SN-1", [0, 4, 0, 4])
         assert session.configuration.burned_in_text == {"action": "redact",
                                                         "scope": "all",
-                                                        "min_confidence": 80}
+                                                        "min_confidence": 80,
+                                                        "target": "any"}
         assert services.BURNED_IN_TEXT_ATTR not in _only_instance(session).attributes
     assert ocr.calls == 0
 
@@ -736,7 +737,7 @@ def test_the_text_ocr_read_reaches_no_row_log_report_store_or_outcome(tmp_path, 
         ocr.sticky = True
         session.redact(show_progress=False)
         outcome = session_module._burned_in_text_worker(
-            (_only_instance(session), (), 80, None, None))
+            (_only_instance(session), (), 80, None, None, "any"))
         session.export(str(tmp_path / "out"), use_compression=False, show_progress=False)
         session.generate_report(str(tmp_path / "r.md"))
         session.save(sync=True)

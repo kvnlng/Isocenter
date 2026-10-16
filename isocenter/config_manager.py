@@ -116,8 +116,10 @@ _PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
 #: No `min_box_height`: word boxes of a 24 px name block measured 17-21
 #: px, and noise boxes on anatomy 9-62 px, so a height floor misses text
 #: and spares no noise.
+#: `target` (#1121, PR B) joined the same row before 1.0.0 by the same
+#: ruling: optional, default `any`, narrowed to kinds of text.
 _BURNED_IN_TEXT_KEYS = frozenset({"action", "min_confidence", "scope",
-                                  "modalities"})
+                                  "modalities", "target"})
 #: What the policy does with text OCR finds on an image, in the order the
 #: refusal lists them. Compared exactly, never case-folded: no `action`
 #: is folded anywhere in a configuration (#754).
@@ -128,6 +130,11 @@ BURNED_IN_TEXT_ACTIONS = ("report", "redact", "withhold")
 #: and every image of a listed Modality), `all` (every image holding
 #: pixels, rc19's reading). Compared exactly, as `action` is.
 BURNED_IN_TEXT_SCOPES = ("flagged", "modalities", "all")
+#: The kinds of text a narrowed `target` names (#1121, owner ruling Q-B1
+#: (a)), in the order the refusal lists them; `text_kinds.KINDS` is the
+#: detectors' copy, and a test keeps the two equal. `target: any` (the
+#: default) is every region, as before the key. Compared exactly.
+BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
 #: A Modality as DICOM writes it: a Code String of upper-case letters,
 #: digits, underscore and space, at most 16 characters (PS3.5 6.2).
 _MODALITY_CS = re.compile(r"[A-Z0-9_ ]{1,16}")
@@ -590,13 +597,14 @@ def _refused_burned_in_text(policy: Any) -> Optional[str]:
     cannot disagree or be worded twice. The caller prefixes its source.
 
     Judged in one order, so a file gets one sentence: the mapping, its
-    keys, `action`, `scope`, `modalities`, `min_confidence`.
+    keys, `action`, `scope`, `modalities`, `target`, `min_confidence`.
 
     Args:
         policy: None (no policy), or a mapping with a required `action`
             (one of `BURNED_IN_TEXT_ACTIONS`), a required `scope` (one of
             `BURNED_IN_TEXT_SCOPES`), a `modalities` list required under
-            `scope: modalities` and refused under any other, and an
+            `scope: modalities` and refused under any other, an optional
+            `target` (`any` or a list of `BURNED_IN_TEXT_KINDS`), and an
             optional `min_confidence` (a number from 0 to 100, not a bool).
 
     Returns:
@@ -618,6 +626,9 @@ def _refused_burned_in_text(policy: Any) -> Optional[str]:
         return (f"'burned_in_text' action {action!r} is not one of "
                 f"{', '.join(BURNED_IN_TEXT_ACTIONS)} (exact spelling)")
     reason = _refused_burned_in_text_scope(policy)
+    if reason is not None:
+        return reason
+    reason = _refused_burned_in_text_target(policy)
     if reason is not None:
         return reason
     if "min_confidence" in policy:
@@ -681,6 +692,40 @@ def _refused_burned_in_text_scope(policy: Dict[Any, Any]) -> Optional[str]:
     return None
 
 
+def _refused_burned_in_text_target(policy: Dict[Any, Any]) -> Optional[str]:
+    """Why a `burned_in_text` mapping's `target` is not one this library
+    applies, or None (#1121). Absent is `any`; `null` is refused as a
+    value, as `scope`'s is. One spelling for one kind: `[names]`, never
+    `names`.
+
+    Args:
+        policy (dict): A mapping whose earlier keys are already judged.
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    if "target" not in policy:
+        return None
+    target = policy["target"]
+    kinds = ", ".join(BURNED_IN_TEXT_KINDS)
+    if not isinstance(target, list):
+        if isinstance(target, str) and target == "any":
+            return None
+        return (f"'burned_in_text' target {target!r} must be any or a list "
+                f"of kinds such as [{kinds}]")
+    if not target:
+        return ("'burned_in_text' target is an empty list; name at least one "
+                f"of {kinds}, or write any")
+    if "any" in target and len(target) > 1:
+        return ("'burned_in_text' target lists any beside other kinds; write "
+                "target: any alone")
+    for item in target:
+        if not isinstance(item, str) or item not in BURNED_IN_TEXT_KINDS:
+            return (f"'burned_in_text' target item {item!r} is not one of "
+                    f"{kinds} (exact spelling)")
+    return None
+
+
 def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]:
     """The policy with its default filled in, or None; refused when the
     loader would refuse it.
@@ -697,7 +742,7 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
             `session.configuration`.
 
     Returns:
-        Optional[Dict[str, Any]]: `{action, scope, min_confidence}`, plus
+        Optional[Dict[str, Any]]: `{action, scope, min_confidence, target}`, plus
             `modalities` under `scope: modalities`; a new dict, or None.
 
     Raises:
@@ -714,6 +759,10 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
     if policy["scope"] == "modalities":
         normalised["modalities"] = sorted({item.strip()
                                            for item in policy["modalities"]})
+    # `any`, or the sorted distinct kinds: a repeat or an order changes
+    # nothing a reader, a hash or a saved file sees.
+    target = policy.get("target", "any")
+    normalised["target"] = target if target == "any" else sorted(set(target))
     return normalised
 
 
