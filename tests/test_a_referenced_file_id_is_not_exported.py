@@ -26,7 +26,7 @@ from isocenter.profiles import BASIC_PROFILE
 
 #: The issue's two-component shape (synthetic values): letters and digits
 #: no replacement UID or dummy can contain by chance.
-TOP_LEVEL = ["06301516", "7452617"]
+TOP_LEVEL = ["04182937", "7452617"]
 NESTED = ["NESTDIR", "7452618"]
 REFERENCED_UID = "1.2.826.0.1.3680043.2.1125.1133.1"
 
@@ -76,7 +76,7 @@ def test_a_referenced_file_id_is_not_exported(tmp_path, config):
 
     with open(path, "rb") as handle:
         raw = handle.read()
-    exported = [part for part in (b"06301516", b"7452617", b"NESTDIR")
+    exported = [part for part in (b"04182937", b"7452617", b"NESTDIR")
                 if part in raw]
     assert exported == []
     out = pydicom.dcmread(path)

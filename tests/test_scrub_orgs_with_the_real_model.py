@@ -20,8 +20,7 @@ never install them (spaCy and thinc publish no free-threaded wheel).
 on every job that is not free-threaded: there the skip is a failure
 (#44's shape, as `ISOCENTER_REQUIRE_TEXT_DETECTOR` does for OpenCV).
 
-The institution names are invented, but for `Harris Community Clinic`,
-which #1130 quotes.
+The institution names are invented.
 """
 import os
 from pathlib import Path
@@ -119,7 +118,7 @@ def test_scrub_with_the_real_model_only_deletes_and_settles_in_one_pass():
 
 HOSPITALS = [
     ("CT HEAD at Northwind General Hospital", "Northwind General Hospital"),
-    ("LUNG CA ACCRIN 6668 at Harris Community Clinic", "Harris Community Clinic"),
+    ("LUNG CA ORVIN 4471 at Fernwood Community Clinic", "Fernwood Community Clinic"),
     ("MR BRAIN at Lakeshore Regional Medical Center",
      "Lakeshore Regional Medical Center"),
 ]

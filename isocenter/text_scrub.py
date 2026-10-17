@@ -42,7 +42,7 @@ SCRUB_KINDS = ("names", "dates", "ids", "orgs")
 ORG_LABELS = text_kinds.ORG_LABELS
 
 #: Words removed with a span directly right of them (owner ruling Q3 (a)):
-#: `for 736-69-8140` goes whole, `Report for Breast` stays.
+#: `for 912-48-3071` goes whole, `Report for Breast` stays.
 CONNECTORS = ("for", "at", "by", "per", "from")
 #: Titles removed with a `names` span directly right of them, and with
 #: no other kind's: `Dr 12345678` keeps `Dr`.
@@ -177,7 +177,7 @@ def _cut(text: str, spans) -> str:
             # `A - 1234567 - B`: one separator survives the cut, not two.
             position = len(text) - len(rest) + 1
         elif rest[:1] in (",", ";", ":"):
-            # `MR BREAS, UNIT` cut to `MR, UNIT`, not `MR , UNIT`.
+            # `MR HEPA, UNIT` cut to `MR, UNIT`, not `MR , UNIT`.
             out = left
     out += text[position:]
     return _SPACE_RUN.sub(" ", out).strip(_STRIPPED_AT_THE_ENDS)

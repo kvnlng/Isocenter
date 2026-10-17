@@ -146,7 +146,7 @@ def test_a_reopened_store_finds_nothing(tmp_path):
 
 def test_scrub_reaches_a_nested_item(tmp_path):
     item = Dataset()
-    item.RequestedProcedureDescription = "MRI KNEE 2017-07-07 for 4815162342"
+    item.RequestedProcedureDescription = "MRI KNEE 2019-03-14 for 4815162342"
     _source(tmp_path, RequestAttributesSequence=Sequence([item]))
     rules = {"0040,0275": {"action": "KEEP"},
              "0032,1060": {"action": "SCRUB", "target": ["dates", "ids"]}}
@@ -184,7 +184,7 @@ def test_a_multi_valued_value_is_scrubbed_value_by_value(tmp_path):
     """Admitting Diagnoses Description is LO 1-n. The in-memory shape
     straight from ingest, not only the reloaded one."""
     _source(tmp_path, AdmittingDiagnosesDescription=[
-        "FRACTURE for 4815162342", "for 20170707", "FOLLOW-UP"])
+        "FRACTURE for 4815162342", "for 20190314", "FOLLOW-UP"])
     rules = {"0008,1080": {"action": "SCRUB", "target": ["dates", "ids"]}}
     with _session(tmp_path, rules) as session:
         report = session.audit()
@@ -435,17 +435,17 @@ def test_orgs_through_a_session_with_a_stand_in_model(tmp_path, monkeypatch):
 
     def model(text):
         ents = []
-        if "Harris Community Clinic" in text:
-            start = text.index("Harris Community Clinic")
+        if "Fernwood Community Clinic" in text:
+            start = text.index("Fernwood Community Clinic")
             ents.append(SimpleNamespace(label_="ORG", start_char=start,
-                                        end_char=start + len("Harris Community Clinic")))
+                                        end_char=start + len("Fernwood Community Clinic")))
         return SimpleNamespace(ents=ents)
     monkeypatch.setattr(text_kinds, "_nlp", lambda: model)
-    _source(tmp_path, SeriesDescription="LUNG CA ACCRIN 6668 at Harris Community Clinic")
+    _source(tmp_path, SeriesDescription="LUNG CA ORVIN 4471 at Fernwood Community Clinic")
     with _session(tmp_path, ORGS) as session:
         session.anonymize(session.audit())
         rows = [r for r in _rows(session, "REMEDIATION_REPLACE") if "0008,103e" in r]
-        assert _instance(session).attributes["0008,103e"] == "LUNG CA ACCRIN 6668"
+        assert _instance(session).attributes["0008,103e"] == "LUNG CA ORVIN 4471"
     assert rows[0].endswith("removed 1 organisation or place"), rows
 
 
@@ -471,14 +471,14 @@ def test_a_held_dummy_is_never_a_finding_whatever_a_model_makes_of_it(
 
     def model(text):
         ents = []
-        for word in ("Anonymized", "Harris Community Clinic"):
+        for word in ("Anonymized", "Fernwood Community Clinic"):
             if word in text:
                 start = text.index(word)
                 ents.append(SimpleNamespace(label_="ORG", start_char=start,
                                             end_char=start + len(word)))
         return SimpleNamespace(ents=ents)
     monkeypatch.setattr(text_kinds, "_nlp", lambda: model)
-    _source(tmp_path, SeriesDescription="at Harris Community Clinic",
+    _source(tmp_path, SeriesDescription="at Fernwood Community Clinic",
             StudyDescription="ANONYMIZED")
     with _session(tmp_path, ORGS) as session:
         report = session.audit()

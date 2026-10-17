@@ -574,7 +574,7 @@ An element a key covers is matched only where it holds a value in the graph; an 
 
 #### Cleaning descriptions
 
-A description can carry an identifier inside clinical text a study selects series by: `MR BREAS UNIT for 736-69-8140`. `REMOVE` loses the clinical part with it. `SCRUB` is PS3.15's Clean Descriptors Option (E.3.5, the `C` of Table E.1-1's Clean Desc. column) as a rule: keep the value, remove the identifying information inside it ([#1130](https://github.com/kvnlng/Isocenter/issues/1130)).
+A description can carry an identifier inside clinical text a study selects series by: `MR HEPA UNIT for 912-48-3071`. `REMOVE` loses the clinical part with it. `SCRUB` is PS3.15's Clean Descriptors Option (E.3.5, the `C` of Table E.1-1's Clean Desc. column) as a rule: keep the value, remove the identifying information inside it ([#1130](https://github.com/kvnlng/Isocenter/issues/1130)).
 
 ```yaml
 phi_tags:
@@ -584,20 +584,20 @@ phi_tags:
 
 | Source value | `target: [names, dates, ids]` |
 | :--- | :--- |
-| `MR BREAS UNIT for 736-69-8140` | `MR BREAS UNIT` |
-| `MA SURGICAL SPECIMEN for 7516817726` | `MA SURGICAL SPECIMEN` |
-| `MA SURGICAL SPECIMEN 20170707` | `MA SURGICAL SPECIMEN` |
-| `Standard Breast Imaging Report for Elena Marsh`, in a file whose Patient's Name is `MARSH^ELENA` (an illustrative example) | `Standard Breast Imaging Report` |
+| `MR HEPA UNIT for 912-48-3071` | `MR HEPA UNIT` |
+| `MG BIOPSY SPECIMEN for 3920584716` | `MG BIOPSY SPECIMEN` |
+| `MG BIOPSY SPECIMEN 20190314` | `MG BIOPSY SPECIMEN` |
+| `Routine Breast Screening Report for Elena Marsh`, in a file whose Patient's Name is `MARSH^ELENA` (an illustrative example) | `Routine Breast Screening Report` |
 
 `target` is required, and lists the kinds to remove, in an order that decides only how a span two kinds find is counted:
 
 * **`dates`**: a date shape: `D-M-Y`, `M-D-Y` or `Y-M-D` with one separator (`/`, `.`, `-` or a space) used twice, `YYYYMMDD`, or a month name beside a day or a year. Digits only, unlike burned-in text, which reads OCR's confusables. A dotted triple whose last field has two digits reads as a date: `Version 3.10.21` becomes `Version`, while `0.2.0` and `dcmqi 1.2.4` are kept.
 * **`ids`**: a run of 6 or more letters and digits (with `-` or `_` inside) holding 5 or more digits. A shorter accession number, such as `A1234`, is not removed.
 * **`names`**: the words of the Person Names the same instance holds, at any depth, and its patient's name: the family, given and middle components, 2 or more characters each, matched whole-word in any case. A name prefix or suffix (`Dr`, `Jr`) is not a word to remove, and a name already replaced (`ANONYMIZED`) is none. No model is used: spaCy's person finder, measured on header text, emptied clinical descriptions (`SAG T1`, `MAMMO SCREENING BILATERAL`) and missed a mixed-case full name. Its cost is a patient or physician whose name is also a clinical word (`LONG`, `HEAD`, `WHITE`): that word is removed from that patient's descriptions.
-* **`orgs`**: spaCy's `ORG`, `FAC` and `GPE` entities (organisations, facilities, countries and cities), read on the value title-cased, since `en_core_web_sm` misses most upper-case names. It needs the `nlp` extra and its model (`pip install "isocenter[nlp]"`, `python -m spacy download en_core_web_sm`); without them `audit()` raises `NlpUnavailableError` (a `RuntimeError`) before anything is scanned, never `load_config()`. spaCy publishes no free-threaded wheel, so on the free-threaded build `orgs` is unavailable. **It removes text that is not a site.** Measured with en_core_web_sm 3.8.0 and spaCy 3.8.16 on 2026-10-16; Isocenter does not pin the model, and these figures may change as the model changes:
+* **`orgs`**: spaCy's `ORG`, `FAC` and `GPE` entities (organisations, facilities, countries and cities), read on the value title-cased, since `en_core_web_sm` misses most upper-case names. It needs the `nlp` extra and its model (`pip install "isocenter[nlp]"`, `python -m spacy download en_core_web_sm`); without them `audit()` raises `NlpUnavailableError` (a `RuntimeError`) before anything is scanned, never `load_config()`. spaCy publishes no free-threaded wheel, so on the free-threaded build `orgs` is unavailable. **It removes text that is not a site.** Measured with en_core_web_sm 3.8.0 and spaCy 3.8.16 on 2026-10-16, and the examples below again on 2026-10-17; Isocenter does not pin the model, and these figures may change as the model changes:
     * of 47 typical clinical descriptions, it changed 14 on the corpus the design was measured on, and 13 on the corpus the tests carry (`tests/support/scrub_corpus.py`). Among them `MR BREAST BILATERAL` became `MR`, `US ABDOMEN COMPLETE` became `ABDOMEN COMPLETE`, and `Nodule 1`, `Brain Tumor Protocol`, `Mayo Protocol`, `Boston Scientific` and `Siemens Somatom Definition` were emptied. Read as written and title-cased together, which does not ship, it changed 28 of 47;
-    * it damages text it is not aimed at: `MR BREAS UNIT for 736-69-8140` became `MR UNIT`, reading `Breas` as an organisation, and `MR BREAS, UNIT at MSCH` became `MR, UNIT at MSCH`, missing `MSCH`;
-    * it found `Harris Community Clinic` in `LUNG CA ACCRIN 6668 at Harris Community Clinic`, which became `LUNG CA ACCRIN 6668`.
+    * it damages text it is not aimed at: `MR HEPA UNIT for 912-48-3071` became `MR UNIT`, reading `Hepa` as an organisation, and `MR HEPA, UNIT at TWMC` became `MR, UNIT at TWMC`, missing `TWMC`;
+    * it found `Fernwood Community Clinic` in `LUNG CA ORVIN 4471 at Fernwood Community Clinic`, which became `LUNG CA ORVIN 4471`.
 
   `orgs` is for text known to carry site names, and keeps the model's mistakes. `REMOVE` remains the exact answer.
 

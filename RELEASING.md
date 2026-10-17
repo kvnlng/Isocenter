@@ -142,7 +142,9 @@ minor's work. A PR with neither is the next unreleased line's work.
      `git show origin/main:CHANGELOG.md | grep -n -m1 '^## \[[0-9]'`
      prints. A hunk at or below that line is an entry under a released
      heading, unless it rewrites a line of a released section in place,
-     on purpose (the test allows that, #927). Move a misplaced entry up
+     on purpose, with a row for that line in the test's `CORRECTIONS`
+     (the sha256 of the line as released, and the line as it now reads;
+     any other rewrite is red). Move a misplaced entry up
      into `[Unreleased]` by hand, in the merge commit or the next one.
    - `tests/test_released_changelog_sections_stay_as_released.py` passes.
      `pytest --changed` selects it for any change to `CHANGELOG.md`, so
@@ -663,7 +665,8 @@ fixes, never features.
      conflict; `tests/test_released_changelog_sections_stay_as_released.py`
      fails a released section whose lines are not those of the newest
      tag that holds it, or of `origin/main`, other than a line rewritten
-     in place ("Changes land on `main`", step 3, has the check to run
+     in place that the test's `CORRECTIONS` names ("Changes land on
+     `main`", step 3, has the check to run
      after such a merge);
    - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
      X.Y is the newest release line. Between releases, `main` declares the

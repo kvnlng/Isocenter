@@ -27,11 +27,15 @@ The rule this pins, for each `## [X]` heading other than `[Unreleased]`:
   rather than `sort -V` (which puts `v1.0.0` before `v1.0.0rc1`) or tag dates
   (which misorder a patch to an older line). A version never tagged (0.6.1,
   0.5.4, 0.5.1, 0.4.0) has a base all the same, in any later tag.
-* **Byte-identical passes.** So does an *in-place rewrite*: the same number of
-  lines and the same heading line, some lines changed. That is the shape of
-  both amendments above, made before the next cut carries them, and never the
-  shape of the defect, which inserts lines. Any added or removed line is red,
-  with the diff against the base tag.
+* **Byte-identical passes.** So does a *correction*: the same number of lines
+  and the same heading line, and each changed line one that `CORRECTIONS`
+  names, by the sha256 of the line as released and the text it now holds.
+  That is the shape of both amendments above, made before the next cut
+  carried them (both shipped before the table, so no row is needed for them).
+  Any other rewrite in place is red, and so is any added or removed line,
+  with the diff against the base tag. Until 2026-10-17 any rewrite in place
+  passed; the table narrows that to the lines a correction names, so a
+  released section changes only on purpose.
 * **Skipped**, naming why: no present tag's CHANGELOG.md holds the heading (a
   fresh clone without tags; CI's checkout was one until #966 made it fetch
   every tag, and there the section being released still has none before
@@ -65,13 +69,13 @@ it. This needs no tag. What it can and cannot see:
 `test_the_main_check_reads_origin_main` pins that this check asks git for
 that ref and no other, and acts on the answer.
 
-What this does not see: a misplaced entry that rewrites an existing line
-instead of adding one, and any change to `[Unreleased]`.
+What this does not see: any change to `[Unreleased]`.
 
 Paths are absolute from this file, so the per-test `tmp_path` cwd (#707) does
 not matter and the test needs no `repo_root` marker.
 """
 import difflib
+import hashlib
 import re
 import subprocess
 from functools import lru_cache
@@ -82,6 +86,58 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = "CHANGELOG.md"
 _HEADING = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
+
+#: The corrections made to a released section after its release, on
+#: purpose: {version: {sha256 of the line as released: the line as it
+#: now reads}}. Keyed by hash, so the table never holds the text it
+#: corrects. A rewrite in place of any other line is red.
+CORRECTIONS = {
+    # The SCRUB examples, replaced with invented strings of the same
+    # shape (owner ruling of 2026-10-17).
+    "1.0.0rc21": {
+        '4b9b76fe4e3c7257f7c28f9665408f0997eb215a1defeb69d1f0ca736edac0e9': (
+            '  - **Now** a rule `{action: SCRUB, target: [names, dates, '
+            'ids]}` keeps the value and removes each span of the kinds '
+            '`target` names, with a connecting word directly before it '
+            '(`for`, `at`, `by`, `per`, `from`, and a title before a '
+            'name), then tidies separators and whitespace. `MR HEPA UNIT '
+            'for 912-48-3071` becomes `MR HEPA UNIT`, `MG BIOPSY SPECIMEN '
+            '20190314` becomes `MG BIOPSY SPECIMEN`, and `Report for '
+            'Breast` is unchanged. The new module '
+            '`isocenter/text_scrub.py` holds the rule; it only deletes '
+            'characters and never logs.'),
+        'a79115732e37d18b8c71ba0be837c2b1dcc2b26e3b7e84785a52896c014b7833': (
+            "  - **The kinds.** `dates` and `ids` are #1121's regular "
+            "expressions, `dates` without OCR's digit confusables "
+            '(`text_kinds.date_spans(ocr=False)`; the burned-in default '
+            'is unchanged). A dotted triple whose last field has two '
+            'digits (`Version 3.10.21`) reads as a date, by owner ruling '
+            'Q8 (a); `0.2.0` and `dcmqi 1.2.4` do not. `names` is the '
+            'family, given and middle names of the Person Names the '
+            "instance itself holds, at any depth, and its patient's, "
+            'matched whole-word: no model (owner ruling Q2 (a)), because '
+            "spaCy's `PERSON`, measured on header text, emptied `SAG T1` "
+            'and `MAMMO SCREENING BILATERAL` and missed a mixed-case full '
+            'name. A name that is also a clinical word (`LONG`) is '
+            "removed from that patient's descriptions. `orgs` (owner "
+            "rulings Q11 (b), R14) is spaCy's `ORG`, `FAC` and `GPE` on "
+            'the value title-cased; it needs the `nlp` extra and '
+            '`en_core_web_sm`, and is unavailable on the free-threaded '
+            'build, which has no spaCy. It over-removes: measured with '
+            'en_core_web_sm 3.8.0 and spaCy 3.8.16, it changed 14 of 47 '
+            'typical clinical descriptions on the corpus the design was '
+            'measured on (13 on the one the tests carry; 28 read as '
+            'written and title-cased together, which does not ship), and '
+            'turned `MR HEPA UNIT for 912-48-3071` into `MR UNIT`. The '
+            'model is not pinned, so these figures may change; '
+            '`docs/configuration.md` lists them.'),
+        '8bb3ed31256d07d7c113e58bebbb99f0dcf012ec518dc8c9d42fb790cb19676f': (
+            '  - **Not scrubbed:** an identifier shorter than 6 '
+            'characters or with fewer than 5 digits (`A1234`), a site the '
+            'model does not find (`TWMC`), and words that are not '
+            'identifiers. `REMOVE` remains the exact answer.'),
+    },
+}
 
 
 def sections(text):
@@ -96,11 +152,12 @@ def sections(text):
             for (version, start), end in zip(starts, ends)}
 
 
-def released_section_problem(current, base):
+def released_section_problem(current, base, corrections=None):
     """None when `current` may stand for `base`, else why it may not.
 
-    Byte-identical, or an in-place rewrite: the same line count and the
-    same heading line. An added or removed line is the defect's shape.
+    Byte-identical, or each changed line one `corrections` names: {sha256
+    of the line in `base`: the line `current` must hold there}. An added
+    or removed line is the defect's shape, and no row permits one.
     """
     if current == base:
         return None
@@ -110,6 +167,13 @@ def released_section_problem(current, base):
     if len(now) != len(then):
         return (f"it has {len(now)} lines where the release has {len(then)}: "
                 "a line was added or removed, not rewritten in place")
+    corrections = corrections or {}
+    for number, (was, is_now) in enumerate(zip(then, now), start=1):
+        if was != is_now and corrections.get(
+                hashlib.sha256(was.encode("utf-8")).hexdigest()) != is_now:
+            return (f"line {number} was rewritten in place, and CORRECTIONS "
+                    "names no such correction: a released section is "
+                    "corrected only through that table")
     return None
 
 
@@ -160,7 +224,7 @@ def problem_for(version, working):
     current, base = working[version], _sections_at_tag(base_tag)[version]
     assert current.startswith(f"## [{version}]") and base.startswith(
         f"## [{version}]"), "the section parser lost its heading"
-    problem = released_section_problem(current, base)
+    problem = released_section_problem(current, base, CORRECTIONS.get(version))
     if problem is None:
         return base_tag, None
     diff = "".join(difflib.unified_diff(
@@ -238,7 +302,7 @@ def main_problem_for(version, working, at_main):
     if version not in at_main:
         return False, None
     current, base = working[version], at_main[version]
-    problem = released_section_problem(current, base)
+    problem = released_section_problem(current, base, CORRECTIONS.get(version))
     if problem is None:
         return True, None
     diff = "".join(difflib.unified_diff(
@@ -413,8 +477,69 @@ def test_a_changed_heading_is_red():
     assert "its heading changed" in released_section_problem(redated, BASE)
 
 
-def test_an_amendment_in_place_passes():
-    """The shape of fd77f8f0's amendment of [1.0.0rc1]: strike and annotate."""
-    amended = BASE.replace("Its body.", "~~Its body.~~ (Closed by #1.)")
+def _sha256(line):
+    return hashlib.sha256(line.encode("utf-8")).hexdigest()
+
+
+ENTRY = "- **An entry.** Its body."
+AMENDED = "- **An entry.** ~~Its body.~~ (Closed by #1.)"
+
+
+def test_an_amendment_in_place_that_no_correction_names_is_red():
+    """The shape of fd77f8f0's amendment of [1.0.0rc1], strike and annotate,
+    is red unless `CORRECTIONS` names it: a released section changes only
+    through that table. Kills the in-place rewrite passing on line count."""
+    amended = BASE.replace(ENTRY, AMENDED)
     assert amended != BASE
-    assert released_section_problem(amended, BASE) is None
+    problem = released_section_problem(amended, BASE)
+    assert problem is not None and "line 5" in problem, problem
+    assert "CORRECTIONS" in problem, problem
+
+
+def test_a_correction_the_table_names_passes():
+    amended = BASE.replace(ENTRY, AMENDED)
+    assert released_section_problem(
+        amended, BASE, {_sha256(ENTRY): AMENDED}) is None
+
+
+def test_a_correction_speaks_for_its_one_line_and_its_one_text():
+    """Kills: a row that permits any text on its line, or any line once a
+    row matches."""
+    table = {_sha256(ENTRY): AMENDED}
+    other_text = BASE.replace(ENTRY, AMENDED + " And more.")
+    assert released_section_problem(other_text, BASE, table) is not None
+    other_line = BASE.replace(ENTRY, AMENDED).replace(
+        "**Output:** none.", "**Output:** some.")
+    assert released_section_problem(other_line, BASE, table) is not None
+    # A row cannot let a line in or out either.
+    longer = BASE.replace(ENTRY, AMENDED + "\n- **More.**")
+    assert "a line was added or removed" in released_section_problem(
+        longer, BASE, table)
+
+
+def test_the_table_holds_hashes_and_corrected_lines_only():
+    """Each key is a sha256 of the line as released, so the table never
+    carries the text it corrects."""
+    for version, table in CORRECTIONS.items():
+        assert table, version
+        for key, line in table.items():
+            assert re.fullmatch(r"[0-9a-f]{64}", key), (version, key)
+            assert "\n" not in line and _sha256(line) != key, (version, key)
+
+
+def test_each_correction_names_a_line_its_release_published(
+        git_reads_this_tree):
+    """Every row names a line of its version's own tag, and that line now
+    reads as the row says. Fails, never skips, where the tag is present: a
+    row that matches nothing would sit there permitting a later edit."""
+    working = _working_sections()
+    for version, table in CORRECTIONS.items():
+        if not _tag_present(version):
+            pytest.skip(f"tag v{version} is not present here")
+        released = _sections_at_tag(version)[version].splitlines()
+        now = working[version].splitlines()
+        assert len(now) == len(released), version
+        for key, line in table.items():
+            at = [i for i, was in enumerate(released) if _sha256(was) == key]
+            assert at, f"[{version}]: no line of v{version} hashes to {key}"
+            assert all(now[i] == line for i in at), (version, key)

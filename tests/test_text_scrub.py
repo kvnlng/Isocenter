@@ -37,7 +37,7 @@ def test_clinical_descriptions_are_left_as_they_are(text):
 @pytest.mark.parametrize("text, kept", [
     ("Report for Breast", "Report for Breast"),
     ("Imaging at follow-up for 12345678", "Imaging at follow-up"),
-    ("CT from 2017-07-07 for review", "CT for review"),
+    ("CT from 2019-03-14 for review", "CT for review"),
 ])
 def test_a_connector_goes_only_with_a_span_beside_it(text, kept):
     assert scrub(text, NO_MODEL)[0] == kept
@@ -56,8 +56,8 @@ def test_a_connector_is_whole_word():
 @pytest.mark.parametrize("target, counts", [
     (["dates", "ids"], {"dates": 1}), (["ids", "dates"], {"ids": 1})])
 def test_one_span_found_by_two_kinds_is_counted_once(target, counts):
-    assert scrub("MA SURGICAL SPECIMEN 20170707", target) == (
-        "MA SURGICAL SPECIMEN", counts)
+    assert scrub("MG BIOPSY SPECIMEN 20190314", target) == (
+        "MG BIOPSY SPECIMEN", counts)
 
 
 def test_a_full_name_is_one_name():
@@ -185,23 +185,23 @@ def nlp(monkeypatch):
     return install
 
 
-CLINIC = "LUNG CA ACCRIN 6668 at Harris Community Clinic"
-CLINIC_TITLED = "Lung Ca Accrin 6668 At Harris Community Clinic"
+CLINIC = "LUNG CA ORVIN 4471 at Fernwood Community Clinic"
+CLINIC_TITLED = "Lung Ca Orvin 4471 At Fernwood Community Clinic"
 
 
 def test_orgs_reads_the_title_cased_text_only(nlp):
-    fake = nlp({CLINIC_TITLED: [("ORG", "Harris Community Clinic")],
-                CLINIC: [("ORG", "LUNG CA ACCRIN")]})
-    assert scrub(CLINIC, ["orgs"]) == ("LUNG CA ACCRIN 6668", {"orgs": 1})
-    assert fake.seen == [CLINIC_TITLED, "Lung Ca Accrin 6668"]
+    fake = nlp({CLINIC_TITLED: [("ORG", "Fernwood Community Clinic")],
+                CLINIC: [("ORG", "LUNG CA ORVIN")]})
+    assert scrub(CLINIC, ["orgs"]) == ("LUNG CA ORVIN 4471", {"orgs": 1})
+    assert fake.seen == [CLINIC_TITLED, "Lung Ca Orvin 4471"]
 
 
 @pytest.mark.parametrize("label, removed", [
     ("ORG", True), ("FAC", True), ("GPE", True),
     ("LOC", False), ("PERSON", False), ("NORP", False)])
 def test_orgs_keeps_only_org_fac_and_gpe(nlp, label, removed):
-    nlp({CLINIC_TITLED: [(label, "Harris Community Clinic")]})
-    assert (scrub(CLINIC, ["orgs"])[0] == "LUNG CA ACCRIN 6668") is removed
+    nlp({CLINIC_TITLED: [(label, "Fernwood Community Clinic")]})
+    assert (scrub(CLINIC, ["orgs"])[0] == "LUNG CA ORVIN 4471") is removed
     assert text_scrub.ORG_LABELS == ("ORG", "FAC", "GPE")
 
 
@@ -212,8 +212,8 @@ def test_an_org_span_takes_its_connector(nlp):
 
 def test_a_cut_leaves_no_space_before_a_comma(nlp):
     """Found measuring `orgs` (R11): `MR , UNIT` must not occur."""
-    nlp({"Mr Breas, Unit At Msch": [("ORG", "Breas")]})
-    assert scrub("MR BREAS, UNIT at MSCH", ["orgs"])[0] == "MR, UNIT at MSCH"
+    nlp({"Mr Hepa, Unit At Twmc": [("ORG", "Hepa")]})
+    assert scrub("MR HEPA, UNIT at TWMC", ["orgs"])[0] == "MR, UNIT at TWMC"
 
 
 def test_orgs_runs_under_the_model_lock(nlp):
@@ -227,7 +227,7 @@ def test_dates_and_ids_ask_no_model(monkeypatch):
     def fail():
         raise AssertionError("the model was asked")
     monkeypatch.setattr(text_kinds, "_nlp", fail)
-    assert scrub("A 20170707", NO_MODEL, ("X",)) == ("A", {"dates": 1})
+    assert scrub("A 20190314", NO_MODEL, ("X",)) == ("A", {"dates": 1})
 
 
 @pytest.mark.parametrize("text", ["2O17O7O7", "O1/O2/1999"])
