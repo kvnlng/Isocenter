@@ -57,11 +57,13 @@ class OcrUnavailableError(RuntimeError):
 
 
 class NlpUnavailableError(OcrUnavailableError):
-    """A `burned_in_text` target naming `names` was asked for, and spaCy
-    or its `en_core_web_sm` model cannot load; nothing was read (#1121).
+    """A `burned_in_text` target naming `names`, or a `SCRUB` target naming
+    a kind that needs the model (`orgs`), was asked for, and spaCy or its
+    `en_core_web_sm` model cannot load; nothing was read (#1121, #1130).
 
     Raised by `redact()` and `export(check_burned_in=True)` where their
-    OCR check sits, never by `load_config()`: a policy is portable, and
+    OCR check sits, and, for `SCRUB`, by `audit()` before anything is
+    scanned; never by `load_config()`: a policy is portable, and
     plain `export()` reads records and needs no model. An
     `OcrUnavailableError`, so a script that treats OCR as optional
     catches it by the parent's name. Tier 2. spaCy publishes no
@@ -95,6 +97,43 @@ def _require_target_readers(operation: str, policy) -> None:
         f"{operation}: burned_in_text target names needs the nlp extra "
         '(pip install "isocenter[nlp]") and its model (python -m spacy '
         f"download en_core_web_sm): {reason}. Nothing was read.")
+
+
+def _require_scrub_readers(operation: str, phi_tags) -> None:
+    """Raise `NlpUnavailableError` naming `operation` when `phi_tags` holds
+    a `SCRUB` rule whose `target` names `orgs` and the model cannot load
+    (#1130, owner ruling R11).
+
+    Called by `audit()` after the policy is validated and before the
+    project secret or any worker, and by `export(check_burned_in=True)`
+    before its scan. `names`, `dates` and `ids` need no model.
+
+    Args:
+        operation (str): The method name the message names.
+        phi_tags (dict): The policy.
+
+    Raises:
+        NlpUnavailableError: Naming the first such tag in key order, the
+            extra and the model, and the load's own failure, which holds
+            no text.
+    """
+    if not isinstance(phi_tags, dict):
+        return
+    needing = sorted(
+        str(tag) for tag, rule in phi_tags.items()
+        if isinstance(rule, dict)
+        and str(rule.get("action") or "").strip().upper() == "SCRUB"
+        and isinstance(rule.get("target"), (list, tuple))
+        and "orgs" in rule["target"])
+    if not needing:
+        return
+    reason = text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
+    if reason is None:
+        return
+    raise NlpUnavailableError(
+        f"{operation}: SCRUB target orgs on {needing[0]} needs the nlp extra "
+        '(pip install "isocenter[nlp]") and its model (python -m spacy '
+        f"download en_core_web_sm): {reason}. Nothing was scanned.")
 
 
 class PixelScanError(RuntimeError):

@@ -232,8 +232,9 @@ def test_an_unconverted_cell_is_grouped_under_its_wire_vr():
 
 def test_the_recorder_version_moved_with_the_unconverted_rendering():
     """A changed rendering is a changed measuring stick: `compare` then
-    reports the differences it causes under Cohort (#945)."""
-    assert fp.RECORDER == 4
+    reports the differences it causes under Cohort (#945). 5 since the
+    third configuration (C) is recorded."""
+    assert fp.RECORDER == 5
 
 
 def test_a_change_inside_a_sequence_is_seen_at_its_path(tmp_path):
@@ -677,7 +678,7 @@ def test_a_changed_measuring_stick_is_cohort_drift_and_output_is_still_compared(
         ("Cohort", "measuring stick"), ("Elements", "0010,0010")], report.text()
     assert "NOTE: the configurations or the recorder differ" in report.text()
     assert fp.measure()["recorder"] == fp.RECORDER
-    assert set(fp.measure()["configs"]) == {"A", "B"}
+    assert set(fp.measure()["configs"]) == {"A", "B", "C"}
 
 
 def test_one_change_in_explicit_and_implicit_arms_is_one_group():

@@ -493,6 +493,9 @@ def test_redaction_over_an_inferred_image(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_pillow_lays_out_jpeg_by_the_element():
+    """A forced 1 now decodes as the declared 0 does: under JPEG the
+    element is read as 0 whatever it declares (#1137). Until #1137 this
+    asserted the two differed, which was that defect, pinned."""
     source = pydicom.dcmread(get_testdata_file("SC_rgb_jpeg_dcmtk.dcm"))
     declared, _ = _decode_pixels(pydicom.dcmread(source.filename))
     supplied = pydicom.dcmread(source.filename)
@@ -503,7 +506,7 @@ def test_pillow_lays_out_jpeg_by_the_element():
     planar, _ = _decode_pixels(forced)
     assert source.PlanarConfiguration == 0
     assert np.array_equal(inferred, declared)
-    assert not np.array_equal(planar, declared)
+    assert np.array_equal(planar, declared)
 
 
 # ---------------------------------------------------------------------------

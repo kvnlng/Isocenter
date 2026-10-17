@@ -1,9 +1,11 @@
-"""Kinds of text a narrowed `burned_in_text` target names (#1121).
+"""Kinds of text a narrowed `burned_in_text` target names (#1121), and
+the kinds a `SCRUB` rule removes from header text (#1130).
 
-Pure functions over one line of text OCR read, each returning the
-`(start, end)` character spans that look like its kind: `dates` (date
-shapes), `ids` (long runs of digits) and `names` (spaCy `PERSON`
-entities). Nothing here compares a reading with any patient's values
+Pure functions over one line of text, each returning the `(start, end)`
+character spans that look like its kind: `dates` (date shapes), `ids`
+(long runs of digits), `names` (spaCy `PERSON` entities, burned-in text
+only) and `orgs` (spaCy `ORG`, `FAC` and `GPE` entities, header text
+only). Nothing here compares a reading with any patient's values
 (owner ruling of 2026-10-15: a burned-in name may be misspelled, and the
 source is not read again), and nothing here keeps or returns text: only
 spans, which never leave the `burned_in_text` worker.
@@ -20,8 +22,10 @@ from typing import Dict, Iterable, List, Optional, Tuple
 Span = Tuple[int, int]
 
 #: The kinds, in the order a refusal lists them. `config_manager` holds
-#: the schema's copy (`BURNED_IN_TEXT_KINDS`); a test keeps them equal.
-KINDS = ("names", "dates", "ids")
+#: the schema's copies: `BURNED_IN_TEXT_KINDS`, every kind but `orgs`
+#: (owner ruling Q-B12 stands for pixels), and `SCRUB_KINDS`, all four
+#: (#1130). A test keeps each a subset of this.
+KINDS = ("names", "dates", "ids", "orgs")
 
 # --- dates -------------------------------------------------------------------
 
@@ -37,6 +41,12 @@ _NUMERIC_DATE = re.compile(
     rf"\2([{_DIGITISH}]{{1,4}})(?![0-9A-Za-z])")
 #: Eight digits read as the DICOM DA form, `YYYYMMDD`.
 _COMPACT_DATE = re.compile(rf"(?<![0-9A-Za-z])[{_DIGITISH}]{{8}}(?![0-9A-Za-z])")
+#: The same two shapes over digits only, for text no OCR read (header
+#: text, #1130): `SO 2O` there is words, not a misread `50 20`.
+_NUMERIC_DATE_DIGITS = re.compile(
+    r"(?<![0-9A-Za-z])([0-9]{1,4})([/.\- ])([0-9]{1,2})"
+    r"\2([0-9]{1,4})(?![0-9A-Za-z])")
+_COMPACT_DATE_DIGITS = re.compile(r"(?<![0-9A-Za-z])[0-9]{8}(?![0-9A-Za-z])")
 _MONTHS = {name: number for number, names in enumerate((
     ("jan", "january"), ("feb", "february"), ("mar", "march"),
     ("apr", "april"), ("may",), ("jun", "june"), ("jul", "july"),
@@ -79,15 +89,17 @@ def _holds_a_digit(text: str) -> bool:
     return any(ch.isdigit() for ch in text)
 
 
-def _numeric_dates(line: str) -> List[Span]:
+def _numeric_dates(line: str, ocr: bool = True) -> List[Span]:
     found = []
-    for match in _NUMERIC_DATE.finditer(line):
+    numeric, compact = ((_NUMERIC_DATE, _COMPACT_DATE) if ocr
+                        else (_NUMERIC_DATE_DIGITS, _COMPACT_DATE_DIGITS))
+    for match in numeric.finditer(line):
         if not _holds_a_digit(match.group(0)):
             continue
         fields = [match.group(i).translate(_CONFUSABLES) for i in (1, 3, 4)]
         if all(f.isdigit() for f in fields) and _numeric_date_ok(*fields):
             found.append(match.span())
-    for match in _COMPACT_DATE.finditer(line):
+    for match in compact.finditer(line):
         if not _holds_a_digit(match.group(0)):
             continue
         text = match.group(0).translate(_CONFUSABLES)
@@ -128,7 +140,7 @@ def _month_dates(line: str) -> List[Span]:
     return found
 
 
-def date_spans(line: str) -> List[Span]:
+def date_spans(line: str, ocr: bool = True) -> List[Span]:
     """Spans of `line` that look like a date.
 
     Numeric `D-M-Y`, `M-D-Y` and `Y-M-D` with one separator (`/`, `.`,
@@ -137,8 +149,13 @@ def date_spans(line: str) -> List[Span]:
     case, beside a day and/or a year. A day/month pair must read as day
     1-31 and month 1-12 in at least one order. Times of day are not dates
     (owner ruling Q-B13 (a)): a colon is no separator.
+
+    With `ocr` (the default, for burned-in text) a numeric field may hold
+    OCR's digit confusables (`O`, `I`, `l`, `|`, `S`, `B`); without it
+    (header text, #1130) only digits. A dotted triple whose last field
+    has two digits reads as a date (`2.1.10`), by owner ruling Q8 (a).
     """
-    return sorted(set(_numeric_dates(line) + _month_dates(line)))
+    return sorted(set(_numeric_dates(line, ocr) + _month_dates(line)))
 
 
 # --- ids ---------------------------------------------------------------------
@@ -349,7 +366,28 @@ def name_spans(line: str) -> List[Span]:
     return sorted(found)
 
 
-_FINDERS = {"names": name_spans, "dates": date_spans, "ids": id_spans}
+#: The spaCy labels `orgs` reads (#1130, owner rulings Q11 (b) and R14):
+#: organisations, facilities and countries, cities and states. `LOC`
+#: (mountains, rivers, regions) and `NORP` are left out.
+ORG_LABELS = ("ORG", "FAC", "GPE")
+
+
+def org_spans(line: str) -> List[Span]:
+    """Spans of `line` that spaCy reads as an `ORG`, `FAC` or `GPE`, on the
+    line title-cased only, never as read (owner ruling R14: measured,
+    title-casing alone over-removed least). `_title_cased` keeps one
+    character for one, so a span of the title-cased text is a span of
+    `line`. There is no fallback: with no model this raises.
+    """
+    model = _nlp()
+    with _NLP_LOCK:
+        return sorted({(ent.start_char, ent.end_char)
+                       for ent in model(_title_cased(line)).ents
+                       if ent.label_ in ORG_LABELS})
+
+
+_FINDERS = {"names": name_spans, "dates": date_spans, "ids": id_spans,
+            "orgs": org_spans}
 
 
 def spans(line: str, kinds: Iterable[str]) -> Dict[str, List[Span]]:

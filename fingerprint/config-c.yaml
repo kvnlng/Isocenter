@@ -1,0 +1,50 @@
+# Configuration C of the output fingerprint (#717; scripts/output_fingerprint.py).
+# Configuration B plus the opt-in rules of #1130, #1131 and #1132, so what
+# a configuration may ask for and the defaults never do is on the
+# fingerprint too, without moving a cell of A or B (owner ruling Q9 (b),
+# 2026-10-16): a creator-scoped private rule, SCRUB on Study and Series
+# Description, and a structured report's Content Sequence kept with its
+# Text Values scrubbed. One arm, C.dicom: header text does not depend on
+# pixel compression, and every export is Explicit VR Little Endian (#1107).
+#
+# No SCRUB target names `orgs`. It needs spaCy and its model, which the
+# free-threaded build cannot install and which is deliberately not pinned,
+# so a recording with it would differ between 3.12 and 3.14t and move with
+# every model. `names`, `dates` and `ids` need no model.
+#
+# Editing this file changes what is measured: retake fingerprint/output.json
+# in the same change.
+version: '2.0'
+privacy_profile: basic
+phi_tags:
+  0008,0020:
+    action: JITTER
+    name: Study Date
+  0010,0040:
+    action: KEEP
+    name: Patient's Sex
+  0010,1010:
+    action: KEEP
+    name: Patient's Age
+  '0009,"GEMS_IDEN_01",27':
+    action: REMOVE
+    name: GE Image actual date
+  0008,1030:
+    action: SCRUB
+    target: [names, dates, ids]
+    name: Study Description
+  0008,103e:
+    action: SCRUB
+    target: [names, dates, ids]
+    name: Series Description
+  0040,a730:
+    action: KEEP
+    name: Content Sequence
+  0040,a160:
+    action: SCRUB
+    target: [names, dates, ids]
+    name: Text Value
+date_jitter:
+  min_days: -365
+  max_days: -1
+remove_private_tags: false

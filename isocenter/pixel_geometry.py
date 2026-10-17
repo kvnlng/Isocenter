@@ -94,6 +94,16 @@ PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
 #: the fact has to be held. `generate_report` counts it for section 5.
 PLANAR_INFERRED_ATTR = "_ISOCENTER_PLANAR_CONFIGURATION_INFERRED"
 
+#: Where an instance, or a nested icon item, records that its source
+#: declared a Planar Configuration (0028,0006) other than 0 under a
+#: syntax whose compressed stream fixes the layout, which was read and
+#: written as 0 (#1137): `"declared"`. Absent otherwise. The same channel,
+#: and the same reasons, as `PLANAR_INFERRED_ATTR`. A key of its own, not
+#: a third value of that one: each of #1134's readers (the export note,
+#: the report's count, the icon's write-back) treats any value under it as
+#: "stated none", so a third value would make all three false at once.
+PLANAR_OVERRIDDEN_ATTR = "_ISOCENTER_PLANAR_CONFIGURATION_OVERRIDDEN"
+
 #: The dtypes this carrier may name, as an allow-list. A stored string is
 #: data, and `np.dtype()` on an arbitrary one is not something a loader
 #: should do.
