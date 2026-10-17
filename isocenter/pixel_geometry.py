@@ -78,6 +78,22 @@ TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
 #: it was given.
 PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
 
+#: Where an instance, or a nested icon item, records that its Planar
+#: Configuration (0028,0006) of 0 was inferred at ingest because the
+#: source stated none (#1134): `"absent"` when the element was missing,
+#: `"empty"` when it was present with no value. Absent from every entity
+#: whose source declared a value.
+#:
+#: The same channel as `PIXEL_DTYPE_ATTR`, for the same reason: a
+#: non-tag key rides `attributes_json` (and an item's attributes, which
+#: are serialised whole), and `DicomExporter._merge` skips `_`-prefixed
+#: keys, so it never reaches a file. Assigned directly, never through
+#: `set_attr`, which lower-cases its key (`SOURCE_SOP_UID_ATTR`'s note).
+#: The export reads it to say, at INFO, that the 0 it writes was
+#: inferred; the source may be gone by then and the store reopened, so
+#: the fact has to be held. `generate_report` counts it for section 5.
+PLANAR_INFERRED_ATTR = "_ISOCENTER_PLANAR_CONFIGURATION_INFERRED"
+
 #: The dtypes this carrier may name, as an allow-list. A stored string is
 #: data, and `np.dtype()` on an arbitrary one is not something a loader
 #: should do.

@@ -116,6 +116,7 @@ from .pixel_geometry import (
     SIDECAR_DTYPE_NAMES,
     GeometryEvidence,
     PIXEL_DTYPE_ATTR,
+    PLANAR_INFERRED_ATTR,
     TAG_DOUBLE_FLOAT_PIXEL_DATA,
     TAG_FLOAT_PIXEL_DATA,
     _CS_UPPER,
@@ -2773,6 +2774,76 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         parent_item.add_sequence_item(tag, seq_item)
 
 
+#: The one transfer syntax under which a colour image with no Planar
+#: Configuration is still refused (#1134, owner ruling of 2026-10-16).
+#: Compared as a string.
+_PLANAR_NOT_INFERRED_UNDER = "1.2.840.10008.1.2.5"  # RLE Lossless
+
+
+def _planar_configuration_to_infer(ds) -> Optional[str]:
+    """`"absent"` or `"empty"` when (0028,0006) is to be read as 0, else None (#1134).
+
+    Planar Configuration is Type 1C, required when Samples per Pixel is
+    above 1, and pydicom refuses a header without it before any decoder
+    runs. By the owner's ruling of 2026-10-16 such an image is read
+    color-by-pixel (0) under every transfer syntax but RLE Lossless, with
+    no check of the pixels and no setting. That is: the dataset holds
+    `PixelData` (Float and Double Float Pixel Data are not decoded here,
+    #226), more than one sample per pixel, and (0028,0006) either missing
+    (`"absent"`) or present with no value (`"empty"`).
+
+    Read only; `_decode_pixels` writes the element.
+
+    Args:
+        ds: The pydicom `Dataset`, or a sequence item with a borrowed
+            `file_meta`.
+
+    Returns:
+        Optional[str]: `"absent"`, `"empty"`, or None for any other
+        dataset, including one any of these reads fail on: pydicom then
+        refuses it in its own words.
+    """
+    try:
+        # RLE's decoder fixes its own layout (planar, segment by segment)
+        # and ignores the element, so no value is "the" inference there;
+        # the exclusion is the ruling, not a decoding necessity.
+        if str(ds.file_meta.TransferSyntaxUID) == _PLANAR_NOT_INFERRED_UNDER:
+            return None
+        if "PixelData" not in ds or int(ds.SamplesPerPixel) <= 1:
+            return None
+        # Raw, with `keep_deferred`: without it pydicom converts a
+        # zero-length element on the spot, and its value is then None
+        # like a deferred element's, so `.value is None` cannot tell
+        # them apart (#740). Zero length is `length == 0`.
+        elem = ds.get_item(0x00280006, keep_deferred=True)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if elem is None:
+        return "absent"
+    if getattr(elem, "is_raw", False) or not hasattr(elem, "VM"):
+        return "empty" if elem.length == 0 else None
+    return "empty" if elem.VM == 0 else None
+
+
+def _planar_configuration_note(how: str) -> str:
+    """The INFO note an export makes for an inferred Planar Configuration.
+
+    Names no file, no header value and no number (#1134).
+
+    Args:
+        how (str): `"absent"` or `"empty"`, as
+            `_planar_configuration_to_infer` answered at ingest.
+
+    Returns:
+        str: The note.
+    """
+    held = "was absent" if how == "absent" else "held no value"
+    return (f"Planar Configuration (0028,0006) {held} in the source file, "
+            f"where an image of more than one sample per pixel requires it "
+            f"(PS3.3 C.7.6.3.1.3); read as 0, color-by-pixel, at ingest, "
+            f"and written as 0. Nothing in the file confirmed that layout.")
+
+
 def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
                    number_of_frames=None,
                    beyond=None) -> Tuple[np.ndarray, str]:
@@ -2788,6 +2859,13 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     8-bit YBR family comes back RGB, and the dataset's own label is left as
     it was. A caller that stores the array has to store this answer with
     it.
+
+    One side effect on `ds`: a colour image with no Planar Configuration,
+    or an empty one, under any syntax but RLE Lossless
+    (`_planar_configuration_to_infer`), is given `PlanarConfiguration` 0
+    on the dataset passed in, before any check of the header (#1134). The
+    file it was read from is not modified. A caller that records the
+    inference asks the predicate before calling this.
 
     pydicom is asked first. For `_IMAGECODECS_FALLBACK_SYNTAXES` only, a
     `RuntimeError` or `ValueError` from pydicom falls through to
@@ -2858,6 +2936,19 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     # (#621; `offset_table_frame_count` offers no count for it, so every
     # door arrives here). Here rather than at each door, so ingest, the
     # Instance door, the readback and an icon refuse each in one sentence.
+    #
+    # A colour image with no Planar Configuration is read as 0 (#1134),
+    # by supplying the element on this in-memory dataset; the source file
+    # is never touched. After the `ts` read, so a `force=True` read with
+    # no file meta still raises first; before `refusal_before_decode` and
+    # the fallback's `_validate_like_pydicom`, because each builds its own
+    # pydicom runner and would otherwise see a header pydicom refuses.
+    # Not an `as_array(planar_configuration=0)` option for the same
+    # reason: only `as_array` takes options, so a native 1-bit colour
+    # file with excess bytes would lose #669's sentence to CPython's
+    # `slice indices must be integers`.
+    if _planar_configuration_to_infer(ds) is not None:
+        ds.PlanarConfiguration = 0
     refusal = refusal_before_decode(ds)
     if refusal is not None:
         raise RuntimeError(refusal)
@@ -2953,9 +3044,12 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
             raise
         # pydicom validates the header only once it has found a plugin, so
         # for JPEG Lossless and JPEG-LS (no plugin here) a file missing
-        # BitsStored, PixelRepresentation or PlanarConfiguration, or
-        # declaring BitsStored 17 under BitsAllocated 16, would reach the
-        # fallback unvalidated. Before the fallback and outside it, so the
+        # BitsStored or PixelRepresentation, or declaring BitsStored 17
+        # under BitsAllocated 16, would reach the fallback unvalidated.
+        # (A missing or empty PlanarConfiguration no longer reaches here
+        # missing: it was supplied as 0 at the top of this function,
+        # #1134, and RLE, the one syntax it is not supplied under, is not
+        # a fallback syntax.) Before the fallback and outside it, so the
         # refusal is pydicom's own `AttributeError` or `ValueError`, not
         # wrapped as a reason imagecodecs could not decode, and before the
         # photometric allow-list, so a header that fails both is refused in
@@ -4045,9 +4139,12 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     interleaved samples, as the top level stores them) or appended to
     `dropped`; a candidate whose item's transfer syntax is not in
     `_CARRIABLE_TRANSFER_SYNTAXES` is dropped undecoded. For a carried
-    icon, the item's PlanarConfiguration is set to 0 and its Photometric
-    Interpretation to the decoded colour space on the graph (`set_attr`,
-    only on a difference). A failed decode never refuses the file.
+    icon, the item's PlanarConfiguration is set to 0 -- when it declared 1,
+    and when it was absent or empty under more than one sample, which
+    also records `PLANAR_INFERRED_ATTR` on the item (#1134) -- and its
+    Photometric Interpretation to the decoded colour space on the graph
+    (`set_attr`, only on a difference). A failed decode never refuses the
+    file.
 
     Args:
         ds (pydicom.Dataset): The enclosing dataset, for its `file_meta`.
@@ -4151,6 +4248,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # `file_meta`; asked before the decode, as at the top level,
             # and kept below only once the decode has succeeded.
             facts = _high_bit_mismatch(item_ds)
+            # The top level's Planar Configuration inference, at this
+            # depth (#1134). Asked before the decode, which supplies the
+            # element on `item_ds`, and recorded below only on carry.
+            item_planar = _planar_configuration_to_infer(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
             # Asked of the decoded samples, so after the decode;
             # inside the borrow, because it walks the frames by the
@@ -4195,6 +4296,12 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         target = resolve_item_path(instance, path)
         if target is not None and target.attributes.get("0028,0006") == 1:
             target.set_attr("0028,0006", 0)
+        # And a colour icon with no Planar Configuration, or an empty one,
+        # carried as 0 with the key, as at the top level (#1134). Without
+        # the `set_attr` the icon would be exported with no (0028,0006).
+        if target is not None and item_planar is not None:
+            target.set_attr("0028,0006", 0)
+            target.attributes[PLANAR_INFERRED_ATTR] = item_planar
         # And the colour space, for the same reason the top-level arm
         # corrects it: the bytes above are whatever pydicom
         # decoded to, and the item's declared label is not consulted by
@@ -5194,6 +5301,19 @@ def ingest_worker(fp: str) -> Tuple:
         # So we MUST ensure PlanarConfiguration=0 in metadata to match our converted data
         if inst.attributes.get("0028,0006") == 1:
             inst.set_attr("0028,0006", 0)
+        # A colour image with no Planar Configuration, or an empty one, is
+        # read as 0 (#1134): the graph holds 0, which describes the stored
+        # interleaved bytes (and so `redact()`'s `set_pixel_data()` writes
+        # no descriptor), and the key records that the 0 was inferred, for
+        # the export's note and the report's count. Asked here, before the
+        # decode below supplies the element on `ds`. Disjoint from the
+        # rewrite above: a declared 1 is not inferred.
+        planar_inferred = _planar_configuration_to_infer(ds)
+        if planar_inferred is not None:
+            inst.set_attr("0028,0006", 0)
+            # Directly, never through `set_attr`, which lower-cases a key;
+            # it rides the save `set_attr` just made due.
+            inst.attributes[PLANAR_INFERRED_ATTR] = planar_inferred
 
         # Extract & Process Pixel Data
         p_bytes = None
@@ -7177,8 +7297,10 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
             table's.
         corrections (list): Where the note goes for each declared Rows,
             Columns, SamplesPerPixel or NumberOfFrames this write
-            overrides (#736), for the parent to log at INFO. `None` means
-            the caller does not collect them.
+            overrides (#736), and for a Planar Configuration of 0 that was
+            inferred at ingest (`PLANAR_INFERRED_ATTR`, #1134), for the
+            parent to log at INFO. `None` means the caller does not
+            collect them.
 
     Raises:
         _PhotometricRefusal: if the *file* would carry more than one
@@ -7359,6 +7481,13 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # overwritten, because that path writes no file.
     if geom.samples >= 3:
         ds.PlanarConfiguration = 0
+        # The 0 was inferred at ingest when the source stated none
+        # (#1134): said at INFO, as the #736 notes are, with no row and no
+        # grade effect (owner ruling of 2026-10-16). Read from the key,
+        # because the source may be gone and the store reopened.
+        how = attributes.get(PLANAR_INFERRED_ATTR)
+        if corrections is not None and how:
+            corrections.append(_planar_configuration_note(how))
 
 
 def _stored_width(arr: np.ndarray, attributes) -> Tuple[int, Optional[str]]:
@@ -8053,8 +8182,9 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             written.
         warnings (list): Appended to with label warnings. Keyword-only,
             no default.
-        corrections (list): Appended to with width notes. Keyword-only,
-            no default.
+        corrections (list): Appended to with width notes, and with the
+            #1134 note for an icon whose Planar Configuration was inferred
+            at ingest. Keyword-only, no default.
     """
     # A post-pass rather than a change to `_merge_sequences`: the merge
     # walks `{tag: DicomSequence}` with no notion of a path, and this
@@ -8193,6 +8323,15 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
                 for note in _width_notes(
                     widened, declared_int(graph_item.attributes, "0028,0102"),
                     item.BitsStored, item.HighBit))
+        # The top level's Planar Configuration note, at this depth
+        # (#1134): the item holds the 0 ingest inferred, which `_merge`
+        # has written, and the key says it was inferred. Only for an item
+        # written here; a removed one carries its own loss row.
+        how = graph_item.attributes.get(PLANAR_INFERRED_ATTR)
+        if how:
+            corrections.append(
+                f"At {_item_path_words(path)}: "
+                f"{_planar_configuration_note(how)}")
         # The label, judged where the pixel element is written: this is the
         # icon's pixel door, as `_write_pixel_geometry` is the top level's.
         # The pydicom item carries `_merge_sequences`' respelling.

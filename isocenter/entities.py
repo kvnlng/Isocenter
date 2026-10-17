@@ -2045,8 +2045,8 @@ class Instance(DicomItem):
                 instance, never the source file. From a file ingest would
                 refuse, in ingest's words: a header pydicom's validation
                 rejects, whether or not pydicom has a plugin for its syntax
-                (`Missing required element: (0028,0006) 'Planar
-                Configuration'`), or a 16-bit YBR_FULL frame.
+                (`Missing required element: (0028,0101) 'Bits
+                Stored'`), or a 16-bit YBR_FULL frame.
                 From the sidecar, when a descriptor written since the
                 frame was stored asks for a reading the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns

@@ -202,6 +202,13 @@ COMMITTED = {
         "no_pixels_under_an_undecodable_syntax-jpip.dcm",
         "no_pixels_under_an_undecodable_syntax-mpeg2.dcm",
         "no_pixels_under_an_undecodable_syntax-private.dcm"],
+    "no_planar_configuration": [
+        "no_planar_configuration-icon.dcm",
+        "no_planar_configuration-jpeg-baseline.dcm",
+        "no_planar_configuration-jpegls.dcm",
+        "no_planar_configuration-native-absent.dcm",
+        "no_planar_configuration-native-empty.dcm",
+        "no_planar_configuration-rle.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
     "number_vr_on_a_date_or_time": ["number_vr_on_a_date_or_time-1.dcm"],
     "offset_table_edges": ["offset_table_edges-agreeing-rle.dcm",

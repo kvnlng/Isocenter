@@ -462,8 +462,11 @@ HEADER_REFUSALS = [
      AttributeError, "(0028,0103) 'Pixel Representation'"),
     ("pixel-representation-2", _with("PixelRepresentation", 2), ValueError,
      "(0028,0103) 'Pixel Representation' value of '2' is invalid"),
-    ("no-planar-configuration", _without("PlanarConfiguration"),
-     AttributeError, "(0028,0006) 'Planar Configuration'"),
+    # No `no-planar-configuration` row since #1134: a missing Planar
+    # Configuration is read as 0, so pydicom accepts the header and the
+    # 1-bit sentence answers, as
+    # test_a_colour_image_with_no_planar_configuration_is_read_interleaved
+    # pins.
     ("planar-configuration-2", _with("PlanarConfiguration", 2), ValueError,
      "(0028,0006) 'Planar Configuration' value of '2' is invalid"),
     ("samples-2", _with("SamplesPerPixel", 2), ValueError,
