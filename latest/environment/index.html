@@ -1220,6 +1220,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#isocenter_require_nlp_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISOCENTER_REQUIRE_NLP_MODEL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#isocenter_worker_faulthandler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1918,6 +1929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#isocenter_require_nlp_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISOCENTER_REQUIRE_NLP_MODEL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#isocenter_worker_faulthandler" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2065,6 +2087,11 @@
 <td style="text-align: left;">Test suite only: <code>1</code> makes the real text-detector test fail instead of skip when the detector cannot run.</td>
 </tr>
 <tr>
+<td style="text-align: left;"><strong><code>ISOCENTER_REQUIRE_NLP_MODEL</code></strong></td>
+<td style="text-align: left;"><code>0</code></td>
+<td style="text-align: left;">Test suite only: <code>1</code> makes the real spaCy-model tests fail instead of skip when spaCy or <code>en_core_web_sm</code> cannot load.</td>
+</tr>
+<tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_WORKER_FAULTHANDLER</code></strong></td>
 <td style="text-align: left;"><code>0</code></td>
 <td style="text-align: left;">Diagnostic: <code>1</code> makes a worker process that is still alive after 240 s dump its stacks, and ends a worker whose exit has not finished 15 s after it began.</td>
@@ -2148,6 +2175,9 @@
 <h2 id="isocenter_require_text_detector"><code>ISOCENTER_REQUIRE_TEXT_DETECTOR</code></h2>
 <p><strong>Default:</strong> <code>0</code>.</p>
 <p>Read by Isocenter's own test suite, never by the package. Set to <code>1</code> to make the real-model test of <code>burned_in_text: {detector: db}</code> fail, rather than skip, when the text detector cannot run (the <code>textdetect</code> extra is not installed, or the shipped model is not the pinned file). <code>tests.yml</code> sets it on every job that is not free-threaded, so a CI install that silently lost OpenCV is a red test and not a skip that reads as a pass (#44's shape, #1121). It stays <code>0</code> on the free-threaded build, where OpenCV publishes no wheel and the detector cannot run.</p>
+<h2 id="isocenter_require_nlp_model"><code>ISOCENTER_REQUIRE_NLP_MODEL</code></h2>
+<p><strong>Default:</strong> <code>0</code>.</p>
+<p>Read by Isocenter's own test suite, never by the package. Set to <code>1</code> to make the real-model tests of <code>SCRUB</code> target <code>orgs</code> and of <code>burned_in_text</code> target <code>names</code> (<code>tests/test_scrub_orgs_with_the_real_model.py</code>) fail, rather than skip, when spaCy or <code>en_core_web_sm</code> cannot load. <code>tests.yml</code> installs the <code>nlp</code> extra and, with <code>python -m spacy download en_core_web_sm</code>, whichever model spaCy picks for the installed spaCy, on every job that is not free-threaded, and sets this there, so a CI install that silently lost the model is a red test and not a skip that reads as a pass (#44's shape, #1130). The model is deliberately not pinned (owner ruling of 2026-10-16), so those tests assert properties, not figures. It stays <code>0</code> on the free-threaded build, where spaCy and thinc publish no wheel. A contributor without the model sees those tests skip.</p>
 <h2 id="isocenter_worker_faulthandler"><code>ISOCENTER_WORKER_FAULTHANDLER</code></h2>
 <p><strong>Default:</strong> <code>0</code>.</p>
 <p>Diagnostic. Set to <code>1</code> to have every worker <em>process</em> arm <code>faulthandler.dump_traceback_later(240, exit=False)</code> at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall <em>inside</em> a pool child becomes a stack trace instead of a silent hang, because the parent's faulthandler cannot see into children. With it set, a worker's exit is also bounded: a worker whose exit has not finished 15 seconds after it began is ended by SIGALRM, so a dump that never finishes cannot hold its pool's shutdown (#844). Leave it off in production runs.</p>

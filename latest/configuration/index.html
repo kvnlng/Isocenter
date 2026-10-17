@@ -1092,6 +1092,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#cleaning-descriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleaning descriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keeping-a-structured-reports-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping a structured report's content
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#private-elements-by-creator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private elements by creator
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2209,6 +2242,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#cleaning-descriptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleaning descriptions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keeping-a-structured-reports-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping a structured report's content
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#private-elements-by-creator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private elements by creator
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2617,7 +2683,7 @@ see <a href="../migration/#configuration-files">Configuration files</a> on the u
 <tr>
 <td style="text-align: left;">top level</td>
 <td style="text-align: left;"><code>phi_tags</code></td>
-<td style="text-align: left;">a mapping of quoted <code>"gggg,eeee"</code> tag, or <a href="#repeating-groups">repeating-group key</a> (<code>"60xx,xxxx"</code>), to rule</td>
+<td style="text-align: left;">a mapping of quoted <code>"gggg,eeee"</code> tag, <a href="#repeating-groups">repeating-group key</a> (<code>"60xx,xxxx"</code>), or <a href="#private-elements-by-creator">private-creator key</a> (<code>'0009,"GEMS_IDEN_01",27'</code>), to rule</td>
 <td style="text-align: left;">no overrides</td>
 </tr>
 <tr>
@@ -2676,8 +2742,8 @@ see <a href="../migration/#configuration-files">Configuration files</a> on the u
 </tr>
 <tr>
 <td style="text-align: left;"><code>phi_tags</code> rule</td>
-<td style="text-align: left;">a string (the tag's name), or a mapping of <code>action</code>, <code>name</code>, <code>value</code></td>
-<td style="text-align: left;"><code>action</code>: one of the <a href="#phi-tags">actions</a>; <code>name</code>: a string, or <code>null</code> (absent); <code>value</code>: a string, or <code>null</code> (absent: <code>REPLACE</code> writes its default)</td>
+<td style="text-align: left;">a string (the tag's name), or a mapping of <code>action</code>, <code>name</code>, <code>value</code>, <code>target</code></td>
+<td style="text-align: left;"><code>action</code>: one of the <a href="#phi-tags">actions</a>; <code>name</code>: a string, or <code>null</code> (absent); <code>value</code>: a string, or <code>null</code> (absent: <code>REPLACE</code> writes its default); <code>target</code>: a list of distinct <code>names</code>, <code>dates</code>, <code>ids</code>, <code>orgs</code>, which <code>SCRUB</code> requires and no other action takes</td>
 <td style="text-align: left;"></td>
 </tr>
 </tbody>
@@ -2757,14 +2823,14 @@ report of that store grades <code>REVIEW_REQUIRED</code> (see <a href="#what-to-
 <p>Any other value is refused: <code>load_config()</code> raises <code>ValueError</code> naming it.</p>
 <p><strong>A built-in profile's name is pinned to the PS3.15 edition its table was taken from.</strong> <code>basic@2026c</code> is the name, and a bare <code>basic</code> means <code>basic@2026c</code> in every 1.x: both load the same rules, and <code>session.configuration.privacy_profile</code> holds <code>"basic@2026c"</code> after either, so <code>save()</code> writes the pinned name back. <code>create_config()</code> writes it. A later PS3.15 edition arrives in a minor release as a new name, under a new configuration schema minor, never as a new meaning for this one. A name is looked up exactly: <code>basic@2026C</code> is refused, and so is <code>Basic</code> unless a file of that name exists, in which case it loads as an external profile. A value containing <code>@</code> that this version does not ship raises <code>ValueError</code> saying which names it ships; such a value is never read as a file path.</p>
 <h4 id="the-floor-policy">The floor policy</h4>
-<p>A session that has loaded no configuration applies the <strong>floor policy</strong>: <code>basic@2026c</code> with three of its 648 rules changed to the research defaults <code>create_config()</code> writes. Study Date is jittered rather than emptied, and Patient's Sex and Patient's Age are kept. Private tags are removed, as <code>remove_private_tags</code> defaults to <code>true</code>. The floor is built on <code>basic@2026c</code> in every 1.x. The compliance report names it (<code>None (session defaults: the floor policy over basic@2026c)</code>), and says <code>None (no base profile)</code> for a session under <code>privacy_profile: none</code>, or under an external profile that contributed no rules.</p>
+<p>A session that has loaded no configuration applies the <strong>floor policy</strong>: <code>basic@2026c</code> with three of its 649 rules changed to the research defaults <code>create_config()</code> writes. Study Date is jittered rather than emptied, and Patient's Sex and Patient's Age are kept. Private tags are removed, as <code>remove_private_tags</code> defaults to <code>true</code>. The floor is built on <code>basic@2026c</code> in every 1.x. The compliance report names it (<code>None (session defaults: the floor policy over basic@2026c)</code>), and says <code>None (no base profile)</code> for a session under <code>privacy_profile: none</code>, or under an external profile that contributed no rules.</p>
 <p><strong>Omitting <code>privacy_profile</code> means the floor beneath your <code>phi_tags</code>.</strong> A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. A bare <code>privacy_profile:</code> line (YAML null) is the same as leaving the line out. To opt a single tag out, give it <code>action: "KEEP"</code>; to opt out of the floor entirely, write <code>privacy_profile: "none"</code>.</p>
 <h4 id="none">none</h4>
 <p>No base. The file's <code>phi_tags</code> are the whole policy. Patient's Name, Patient ID and Study Date are still replaced unless a rule says otherwise (see <a href="#patients-name-patient-id-and-study-date">below</a>); any other standard tag the file does not name is exported as ingested. Private tags still follow <code>remove_private_tags</code>, which defaults to <code>true</code>.</p>
 <h4 id="external-profile-file">External profile file</h4>
 <p>A path to another YAML file (e.g., <code>./profiles/my_hospital_standard.yaml</code>) inherits its rules. That file carries its rules under a <code>phi_tags:</code> mapping and nothing else, beside an optional <code>version</code>; any other key raises <code>ValueError</code> naming it. A profile file contributes only its <code>phi_tags</code>, so a <code>privacy_profile: basic</code> or <code>remove_private_tags:</code> line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises <code>ValueError</code> too.</p>
 <h4 id="what-basic2026c-contains">What basic@2026c contains</h4>
-<p><code>basic@2026c</code> (short form <code>basic</code>) is the Basic Profile column of <em>DICOM PS3.15 Annex E, Table E.1-1</em>, <strong>edition 2026c</strong>: 648 tag rules. Each row maps to a rule:</p>
+<p><code>basic@2026c</code> (short form <code>basic</code>) is the Basic Profile column of <em>DICOM PS3.15 Annex E, Table E.1-1</em>, <strong>edition 2026c</strong>, as 649 tag rules. The table has 656 rows, and 647 of them give a rule. The other nine give none: the two <code>X/Z/U*</code> sequences, Referenced Image Sequence and Source Image Sequence, which are kept while the UIDs inside them are replaced as rows of their own; the private-attribute row <code>gggg,eeee</code>, which is the <code>remove_private_tags</code> sweep; the four sequences listed below as having no rule (Verifying Observer, Flow Identifier, Waveform Annotation and Icon Image); and Overlay Data and Overlay Comments, which are folded into the overlay group rule. The other two rules are on keys the table has no row for: the overlay group <code>60xx,xxxx</code> and Referenced File ID <code>(0004,1500)</code>. A row's code maps to a rule as follows:</p>
 <ul>
 <li><code>X</code> removes the attribute.</li>
 <li><code>Z</code> and <code>X/Z</code> empty it, so a Type 2 attribute stays present.</li>
@@ -2823,7 +2889,7 @@ report of that store grades <code>REVIEW_REQUIRED</code> (see <a href="#what-to-
 <li>Person Identification Code Sequence is Type 1 inside the Person Identification Macro, so emptying it and removing it both break that rule. It stays emptied.</li>
 </ul>
 </li>
-<li><strong>A Structured Report is exported without its content tree, and a presentation state without its annotations.</strong> Content Sequence <code>(0040,A730)</code> holds the content items of an SR document (a report, a measurement report, a Key Object Selection), and a TEXT item's Text Value <code>(0040,A160)</code> is free text that no row of the table reaches. Graphic Annotation Sequence <code>(0070,0001)</code> holds a presentation state's text and graphic objects, and an object's Tracking ID <code>(0062,0020)</code> and a major tick's Tick Label <code>(0070,0289)</code> are free text that no row reaches either. The rows nested inside cannot clean such text, so the sequence is removed. To keep either, give its key <code>action: "KEEP"</code>. The rows inside a kept sequence still apply: names and dates hold their dummies, Unformatted Text Value is replaced, and UIDs are replaced. The free text no row reaches is exported as written, because the table's Clean Structured Content and Clean Graphics options, which would clean it, are not implemented.</li>
+<li><strong>A Structured Report is exported without its content tree, and a presentation state without its annotations.</strong> Content Sequence <code>(0040,A730)</code> holds the content items of an SR document (a report, a measurement report, a Key Object Selection), and a TEXT item's Text Value <code>(0040,A160)</code> is free text that no row of the table reaches. Graphic Annotation Sequence <code>(0070,0001)</code> holds a presentation state's text and graphic objects, and an object's Tracking ID <code>(0062,0020)</code> and a major tick's Tick Label <code>(0070,0289)</code> are free text that no row reaches either. The rows nested inside cannot clean such text, so the sequence is removed. To keep either, give its key <code>action: "KEEP"</code>. The rows inside a kept sequence still apply: names and dates hold their dummies, Unformatted Text Value is replaced, and UIDs are replaced. The free text no row reaches is exported as written, because the table's Clean Structured Content and Clean Graphics options, which would clean it, are not implemented. A kept SR's Text Values can be cleaned with <a href="#keeping-a-structured-reports-content"><code>SCRUB</code></a>.</li>
 <li>The table's other sequences coded <code>D</code> have no rule: Verifying Observer Sequence and Flow Identifier Sequence. Every identifying attribute their items can hold is a row of its own and is handled where it sits, so the items stay valid. Waveform Annotation Sequence is below.</li>
 <li>Study and Series Description are emptied rather than removed, because the export directory names read them.</li>
 <li>Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned. An icon is dropped when its pixels may show what redaction removed, in two tiers: an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a <em>different</em> instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export.</li>
@@ -2831,6 +2897,7 @@ report of that store grades <code>REVIEW_REQUIRED</code> (see <a href="#what-to-
 <li>A presentation state's Bitmap Display Shutter can name an overlay group this removes: Shutter Overlay Group <code>(0018,1623)</code> is kept as written, and then points at a group the file no longer has. PS3.15 Annex E is the authority on what the profile removes: for the overlay group, E.1.1's sentence on overlays quoted above, and for every other attribute, Table E.1-1, which has no row for Shutter Overlay Group. Isocenter does not second-guess either for one object: it neither keeps a group because a shutter names it nor removes the shutter. Removing Overlay Data alone, as the table's own row does, already left that presentation state without a Type 1 element. Where it must stay valid, keep the overlays: <code>"60xx,xxxx": {action: KEEP}</code>.</li>
 </ul>
 </li>
+<li><strong>Referenced File ID <code>(0004,1500)</code> is removed, a rule the table does not have.</strong> It is a Directory Record element of the Basic Directory IOD (the DICOMDIR, PS3.3 Annex F), not part of any composite instance, so in an image file it is an anomaly. Its value is a file-set path, which sites build from MRNs, accession numbers or dates. Table E.1-1 has no row for it, so through 1.0.0rc20 an image file carrying one exported it as written (<a href="https://github.com/kvnlng/Isocenter/issues/1133">#1133</a>). The rule is on that element alone, wherever it sits, nested items included, and not on group 0004: Referenced SOP Instance UID in File <code>(0004,1511)</code> keeps its <code>U</code> row, and the other Directory Structuring elements have no rule. To keep it, give <code>"0004,1500"</code> <code>action: "KEEP"</code>.</li>
 <li>Isocenter's own redaction note in Derivation Description <code>(0008,2111)</code> is kept; any other Derivation Description is removed.</li>
 <li>Private attributes are the <code>remove_private_tags</code> sweep, not a rule.</li>
 </ul>
@@ -2970,6 +3037,7 @@ report of that store grades <code>REVIEW_REQUIRED</code> (see <a href="#what-to-
 <li><code>true</code>: Removes <strong>ALL</strong> private tags, including private sequences at every depth. (Recommended for safety.)</li>
 <li><code>false</code>: Retains them (Use only if you are sure they are safe or strictly needed for analysis).</li>
 </ul>
+<p>The sweep is not narrowed by a rule: under <code>true</code> every private element is removed, and a <code>KEEP</code> on one, by its tag or by its <a href="#private-elements-by-creator">creator</a>, does not keep it. To keep some private elements and remove others, set <code>false</code> and write a rule for each one to remove.</p>
 <h4 id="the-65534-byte-limit">The 65534-byte limit</h4>
 <p>The flag governs the private tags Isocenter <em>holds</em>, which is not every
 private tag in your source files. Whether a private value is held is
@@ -3143,7 +3211,7 @@ own <code>WARNING</code> row says so.</p>
 section but does not change the grade.</p>
 </div>
 <h3 id="phi-tags">PHI Tags</h3>
-<p>Define specific rules for individual DICOM tags. Keys are <code>"gggg,eeee"</code> hex strings (e.g. <code>"0010,0010"</code>); case is normalised on load, so either case works. <strong>Default:</strong> no overrides; the profile's rules apply.</p>
+<p>Define specific rules for individual DICOM tags. Keys are <code>"gggg,eeee"</code> hex strings (e.g. <code>"0010,0010"</code>), <a href="#repeating-groups">repeating-group keys</a>, or <a href="#private-elements-by-creator">private-creator keys</a> (<code>'0009,"GEMS_IDEN_01",27'</code>); hex case is normalised on load, so either case works, and a private creator's case is kept. <strong>Default:</strong> no overrides; the profile's rules apply.</p>
 <p><strong>Supported Actions:</strong></p>
 <table>
 <thead>
@@ -3184,9 +3252,14 @@ section but does not change the grade.</p>
 <td style="text-align: left;">Explicitly retains the original value (Exception to profile).</td>
 <td style="text-align: left;"><code>action: "KEEP"</code></td>
 </tr>
+<tr>
+<td style="text-align: left;"><strong><code>SCRUB</code></strong></td>
+<td style="text-align: left;">Keeps a description and removes the identifiers inside it: the kinds its <code>target</code> names (<code>names</code>, <code>dates</code>, <code>ids</code>, <code>orgs</code>), with a connecting word directly before each. A value left with nothing is written as <code>ANONYMIZED</code>. LO, LT, SH, ST, UC and UT only, and private tags. See <a href="#cleaning-descriptions">Cleaning descriptions</a>.</td>
+<td style="text-align: left;"><code>action: "SCRUB"</code>, <code>target: [dates, ids]</code></td>
+</tr>
 </tbody>
 </table>
-<p>A rule mapping's keys are <code>action</code>, <code>name</code> and <code>value</code>; any other key raises <code>ValueError</code> naming it. Any other action makes <code>load_config()</code> raise <code>ValueError</code> naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by <code>set_phi_tag()</code> and by <code>audit()</code> for a <code>phi_tags</code> assigned in code:</p>
+<p>A rule mapping's keys are <code>action</code>, <code>name</code>, <code>value</code> and <code>target</code>; any other key raises <code>ValueError</code> naming it. Any other action makes <code>load_config()</code> raise <code>ValueError</code> naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by <code>set_phi_tag()</code> and by <code>audit()</code> for a <code>phi_tags</code> assigned in code:</p>
 <ul>
 <li>a <code>value:</code> under any action but <code>REPLACE</code>, a <code>value:</code> that is not a string, or a <code>replacement:</code> key (a 0.9.x spelling; rename it <code>value:</code>);</li>
 <li>a Patient ID <code>(0010,0020)</code> rule other than <code>KEEP</code> or <code>REPLACE</code> with no value;</li>
@@ -3195,6 +3268,8 @@ section but does not change the grade.</p>
 <li><code>SHIFT</code> or <code>JITTER</code> on a standard tag that is not DA or DT;</li>
 <li><code>REPLACE</code> on a standard tag whose VR cannot hold what it writes. With no <code>value:</code>, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (<code>US or SS</code>). With a <code>value:</code>, a value the VR cannot hold, such as text in a DA. Use <code>EMPTY</code> or <code>REMOVE</code>, <code>JITTER</code> for a date, or a <code>value:</code> the VR can hold. Study Date's <code>REPLACE</code> with no value is the shift and is allowed.</li>
 <li>a <a href="#repeating-groups">repeating-group key</a> with an action other than <code>REMOVE</code> or <code>KEEP</code>, or in its string form;</li>
+<li><code>SCRUB</code> with no <code>target</code>, or a <code>target</code> that is not a list of distinct <code>names</code>, <code>dates</code>, <code>ids</code> and <code>orgs</code> (<code>any</code>, an empty list, a bare string, a kind twice), or a <code>target</code> under any other action;</li>
+<li><code>SCRUB</code> on a standard tag whose VR is not LO, LT, SH, ST, UC or UT (a Person Name, a code string, a UID, a date, a number, a sequence), or on Patient ID;</li>
 <li>a <code>REPLACE</code> <code>value:</code> holding a range: a <code>-</code> in a DA or TM, or in a DT anywhere but its UTC offset at the end (<code>20230515104822-0500</code> is one DateTime; <code>20230101-20230201</code> is a range);</li>
 <li>a <code>REPLACE</code> <code>value:</code> whose count of <code>\</code>-separated values the standard tag's value multiplicity does not allow: a <code>\</code> on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.</li>
 </ul>
@@ -3217,11 +3292,98 @@ section but does not change the grade.</p>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="s">"60xx,4000"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="s">"REMOVE"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1">#    as the table's own two rows do</span>
 </code></pre></div>
 <p>An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its <code>DATA_LOSS</code> row from ingest (see <a href="#the-65534-byte-limit">The 65534-byte limit</a>). Every element removed has its own <code>REMEDIATION_REMOVE</code> row.</p>
-<p><strong>Example:</strong></p>
+<h4 id="cleaning-descriptions">Cleaning descriptions</h4>
+<p>A description can carry an identifier inside clinical text a study selects series by: <code>MR BREAS UNIT for 736-69-8140</code>. <code>REMOVE</code> loses the clinical part with it. <code>SCRUB</code> is PS3.15's Clean Descriptors Option (E.3.5, the <code>C</code> of Table E.1-1's Clean Desc. column) as a rule: keep the value, remove the identifying information inside it (<a href="https://github.com/kvnlng/Isocenter/issues/1130">#1130</a>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">phi_tags</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"EMPTY"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"StudyDescription"</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="s">"0010,0030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"SHIFT"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"PatientBirthDate"</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"REPLACE"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"value"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"Project-X"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"InstitutionName"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">SCRUB</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">],</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Study Description</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="s">"0008,103e"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">SCRUB</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">],</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Series Description</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Source value</th>
+<th style="text-align: left;"><code>target: [names, dates, ids]</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>MR BREAS UNIT for 736-69-8140</code></td>
+<td style="text-align: left;"><code>MR BREAS UNIT</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MA SURGICAL SPECIMEN for 7516817726</code></td>
+<td style="text-align: left;"><code>MA SURGICAL SPECIMEN</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>MA SURGICAL SPECIMEN 20170707</code></td>
+<td style="text-align: left;"><code>MA SURGICAL SPECIMEN</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>Standard Breast Imaging Report for Elena Marsh</code>, in a file whose Patient's Name is <code>MARSH^ELENA</code> (an illustrative example)</td>
+<td style="text-align: left;"><code>Standard Breast Imaging Report</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>target</code> is required, and lists the kinds to remove, in an order that decides only how a span two kinds find is counted:</p>
+<ul>
+<li><strong><code>dates</code></strong>: a date shape: <code>D-M-Y</code>, <code>M-D-Y</code> or <code>Y-M-D</code> with one separator (<code>/</code>, <code>.</code>, <code>-</code> or a space) used twice, <code>YYYYMMDD</code>, or a month name beside a day or a year. Digits only, unlike burned-in text, which reads OCR's confusables. A dotted triple whose last field has two digits reads as a date: <code>Version 3.10.21</code> becomes <code>Version</code>, while <code>0.2.0</code> and <code>dcmqi 1.2.4</code> are kept.</li>
+<li><strong><code>ids</code></strong>: a run of 6 or more letters and digits (with <code>-</code> or <code>_</code> inside) holding 5 or more digits. A shorter accession number, such as <code>A1234</code>, is not removed.</li>
+<li><strong><code>names</code></strong>: the words of the Person Names the same instance holds, at any depth, and its patient's name: the family, given and middle components, 2 or more characters each, matched whole-word in any case. A name prefix or suffix (<code>Dr</code>, <code>Jr</code>) is not a word to remove, and a name already replaced (<code>ANONYMIZED</code>) is none. No model is used: spaCy's person finder, measured on header text, emptied clinical descriptions (<code>SAG T1</code>, <code>MAMMO SCREENING BILATERAL</code>) and missed a mixed-case full name. Its cost is a patient or physician whose name is also a clinical word (<code>LONG</code>, <code>HEAD</code>, <code>WHITE</code>): that word is removed from that patient's descriptions.</li>
+<li><strong><code>orgs</code></strong>: spaCy's <code>ORG</code>, <code>FAC</code> and <code>GPE</code> entities (organisations, facilities, countries and cities), read on the value title-cased, since <code>en_core_web_sm</code> misses most upper-case names. It needs the <code>nlp</code> extra and its model (<code>pip install "isocenter[nlp]"</code>, <code>python -m spacy download en_core_web_sm</code>); without them <code>audit()</code> raises <code>NlpUnavailableError</code> (a <code>RuntimeError</code>) before anything is scanned, never <code>load_config()</code>. spaCy publishes no free-threaded wheel, so on the free-threaded build <code>orgs</code> is unavailable. <strong>It removes text that is not a site.</strong> Measured with en_core_web_sm 3.8.0 and spaCy 3.8.16 on 2026-10-16; Isocenter does not pin the model, and these figures may change as the model changes:<ul>
+<li>of 47 typical clinical descriptions, it changed 14 on the corpus the design was measured on, and 13 on the corpus the tests carry (<code>tests/support/scrub_corpus.py</code>). Among them <code>MR BREAST BILATERAL</code> became <code>MR</code>, <code>US ABDOMEN COMPLETE</code> became <code>ABDOMEN COMPLETE</code>, and <code>Nodule 1</code>, <code>Brain Tumor Protocol</code>, <code>Mayo Protocol</code>, <code>Boston Scientific</code> and <code>Siemens Somatom Definition</code> were emptied. Read as written and title-cased together, which does not ship, it changed 28 of 47;</li>
+<li>it damages text it is not aimed at: <code>MR BREAS UNIT for 736-69-8140</code> became <code>MR UNIT</code>, reading <code>Breas</code> as an organisation, and <code>MR BREAS, UNIT at MSCH</code> became <code>MR, UNIT at MSCH</code>, missing <code>MSCH</code>;</li>
+<li>it found <code>Harris Community Clinic</code> in <code>LUNG CA ACCRIN 6668 at Harris Community Clinic</code>, which became <code>LUNG CA ACCRIN 6668</code>.</li>
+</ul>
+</li>
+</ul>
+<p><code>orgs</code> is for text known to carry site names, and keeps the model's mistakes. <code>REMOVE</code> remains the exact answer.</p>
+<p>What is removed with a span, and what is left:</p>
+<ul>
+<li><strong>A connecting word</strong> directly before a span goes with it: <code>for</code>, <code>at</code>, <code>by</code>, <code>per</code>, <code>from</code>, in any case, with an optional <code>.</code>. A title (<code>Dr</code>, <code>Mr</code>, <code>Mrs</code>, <code>Ms</code>, <code>Miss</code>, <code>Prof</code>) goes with a <code>names</code> span only. A connecting word elsewhere stays: <code>Report for Breast</code> is unchanged.</li>
+<li><strong>The tidy.</strong> Where two of <code>,;:-/|</code> would meet at a cut, one is kept (<code>A - 1234567 - B</code> becomes <code>A - B</code>); whitespace a cut leaves before <code>,</code>, <code>;</code> or <code>:</code> is removed; runs of whitespace become one space; and the ends are stripped of whitespace and <code>,;:-/_|.</code>. Brackets are not balanced: <code>(1234567) scan</code> becomes <code>() scan</code>. A value nothing is found in is left exactly as it is.</li>
+<li><strong>A value left with nothing</strong> is written as <code>ANONYMIZED</code>, the dummy <code>REPLACE</code> writes, never empty: a Type 1C element such as a TEXT item's Text Value cannot be zero-length. A value that is not text (bytes, a number) is replaced by that dummy too, with a row saying <code>SCRUB could not read the value as text; replaced by its dummy</code>. A multi-valued element is cleaned value by value.</li>
+<li>SCRUB only deletes characters, so the result is never longer than the value. It is repeated until it finds nothing more, so a second <code>audit()</code>, here or after a reopen, finds nothing.</li>
+</ul>
+<p>Each element cleaned has one <code>REMEDIATION_REPLACE</code> row of counts only: <code>Scrubbed &lt;uid&gt; (Tag 0008,103e): removed 1 id, 1 date</code>. Neither the source text nor the cleaned text is written to the audit log or the session's log; the finding's own value is the source, as for every finding.</p>
+<p><code>SCRUB</code> applies to a standard tag whose VR is LO, LT, SH, ST, UC or UT, at any depth, and to a private tag, by its tag or its <a href="#private-elements-by-creator">creator</a>. It is refused on any other VR, on Patient ID, on a <a href="#repeating-groups">repeating-group key</a>, and without a <code>target</code>. In code: <code>set_phi_tag("0008,103e", "SCRUB", target=["dates", "ids"])</code>, or assign <code>configuration.phi_tags["0008,103e"] = {"action": "SCRUB", "target": ["dates", "ids"]}</code>, which <code>audit()</code> checks; an assignment is not saved by <code>auto_save</code>.</p>
+<h4 id="keeping-a-structured-reports-content">Keeping a structured report's content</h4>
+<p><code>basic@2026c</code> removes an SR's Content Sequence <code>(0040,A730)</code> (see <a href="#what-basic2026c-contains">the departures above</a>), so a de-identified report keeps its header and nothing it reports: measurements, coded findings, segmentation references and algorithm provenance. With <a href="#cleaning-descriptions"><code>SCRUB</code></a> on Text Value, a configuration can keep the tree and clean the free text inside it (<a href="https://github.com/kvnlng/Isocenter/issues/1131">#1131</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">basic</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">phi_tags</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="s">"0040,a730"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Content Sequence</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># departs from basic@2026c's REMOVE (#848)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="s">"0040,a160"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">SCRUB</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">],</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Text Value</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="s">"0040,0555"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Acquisition Context Sequence</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># optional, the same pattern</span>
+</code></pre></div>
+<ul>
+<li><strong>The rows nested in content items keep applying inside the kept tree</strong>, as <code>basic@2026c</code> defines them: Person Name <code>(0040,A123)</code>, Date <code>(0040,A121)</code>, Time <code>(0040,A122)</code> and DateTime <code>(0040,A120)</code> hold their dummies, and UID <code>(0040,A124)</code>, Observation UID <code>(0040,A171)</code> and Referenced SOP Instance UID <code>(0008,1155)</code> are replaced. To shift the dates instead, add <code>"0040,a121": { action: JITTER }</code> (and <code>0040,a120</code>).</li>
+<li><strong>Coded and numeric content is kept as written</strong>: Code Meaning, concept names, Value Types, Numeric Value, Measurement Units and Template Identifier. No rule reaches them.</li>
+<li><strong>Text Value is cleaned at every depth.</strong> A TEXT item's Text Value is Type 1C, required whenever Value Type is TEXT (PS3.3, Table 10-2, Content Item Macro), so one cleaned to nothing is written <code>ANONYMIZED</code>, never empty. The <code>names</code> kind reads the instance's own Person Names, so an observer's name in a PNAME item is removed from the report's own text.</li>
+<li>Acquisition Context <code>(0040,0555)</code> and Specimen Preparation <code>(0040,0610)</code> hold content items too, and follow the same pattern: keep the sequence, and the SCRUB on Text Value reaches the items inside.</li>
+<li><strong>Keeping the tree with no rule on Text Value</strong> keeps every Text Value as written, with no warning: Text Value has no row in Table E.1-1, and what is private beyond the table is the configuration's call.</li>
+</ul>
+<p><strong>This is not PS3.15's Clean Structured Content Option.</strong> E.3.4 cleans content items by what they mean: Table E.3.4-1 gives an action for each Concept Name Code, and marks 64 TEXT concepts <code>X</code>, among them Accession Number <code>(121022, DCM)</code>, Filler Number <code>(121021, DCM)</code>, Identifier <code>(125010, DCM)</code> and Identifier within Person Observer's Role <code>(128775, DCM)</code>. A tag-level <code>SCRUB</code> on Text Value cannot tell those items apart: it removes what looks like a date, an ID or the instance's names in any TEXT item, and leaves a 5-character identifier, which <code>ids</code> does not reach. Concept-keyed cleaning is a follow-up. The export writes no option code for it, and <code>(0012,0063)</code> names the policy's hash, so no exported file claims the option.</p>
+<h4 id="private-elements-by-creator">Private elements by creator</h4>
+<p>A private element's tag is not its identity. PS3.5 7.8.1 gives each private creator a block: the creator's name sits at <code>gggg,00BB</code>, and its elements at <code>gggg,BBee</code>. The block is chosen per file, so one vendor's element can sit at <code>0009,1027</code> in one file and at <code>0009,1127</code> in another, and another vendor's element can sit at <code>0009,1027</code> too. A rule keyed by the concrete tag hits whatever is there (<a href="https://github.com/kvnlng/Isocenter/issues/1132">#1132</a>).</p>
+<p>A key <code>gggg,"CREATOR",ee</code> names the element by its creator and its offset <code>ee</code> in the creator's block, the way PS3.15 Table E.3.10-1 names safe private attributes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">remove_private_tags</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">phi_tags</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",27'</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">REMOVE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">GE Image actual date</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<ul>
+<li>It matches the element <code>gggg,BBee</code> of a dataset or sequence item whose own <code>gggg,00BB</code> holds <code>CREATOR</code>. A sequence item has its own creators, and they are the ones read.</li>
+<li>Spaces around the creator's value are padding and are ignored; its case is compared exactly (<code>gems_iden_01</code> is another creator). The key's hex digits may be written in either case.</li>
+<li>It never touches another creator's element, whatever tag that element sits at, and an element whose block names no creator matches no creator key.</li>
+<li>For one element, a creator key wins over a concrete-tag key. A concrete-tag key keeps its meaning for every other element at that tag.</li>
+<li>Every action loads on it that loads on a concrete private tag. A private sequence can be named this way too.</li>
+<li>The audit row names the creator: <code>Removed Tag 0009,1127 (creator GEMS_IDEN_01) from &lt;uid&gt;</code>. A creator is a vendor's block name, not PHI.</li>
+<li>The group must be odd and not <code>0001</code>, <code>0003</code>, <code>0005</code>, <code>0007</code> or <code>ffff</code>; the creator must be 1 to 64 characters, with no backslash or control character, in double quotes; the offset must be two hex digits. Anything else raises <code>ValueError</code> naming the key, at <code>load_config()</code> and at every other door (<code>set_phi_tag()</code>, <code>configuration.phi_tags</code> assigned in code, <code>audit()</code>).</li>
+<li>It applies only while private tags are kept: under <code>remove_private_tags: true</code> the sweep removes every private element first (see <a href="#private-tags">Private Tags</a>).</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">phi_tags</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"EMPTY"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"StudyDescription"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="s">"0010,0030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"SHIFT"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"PatientBirthDate"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"REPLACE"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"value"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"Project-X"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"InstitutionName"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <h3 id="what-an-exported-file-says-about-itself">What an exported file says about itself</h3>
 <p><code>export(format="dicom")</code> writes up to three elements that say how the file was de-identified. They state which software ran and which policy it applied. They do not say whether that policy is enough: that is your configuration's call.</p>
@@ -3317,22 +3479,22 @@ section but does not change the grade.</p>
 <h3 id="pixel-redaction-machines">Pixel Redaction (Machines)</h3>
 <p>Blacks out burned-in text (pixels) on specific devices. Isocenter identifies the machine by the Device Serial Number <code>(0018,1000)</code> of each series. <strong>Default:</strong> no rules, so no pixels are redacted.</p>
 <p>Worked example: <a href="../tutorials/redact-burned-in-pixels/">Redact burned-in text for one machine</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-9999"</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Documentation</span><span class="nv"> </span><span class="s">Only"</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-9999"</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Documentation</span><span class="nv"> </span><span class="s">Only"</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <ul>
 <li><strong><code>serial_number</code></strong>: Exact match for <code>0018,1000</code>; <code>""</code> (quoted) for every series with no Device Serial Number, including a series whose files name no manufacturer, no model and no serial (it has no equipment); a series whose files carry a serial and nothing else is matched by that serial, not by <code>""</code>; or <code>"*"</code> for every series, with a serial or without. A bare <code>serial_number:</code> is null, and is refused as missing.</li>
 <li>
 <p><strong><code>match</code></strong>: select by device instead of serial, for a machine whose files carry no serial number:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">match</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">      </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="s">"FUJI</span><span class="nv"> </span><span class="s">PHOTO</span><span class="nv"> </span><span class="s">FILM</span><span class="nv"> </span><span class="s">CO.</span><span class="nv"> </span><span class="s">LTD."</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IRS</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">90</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">380</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">match</span><span class="p">:</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">      </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="s">"FUJI</span><span class="nv"> </span><span class="s">PHOTO</span><span class="nv"> </span><span class="s">FILM</span><span class="nv"> </span><span class="s">CO.</span><span class="nv"> </span><span class="s">LTD."</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">      </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">IRS</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">90</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">60</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">380</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>Give <code>manufacturer</code>, <code>model_name</code>, or both. Each is compared exactly with Manufacturer <code>(0008,0070)</code> and Manufacturer's Model Name <code>(0008,1090)</code> as the files spell them, case and spaces included, and the rule covers every series of that device whatever its serial, with one or without. A series whose files name neither is never matched. A rule has exactly one selector: <code>serial_number</code> or <code>match</code>, never both. The <code>manufacturer</code> and <code>model_name</code> keys beside <code>serial_number</code> are still labels, read by nothing, because <code>add_rule()</code> writes <code>Unknown</code> for both by default. <code>get_rule()</code>, <code>update_rule()</code> and <code>delete_rule()</code> look a rule up by its serial and do not see a <code>match</code> rule: write it in the file, or append it to <code>configuration.rules</code>.
 * <strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule, a <code>match</code> rule, a <code>""</code> rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones. No rule takes precedence over another for what is zeroed. <code>redact()</code> redacts such an image once, with every matching rule's zones, and derives its new SOP Instance UID from all of them, whatever order the work runs in (<a href="https://github.com/kvnlng/Isocenter/issues/908">#908</a>). The export applies them whether or not <code>redact()</code> has run.
@@ -3345,13 +3507,13 @@ section but does not change the grade.</p>
 <p>To find where a machine draws its text, see <a href="../ocr/#setting-up-new-machines-zone-discovery">Zone Discovery</a>.</p>
 <h3 id="burned-in-text">Burned-in Text</h3>
 <p>Reads the images its <code>scope</code> names with OCR and acts on the text it finds, image by image: for text that moves from one image to the next, which no zone describes, and for series with no Device Serial Number, which no machine rule reaches (<a href="https://github.com/kvnlng/Isocenter/issues/1108">#1108</a>, <a href="https://github.com/kvnlng/Isocenter/issues/1121">#1121</a>). <strong>Default:</strong> absent, so nothing is read by OCR and nothing below happens. It needs the <code>ocr</code> extra and the <code>tesseract</code> binary (<a href="../ocr/#prerequisites">OCR prerequisites</a>), or under <code>detector: db</code> the <code>textdetect</code> extra instead, which the free-threaded build cannot install (<a href="../ocr/#detecting-text-with-a-model-detector-db">Detecting text with a model</a>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">burned_in_text</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span><span class="w">        </span><span class="c1"># report | redact | withhold (required)</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">modalities</span><span class="w">     </span><span class="c1"># flagged | modalities | all (required)</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">modalities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">CR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DX</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">MG</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># required under scope: modalities, refused otherwise</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># any | a list of kinds; default any</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="nt">detector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tesseract</span><span class="w">   </span><span class="c1"># tesseract | db; default tesseract</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span><span class="nt">min_confidence</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span><span class="w">    </span><span class="c1"># 0 to 100; default 80</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">burned_in_text</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span><span class="w">        </span><span class="c1"># report | redact | withhold (required)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">modalities</span><span class="w">     </span><span class="c1"># flagged | modalities | all (required)</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">modalities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">CR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DX</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">MG</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># required under scope: modalities, refused otherwise</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># any | a list of kinds; default any</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">  </span><span class="nt">detector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tesseract</span><span class="w">   </span><span class="c1"># tesseract | db; default tesseract</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">  </span><span class="nt">min_confidence</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span><span class="w">    </span><span class="c1"># 0 to 100; default 80</span>
 </code></pre></div>
 <ul>
 <li><strong><code>scope</code></strong> (required, spelled exactly): which images the policy reads and gates. Every scope reads only images that hold pixels.</li>
@@ -3383,22 +3545,22 @@ section but does not change the grade.</p>
 <p>The key is not part of the <a href="#what-an-exported-file-says-about-itself">policy fingerprint</a>: adding it moves no <code>(0012,0063)</code> value and no recorded PHI status.</p>
 <h3 id="generating-configuration-templates">Generating Configuration Templates</h3>
 <p>You can generate a starter <code>isocenter_config.yaml</code> from the session's inventory. On a session that has loaded no configuration (the floor), it names <code>basic@2026c</code>, gives Study Date <code>JITTER</code> and keeps Patient's Sex and Age (the floor's three research defaults), and lists each machine it found. On a session that loaded a configuration, it names that configuration's base as <code>save()</code> does (the pinned profile, an external profile's path, or <code>none</code>) and writes every <code>phi_tags</code> rule that differs from the base's, value and name included, so the file loads to the policy the session holds (<a href="https://github.com/kvnlng/Isocenter/issues/741">#741</a>). It also carries over the session's current <code>date_jitter</code>, <code>remove_private_tags</code> and machine rules. A series with no Device Serial Number gets no scaffolded rule; write <code>serial_number: ""</code> for it yourself. A policy missing a rule its base supplies is refused with <code>save()</code>'s <code>ValueError</code>, and a failed write raises its <code>OSError</code>. Each machine's <code>redaction_zones</code> is empty unless the machine is one Isocenter's shipped knowledge base recognises: fill them in, or <code>redact()</code> changes nothing for that machine.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Inspects data, finds all unique machine serials, and writes a config file</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"my_new_policy.yaml"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Inspects data, finds all unique machine serials, and writes a config file</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"my_new_policy.yaml"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="programmatic-configuration">Programmatic Configuration</h2>
 <p>In addition to YAML files, you can manage the configuration dynamically using Python code via the <code>session.configuration</code> property.</p>
 <h3 id="accessing-configuration">Accessing Configuration</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">rules</span><span class="p">)</span>    <span class="c1"># machine redaction rules</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">)</span> <span class="c1"># the full tag policy in force, floor included</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter_config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">rules</span><span class="p">)</span>    <span class="c1"># machine redaction rules</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">)</span> <span class="c1"># the full tag policy in force, floor included</span>
 </code></pre></div>
 <h3 id="methods">Methods</h3>
 <p>These methods change the configuration <strong>in memory</strong>. They do not write the file <code>load_config()</code> read; the first change after a load or a save prints one line saying the file is unchanged. Call <code>session.configuration.save()</code> to write it, or turn on auto-save for the session with <code>session.configuration.auto_save = True</code>, after which every change is written as it is made, to whichever file the session loaded last. <code>save()</code> raises <code>ValueError</code> when there is no file to write (a session that loaded none: set <code>session.configuration.config_path</code> first), and it raises the error of a write that fails. With auto-save on, a change whose write fails or is refused is undone, and with no file to write each method raises that <code>ValueError</code> before changing anything.</p>
@@ -3406,37 +3568,40 @@ section but does not change the grade.</p>
 <h4 id="add_rule">add_rule()</h4>
 <p><code>add_rule(serial_number, manufacturer="Unknown", model_name="Unknown", redaction_zones=None)</code></p>
 <p>Add a new machine redaction rule dynamically.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Add a rule for a specific ultrasound machine</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-5555"</span><span class="p">,</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">"GE"</span><span class="p">,</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">model_name</span><span class="o">=</span><span class="s2">"Voluson"</span><span class="p">,</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="n">redaction_zones</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]]</span> <span class="c1"># [y1, y2, x1, x2]</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="p">)</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>  <span class="c1"># write it to the loaded file</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Add a rule for a specific ultrasound machine</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-5555"</span><span class="p">,</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">"GE"</span><span class="p">,</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>    <span class="n">model_name</span><span class="o">=</span><span class="s2">"Voluson"</span><span class="p">,</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    <span class="n">redaction_zones</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]]</span> <span class="c1"># [y1, y2, x1, x2]</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="p">)</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>  <span class="c1"># write it to the loaded file</span>
 </code></pre></div>
 <h4 id="delete_rule">delete_rule()</h4>
 <p><code>delete_rule(serial_number)</code></p>
 <p>Remove a rule by serial number. Returns <code>True</code> if a rule was removed, <code>False</code> if none had that serial.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">removed</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">"US-5555"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">removed</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">"US-5555"</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="update_rule">update_rule()</h4>
 <p><code>update_rule(serial_number, updates)</code></p>
 <p>Update a rule by serial number. <code>updates</code> is a dict of the rule's keys and their new values; the serial number itself cannot be changed. A rule with no such serial raises <code>ValueError</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">update_rule</span><span class="p">(</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="s2">"US-5555"</span><span class="p">,</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="p">{</span><span class="s2">"redaction_zones"</span><span class="p">:</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]],</span> <span class="s2">"comment"</span><span class="p">:</span> <span class="s2">"banner is taller on v2 firmware"</span><span class="p">},</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">update_rule</span><span class="p">(</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>    <span class="s2">"US-5555"</span><span class="p">,</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    <span class="p">{</span><span class="s2">"redaction_zones"</span><span class="p">:</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]],</span> <span class="s2">"comment"</span><span class="p">:</span> <span class="s2">"banner is taller on v2 firmware"</span><span class="p">},</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="p">)</span>
 </code></pre></div>
 <p><code>add_rule()</code> and <code>update_rule()</code> refuse, with <code>ValueError</code>, a rule <code>load_config()</code> would refuse -- an unknown key such as <code>redaction_zone</code>, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file <code>save()</code> writes always loads again.</p>
 <h4 id="set_phi_tag">set_phi_tag()</h4>
-<p><code>set_phi_tag(tag, action, value=None)</code></p>
-<p>Update the policy for a specific DICOM tag. <code>action</code> is one of the <a href="#phi-tags">actions</a>; <code>value</code> is stored as the rule's <code>value:</code>, which <code>REPLACE</code> writes. An unknown action, or a rule Isocenter cannot honour (see <a href="#phi-tags">PHI Tags</a>), raises <code>ValueError</code> and leaves the policy and its file unchanged.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Remove Manufacturer's Model Name, which basic@2026c keeps</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1090"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Keep Study Description, which basic@2026c empties</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1030"</span><span class="p">,</span> <span class="s2">"KEEP"</span><span class="p">)</span>
+<p><code>set_phi_tag(tag, action, value=None, target=None)</code></p>
+<p>Update the policy for a specific DICOM tag. <code>action</code> is one of the <a href="#phi-tags">actions</a>; <code>value</code> is stored as the rule's <code>value:</code>, which <code>REPLACE</code> writes; <code>target</code> is stored as the rule's <code>target:</code>, the kinds <a href="#cleaning-descriptions"><code>SCRUB</code></a> removes, a list or tuple kept in its order. <code>SCRUB</code> requires <code>target</code>, and no other action takes it. An unknown action, or a rule Isocenter cannot honour (see <a href="#phi-tags">PHI Tags</a>), raises <code>ValueError</code> and leaves the policy and its file unchanged.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Remove Manufacturer's Model Name, which basic@2026c keeps</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1090"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Keep Study Description, which basic@2026c empties</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1030"</span><span class="p">,</span> <span class="s2">"KEEP"</span><span class="p">)</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># Keep Series Description, and remove the dates and IDs inside it</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,103e"</span><span class="p">,</span> <span class="s2">"SCRUB"</span><span class="p">,</span> <span class="n">target</span><span class="o">=</span><span class="p">[</span><span class="s2">"dates"</span><span class="p">,</span> <span class="s2">"ids"</span><span class="p">])</span>
 </code></pre></div>
 <h2 id="what-to-keep">What to keep</h2>
 <p>A de-identification run depends on three things, and the configuration file is only one of them.</p>
@@ -3481,21 +3646,21 @@ candidates, not zones. <code>to_zones()</code> groups them, and each group's <co
 is the <code>[y1, y2, x1, x2]</code> list a rule stores; see
 <a href="../ocr/#setting-up-new-machines-zone-discovery">Zone Discovery</a> for filtering
 and tuning the grouping.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Discover potential redaction zones for a machine</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="p">)</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">z</span><span class="p">[</span><span class="s2">"zone"</span><span class="p">]</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">to_zones</span><span class="p">()]</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">zones</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># Apply these zones to your configuration</span>
-<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
-<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
-<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>        <span class="n">redaction_zones</span><span class="o">=</span><span class="n">zones</span>
-<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>    <span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Discover potential redaction zones for a machine</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="p">)</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">z</span><span class="p">[</span><span class="s2">"zone"</span><span class="p">]</span> <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">to_zones</span><span class="p">()]</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">zones</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="c1"># Apply these zones to your configuration</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="k">if</span> <span class="n">zones</span><span class="p">:</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>        <span class="n">redaction_zones</span><span class="o">=</span><span class="n">zones</span>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>    <span class="p">)</span>
 </code></pre></div>
 
 

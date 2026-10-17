@@ -2466,7 +2466,7 @@ are then as they were.</p>
 
 
 <h3 id="isocenter.configuration.IsocenterConfiguration.set_phi_tag" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">set_phi_tag</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">action</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">set_phi_tag</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">action</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">target</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -2515,7 +2515,7 @@ lowercase.</p>
             <td>
               <div class="doc-md-description">
                 <p>One of <code>KEEP</code>, <code>REMOVE</code>, <code>EMPTY</code>, <code>REPLACE</code>,
-<code>SHIFT</code> and <code>JITTER</code> (<code>JITTER</code> is <code>SHIFT</code>).</p>
+<code>SHIFT</code>, <code>JITTER</code> (<code>JITTER</code> is <code>SHIFT</code>) and <code>SCRUB</code>.</p>
               </div>
             </td>
             <td>
@@ -2536,6 +2536,27 @@ the rule's <code>value</code>, the key a file spells it with. An empty
 value is no value, on every tag: <code>value=""</code> stores no
 <code>value</code> key, so on a UI tag it is the keyed replacement UID,
 although a file's <code>value: ''</code> on a UI tag is refused (#883).</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>target</code>
+            </td>
+            <td>
+                  <code><span title="typing.Sequence">Sequence</span>[<span title="str">str</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The kinds <code>SCRUB</code> removes,
+stored as the rule's <code>target</code>, the key a file spells it
+with: a list or tuple of <code>names</code>, <code>dates</code>, <code>ids</code> and <code>orgs</code>,
+kept in the order given, which decides how a span two kinds
+find is counted (#1130). Only <code>SCRUB</code> takes it, and <code>SCRUB</code>
+requires it.</p>
               </div>
             </td>
             <td>
@@ -2566,8 +2587,12 @@ cannot honour: a Patient ID rule other than KEEP or REPLACE
 with no value, a Study or Series Instance UID rule other
 than KEEP or REPLACE with no value (#877), a <code>value</code>
 under an action other than REPLACE, SHIFT/JITTER on a
-standard tag that is not DA or DT, or REPLACE on a standard tag whose VR cannot hold the
-value. Raised before the policy or its file is changed.
+standard tag that is not DA or DT, REPLACE on a standard
+tag whose VR cannot hold the value, <code>SCRUB</code> with no
+<code>target</code> or on a tag that does not hold text, and a
+<code>target</code> that is not a list of distinct kinds or is given
+with another action. Raised before the policy or its file
+is changed.
 Under <code>auto_save</code>, also with no <code>config_path</code> and when
 <code>save()</code> refuses; the policy is then as it was.</p>
               </div>

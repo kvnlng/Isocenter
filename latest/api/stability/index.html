@@ -2054,7 +2054,7 @@ are in the paragraphs below.</p>
 </tr>
 <tr>
 <td><code>IsocenterConfiguration.set_phi_tag</code></td>
-<td><code>tag, action, value=None</code></td>
+<td><code>tag, action, value=None, target=None</code></td>
 </tr>
 <tr>
 <td><code>IsocenterConfiguration.get_rule</code></td>
@@ -2308,7 +2308,9 @@ no configuration, <code>phi_tags</code> is a copy of the floor policy
 held under is tier 2), and <code>audit()</code>/<code>anonymize()</code> apply it; a config
 with no <code>privacy_profile</code> line, or a null one, extends it, and one with
 <code>privacy_profile: none</code> opts out of it. <code>set_phi_tag()</code> stores lowercase
-keys, stores its <code>value</code> argument as the rule's <code>value</code>, and raises
+keys (a private creator's case kept), stores its <code>value</code> argument as the
+rule's <code>value</code> and its <code>target</code> argument as the rule's <code>target</code>, which
+only <code>SCRUB</code> takes and <code>SCRUB</code> requires, and raises
 <code>ValueError</code>, leaving the policy and its file unchanged, for an unknown
 action or a rule <code>load_config</code> would refuse. <code>add_rule()</code> and
 <code>update_rule()</code> raise <code>ValueError</code>, leaving the rules and the file
