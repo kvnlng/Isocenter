@@ -325,6 +325,10 @@ SCHEMA_BY_VERSION = {
         "match": {"manufacturer", "model_name"},
         "zone": {"roi", "note"},
         "phi_rule": {"action", "name", "value"},
+        # The shapes a `phi_tags` key takes. The private-creator key
+        # (#1132) joined the unshipped 2.0 row before 1.0.0, by the same
+        # ruling (Q9 on #782; Q6 (a) of 2026-10-16).
+        "phi_key_shapes": {"tag", "mask", "creator"},
         # `scope` and `modalities` (#1121) joined the same unshipped row
         # before 1.0.0, by the same ruling (Q9 on #782; Q-X1 (a) of
         # 2026-10-15): the key shipped only in rc19.
@@ -367,6 +371,14 @@ def test_a_new_burned_in_text_value_comes_with_a_schema_minor():
     assert set(config_manager.BURNED_IN_TEXT_SCOPES) == values["scope"]
     assert set(config_manager.BURNED_IN_TEXT_KINDS) | {"any"} == values["target"]
     assert set(config_manager.BURNED_IN_TEXT_DETECTORS) == values["detector"]
+
+
+def test_a_new_phi_key_shape_comes_with_a_schema_minor():
+    """Kills a `phi_tags` key shape added under an unchanged
+    `CONFIG_VERSION`: a 2.0 file holding it would reach an older library
+    that refuses the key with no newer-minor hint (#1132)."""
+    assert (set(config_manager.PHI_KEY_SHAPES)
+            == SCHEMA_BY_VERSION[CONFIG_VERSION]["phi_key_shapes"])
 
 
 def test_a_new_profile_name_comes_with_a_schema_minor():

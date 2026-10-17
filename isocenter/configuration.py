@@ -712,12 +712,13 @@ class IsocenterConfiguration:
             OSError: Under `auto_save`, when the write fails; the policy
                 is then as it was.
         """
-        # Lowercase, as every other key in the policy is (profiles.py's
-        # header comment gives the reason). Any other case would store a
-        # second rule for a tag the floor already holds, one of which
+        # One spelling, as every other key in the policy has: lowercase,
+        # with a private creator's case kept (#1132; profiles.py's header
+        # comment gives the reason). Any other case would store a second
+        # rule for a tag the floor already holds, one of which
         # `PhiInspector._normalize_tag_keys` drops at scan time by dict
         # order.
-        tag = tag.lower()
+        tag = config_manager._canonical_rule_key(tag)
         # `config_manager` accepts a tag value in either of two shapes --
         # a bare name string, or the structured
         # `{"name": ..., "action": ...}` form -- and this method always

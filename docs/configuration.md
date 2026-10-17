@@ -99,7 +99,7 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | :--- | :--- | :--- | :--- |
 | top level | `version` | a quoted `"MAJOR.MINOR"` string with no leading zero: `"2.0"` | `"2.0"` |
 | top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file; `null` (a bare `privacy_profile:`) is absent | the floor |
-| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, or [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), to rule | no overrides |
+| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), or [private-creator key](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`), to rule | no overrides |
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` | `{min_days: -365, max_days: -1}` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
 | top level | `machines` | a list of machine rules | no rules |
@@ -346,6 +346,8 @@ remove_private_tags: true
 * `true`: Removes **ALL** private tags, including private sequences at every depth. (Recommended for safety.)
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
 
+The sweep is not narrowed by a rule: under `true` every private element is removed, and a `KEEP` on one, by its tag or by its [creator](#private-elements-by-creator), does not keep it. To keep some private elements and remove others, set `false` and write a rule for each one to remove.
+
 #### The 65534-byte limit
 
 The flag governs the private tags Isocenter *holds*, which is not every
@@ -512,7 +514,7 @@ private attribute and the entry reads `removed before export` (grading
 
 ### PHI Tags
 
-Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`); case is normalised on load, so either case works. **Default:** no overrides; the profile's rules apply.
+Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`), [repeating-group keys](#repeating-groups), or [private-creator keys](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`); hex case is normalised on load, so either case works, and a private creator's case is kept. **Default:** no overrides; the profile's rules apply.
 
 **Supported Actions:**
 
@@ -566,6 +568,27 @@ phi_tags:
 ```
 
 An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its `DATA_LOSS` row from ingest (see [The 65534-byte limit](#the-65534-byte-limit)). Every element removed has its own `REMEDIATION_REMOVE` row.
+
+#### Private elements by creator
+
+A private element's tag is not its identity. PS3.5 7.8.1 gives each private creator a block: the creator's name sits at `gggg,00BB`, and its elements at `gggg,BBee`. The block is chosen per file, so one vendor's element can sit at `0009,1027` in one file and at `0009,1127` in another, and another vendor's element can sit at `0009,1027` too. A rule keyed by the concrete tag hits whatever is there ([#1132](https://github.com/kvnlng/Isocenter/issues/1132)).
+
+A key `gggg,"CREATOR",ee` names the element by its creator and its offset `ee` in the creator's block, the way PS3.15 Table E.3.10-1 names safe private attributes:
+
+```yaml
+remove_private_tags: false
+phi_tags:
+  '0009,"GEMS_IDEN_01",27': { action: REMOVE, name: GE Image actual date }
+```
+
+* It matches the element `gggg,BBee` of a dataset or sequence item whose own `gggg,00BB` holds `CREATOR`. A sequence item has its own creators, and they are the ones read.
+* Spaces around the creator's value are padding and are ignored; its case is compared exactly (`gems_iden_01` is another creator). The key's hex digits may be written in either case.
+* It never touches another creator's element, whatever tag that element sits at, and an element whose block names no creator matches no creator key.
+* For one element, a creator key wins over a concrete-tag key. A concrete-tag key keeps its meaning for every other element at that tag.
+* Every action loads on it that loads on a concrete private tag. A private sequence can be named this way too.
+* The audit row names the creator: `Removed Tag 0009,1127 (creator GEMS_IDEN_01) from <uid>`. A creator is a vendor's block name, not PHI.
+* The group must be odd and not `0001`, `0003`, `0005`, `0007` or `ffff`; the creator must be 1 to 64 characters, with no backslash or control character, in double quotes; the offset must be two hex digits. Anything else raises `ValueError` naming the key, at `load_config()` and at every other door (`set_phi_tag()`, `configuration.phi_tags` assigned in code, `audit()`).
+* It applies only while private tags are kept: under `remove_private_tags: true` the sweep removes every private element first (see [Private Tags](#private-tags)).
 
 **Example:**
 

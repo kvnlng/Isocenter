@@ -425,7 +425,7 @@ class RemediationService:
                     # unsaved changes after its PHI is stripped, the next
                     # save skips it, and the identifier stays in the store.
                     entity.mark_modified()
-                    details = f"Removed Tag {proposal.target_attr} from {finding.entity_uid}"
+                    details = f"Removed Tag {_tag_and_creator(proposal)} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
                 elif proposal.target_attr in getattr(entity, "sequences", {}):
                     # A private sequence is a private tag, and the sweep
@@ -774,7 +774,7 @@ class RemediationService:
             entity._take_sop_uid(value, pixels_changed=False)
         else:
             entity.set_attr(proposal.target_attr, value)
-        return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
+        return (f"Remediated {finding.entity_uid} (Tag {_tag_and_creator(proposal)}) "
                 f"-> {proposal.new_value}"), None
 
     @staticmethod
@@ -2949,3 +2949,23 @@ class _OwnerNotHandedIn(str):
     Truthy, so both arms stop as at a decline, and told apart by type in
     `_record_decline`, which then writes no row. Carries the tag only.
     """
+
+
+def _tag_and_creator(proposal: PhiRemediation) -> str:
+    """The tag a row names, with its private creator when a creator-scoped
+    key matched it (#1132): `0009,1127 (creator GEMS_IDEN_01)`.
+
+    The creator is a vendor's block name, not PHI, and the store already
+    holds it. Defined down here so the cited `mark_modified()` calls keep
+    their line numbers.
+
+    Args:
+        proposal (PhiRemediation): The proposal the row is for.
+
+    Returns:
+        str: The text.
+    """
+    creator = (proposal.metadata or {}).get("private_creator")
+    if creator is None:
+        return f"{proposal.target_attr}"
+    return f"{proposal.target_attr} (creator {creator})"

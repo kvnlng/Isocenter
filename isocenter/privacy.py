@@ -17,7 +17,7 @@ from pydicom.multival import MultiValue
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, SOURCE_SOP_UID_ATTR,
                        is_synthetic_patient_id, iter_item_tree)
-from .config_manager import _vr_dummy
+from .config_manager import _canonical_rule_key, _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
 
@@ -115,6 +115,96 @@ def _rule_for(phi_tags, tag):
         return None
     prefix = tag[:2]
     return phi_tags.get(f"{prefix}xx,{tag[5:]}") or phi_tags.get(f"{prefix}xx,xxxx")
+
+
+#: The metadata key a finding matched by a private-creator key carries,
+#: naming the creator, so the audit row can say whose element it was
+#: (#1132).
+PRIVATE_CREATOR = "private_creator"
+
+
+def _creator_index(phi_tags) -> Dict[Tuple[int, str, int], str]:
+    """`{(group, creator, offset): key}` for the private-creator keys of
+    `phi_tags` (#1132), built once per inspector.
+
+    Args:
+        phi_tags (dict): The policy, keys in their canonical spelling.
+
+    Returns:
+        dict: The index; empty when the policy holds no creator key.
+    """
+    from .config_manager import (  # pylint: disable=import-outside-toplevel
+        _creator_key_parts, _is_creator_key)
+    return {_creator_key_parts(key): key for key in (phi_tags or {})
+            if _is_creator_key(key)}
+
+
+def _item_creators(item) -> Dict[Tuple[int, int], str]:
+    """`{(group, block): creator}` from `item`'s own private creator
+    elements (`gggg,0010`-`gggg,00ff` of an odd group, PS3.5 7.8.1).
+
+    Per item, never per instance: a sequence item has its own creators.
+    The value is stripped of spaces, which are LO padding; its case is
+    kept, because PS3.5 does not fold it.
+
+    Args:
+        item: A `DicomItem`.
+
+    Returns:
+        dict: The creators the item names.
+    """
+    creators = {}
+    for tag, value in item.attributes.items():
+        if not isinstance(tag, str) or len(tag) != 9:
+            continue
+        try:
+            group, element = int(tag[:4], 16), int(tag[5:], 16)
+        except ValueError:
+            continue
+        if group % 2 and 0x10 <= element <= 0xFF and isinstance(value, str):
+            creators[(group, element)] = value.strip(" ")
+    return creators
+
+
+def _rule_and_key_for(phi_tags, tag, item=None, index=None, creators=None):
+    """The rule for `tag` on `item`, and the private-creator key that
+    named it (None when another key did).
+
+    A private element (odd group, element >= 0x1000) of an item whose
+    block `gggg,00BB` holds a creator with a key in `index` takes that
+    key's rule: the creator key names the element's identity, a concrete
+    key only its slot, so it wins (owner ruling Q4 (a) on #1132). Then
+    `_rule_for`: the concrete tag, then the masks.
+
+    Args:
+        phi_tags (dict): The policy.
+        tag (str): A concrete `gggg,eeee` key.
+        item: The `DicomItem` holding the element, whose creators decide.
+        index (dict, optional): `_creator_index(phi_tags)`; built here
+            when not given.
+        creators (dict, optional): `_item_creators(item)`; built here when
+            not given.
+
+    Returns:
+        tuple: `(rule or None, creator key or None)`.
+    """
+    if item is not None:
+        if index is None:
+            index = _creator_index(phi_tags)
+        if index:
+            try:
+                group, element = int(tag[:4], 16), int(tag[5:], 16)
+            except (TypeError, ValueError):
+                group, element = 0, 0
+            if group % 2 and element >= 0x1000:
+                if creators is None:
+                    creators = _item_creators(item)
+                creator = creators.get((group, element >> 8))
+                key = (index.get((group, creator, element & 0xFF))
+                       if creator is not None else None)
+                if key is not None and phi_tags.get(key):
+                    return phi_tags[key], key
+    return _rule_for(phi_tags, tag), None
 
 
 def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
@@ -934,6 +1024,8 @@ class PhiInspector:
         # Description -- would otherwise never match and silently disable
         # a declared policy with no error anywhere.
         self.phi_tags = self._normalize_tag_keys(self.phi_tags)
+        # Once, so the scan does not walk the policy per element (#1132).
+        self._creator_rules = _creator_index(self.phi_tags)
         # A rule the scan cannot honour raises here, as it does at the
         # loader and at `audit()`. The inspector is also built directly,
         # and in every worker; the check is cheap.
@@ -1004,7 +1096,8 @@ class PhiInspector:
 
         normalized: Dict[str, Any] = {}
         for key, value in phi_tags.items():
-            norm_key = key.lower() if isinstance(key, str) else key
+            # The one spelling (#1132): a private creator keeps its case.
+            norm_key = _canonical_rule_key(key) if isinstance(key, str) else key
             if norm_key in normalized:
                 # Two source keys collided after lowercasing (e.g. both
                 # "0008,103E" and "0008,103e" were present). Last one
@@ -1186,6 +1279,22 @@ class PhiInspector:
             for tag in list(item.attributes.keys())
         ]
 
+        # Each item's private creators, read once per item, and the
+        # lookup steps 2, 2b and 3 share (#1132).
+        creators_of = {}
+
+        def creators(item):
+            found = creators_of.get(id(item))
+            if found is None:
+                found = creators_of[id(item)] = _item_creators(item)
+            return found
+
+        def rule_for(item, tag):
+            if not self._creator_rules:
+                return _rule_for(self.phi_tags, tag), None
+            return _rule_and_key_for(self.phi_tags, tag, item,
+                                     self._creator_rules, creators(item))
+
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
             # Private tags live in odd groups. Remove all of them except
@@ -1264,13 +1373,16 @@ class PhiInspector:
         for item, tag, path in scan_targets:
             # Parse config
             # Through the masks: a `60xx,xxxx` rule covers
-            # `6002,0022`, and a concrete key beats it.
-            config_val = _rule_for(self.phi_tags, tag)
+            # `6002,0022`, and a concrete key beats it; a private-creator
+            # key beats the concrete key (#1132).
+            config_val, creator_key = rule_for(item, tag)
             if not config_val:
                 continue
 
             if isinstance(config_val, dict):
                 description = _rule_name(config_val)
+                if creator_key is not None and config_val.get("name") is None:
+                    description = creator_key
                 action_code = config_val.get("action", "REPLACE").upper()
                 rule_value = config_val.get("value")
             else:
@@ -1441,13 +1553,19 @@ class PhiInspector:
                             patient, "_jitter_scheme", JITTER_SCHEME_KEYED),
                     } if remediation_action == "SHIFT_DATE"
                     else {UID_REPLACEMENT: True} if uid_replacement else {})
+                if creator_key is not None:
+                    # The row names the creator (#1132): a vendor block
+                    # name, not PHI, and already in the store.
+                    proposal.metadata[PRIVATE_CREATOR] = creators(item)[
+                        (int(tag[:4], 16), int(tag[5:], 16) >> 8)]
 
+                by = f" by {creator_key}" if creator_key is not None else ""
                 findings.append(PhiFinding(
                     entity_uid=instance.sop_instance_uid,
                     entity_type="Instance",
                     field_name=f"{description} (Deep)" if item != instance else description,
                     value=val,
-                    reason=f"Matched PHI Tag {tag} ({description})",
+                    reason=f"Matched PHI Tag {tag}{by} ({description})",
                     tag=tag,
                     patient_id=patient_id,
                     entity=item,  # Point to the specific deep item!
@@ -1472,7 +1590,8 @@ class PhiInspector:
                     continue
                 if group % 2 == 0 or element < 0x1000:
                     continue
-                if _rule_for(self.phi_tags, tag):
+                # A creator-scoped rule is a rule of its own too (#1132).
+                if rule_for(item, tag)[0]:
                     continue
                 val = item.attributes.get(tag)
                 if val is None:
@@ -1510,12 +1629,14 @@ class PhiInspector:
             for seq_tag in list(owner.sequences.keys()):
                 # One lookup path with the loop above, though no
                 # 50xx or 60xx element is a sequence.
-                config_val = _rule_for(self.phi_tags, seq_tag)
+                config_val, creator_key = rule_for(owner, seq_tag)
                 # The private sweep already raised this one.
                 if not config_val or (id(owner), seq_tag) in swept:
                     continue
                 if isinstance(config_val, dict):
                     description = _rule_name(config_val)
+                    if creator_key is not None and config_val.get("name") is None:
+                        description = creator_key
                     action_code = config_val.get("action", "REPLACE").upper()
                 else:
                     description = str(config_val)
