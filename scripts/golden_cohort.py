@@ -1093,6 +1093,168 @@ def no_planar_configuration(out: Path):
     write(ds, out / f"{member}-icon.dcm")
 
 
+#: `_PLANAR_RGB` as one JPEG 2000 Lossless codestream (`jpeg2k_encode`,
+#: level 0, J2K, imagecodecs 2026.8.16). A literal, for the reason
+#: `_J2K_FRAMES` gives.
+_PLANAR_J2K = bytes.fromhex(
+    "ff4fff51002f0000000000050000000400000000000000000000000500000004"
+    "00000000000000000003070101070101070101ff52000c000000010100040400"
+    "01ff5c00044040ff640025000143726561746564206279204f70656e4a504547"
+    "2076657273696f6e20322e352e34ff90000a00000000004e0001ff93c7d42003"
+    "83c9b6df49e6c6d3cefbe2a5ca8817df80a0150d6dcc9b0e3f2cd29499ba0363"
+    "1f459c703dc7cfb44c10dc2211aed6aa555bd8a90f221c76b91369d3ffd9")
+
+
+def declared_planar_configuration(out: Path):
+    """Colour images declaring a Planar Configuration `(0028,0006)` other
+    than 0 under a compressed syntax, whose stream fixes the layout
+    (#1137). Each is a 4x5 RGB Secondary Capture of `_PLANAR_RGB`, of its
+    own patient. `-jpeg-baseline` (declaring 1) is the witness: pydicom's
+    Pillow plugin laid it out by the element, scrambled, and it is now
+    read as 0, so its exported pixels equal
+    `no_planar_configuration-jpeg-baseline`'s. `-j2k` (1) is Pillow's JPEG
+    2000 arm, its samples `_PLANAR_RGB`. `-jpegls` (1) is the imagecodecs
+    fallback, which never read the element. `-jpeg-baseline-2` declares 2,
+    refused before with pydicom's "must be 0 or 1" and read as 0 now
+    (owner ruling R20a). `-icon` is a JPEG Baseline image whose Icon Image
+    Sequence item is the same stream declaring 1, carried as 0. Controls,
+    unchanged: `-native` holds the samples color-by-plane and declares 1,
+    which a native syntax means; `-rle` declares 1, which RLE's decoder
+    ignores. Every value invented."""
+    member = "declared_planar_configuration"
+    sc = "1.2.840.10008.5.1.4.1.1.7"
+    jpeg = "1.2.840.10008.1.2.4.50"
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+
+    def image(study, label, syntax, pixels, declared):
+        ds = ct(member, study=study, rows=4, cols=5, syntax=syntax,
+                pid=f"GOLD-{member}-{label}")
+        ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = sc
+        ds.Modality = "OT"
+        ds.SamplesPerPixel = 3
+        ds.PhotometricInterpretation = "RGB"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+        ds.add_new(0x00280006, "US", declared)
+        if syntax == jpeg:
+            ds.LossyImageCompression = "01"
+        ds[0x7FE00010] = pydicom.DataElement(0x7FE00010, "OB", pixels)
+        if syntax != ExplicitVRLittleEndian:
+            ds[0x7FE00010].is_undefined_length = True
+        return ds
+
+    jpeg_pixels = encapsulate([_PLANAR_JPEG], has_bot=True)
+    write(image(1, "jpeg-baseline", jpeg, jpeg_pixels, 1),
+          out / f"{member}-jpeg-baseline.dcm")
+    write(image(2, "j2k", "1.2.840.10008.1.2.4.90",
+                encapsulate([_PLANAR_J2K], has_bot=True), 1),
+          out / f"{member}-j2k.dcm")
+    write(image(3, "jpegls", "1.2.840.10008.1.2.4.80",
+                encapsulate([_PLANAR_JPEGLS], has_bot=True), 1),
+          out / f"{member}-jpegls.dcm")
+    write(image(4, "jpeg-baseline-2", jpeg, jpeg_pixels, 2),
+          out / f"{member}-jpeg-baseline-2.dcm")
+    write(image(5, "native", ExplicitVRLittleEndian,
+                np.ascontiguousarray(np.moveaxis(_PLANAR_RGB, -1, 0)).tobytes(), 1),
+          out / f"{member}-native.dcm")
+    write(image(6, "rle", "1.2.840.10008.1.2.5", _PLANAR_RLE, 1),
+          out / f"{member}-rle.dcm")
+
+    host = image(7, "icon", jpeg, jpeg_pixels, 0)
+    icon = Dataset()
+    icon.Rows, icon.Columns, icon.SamplesPerPixel = 4, 5, 3
+    icon.PhotometricInterpretation = "RGB"
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.add_new(0x00280006, "US", 1)
+    icon.add_new(0x7FE00010, "OB", jpeg_pixels)
+    icon[0x7FE00010].is_undefined_length = True
+    host.IconImageSequence = Sequence([icon])
+    write(host, out / f"{member}-icon.dcm")
+
+
+COMPREHENSIVE_SR = "1.2.840.10008.5.1.4.1.1.88.33"
+
+
+def _code(value, scheme, meaning):
+    code = Dataset()
+    code.CodeValue, code.CodingSchemeDesignator, code.CodeMeaning = value, scheme, meaning
+    return code
+
+
+def _content_item(value_type, concept, relationship="CONTAINS", **values):
+    item = Dataset()
+    item.RelationshipType, item.ValueType = relationship, value_type
+    item.ConceptNameCodeSequence = Sequence([_code(*concept)])
+    for keyword, value in values.items():
+        setattr(item, keyword, value)
+    return item
+
+
+def structured_report(out: Path):
+    """A dcmqi-style Comprehensive SR (#1131): a TEXT holding an injected
+    ID, a tracking identifier and two provenance strings kept verbatim
+    (#1131 quotes `Nodule 1`, `pylidc`, `0.2.0`), a PNAME observer, a
+    DATE, a NUM with units and a UIDREF, and Study and Series Descriptions
+    holding an ID and none. A and B remove the Content Sequence
+    (`basic@2026c`, #848) and the descriptions; C keeps the tree and
+    scrubs the Text Values and the descriptions (#1130). Values invented."""
+    sop = uid("structured_report", 1, 1, 1)
+    ds = FileDataset(None, {}, file_meta=_meta(COMPREHENSIVE_SR, sop, ExplicitVRLittleEndian),
+                     preamble=b"\0" * 128)
+    ds.SpecificCharacterSet = "ISO_IR 100"
+    ds.PatientID, ds.PatientName = "GOLD-structured_report", "GOLDEN^REPORT"
+    ds.PatientBirthDate, ds.PatientSex = "19600101", "F"
+    ds.StudyInstanceUID = uid("structured_report", 1)
+    ds.SeriesInstanceUID = uid("structured_report", 1, 1)
+    ds.SOPInstanceUID, ds.SOPClassUID = sop, COMPREHENSIVE_SR
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "SR", 1, 1
+    ds.StudyDate, ds.ContentDate, ds.StudyTime = "20230101", "20230101", "120000"
+    ds.StudyID, ds.AccessionNumber = "S1", "ACC1"
+    ds.ReferringPhysicianName = "REF^DOC"
+    ds.StudyDescription = "CHEST for 8675309421"
+    ds.SeriesDescription = "Lesion 1 - Reader 2"
+    ds.Manufacturer = "Acme"
+    ds.ValueType = "CONTAINER"
+    ds.ConceptNameCodeSequence = Sequence([_code("126000", "DCM",
+                                                 "Imaging Measurement Report")])
+    ds.ContinuityOfContent, ds.CompletionFlag = "SEPARATE", "COMPLETE"
+    ds.VerificationFlag = "UNVERIFIED"
+    measured = Dataset()
+    measured.NumericValue = "71.06"
+    measured.MeasurementUnitsCodeSequence = Sequence([_code("mm", "UCUM", "millimeter")])
+    ds.ContentSequence = Sequence([
+        _content_item("TEXT", ("121106", "DCM", "Comment"),
+                      TextValue="GOLD MASS for 8675309421"),
+        _content_item("TEXT", ("112039", "DCM", "Tracking Identifier"),
+                      TextValue="Nodule 1"),
+        _content_item("TEXT", ("111526", "DCM", "Algorithm Name"), TextValue="pylidc"),
+        _content_item("TEXT", ("111528", "DCM", "Algorithm Version"), TextValue="0.2.0"),
+        _content_item("PNAME", ("121008", "DCM", "Person Observer Name"),
+                      relationship="HAS OBS CONTEXT", PersonName="OBSERVER^ONE"),
+        _content_item("DATE", ("111060", "DCM", "Study Date"), Date="20221111"),
+        _content_item("NUM", ("G-D705", "SRT", "Volume"),
+                      MeasuredValueSequence=Sequence([measured])),
+        _content_item("UIDREF", ("121232", "DCM", "Source series for segmentation"),
+                      UID=uid("structured_report", "source series")),
+    ])
+    write(ds, out / "structured_report-1.dcm")
+
+
+def private_creators(out: Path):
+    """GE's `GEMS_IDEN_01` "Image actual date" (offset 27) in block 10 of
+    one file and block 11 of another, and `GEMS_PETD_01` holding a
+    parameter at `0009,1027`, the tag the first file's date uses (#1132).
+    A sweeps all three; B keeps all three; C's creator-scoped REMOVE
+    removes the two dates and keeps the parameter. Values invented."""
+    first = ct("private_creators", inst=1)
+    first.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(first, out / "private_creators-1.dcm")
+    second = ct("private_creators", inst=2)
+    second.private_block(0x0009, "GEMS_PETD_01", create=True).add_new(0x27, "LO", "1.5")
+    second.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(second, out / "private_creators-2.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -1105,7 +1267,8 @@ MEMBERS = {f.__name__: f for f in (
     sop_classes_in_the_file_meta, label_spelling, one_bit_excess,
     offset_table_edges, fewer_fragments_than_frames,
     no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
-    no_planar_configuration)}
+    no_planar_configuration, structured_report, private_creators,
+    declared_planar_configuration)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

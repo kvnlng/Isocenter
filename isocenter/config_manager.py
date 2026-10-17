@@ -101,7 +101,7 @@ _ZONE_KEYS = frozenset({"roi", "note"})
 #: `replacement` is deliberately absent and deliberately not reported as
 #: unknown: it is the one known-refused key, and `_refused_phi_rule`
 #: refuses it with its rename advice.
-_PHI_RULE_KEYS = frozenset({"name", "action", "value"})
+_PHI_RULE_KEYS = frozenset({"name", "action", "value", "target"})
 #: An external profile file contributes its `phi_tags` and nothing else,
 #: so any other key is refused: a profile carrying `privacy_profile: basic`
 #: beside one rule would otherwise load as that one rule.
@@ -133,9 +133,18 @@ BURNED_IN_TEXT_ACTIONS = ("report", "redact", "withhold")
 BURNED_IN_TEXT_SCOPES = ("flagged", "modalities", "all")
 #: The kinds of text a narrowed `target` names (#1121, owner ruling Q-B1
 #: (a)), in the order the refusal lists them; `text_kinds.KINDS` is the
-#: detectors' copy, and a test keeps the two equal. `target: any` (the
-#: default) is every region, as before the key. Compared exactly.
+#: detectors' list, which also holds `orgs` (a `SCRUB` kind only, #1130),
+#: and a test keeps this a subset of it. `target: any` (the default) is
+#: every region, as before the key. Compared exactly.
 BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
+#: The kinds a `SCRUB` rule's `target` names (#1130), in the order the
+#: refusal lists them. `text_scrub.SCRUB_KINDS` is the scrub's copy, and
+#: a test keeps the two equal. There is no `any`: `target` is required
+#: (owner ruling Q5 (b)). Compared exactly.
+SCRUB_KINDS = ("names", "dates", "ids", "orgs")
+#: The VRs `SCRUB` applies to on a standard tag: text a description can
+#: carry. A Person Name is a name whole, so `REPLACE` is its answer.
+_SCRUB_VRS = frozenset({"LO", "LT", "SH", "ST", "UC", "UT"})
 #: What decides "is this text?" (#1121, PR C), in the order the refusal
 #: lists them: `tesseract` (rc19's OCR, the default) or `db` (the
 #: PP-OCRv3 DB text detector run by OpenCV, the optional `textdetect`
@@ -432,7 +441,9 @@ def get_logger() -> logging.Logger:
 
 
 def _lowercase_tag_keys(tags: Dict[Any, Any]) -> Dict[Any, Any]:
-    """`tags` with every string key lowercased, order kept.
+    """`tags` with every string key in its one spelling
+    (`_canonical_rule_key`: lowercased, a private creator's case kept),
+    order kept.
 
     Args:
         tags (dict): The mapping.
@@ -440,7 +451,7 @@ def _lowercase_tag_keys(tags: Dict[Any, Any]) -> Dict[Any, Any]:
     Returns:
         dict: A new mapping; non-string keys are kept as they are.
     """
-    return {(key.lower() if isinstance(key, str) else key): value
+    return {(_canonical_rule_key(key) if isinstance(key, str) else key): value
             for key, value in tags.items()}
 
 
@@ -463,7 +474,8 @@ def _names_no_profile(profile_name: Any) -> bool:
 #: The actions `PhiInspector._scan_instance` dispatches on (`REPLACE` is
 #: its `else` arm). Anything else is refused at load, because the scan
 #: would otherwise treat `action: OBLITERATE` as REPLACE without a word.
-_PHI_ACTIONS = frozenset({"KEEP", "REMOVE", "EMPTY", "REPLACE", "SHIFT", "JITTER"})
+_PHI_ACTIONS = frozenset({"KEEP", "REMOVE", "EMPTY", "REPLACE", "SHIFT", "JITTER",
+                          "SCRUB"})
 
 
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
@@ -509,6 +521,110 @@ def _is_group_mask_key(key: str) -> bool:
         bool: Whether it is a repeating-group mask.
     """
     return isinstance(key, str) and _GROUP_MASK_KEY.fullmatch(key.lower()) is not None
+
+
+#: A private-creator key (#1132): `gggg,"CREATOR",ee`, an odd group, the
+#: creator's value in double quotes, and the element's offset in the
+#: creator's block. PS3.15 Table E.3.10-1 names a private element by the
+#: same two halves, and so does the MIDI-B answer key.
+_CREATOR_KEY = re.compile(r'([0-9a-fA-F]{4}),"(.*)",([0-9a-fA-F]{2})', re.S)
+#: Groups PS3.5 7.8.1 says are not private although they are odd.
+_NOT_PRIVATE_GROUPS = frozenset({0x0001, 0x0003, 0x0005, 0x0007, 0xFFFF})
+#: An LO holds 64 characters (PS3.5 6.2), and a creator is an LO.
+_CREATOR_MAX_CHARACTERS = 64
+#: The key shapes a `phi_tags` key may take. A new shape is a new value a
+#: 2.0 file could hold, so it comes with a schema minor once 1.0.0 is
+#: tagged (`tests/test_config_schema_version.py` reads this).
+PHI_KEY_SHAPES = ("tag", "mask", "creator")
+
+
+def _creator_key_refused(key: Any) -> Optional[str]:
+    """Why `key`, which holds a double quote, is not a private-creator key,
+    or None when it is one (or holds no quote, so is not trying to be).
+
+    Args:
+        key: The `phi_tags` key.
+
+    Returns:
+        Optional[str]: The refusal, naming the key, or None.
+    """
+    if not isinstance(key, str) or '"' not in key:
+        return None
+    match = _CREATOR_KEY.fullmatch(key)
+    why = None
+    if match is None:
+        why = ("it is not four hex digits, a comma, the creator in double "
+               "quotes, a comma and two hex digits")
+    else:
+        group = int(match.group(1), 16)
+        creator = match.group(2).strip(" ")
+        if group % 2 == 0 or group in _NOT_PRIVATE_GROUPS:
+            why = (f"group {match.group(1)} is not private (PS3.5 7.8.1: an "
+                   f"odd group other than 0001, 0003, 0005, 0007 and ffff)")
+        elif not creator:
+            why = "the creator is empty"
+        elif len(creator) > _CREATOR_MAX_CHARACTERS:
+            why = (f"the creator is {len(creator)} characters, and a private "
+                   f"creator is an LO of at most {_CREATOR_MAX_CHARACTERS}")
+        elif any(ch == "\\" or ord(ch) < 0x20 or ord(ch) == 0x7F
+                 for ch in creator):
+            why = ("the creator holds a backslash or a control character, "
+                   "which an LO cannot")
+    if why is None:
+        return None
+    return (f"phi_tags key {key!r} is not a private-creator key: {why}. The "
+            f"shape is 'gggg,\"CREATOR\",ee', such as "
+            f"'0009,\"GEMS_IDEN_01\",27'")
+
+
+def _is_creator_key(key: Any) -> bool:
+    """True for a well-formed private-creator key (`_creator_key_refused`
+    finds nothing wrong with it).
+
+    Args:
+        key: The `phi_tags` key.
+
+    Returns:
+        bool: Whether it is one.
+    """
+    return (isinstance(key, str) and '"' in key
+            and _creator_key_refused(key) is None)
+
+
+def _creator_key_parts(key: str):
+    """`(group, creator, offset)` of a private-creator key: the group and
+    offset as ints, the creator stripped of its LO padding.
+
+    Args:
+        key (str): A key `_is_creator_key` accepts.
+
+    Returns:
+        tuple: `(int, str, int)`.
+    """
+    match = _CREATOR_KEY.fullmatch(key)
+    return (int(match.group(1), 16), match.group(2).strip(" "),
+            int(match.group(3), 16))
+
+
+def _canonical_rule_key(key: str) -> str:
+    """The one spelling of a `phi_tags` key.
+
+    A tag or mask is lowercased. A private-creator key has its group and
+    offset lowercased and its creator kept as written, stripped of
+    surrounding spaces: PS3.5 does not fold a creator's case, and a
+    lowercased `GEMS_IDEN_01` would match nothing, silently. Every site
+    that spells a key goes through here (#1132).
+
+    Args:
+        key (str): The key as written.
+
+    Returns:
+        str: Its spelling in the policy.
+    """
+    if _is_creator_key(key):
+        group, creator, offset = _creator_key_parts(key)
+        return f'{group:04x},"{creator}",{offset:02x}'
+    return key.lower()
 
 
 def _external_profile_tags(path: str) -> Dict[str, Any]:
@@ -823,6 +939,38 @@ def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
     if rule.get("name") is not None and not isinstance(rule["name"], str):
         return (f"phi_tags[{tag!r}] name must be a string, got "
                 f"{type(rule['name']).__name__}")
+    if "target" in rule:
+        return _scrub_target_refused(tag, rule["target"])
+    return None
+
+
+def _scrub_target_refused(tag: Any, target: Any) -> Optional[str]:
+    """Why a rule's `target` is not a list of distinct `SCRUB_KINDS`, or
+    None (#1130). Whether the action takes one is `_refused_phi_rule`'s.
+
+    Args:
+        tag (str): The rule's key, for the message.
+        target: The `target` value.
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    kinds = ", ".join(SCRUB_KINDS)
+    if not isinstance(target, list):
+        # A string is refused rather than read as one kind: `set_phi_tag`
+        # would otherwise iterate it into letters.
+        return (f"phi_tags[{tag!r}] target must be a list of kinds, such as "
+                f"['dates'], got {target!r}")
+    if not target:
+        return (f"phi_tags[{tag!r}] target is an empty list; name at least "
+                f"one of {kinds}")
+    for item in target:
+        if not isinstance(item, str) or item not in SCRUB_KINDS:
+            return (f"phi_tags[{tag!r}] target item {item!r} is not one of "
+                    f"{kinds} (exact spelling)")
+    for item in target:
+        if target.count(item) > 1:
+            return f"phi_tags[{tag!r}] target lists {item!r} twice"
     return None
 
 
@@ -861,13 +1009,18 @@ def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
             raise ValueError(
                 f"{source}: phi_tags key {tag!r} must be a quoted "
                 f"'gggg,eeee' string, got {type(tag).__name__}")
-        if not (_is_tag_key(tag) or _is_group_mask_key(tag)):
+        creator = _creator_key_refused(tag)
+        if creator is not None:
+            raise ValueError(f"{source}: {creator}")
+        if not (_is_tag_key(tag) or _is_group_mask_key(tag)
+                or _is_creator_key(tag)):
             raise ValueError(
                 f"{source}: phi_tags key {tag!r} is not a 'gggg,eeee' tag "
                 f"(four hex digits, a comma, four hex digits, such as "
                 f"'0010,0010'), or a repeating-group key such as "
-                f"'60xx,xxxx'; the scan reads no tag by that key, so the "
-                f"rule would never run")
+                f"'60xx,xxxx', or a private-creator key such as "
+                f"'0009,\"GEMS_IDEN_01\",27'; the scan reads no tag by that "
+                f"key, so the rule would never run")
         if isinstance(rule, dict):
             # Here as well as in `_refused_phi_rule`: that one judges the
             # merged policy, where a configuration's rule for a tag
@@ -1199,6 +1352,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     # `actoin:` is named rather than judged as the REPLACE it would default
     # to. An oversized key is refused as the loader refuses a non-tag key,
     # rather than letting pydicom raise `OverflowError`.
+    # A malformed private-creator key is named on every door, not only
+    # the loader's: assigned in code it would otherwise match nothing,
+    # silently (#1132).
+    creator = _creator_key_refused(tag)
+    if creator is not None:
+        return creator
     if isinstance(tag, str) and _is_oversized_tag_key(tag):
         return (f"phi_tags key {tag!r} is not a 'gggg,eeee' tag (four hex "
                 f"digits, a comma, four hex digits, such as '0010,0010'); the "
@@ -1216,6 +1375,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         if "replacement" in rule:
             return (f"phi_tags[{tag!r}] has a 'replacement' key; the key is "
                     f"'value' (renamed in 0.9.8), so rename it")
+        if action == "SCRUB" and rule.get("target") is None:
+            return (f"phi_tags[{tag!r}] is SCRUB with no target; name the "
+                    f"kinds to remove, a list of {', '.join(SCRUB_KINDS)}")
+        if rule.get("target") is not None and action != "SCRUB":
+            return (f"phi_tags[{tag!r}] has a target under {action}; only "
+                    f"SCRUB takes a target")
         if value is not None and action != "REPLACE":
             return (f"phi_tags[{tag!r}] has a value under {action}; only "
                     f"REPLACE writes a value")
@@ -1228,6 +1393,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         return None
 
     if not isinstance(tag, str):
+        return None
+    if _is_creator_key(tag):
+        # A private element, decided here rather than by the dictionary
+        # reads below happening to find no entry for the key: a creator
+        # key loads under every action a concrete private key does
+        # (#1132).
         return None
     if _is_group_mask_key(tag):
         # Here, not only in `_validated_phi_tags`: `set_phi_tag`,
@@ -1244,7 +1415,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     # The ID is what keeps two patients apart, and `anonymize()` merges
     # patients that share one, so an emptied or literal ID would merge
     # every patient.
-    if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER")
+    if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER",
+                                          "SCRUB")
                                or value):
         said = f" with value {value!r}" if value else ""
         return (f"phi_tags['{tag}'] is {action}{said}; Patient ID can only be "
@@ -1288,6 +1460,23 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"would carry the source UID. Omit the value: key (or write "
                 f"value: null) for this project's keyed replacement UID, "
                 f"or use EMPTY or REMOVE")
+    if action == "SCRUB":
+        # Text a description carries (#1130). A concrete private tag loads,
+        # as a creator key did above: its value is read as text where it
+        # is text. Patient ID, LO, was refused above; the other owned tags
+        # are PN, DA and UI, refused here by their VR.
+        try:
+            private = int(tag[:4], 16) % 2 == 1
+        except ValueError:
+            private = False
+        vr = None if private else _standard_dictionary_vr(tag)
+        if private or vr in _SCRUB_VRS:
+            return None
+        said = f"{tag} is {vr}" if vr else f"{tag} is not in the dictionary"
+        return (f"phi_tags['{tag}'] is SCRUB, and {said}; SCRUB removes "
+                f"identifiers from text and applies only to LO, LT, SH, ST, "
+                f"UC and UT, and to private tags; use REMOVE, EMPTY or KEEP"
+                + (", or REPLACE for a name" if vr == "PN" else ""))
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
@@ -1372,7 +1561,7 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
     if not isinstance(tags, dict):
         return
     for tag, rule in tags.items():
-        key = tag.lower() if isinstance(tag, str) else tag
+        key = _canonical_rule_key(tag) if isinstance(tag, str) else tag
         reason = _refused_phi_rule(key, rule)
         if reason is not None:
             raise ValueError(f"{source}: {reason}")

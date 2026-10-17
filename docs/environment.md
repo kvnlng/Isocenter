@@ -19,6 +19,7 @@ Each variable's name, default and documented behaviour are part of the 1.0 freez
 | **`ISOCENTER_FORCE_PROCESSES`** | `0` | `1` runs in processes on a free-threaded build too. |
 | **`ISOCENTER_SHOW_PROGRESS`** | `1` | `0` turns every progress bar off. |
 | **`ISOCENTER_REQUIRE_TEXT_DETECTOR`** | `0` | Test suite only: `1` makes the real text-detector test fail instead of skip when the detector cannot run. |
+| **`ISOCENTER_REQUIRE_NLP_MODEL`** | `0` | Test suite only: `1` makes the real spaCy-model tests fail instead of skip when spaCy or `en_core_web_sm` cannot load. |
 | **`ISOCENTER_WORKER_FAULTHANDLER`** | `0` | Diagnostic: `1` makes a worker process that is still alive after 240 s dump its stacks, and ends a worker whose exit has not finished 15 s after it began. |
 
 ## `ISOCENTER_LOG_LEVEL`
@@ -136,6 +137,12 @@ It can only switch a bar off: an explicit `show_progress=False`, where a call ta
 **Default:** `0`.
 
 Read by Isocenter's own test suite, never by the package. Set to `1` to make the real-model test of `burned_in_text: {detector: db}` fail, rather than skip, when the text detector cannot run (the `textdetect` extra is not installed, or the shipped model is not the pinned file). `tests.yml` sets it on every job that is not free-threaded, so a CI install that silently lost OpenCV is a red test and not a skip that reads as a pass (#44's shape, #1121). It stays `0` on the free-threaded build, where OpenCV publishes no wheel and the detector cannot run.
+
+## `ISOCENTER_REQUIRE_NLP_MODEL`
+
+**Default:** `0`.
+
+Read by Isocenter's own test suite, never by the package. Set to `1` to make the real-model tests of `SCRUB` target `orgs` and of `burned_in_text` target `names` (`tests/test_scrub_orgs_with_the_real_model.py`) fail, rather than skip, when spaCy or `en_core_web_sm` cannot load. `tests.yml` installs the `nlp` extra and, with `python -m spacy download en_core_web_sm`, whichever model spaCy picks for the installed spaCy, on every job that is not free-threaded, and sets this there, so a CI install that silently lost the model is a red test and not a skip that reads as a pass (#44's shape, #1130). The model is deliberately not pinned (owner ruling of 2026-10-16), so those tests assert properties, not figures. It stays `0` on the free-threaded build, where spaCy and thinc publish no wheel. A contributor without the model sees those tests skip.
 
 ## `ISOCENTER_WORKER_FAULTHANDLER`
 
