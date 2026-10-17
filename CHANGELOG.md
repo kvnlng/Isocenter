@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc21] - 2026-10-17
+
 ### Changed
 
 - **`basic@2026c` and the floor remove Referenced File ID `(0004,1500)`, an element Table E.1-1 has no row for (#1133).** It is a Directory Record element of the Basic Directory IOD (the DICOMDIR, PS3.3 Annex F), not part of any composite instance, and its value is a file-set path. Sites build those from MRNs, accession numbers or dates. With no row there was no rule, so an image file carrying one exported it as written under `basic`, the floor and the scaffold `create_config()` writes, with `(0012,0062) YES` and a PASS grade. Found on the MIDI-B Test set with 1.0.0rc20: 64 MR instances of one series carried a two-component path. These were the only text-removal failures left in either set. The flag comes from TCIA's own review, not from HIPAA or PS3.15, but the reason is general: a directory path is free-form site data.
