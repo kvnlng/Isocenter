@@ -11,7 +11,7 @@ import copy
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 import yaml
 
 from . import config_manager, profiles
@@ -682,7 +682,8 @@ class IsocenterConfiguration:
             return False
         return self._apply(lambda configuration: self._without_rule(configuration, serial_number))
 
-    def set_phi_tag(self, tag: str, action: str, value: str = None) -> None:
+    def set_phi_tag(self, tag: str, action: str, value: str = None,
+                    target: Sequence[str] = None) -> None:
         """
         Set or replace the PHI rule for one tag.
 
@@ -692,12 +693,18 @@ class IsocenterConfiguration:
             tag (str): The DICOM tag to target (e.g. "0010,0010"), stored
                 lowercase.
             action (str): One of `KEEP`, `REMOVE`, `EMPTY`, `REPLACE`,
-                `SHIFT` and `JITTER` (`JITTER` is `SHIFT`).
+                `SHIFT`, `JITTER` (`JITTER` is `SHIFT`) and `SCRUB`.
             value (str, optional): The value `REPLACE` writes, stored as
                 the rule's `value`, the key a file spells it with. An empty
                 value is no value, on every tag: `value=""` stores no
                 `value` key, so on a UI tag it is the keyed replacement UID,
                 although a file's `value: ''` on a UI tag is refused (#883).
+            target (Sequence[str], optional): The kinds `SCRUB` removes,
+                stored as the rule's `target`, the key a file spells it
+                with: a list or tuple of `names`, `dates`, `ids` and `orgs`,
+                kept in the order given, which decides how a span two kinds
+                find is counted (#1130). Only `SCRUB` takes it, and `SCRUB`
+                requires it.
 
         Raises:
             ValueError: For an unknown action, and for a rule the pipeline
@@ -705,19 +712,24 @@ class IsocenterConfiguration:
                 with no value, a Study or Series Instance UID rule other
                 than KEEP or REPLACE with no value (#877), a `value`
                 under an action other than REPLACE, SHIFT/JITTER on a
-                standard tag that is not DA or DT, or REPLACE on a standard tag whose VR cannot hold the
-                value. Raised before the policy or its file is changed.
+                standard tag that is not DA or DT, REPLACE on a standard
+                tag whose VR cannot hold the value, `SCRUB` with no
+                `target` or on a tag that does not hold text, and a
+                `target` that is not a list of distinct kinds or is given
+                with another action. Raised before the policy or its file
+                is changed.
                 Under `auto_save`, also with no `config_path` and when
                 `save()` refuses; the policy is then as it was.
             OSError: Under `auto_save`, when the write fails; the policy
                 is then as it was.
         """
-        # Lowercase, as every other key in the policy is (profiles.py's
-        # header comment gives the reason). Any other case would store a
-        # second rule for a tag the floor already holds, one of which
+        # One spelling, as every other key in the policy has: lowercase,
+        # with a private creator's case kept (#1132; profiles.py's header
+        # comment gives the reason). Any other case would store a second
+        # rule for a tag the floor already holds, one of which
         # `PhiInspector._normalize_tag_keys` drops at scan time by dict
         # order.
-        tag = tag.lower()
+        tag = config_manager._canonical_rule_key(tag)
         # `config_manager` accepts a tag value in either of two shapes --
         # a bare name string, or the structured
         # `{"name": ..., "action": ...}` form -- and this method always
@@ -732,6 +744,20 @@ class IsocenterConfiguration:
         # (owner ruling Q3 A).
         if value:
             val["value"] = value
+        # A list or tuple is stored as a list of its own, never the caller's
+        # list, so a later change to it does not change the policy; anything
+        # else is left for the loader's refusal, so a bare string is refused
+        # rather than iterated into letters.
+        if target is not None:
+            val["target"] = (list(target) if isinstance(target, (list, tuple))
+                             else target)
+        elif str(action).strip().upper() == "SCRUB":
+            # The loader's no-target refusal, naming this method's keyword.
+            raise ValueError(
+                f"set_phi_tag: phi_tags[{tag!r}] is SCRUB with no target; "
+                f"pass target=, a list of "
+                f"{', '.join(config_manager.SCRUB_KINDS)} "
+                f'(set_phi_tag(tag, "SCRUB", target=["dates", "ids"]))')
 
         # Before the assignment and any write: a refused rule leaves the
         # policy and its file as they were. This refuses an unknown action

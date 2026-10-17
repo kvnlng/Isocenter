@@ -99,7 +99,7 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | :--- | :--- | :--- | :--- |
 | top level | `version` | a quoted `"MAJOR.MINOR"` string with no leading zero: `"2.0"` | `"2.0"` |
 | top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file; `null` (a bare `privacy_profile:`) is absent | the floor |
-| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, or [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), to rule | no overrides |
+| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag, [repeating-group key](#repeating-groups) (`"60xx,xxxx"`), or [private-creator key](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`), to rule | no overrides |
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` | `{min_days: -365, max_days: -1}` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) | `true` |
 | top level | `machines` | a list of machine rules | no rules |
@@ -109,7 +109,7 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
 | machine rule | `redaction_zones` | a list of zones | no zones |
 | zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) | |
-| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the [actions](#phi-tags); `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default) | |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value`, `target` | `action`: one of the [actions](#phi-tags); `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default); `target`: a list of distinct `names`, `dates`, `ids`, `orgs`, which `SCRUB` requires and no other action takes | |
 
 Three of these are traps YAML sets, and are refused rather than read:
 
@@ -178,7 +178,7 @@ Any other value is refused: `load_config()` raises `ValueError` naming it.
 
 #### The floor policy
 
-A session that has loaded no configuration applies the **floor policy**: `basic@2026c` with three of its 648 rules changed to the research defaults `create_config()` writes. Study Date is jittered rather than emptied, and Patient's Sex and Patient's Age are kept. Private tags are removed, as `remove_private_tags` defaults to `true`. The floor is built on `basic@2026c` in every 1.x. The compliance report names it (`None (session defaults: the floor policy over basic@2026c)`), and says `None (no base profile)` for a session under `privacy_profile: none`, or under an external profile that contributed no rules.
+A session that has loaded no configuration applies the **floor policy**: `basic@2026c` with three of its 649 rules changed to the research defaults `create_config()` writes. Study Date is jittered rather than emptied, and Patient's Sex and Patient's Age are kept. Private tags are removed, as `remove_private_tags` defaults to `true`. The floor is built on `basic@2026c` in every 1.x. The compliance report names it (`None (session defaults: the floor policy over basic@2026c)`), and says `None (no base profile)` for a session under `privacy_profile: none`, or under an external profile that contributed no rules.
 
 **Omitting `privacy_profile` means the floor beneath your `phi_tags`.** A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. A bare `privacy_profile:` line (YAML null) is the same as leaving the line out. To opt a single tag out, give it `action: "KEEP"`; to opt out of the floor entirely, write `privacy_profile: "none"`.
 
@@ -192,7 +192,7 @@ A path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) inher
 
 #### What basic@2026c contains
 
-`basic@2026c` (short form `basic`) is the Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c**: 648 tag rules. Each row maps to a rule:
+`basic@2026c` (short form `basic`) is the Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c**, as 649 tag rules. The table has 656 rows, and 647 of them give a rule. The other nine give none: the two `X/Z/U*` sequences, Referenced Image Sequence and Source Image Sequence, which are kept while the UIDs inside them are replaced as rows of their own; the private-attribute row `gggg,eeee`, which is the `remove_private_tags` sweep; the four sequences listed below as having no rule (Verifying Observer, Flow Identifier, Waveform Annotation and Icon Image); and Overlay Data and Overlay Comments, which are folded into the overlay group rule. The other two rules are on keys the table has no row for: the overlay group `60xx,xxxx` and Referenced File ID `(0004,1500)`. A row's code maps to a rule as follows:
 
 * `X` removes the attribute.
 * `Z` and `X/Z` empty it, so a Type 2 attribute stays present.
@@ -223,12 +223,13 @@ It is **not** the whole of Annex E. Where it departs from the table:
     * **Removed:** Operator Identification Sequence (`X/D`), and Content Sequence and Graphic Annotation Sequence (`D`). Each of the last two must hold one or more items when present: Content Sequence is Type 1C and Graphic Annotation Sequence is Type 1. A zero-item one breaks that rule, and an absent one keeps it. An SR's root content item becomes a leaf, which PS3.3 allows. A presentation state that applies no annotations has no Graphic Annotation Module, which PS3.3 requires only while annotations are applied. 1.0.0rc4 emptied both; they are removed since 1.0.0rc5 ([#848](https://github.com/kvnlng/Isocenter/issues/848)).
     * The rest of the file is not made to fit, under either action. An SR's template can require content items: a Key Object Selection must reference, in its content, every instance its Current Requested Procedure Evidence Sequence names. A presentation state keeps its Graphic Layer Module, which no rule removes; PS3.3 requires that module only while annotations or overlays are applied, and a conditional module whose condition is not met shall not be present.
     * Person Identification Code Sequence is Type 1 inside the Person Identification Macro, so emptying it and removing it both break that rule. It stays emptied.
-* **A Structured Report is exported without its content tree, and a presentation state without its annotations.** Content Sequence `(0040,A730)` holds the content items of an SR document (a report, a measurement report, a Key Object Selection), and a TEXT item's Text Value `(0040,A160)` is free text that no row of the table reaches. Graphic Annotation Sequence `(0070,0001)` holds a presentation state's text and graphic objects, and an object's Tracking ID `(0062,0020)` and a major tick's Tick Label `(0070,0289)` are free text that no row reaches either. The rows nested inside cannot clean such text, so the sequence is removed. To keep either, give its key `action: "KEEP"`. The rows inside a kept sequence still apply: names and dates hold their dummies, Unformatted Text Value is replaced, and UIDs are replaced. The free text no row reaches is exported as written, because the table's Clean Structured Content and Clean Graphics options, which would clean it, are not implemented.
+* **A Structured Report is exported without its content tree, and a presentation state without its annotations.** Content Sequence `(0040,A730)` holds the content items of an SR document (a report, a measurement report, a Key Object Selection), and a TEXT item's Text Value `(0040,A160)` is free text that no row of the table reaches. Graphic Annotation Sequence `(0070,0001)` holds a presentation state's text and graphic objects, and an object's Tracking ID `(0062,0020)` and a major tick's Tick Label `(0070,0289)` are free text that no row reaches either. The rows nested inside cannot clean such text, so the sequence is removed. To keep either, give its key `action: "KEEP"`. The rows inside a kept sequence still apply: names and dates hold their dummies, Unformatted Text Value is replaced, and UIDs are replaced. The free text no row reaches is exported as written, because the table's Clean Structured Content and Clean Graphics options, which would clean it, are not implemented. A kept SR's Text Values can be cleaned with [`SCRUB`](#keeping-a-structured-reports-content).
 * The table's other sequences coded `D` have no rule: Verifying Observer Sequence and Flow Identifier Sequence. Every identifying attribute their items can hold is a row of its own and is handled where it sits, so the items stay valid. Waveform Annotation Sequence is below.
 * Study and Series Description are emptied rather than removed, because the export directory names read them.
 * Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned. An icon is dropped when its pixels may show what redaction removed, in two tiers: an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export.
 * Retired Curve groups `(50xx)` are removed, by the table's own `50xx,xxxx` row. Overlay groups `(60xx)` are removed whole by `60xx,xxxx`, a rule the table does not have. The table removes Overlay Data `(60xx,3000)` and Overlay Comments `(60xx,4000)`, which alone leaves an Overlay Plane module without its Type 1 element (PS3.3 C.9-2) and its free-text Overlay Description and Overlay Label in place, and PS3.15 E.1.1 says "If non-pixel data graphics or overlays contain identification, the de-identifier is required to remove them". The two table rows are folded into the group rule, so `"60xx,xxxx": {action: KEEP}` keeps a whole, valid overlay.
     * A presentation state's Bitmap Display Shutter can name an overlay group this removes: Shutter Overlay Group `(0018,1623)` is kept as written, and then points at a group the file no longer has. PS3.15 Annex E is the authority on what the profile removes: for the overlay group, E.1.1's sentence on overlays quoted above, and for every other attribute, Table E.1-1, which has no row for Shutter Overlay Group. Isocenter does not second-guess either for one object: it neither keeps a group because a shutter names it nor removes the shutter. Removing Overlay Data alone, as the table's own row does, already left that presentation state without a Type 1 element. Where it must stay valid, keep the overlays: `"60xx,xxxx": {action: KEEP}`.
+* **Referenced File ID `(0004,1500)` is removed, a rule the table does not have.** It is a Directory Record element of the Basic Directory IOD (the DICOMDIR, PS3.3 Annex F), not part of any composite instance, so in an image file it is an anomaly. Its value is a file-set path, which sites build from MRNs, accession numbers or dates. Table E.1-1 has no row for it, so through 1.0.0rc20 an image file carrying one exported it as written ([#1133](https://github.com/kvnlng/Isocenter/issues/1133)). The rule is on that element alone, wherever it sits, nested items included, and not on group 0004: Referenced SOP Instance UID in File `(0004,1511)` keeps its `U` row, and the other Directory Structuring elements have no rule. To keep it, give `"0004,1500"` `action: "KEEP"`.
 * Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed.
 * Private attributes are the `remove_private_tags` sweep, not a rule.
 
@@ -344,6 +345,8 @@ remove_private_tags: true
 
 * `true`: Removes **ALL** private tags, including private sequences at every depth. (Recommended for safety.)
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
+
+The sweep is not narrowed by a rule: under `true` every private element is removed, and a `KEEP` on one, by its tag or by its [creator](#private-elements-by-creator), does not keep it. To keep some private elements and remove others, set `false` and write a rule for each one to remove.
 
 #### The 65534-byte limit
 
@@ -511,7 +514,7 @@ private attribute and the entry reads `removed before export` (grading
 
 ### PHI Tags
 
-Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`); case is normalised on load, so either case works. **Default:** no overrides; the profile's rules apply.
+Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`), [repeating-group keys](#repeating-groups), or [private-creator keys](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`); hex case is normalised on load, so either case works, and a private creator's case is kept. **Default:** no overrides; the profile's rules apply.
 
 **Supported Actions:**
 
@@ -523,8 +526,9 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 | **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined. | `action: "SHIFT"` |
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
+| **`SCRUB`** | Keeps a description and removes the identifiers inside it: the kinds its `target` names (`names`, `dates`, `ids`, `orgs`), with a connecting word directly before each. A value left with nothing is written as `ANONYMIZED`. LO, LT, SH, ST, UC and UT only, and private tags. See [Cleaning descriptions](#cleaning-descriptions). | `action: "SCRUB"`, `target: [dates, ids]` |
 
-A rule mapping's keys are `action`, `name` and `value`; any other key raises `ValueError` naming it. Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
+A rule mapping's keys are `action`, `name`, `value` and `target`; any other key raises `ValueError` naming it. Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
 
 * a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (a 0.9.x spelling; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
@@ -533,6 +537,8 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT;
 * `REPLACE` on a standard tag whose VR cannot hold what it writes. With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
 * a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form;
+* `SCRUB` with no `target`, or a `target` that is not a list of distinct `names`, `dates`, `ids` and `orgs` (`any`, an empty list, a bare string, a kind twice), or a `target` under any other action;
+* `SCRUB` on a standard tag whose VR is not LO, LT, SH, ST, UC or UT (a Person Name, a code string, a UID, a date, a number, a sequence), or on Patient ID;
 * a `REPLACE` `value:` holding a range: a `-` in a DA or TM, or in a DT anywhere but its UTC offset at the end (`20230515104822-0500` is one DateTime; `20230101-20230201` is a range);
 * a `REPLACE` `value:` whose count of `\`-separated values the standard tag's value multiplicity does not allow: a `\` on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.
 
@@ -565,6 +571,87 @@ phi_tags:
 ```
 
 An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its `DATA_LOSS` row from ingest (see [The 65534-byte limit](#the-65534-byte-limit)). Every element removed has its own `REMEDIATION_REMOVE` row.
+
+#### Cleaning descriptions
+
+A description can carry an identifier inside clinical text a study selects series by: `MR BREAS UNIT for 736-69-8140`. `REMOVE` loses the clinical part with it. `SCRUB` is PS3.15's Clean Descriptors Option (E.3.5, the `C` of Table E.1-1's Clean Desc. column) as a rule: keep the value, remove the identifying information inside it ([#1130](https://github.com/kvnlng/Isocenter/issues/1130)).
+
+```yaml
+phi_tags:
+  "0008,1030": { action: SCRUB, target: [names, dates, ids], name: Study Description }
+  "0008,103e": { action: SCRUB, target: [names, dates, ids], name: Series Description }
+```
+
+| Source value | `target: [names, dates, ids]` |
+| :--- | :--- |
+| `MR BREAS UNIT for 736-69-8140` | `MR BREAS UNIT` |
+| `MA SURGICAL SPECIMEN for 7516817726` | `MA SURGICAL SPECIMEN` |
+| `MA SURGICAL SPECIMEN 20170707` | `MA SURGICAL SPECIMEN` |
+| `Standard Breast Imaging Report for Elena Marsh`, in a file whose Patient's Name is `MARSH^ELENA` (an illustrative example) | `Standard Breast Imaging Report` |
+
+`target` is required, and lists the kinds to remove, in an order that decides only how a span two kinds find is counted:
+
+* **`dates`**: a date shape: `D-M-Y`, `M-D-Y` or `Y-M-D` with one separator (`/`, `.`, `-` or a space) used twice, `YYYYMMDD`, or a month name beside a day or a year. Digits only, unlike burned-in text, which reads OCR's confusables. A dotted triple whose last field has two digits reads as a date: `Version 3.10.21` becomes `Version`, while `0.2.0` and `dcmqi 1.2.4` are kept.
+* **`ids`**: a run of 6 or more letters and digits (with `-` or `_` inside) holding 5 or more digits. A shorter accession number, such as `A1234`, is not removed.
+* **`names`**: the words of the Person Names the same instance holds, at any depth, and its patient's name: the family, given and middle components, 2 or more characters each, matched whole-word in any case. A name prefix or suffix (`Dr`, `Jr`) is not a word to remove, and a name already replaced (`ANONYMIZED`) is none. No model is used: spaCy's person finder, measured on header text, emptied clinical descriptions (`SAG T1`, `MAMMO SCREENING BILATERAL`) and missed a mixed-case full name. Its cost is a patient or physician whose name is also a clinical word (`LONG`, `HEAD`, `WHITE`): that word is removed from that patient's descriptions.
+* **`orgs`**: spaCy's `ORG`, `FAC` and `GPE` entities (organisations, facilities, countries and cities), read on the value title-cased, since `en_core_web_sm` misses most upper-case names. It needs the `nlp` extra and its model (`pip install "isocenter[nlp]"`, `python -m spacy download en_core_web_sm`); without them `audit()` raises `NlpUnavailableError` (a `RuntimeError`) before anything is scanned, never `load_config()`. spaCy publishes no free-threaded wheel, so on the free-threaded build `orgs` is unavailable. **It removes text that is not a site.** Measured with en_core_web_sm 3.8.0 and spaCy 3.8.16 on 2026-10-16; Isocenter does not pin the model, and these figures may change as the model changes:
+    * of 47 typical clinical descriptions, it changed 14 on the corpus the design was measured on, and 13 on the corpus the tests carry (`tests/support/scrub_corpus.py`). Among them `MR BREAST BILATERAL` became `MR`, `US ABDOMEN COMPLETE` became `ABDOMEN COMPLETE`, and `Nodule 1`, `Brain Tumor Protocol`, `Mayo Protocol`, `Boston Scientific` and `Siemens Somatom Definition` were emptied. Read as written and title-cased together, which does not ship, it changed 28 of 47;
+    * it damages text it is not aimed at: `MR BREAS UNIT for 736-69-8140` became `MR UNIT`, reading `Breas` as an organisation, and `MR BREAS, UNIT at MSCH` became `MR, UNIT at MSCH`, missing `MSCH`;
+    * it found `Harris Community Clinic` in `LUNG CA ACCRIN 6668 at Harris Community Clinic`, which became `LUNG CA ACCRIN 6668`.
+
+  `orgs` is for text known to carry site names, and keeps the model's mistakes. `REMOVE` remains the exact answer.
+
+What is removed with a span, and what is left:
+
+* **A connecting word** directly before a span goes with it: `for`, `at`, `by`, `per`, `from`, in any case, with an optional `.`. A title (`Dr`, `Mr`, `Mrs`, `Ms`, `Miss`, `Prof`) goes with a `names` span only. A connecting word elsewhere stays: `Report for Breast` is unchanged.
+* **The tidy.** Where two of `,;:-/|` would meet at a cut, one is kept (`A - 1234567 - B` becomes `A - B`); whitespace a cut leaves before `,`, `;` or `:` is removed; runs of whitespace become one space; and the ends are stripped of whitespace and ` ,;:-/_|.`. Brackets are not balanced: `(1234567) scan` becomes `() scan`. A value nothing is found in is left exactly as it is.
+* **A value left with nothing** is written as `ANONYMIZED`, the dummy `REPLACE` writes, never empty: a Type 1C element such as a TEXT item's Text Value cannot be zero-length. A value that is not text (bytes, a number) is replaced by that dummy too, with a row saying `SCRUB could not read the value as text; replaced by its dummy`. A multi-valued element is cleaned value by value.
+* SCRUB only deletes characters, so the result is never longer than the value. It is repeated until it finds nothing more, so a second `audit()`, here or after a reopen, finds nothing.
+
+Each element cleaned has one `REMEDIATION_REPLACE` row of counts only: `Scrubbed <uid> (Tag 0008,103e): removed 1 id, 1 date`. Neither the source text nor the cleaned text is written to the audit log or the session's log; the finding's own value is the source, as for every finding.
+
+`SCRUB` applies to a standard tag whose VR is LO, LT, SH, ST, UC or UT, at any depth, and to a private tag, by its tag or its [creator](#private-elements-by-creator). It is refused on any other VR, on Patient ID, on a [repeating-group key](#repeating-groups), and without a `target`. In code: `set_phi_tag("0008,103e", "SCRUB", target=["dates", "ids"])`, or assign `configuration.phi_tags["0008,103e"] = {"action": "SCRUB", "target": ["dates", "ids"]}`, which `audit()` checks; an assignment is not saved by `auto_save`.
+
+#### Keeping a structured report's content
+
+`basic@2026c` removes an SR's Content Sequence `(0040,A730)` (see [the departures above](#what-basic2026c-contains)), so a de-identified report keeps its header and nothing it reports: measurements, coded findings, segmentation references and algorithm provenance. With [`SCRUB`](#cleaning-descriptions) on Text Value, a configuration can keep the tree and clean the free text inside it ([#1131](https://github.com/kvnlng/Isocenter/issues/1131)):
+
+```yaml
+privacy_profile: basic
+phi_tags:
+  "0040,a730": { action: KEEP, name: Content Sequence }   # departs from basic@2026c's REMOVE (#848)
+  "0040,a160": { action: SCRUB, target: [names, dates, ids], name: Text Value }
+  "0040,0555": { action: KEEP, name: Acquisition Context Sequence }   # optional, the same pattern
+```
+
+* **The rows nested in content items keep applying inside the kept tree**, as `basic@2026c` defines them: Person Name `(0040,A123)`, Date `(0040,A121)`, Time `(0040,A122)` and DateTime `(0040,A120)` hold their dummies, and UID `(0040,A124)`, Observation UID `(0040,A171)` and Referenced SOP Instance UID `(0008,1155)` are replaced. To shift the dates instead, add `"0040,a121": { action: JITTER }` (and `0040,a120`).
+* **Coded and numeric content is kept as written**: Code Meaning, concept names, Value Types, Numeric Value, Measurement Units and Template Identifier. No rule reaches them.
+* **Text Value is cleaned at every depth.** A TEXT item's Text Value is Type 1C, required whenever Value Type is TEXT (PS3.3, Table 10-2, Content Item Macro), so one cleaned to nothing is written `ANONYMIZED`, never empty. The `names` kind reads the instance's own Person Names, so an observer's name in a PNAME item is removed from the report's own text.
+* Acquisition Context `(0040,0555)` and Specimen Preparation `(0040,0610)` hold content items too, and follow the same pattern: keep the sequence, and the SCRUB on Text Value reaches the items inside.
+* **Keeping the tree with no rule on Text Value** keeps every Text Value as written, with no warning: Text Value has no row in Table E.1-1, and what is private beyond the table is the configuration's call.
+
+**This is not PS3.15's Clean Structured Content Option.** E.3.4 cleans content items by what they mean: Table E.3.4-1 gives an action for each Concept Name Code, and marks 64 TEXT concepts `X`, among them Accession Number `(121022, DCM)`, Filler Number `(121021, DCM)`, Identifier `(125010, DCM)` and Identifier within Person Observer's Role `(128775, DCM)`. A tag-level `SCRUB` on Text Value cannot tell those items apart: it removes what looks like a date, an ID or the instance's names in any TEXT item, and leaves a 5-character identifier, which `ids` does not reach. Concept-keyed cleaning is a follow-up. The export writes no option code for it, and `(0012,0063)` names the policy's hash, so no exported file claims the option.
+
+#### Private elements by creator
+
+A private element's tag is not its identity. PS3.5 7.8.1 gives each private creator a block: the creator's name sits at `gggg,00BB`, and its elements at `gggg,BBee`. The block is chosen per file, so one vendor's element can sit at `0009,1027` in one file and at `0009,1127` in another, and another vendor's element can sit at `0009,1027` too. A rule keyed by the concrete tag hits whatever is there ([#1132](https://github.com/kvnlng/Isocenter/issues/1132)).
+
+A key `gggg,"CREATOR",ee` names the element by its creator and its offset `ee` in the creator's block, the way PS3.15 Table E.3.10-1 names safe private attributes:
+
+```yaml
+remove_private_tags: false
+phi_tags:
+  '0009,"GEMS_IDEN_01",27': { action: REMOVE, name: GE Image actual date }
+```
+
+* It matches the element `gggg,BBee` of a dataset or sequence item whose own `gggg,00BB` holds `CREATOR`. A sequence item has its own creators, and they are the ones read.
+* Spaces around the creator's value are padding and are ignored; its case is compared exactly (`gems_iden_01` is another creator). The key's hex digits may be written in either case.
+* It never touches another creator's element, whatever tag that element sits at, and an element whose block names no creator matches no creator key.
+* For one element, a creator key wins over a concrete-tag key. A concrete-tag key keeps its meaning for every other element at that tag.
+* Every action loads on it that loads on a concrete private tag. A private sequence can be named this way too.
+* The audit row names the creator: `Removed Tag 0009,1127 (creator GEMS_IDEN_01) from <uid>`. A creator is a vendor's block name, not PHI.
+* The group must be odd and not `0001`, `0003`, `0005`, `0007` or `ffff`; the creator must be 1 to 64 characters, with no backslash or control character, in double quotes; the offset must be two hex digits. Anything else raises `ValueError` naming the key, at `load_config()` and at every other door (`set_phi_tag()`, `configuration.phi_tags` assigned in code, `audit()`).
+* It applies only while private tags are kept: under `remove_private_tags: true` the sweep removes every private element first (see [Private Tags](#private-tags)).
 
 **Example:**
 
@@ -783,9 +870,9 @@ session.configuration.update_rule(
 
 #### set_phi_tag()
 
-`set_phi_tag(tag, action, value=None)`
+`set_phi_tag(tag, action, value=None, target=None)`
 
-Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
+Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes; `target` is stored as the rule's `target:`, the kinds [`SCRUB`](#cleaning-descriptions) removes, a list or tuple kept in its order. `SCRUB` requires `target`, and no other action takes it. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
 # Remove Manufacturer's Model Name, which basic@2026c keeps
@@ -793,6 +880,9 @@ session.configuration.set_phi_tag("0008,1090", "REMOVE")
 
 # Keep Study Description, which basic@2026c empties
 session.configuration.set_phi_tag("0008,1030", "KEEP")
+
+# Keep Series Description, and remove the dates and IDs inside it
+session.configuration.set_phi_tag("0008,103e", "SCRUB", target=["dates", "ids"])
 ```
 
 ## What to keep

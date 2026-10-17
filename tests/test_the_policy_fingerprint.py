@@ -352,7 +352,24 @@ UNFOLDED = {
     # Memory only: the loader refuses `Action` as an unknown key.
     "a rule key's case": ({NAME: {"action": "KEEP"}},
                           {NAME: {"Action": "KEEP"}}),
+    # A private creator's case is significant to the scan (#1132), so to
+    # the form; and a creator key's hex case, assigned in code, is another
+    # policy, like an upper-case tag (the loader folds it).
+    "a creator's case": ({'0009,"GEMS_IDEN_01",27': {"action": "REMOVE"}},
+                         {'0009,"gems_iden_01",27': {"action": "REMOVE"}}),
+    "a creator key's hex case": ({'0009,"GEMS_IDEN_01",2a': {"action": "REMOVE"}},
+                                 {'0009,"GEMS_IDEN_01",2A': {"action": "REMOVE"}}),
 }
+
+
+def test_the_loader_folds_a_creator_keys_hex_and_keeps_its_creator(tmp_path):
+    """What reaches the form from a file: hex lowercased, creator as
+    written (#1132). Kills the loader lowercasing the whole key."""
+    path = tmp_path / "c.yaml"
+    path.write_text("privacy_profile: none\nphi_tags:\n"
+                    "  '0009,\"GEMS_IDEN_01\",2A': {action: REMOVE}\n")
+    tags = config_manager.ConfigLoader.load_unified_config(str(path))[0]
+    assert list(tags) == ['0009,"GEMS_IDEN_01",2a']
 
 
 @pytest.mark.parametrize("pair", sorted(UNFOLDED))

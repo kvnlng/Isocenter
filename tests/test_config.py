@@ -54,8 +54,9 @@ def test_validation_logic(tmp_path, machine, fragment):
 
 _NOT_A_TAG = ("phi_tags key 'patient_id' is not a 'gggg,eeee' tag (four hex "
               "digits, a comma, four hex digits, such as '0010,0010'), or a "
-              "repeating-group key such as '60xx,xxxx'; the scan reads no "
-              "tag by that key, so the rule would never run")
+              "repeating-group key such as '60xx,xxxx', or a "
+              "private-creator key such as '0009,\"GEMS_IDEN_01\",27'; the "
+              "scan reads no tag by that key, so the rule would never run")
 
 
 def test_a_key_the_scan_would_never_read_is_refused(tmp_path):

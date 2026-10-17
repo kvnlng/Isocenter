@@ -52,8 +52,11 @@ PINNED_DIGESTS = {
     # 1.0.0rc5: both moved from EMPTY to REMOVE (#848): a zero-item one
     # breaks PS3.3's one-or-more-items rule, which an absent one keeps
     # (648 rules still).
-    "basic@2026c": "c5b2eb65c741865354ce3f68528543ff956dcce99297b3f42fe17187d8e9b0e4",
-    "floor": "da0b3f3d69785b6ab6db75fbc7c3b56fbb2d778e92d52be5a5362632c44e94fe",
+    # After 1.0.0rc20: Referenced File ID (0004,1500), which Table E.1-1
+    # has no row for, gained REMOVE (#1133): a DICOMDIR element whose
+    # value is a file path (648 -> 649).
+    "basic@2026c": "62bd0e6744e50cf93d469cb1d8858c365774a6165aaf6715fd5c0a1bfe20aebf",
+    "floor": "32a7cc5b14ce86aab8ad3b7ed61075abd4f9169089197971f0bdb1141e344152",
 }
 #: The rules 1.0 ships under each pinned name: `PINNED_DIGESTS` as it
 #: stood when L14 (#26, #527) filled this on `main`, before RELEASING.md's
@@ -63,8 +66,8 @@ PINNED_DIGESTS = {
 #: floor updates **both** dicts in the same PR, and its review checks that
 #: it did; after the tag this one never changes.
 FROZEN_AT_1_0 = {
-    "basic@2026c": "c5b2eb65c741865354ce3f68528543ff956dcce99297b3f42fe17187d8e9b0e4",
-    "floor": "da0b3f3d69785b6ab6db75fbc7c3b56fbb2d778e92d52be5a5362632c44e94fe",
+    "basic@2026c": "62bd0e6744e50cf93d469cb1d8858c365774a6165aaf6715fd5c0a1bfe20aebf",
+    "floor": "32a7cc5b14ce86aab8ad3b7ed61075abd4f9169089197971f0bdb1141e344152",
 }
 
 #: The one sentence both digest tests end on (owner ruling Q3, 2026-09-21).
@@ -118,7 +121,7 @@ def test_the_pinned_name_loads_the_2026c_table(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(path)
         assert session.configuration.phi_tags == BASIC_PROFILE
-        assert len(session.configuration.phi_tags) == 648
+        assert len(session.configuration.phi_tags) == 649
         assert session.configuration.privacy_profile == "basic@2026c"
 
 
@@ -346,7 +349,7 @@ def test_the_report_names_the_edition_and_tells_floor_from_none(tmp_path):
         basic = _report_rows(session, tmp_path, "basic.md")
     assert basic["Privacy Profile"] == "| Privacy Profile | basic@2026c |", basic
     assert "edition 2026c" in basic["De-ID Method"], basic
-    assert "648 tag rules" in basic["De-ID Method"], basic
+    assert "649 tag rules" in basic["De-ID Method"], basic
 
     with Session(str(tmp_path / "none.db")) as session:
         session.load_config(_config(tmp_path, "privacy_profile: none\n", "n.yaml"))

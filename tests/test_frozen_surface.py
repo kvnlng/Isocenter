@@ -104,6 +104,8 @@ FROZEN_DICOM_EXPORT_OPTIONS = (
 #: shadowed the builtin), `add_rule(model=, zones=)` to the file's own
 #: keys `model_name`/`redaction_zones`, and `set_phi_tag(replacement=)`
 #: to `value`, the key #538 renamed in the file.
+#: `set_phi_tag(target=)` was added before the freeze (#1130, owner ruling
+#: R16 of 2026-10-16), the rule's own key, as `value` is.
 #:
 #: `entities.is_synthetic_patient_id` is the one module-level function,
 #: and `Builder.start_patient` the one staticmethod: `_owner_and_callable`
@@ -119,7 +121,7 @@ FROZEN_OTHER_CALLABLES = {
         "redaction_zones=None"),
     "IsocenterConfiguration.update_rule": "serial_number, updates",
     "IsocenterConfiguration.delete_rule": "serial_number",
-    "IsocenterConfiguration.set_phi_tag": "tag, action, value=None",
+    "IsocenterConfiguration.set_phi_tag": "tag, action, value=None, target=None",
     "IsocenterConfiguration.get_rule": "serial_number",
     "DicomItem.set_attr": "tag, value",
     "Instance.set_attr": "tag, value",

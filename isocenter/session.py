@@ -70,6 +70,7 @@ from ._version import __version__
 from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree,
                        exported_patient_id, is_synthetic_patient_id, PASS_WRITING)
+from .pixel_geometry import PLANAR_INFERRED_ATTR, PLANAR_OVERRIDDEN_ATTR
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read.
@@ -3641,6 +3642,12 @@ class DicomSession:
             # range was judged by the loader above.
             config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
+        # A SCRUB target naming `orgs` needs spaCy's model (#1130, R11):
+        # refused here, after the policy is judged and before the merge,
+        # the recorded policy, the project secret and any worker, so a
+        # refused audit leaves the session as it was. Never at load.
+        pixel_analysis._require_scrub_readers("audit", tags_to_use)
+
         # Two `Patient` objects holding one Patient ID are merged before the
         # scan, as `anonymize()` and a restore merge them. The scan
         # cannot see them as two: `_rehydrate_findings` binds a patient
@@ -4688,6 +4695,14 @@ class DicomSession:
         # instance is in exactly one of `edited` and `never_scanned`, so
         # with the gate open every instance section 5 counts is graded.
         never_scanned = {"patients": 0, "studies": 0, "instances": 0}
+        # #1134: images and icons read with a Planar Configuration inferred
+        # at ingest, counted over the store from the key ingest left, so a
+        # report before any export, or after a reopen, says the same.
+        # Icons apart from images: an icon is not an image instance.
+        planar_inferred = {"images": 0, "icons": 0}
+        # #1137: the same count, apart, for a declared value read as 0
+        # under a syntax whose stream fixes the layout.
+        planar_overridden = {"images": 0, "icons": 0}
         walked = 0
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
@@ -4708,6 +4723,18 @@ class DicomSession:
                         never_scanned["instances"] += (
                             _holds_no_recorded_status(instance))
                         walked += 1
+                        planar_inferred["images"] += bool(
+                            instance.attributes.get(PLANAR_INFERRED_ATTR))
+                        planar_inferred["icons"] += sum(
+                            1 for item, path in iter_item_tree(instance)
+                            if path and item.attributes.get(
+                                PLANAR_INFERRED_ATTR))
+                        planar_overridden["images"] += bool(
+                            instance.attributes.get(PLANAR_OVERRIDDEN_ATTR))
+                        planar_overridden["icons"] += sum(
+                            1 for item, path in iter_item_tree(instance)
+                            if path and item.attributes.get(
+                                PLANAR_OVERRIDDEN_ATTR))
         # At least one of the entities walked holds a recorded status.
         status_recorded = sum(never_scanned.values()) < walked
 
@@ -4756,6 +4783,8 @@ class DicomSession:
             unscanned_instances=unscanned_instances,
             never_scanned=never_scanned,
             phi_status_recorded=status_recorded,
+            planar_configuration_inferred=planar_inferred,
+            planar_configuration_overridden=planar_overridden,
         )
 
         renderer.render(report, output_path)
@@ -8332,6 +8361,10 @@ class DicomSession:
         read_pixels = bool(check_burned_in) and policy is not None
         if read_pixels:
             _require_burned_in_text_reader(policy, "export(check_burned_in=True)")
+        if check_burned_in:
+            # The re-audit's own refusal, named for this call (#1130).
+            pixel_analysis._require_scrub_readers(
+                "export(check_burned_in=True)", self.configuration.phi_tags)
 
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them

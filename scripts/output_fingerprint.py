@@ -50,7 +50,9 @@ secret, ingest, load_config, audit, anonymize, redact, then the arms
 (compressed: the explicit-VR arm), `A.wfdb`, and after closing and
 reopening the store, `A.reopened.dicom`. Configuration B
 (`fingerprint/config-b.yaml`, private tags kept): the same without redact,
-arms `B.dicom` and `B.dicom-j2k`. A step that raises is recorded as its
+arms `B.dicom` and `B.dicom-j2k`. Configuration C
+(`fingerprint/config-c.yaml`, B plus the opt-in rules of #1130, #1131 and
+#1132): the same as B, with one arm, `C.dicom`. A step that raises is recorded as its
 outcome and the member continues; that is output, not a tool failure.
 
 **What is deliberately not recorded**, the complete list; each
@@ -134,7 +136,8 @@ FINGERPRINT_DIR = REPO / "fingerprint"
 GOLDEN = FINGERPRINT_DIR / "output.json"
 COHORT = FINGERPRINT_DIR / "cohort"
 CONFIGS = {"A": FINGERPRINT_DIR / "config-a.yaml",
-           "B": FINGERPRINT_DIR / "config-b.yaml"}
+           "B": FINGERPRINT_DIR / "config-b.yaml",
+           "C": FINGERPRINT_DIR / "config-c.yaml"}
 
 SCHEMA = 1
 
@@ -149,7 +152,9 @@ SCHEMA = 1
 #: 4 (#945): an element pydicom cannot convert is recorded as its wire
 #: VR, `unconverted`, and the digest and length of its encoded value,
 #: where it was `unreadable:` and pydicom's exception class and message.
-RECORDER = 4
+#: 5 (#1130, #1131, #1132): a third configuration, C, and its arm
+#: `C.dicom`, recorded for every member; A and B record as before.
+RECORDER = 5
 
 #: A public test secret, not a secret: `bytes(range(32))`. The suite's
 #: `tests/support/project_secret.py` FIXED_A is the same constant, and a
@@ -181,6 +186,8 @@ NOT_OUTPUT_ENV = {
     "ISOCENTER_WORKER_FAULTHANDLER": "a diagnostic traceback dump",
     "ISOCENTER_REQUIRE_TEXT_DETECTOR": "read by the test suite only, "
                                        "never by the package",
+    "ISOCENTER_REQUIRE_NLP_MODEL": "read by the test suite only, never by "
+                                   "the package",
 }
 
 #: Audit rows left out of the accounting, and only these: each records
@@ -659,6 +666,10 @@ A_ARMS = (("A.dicom", "dicom", {"use_compression": False, "check_burned_in": Tru
 A_REOPENED = ("A.reopened.dicom", "dicom", {"use_compression": False})
 B_ARMS = (("B.dicom", "dicom", {"use_compression": False}),
           ("B.dicom-j2k", "dicom", {"use_compression": True}))
+#: One arm: header text does not depend on pixel compression, and every
+#: export is Explicit VR Little Endian since #1107 (owner ruling Q9 (b) on
+#: the #1130/#1131/#1132 batch).
+C_ARMS = (("C.dicom", "dicom", {"use_compression": False}),)
 
 
 def _run_config(name: str, src: Path, work: Path, secret: bytes,
@@ -702,7 +713,7 @@ def _run_config(name: str, src: Path, work: Path, secret: bytes,
 
 
 def run_member(member: Member, work, secret: bytes) -> dict:
-    """The pipeline for one member: configuration A, then B."""
+    """The pipeline for one member: configuration A, then B, then C."""
     work = Path(work)
     src = work / "src"
     for rel in member.files:
@@ -711,7 +722,8 @@ def run_member(member: Member, work, secret: bytes) -> dict:
         shutil.copyfile(Path(member.base) / rel, dest)
     configs, paths = {}, {"<src>": str(src), "<member>": str(work)}
     runs = (("A", CONFIGS["A"], A_ARMS, True, A_REOPENED),
-            ("B", CONFIGS["B"], B_ARMS, False, None))
+            ("B", CONFIGS["B"], B_ARMS, False, None),
+            ("C", CONFIGS["C"], C_ARMS, False, None))
     for name, config, arms, redact, reopened in runs:
         record, extra = _run_config(name, src, work / name, secret, config,
                                     arms, redact, reopened)

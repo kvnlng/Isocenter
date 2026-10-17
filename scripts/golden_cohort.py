@@ -998,6 +998,263 @@ def private_vr_unlike_the_dictionary(out: Path):
         write(ds, out / f"{member}-{vr.lower()}.dcm")
 
 
+#: Three codestreams of one 4x5 RGB image (`_PLANAR_RGB`), as bytes:
+#: JPEG Baseline written RGB with an Adobe marker (no colour transform),
+#: JPEG-LS Lossless, and RLE Lossless (an encapsulated Pixel Data value,
+#: fragments and all). Literals, not encoder calls, for the reason
+#: `_J2K_FRAMES` gives.
+_PLANAR_JPEG = bytes.fromhex(
+    "ffd8ffee000e41646f626500640000000000ffdb004300020101010101020101"
+    "0102020202020403020202020504040304060506060605060606070908060709"
+    "070606080b08090a0a0a0a0a06080b0c0b0a0c090a0a0affc000110800040005"
+    "03521100471100421100ffc4001f000001050101010101010000000000000000"
+    "0102030405060708090a0bffc400b5100002010303020403050504040000017d"
+    "01020300041105122131410613516107227114328191a1082342b1c11552d1f0"
+    "2433627282090a161718191a25262728292a3435363738393a43444546474849"
+    "4a535455565758595a636465666768696a737475767778797a83848586878889"
+    "8a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5"
+    "c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8"
+    "f9faffda000c03520047004200003f00ec3e097fc124bf620ff84497fe2d7ff7"
+    "7fe5a27a1ff62bea8f047ec91f03ff00b247fc52fe9fc4bffc4d7b07c4dff828"
+    "07ed39fdbe7fe2b8f5fe16ff00e2abffd9")
+_PLANAR_JPEGLS = bytes.fromhex(
+    "ffd8ffe800205350494646000200000300000004000000050a0806010000012c"
+    "0000012cffe8000800000001ffd8fff70011080004000503011100021100031100"
+    "ffda000c0301000200030000020040000038f2c10a4074904a5c6a480000016300"
+    "0c0000c0866108433b010cc0000016310244252347682108102e406d1b54d59d80"
+    "ffd9")
+_PLANAR_RLE = bytes.fromhex(
+    "feff00e00400000000000000feff00e088000000030000004000000058000000"
+    "7000000000000000000000000000000000000000000000000000000000000000"
+    "000000000000000000000000000000000000000004000a141e2804323c46505a"
+    "04646e78828c0496a0aab4be0464696e7378047d82878c9104969ba0a5aa04af"
+    "b4b9bec304faf3ece5de04d7d0c9c2bb04b4ada69f9804918a837c75")
+#: The image the native files hold, interleaved: every channel distinct.
+_PLANAR_RGB = np.stack(
+    [np.arange(20).reshape(4, 5) * 10, 100 + np.arange(20).reshape(4, 5) * 5,
+     250 - np.arange(20).reshape(4, 5) * 7], axis=-1).astype(np.uint8)
+
+
+def no_planar_configuration(out: Path):
+    """Colour images with no Planar Configuration `(0028,0006)` (#1134).
+    Each is a 4x5 RGB Secondary Capture of its own patient. `-native-absent`
+    (Explicit VR Little Endian, element absent) and `-native-empty` (the
+    element present and zero-length) were refused at ingest with pydicom's
+    `Missing required element: (0028,0006) 'Planar Configuration'`, the
+    shape of 14 GE ultrasound images of the MIDI-B Validation set; each
+    is now read color-by-pixel and written with 0. `-jpeg-baseline` is the
+    family pydicom's Pillow plugin decodes and lays out by this element,
+    `-jpegls` one the imagecodecs fallback decodes without reading it.
+    `-rle` is RLE Lossless with the element absent, still refused in
+    pydicom's words by the owner's ruling of 2026-10-16. `-icon` is a
+    monochrome CT whose colour Icon Image Sequence item has no element: it
+    was dropped with a `DATA_LOSS` row and is now carried with 0. No other
+    input holds a colour image or icon with no Planar Configuration (333
+    files read, top level and nested)."""
+    member = "no_planar_configuration"
+    sc = "1.2.840.10008.5.1.4.1.1.7"
+
+    def image(study, label, syntax, pixels, how="absent"):
+        ds = ct(member, study=study, rows=4, cols=5, syntax=syntax,
+                pid=f"GOLD-{member}-{label}")
+        ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = sc
+        ds.Modality = "OT"
+        ds.SamplesPerPixel = 3
+        ds.PhotometricInterpretation = "RGB"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+        if how == "empty":
+            ds.add_new(0x00280006, "US", None)
+        if syntax == "1.2.840.10008.1.2.4.50":
+            # Stated, so the only row this member's ingest writes is RLE's.
+            ds.LossyImageCompression = "01"
+        ds[0x7FE00010] = pydicom.DataElement(0x7FE00010, "OB", pixels)
+        if syntax != ExplicitVRLittleEndian:
+            ds[0x7FE00010].is_undefined_length = True
+        write(ds, out / f"{member}-{label}.dcm")
+
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    image(1, "native-absent", ExplicitVRLittleEndian, _PLANAR_RGB.tobytes())
+    image(2, "native-empty", ExplicitVRLittleEndian, _PLANAR_RGB.tobytes(),
+          how="empty")
+    image(3, "jpeg-baseline", "1.2.840.10008.1.2.4.50",
+          encapsulate([_PLANAR_JPEG], has_bot=True))
+    image(4, "jpegls", "1.2.840.10008.1.2.4.80",
+          encapsulate([_PLANAR_JPEGLS], has_bot=True))
+    image(5, "rle", "1.2.840.10008.1.2.5", _PLANAR_RLE)
+
+    ds = ct(member, study=6, pid=f"GOLD-{member}-icon")
+    icon = Dataset()
+    icon.Rows, icon.Columns, icon.SamplesPerPixel = 4, 5, 3
+    icon.PhotometricInterpretation = "RGB"
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.add_new(0x7FE00010, "OB", _PLANAR_RGB.tobytes())
+    ds.IconImageSequence = Sequence([icon])
+    write(ds, out / f"{member}-icon.dcm")
+
+
+#: `_PLANAR_RGB` as one JPEG 2000 Lossless codestream (`jpeg2k_encode`,
+#: level 0, J2K, imagecodecs 2026.8.16). A literal, for the reason
+#: `_J2K_FRAMES` gives.
+_PLANAR_J2K = bytes.fromhex(
+    "ff4fff51002f0000000000050000000400000000000000000000000500000004"
+    "00000000000000000003070101070101070101ff52000c000000010100040400"
+    "01ff5c00044040ff640025000143726561746564206279204f70656e4a504547"
+    "2076657273696f6e20322e352e34ff90000a00000000004e0001ff93c7d42003"
+    "83c9b6df49e6c6d3cefbe2a5ca8817df80a0150d6dcc9b0e3f2cd29499ba0363"
+    "1f459c703dc7cfb44c10dc2211aed6aa555bd8a90f221c76b91369d3ffd9")
+
+
+def declared_planar_configuration(out: Path):
+    """Colour images declaring a Planar Configuration `(0028,0006)` other
+    than 0 under a compressed syntax, whose stream fixes the layout
+    (#1137). Each is a 4x5 RGB Secondary Capture of `_PLANAR_RGB`, of its
+    own patient. `-jpeg-baseline` (declaring 1) is the witness: pydicom's
+    Pillow plugin laid it out by the element, scrambled, and it is now
+    read as 0, so its exported pixels equal
+    `no_planar_configuration-jpeg-baseline`'s. `-j2k` (1) is Pillow's JPEG
+    2000 arm, its samples `_PLANAR_RGB`. `-jpegls` (1) is the imagecodecs
+    fallback, which never read the element. `-jpeg-baseline-2` declares 2,
+    refused before with pydicom's "must be 0 or 1" and read as 0 now
+    (owner ruling R20a). `-icon` is a JPEG Baseline image whose Icon Image
+    Sequence item is the same stream declaring 1, carried as 0. Controls,
+    unchanged: `-native` holds the samples color-by-plane and declares 1,
+    which a native syntax means; `-rle` declares 1, which RLE's decoder
+    ignores. Every value invented."""
+    member = "declared_planar_configuration"
+    sc = "1.2.840.10008.5.1.4.1.1.7"
+    jpeg = "1.2.840.10008.1.2.4.50"
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+
+    def image(study, label, syntax, pixels, declared):
+        ds = ct(member, study=study, rows=4, cols=5, syntax=syntax,
+                pid=f"GOLD-{member}-{label}")
+        ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID = sc
+        ds.Modality = "OT"
+        ds.SamplesPerPixel = 3
+        ds.PhotometricInterpretation = "RGB"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+        ds.add_new(0x00280006, "US", declared)
+        if syntax == jpeg:
+            ds.LossyImageCompression = "01"
+        ds[0x7FE00010] = pydicom.DataElement(0x7FE00010, "OB", pixels)
+        if syntax != ExplicitVRLittleEndian:
+            ds[0x7FE00010].is_undefined_length = True
+        return ds
+
+    jpeg_pixels = encapsulate([_PLANAR_JPEG], has_bot=True)
+    write(image(1, "jpeg-baseline", jpeg, jpeg_pixels, 1),
+          out / f"{member}-jpeg-baseline.dcm")
+    write(image(2, "j2k", "1.2.840.10008.1.2.4.90",
+                encapsulate([_PLANAR_J2K], has_bot=True), 1),
+          out / f"{member}-j2k.dcm")
+    write(image(3, "jpegls", "1.2.840.10008.1.2.4.80",
+                encapsulate([_PLANAR_JPEGLS], has_bot=True), 1),
+          out / f"{member}-jpegls.dcm")
+    write(image(4, "jpeg-baseline-2", jpeg, jpeg_pixels, 2),
+          out / f"{member}-jpeg-baseline-2.dcm")
+    write(image(5, "native", ExplicitVRLittleEndian,
+                np.ascontiguousarray(np.moveaxis(_PLANAR_RGB, -1, 0)).tobytes(), 1),
+          out / f"{member}-native.dcm")
+    write(image(6, "rle", "1.2.840.10008.1.2.5", _PLANAR_RLE, 1),
+          out / f"{member}-rle.dcm")
+
+    host = image(7, "icon", jpeg, jpeg_pixels, 0)
+    icon = Dataset()
+    icon.Rows, icon.Columns, icon.SamplesPerPixel = 4, 5, 3
+    icon.PhotometricInterpretation = "RGB"
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit, icon.PixelRepresentation = 7, 0
+    icon.add_new(0x00280006, "US", 1)
+    icon.add_new(0x7FE00010, "OB", jpeg_pixels)
+    icon[0x7FE00010].is_undefined_length = True
+    host.IconImageSequence = Sequence([icon])
+    write(host, out / f"{member}-icon.dcm")
+
+
+COMPREHENSIVE_SR = "1.2.840.10008.5.1.4.1.1.88.33"
+
+
+def _code(value, scheme, meaning):
+    code = Dataset()
+    code.CodeValue, code.CodingSchemeDesignator, code.CodeMeaning = value, scheme, meaning
+    return code
+
+
+def _content_item(value_type, concept, relationship="CONTAINS", **values):
+    item = Dataset()
+    item.RelationshipType, item.ValueType = relationship, value_type
+    item.ConceptNameCodeSequence = Sequence([_code(*concept)])
+    for keyword, value in values.items():
+        setattr(item, keyword, value)
+    return item
+
+
+def structured_report(out: Path):
+    """A dcmqi-style Comprehensive SR (#1131): a TEXT holding an injected
+    ID, a tracking identifier and two provenance strings kept verbatim
+    (#1131 quotes `Nodule 1`, `pylidc`, `0.2.0`), a PNAME observer, a
+    DATE, a NUM with units and a UIDREF, and Study and Series Descriptions
+    holding an ID and none. A and B remove the Content Sequence
+    (`basic@2026c`, #848) and the descriptions; C keeps the tree and
+    scrubs the Text Values and the descriptions (#1130). Values invented."""
+    sop = uid("structured_report", 1, 1, 1)
+    ds = FileDataset(None, {}, file_meta=_meta(COMPREHENSIVE_SR, sop, ExplicitVRLittleEndian),
+                     preamble=b"\0" * 128)
+    ds.SpecificCharacterSet = "ISO_IR 100"
+    ds.PatientID, ds.PatientName = "GOLD-structured_report", "GOLDEN^REPORT"
+    ds.PatientBirthDate, ds.PatientSex = "19600101", "F"
+    ds.StudyInstanceUID = uid("structured_report", 1)
+    ds.SeriesInstanceUID = uid("structured_report", 1, 1)
+    ds.SOPInstanceUID, ds.SOPClassUID = sop, COMPREHENSIVE_SR
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "SR", 1, 1
+    ds.StudyDate, ds.ContentDate, ds.StudyTime = "20230101", "20230101", "120000"
+    ds.StudyID, ds.AccessionNumber = "S1", "ACC1"
+    ds.ReferringPhysicianName = "REF^DOC"
+    ds.StudyDescription = "CHEST for 8675309421"
+    ds.SeriesDescription = "Lesion 1 - Reader 2"
+    ds.Manufacturer = "Acme"
+    ds.ValueType = "CONTAINER"
+    ds.ConceptNameCodeSequence = Sequence([_code("126000", "DCM",
+                                                 "Imaging Measurement Report")])
+    ds.ContinuityOfContent, ds.CompletionFlag = "SEPARATE", "COMPLETE"
+    ds.VerificationFlag = "UNVERIFIED"
+    measured = Dataset()
+    measured.NumericValue = "71.06"
+    measured.MeasurementUnitsCodeSequence = Sequence([_code("mm", "UCUM", "millimeter")])
+    ds.ContentSequence = Sequence([
+        _content_item("TEXT", ("121106", "DCM", "Comment"),
+                      TextValue="GOLD MASS for 8675309421"),
+        _content_item("TEXT", ("112039", "DCM", "Tracking Identifier"),
+                      TextValue="Nodule 1"),
+        _content_item("TEXT", ("111526", "DCM", "Algorithm Name"), TextValue="pylidc"),
+        _content_item("TEXT", ("111528", "DCM", "Algorithm Version"), TextValue="0.2.0"),
+        _content_item("PNAME", ("121008", "DCM", "Person Observer Name"),
+                      relationship="HAS OBS CONTEXT", PersonName="OBSERVER^ONE"),
+        _content_item("DATE", ("111060", "DCM", "Study Date"), Date="20221111"),
+        _content_item("NUM", ("G-D705", "SRT", "Volume"),
+                      MeasuredValueSequence=Sequence([measured])),
+        _content_item("UIDREF", ("121232", "DCM", "Source series for segmentation"),
+                      UID=uid("structured_report", "source series")),
+    ])
+    write(ds, out / "structured_report-1.dcm")
+
+
+def private_creators(out: Path):
+    """GE's `GEMS_IDEN_01` "Image actual date" (offset 27) in block 10 of
+    one file and block 11 of another, and `GEMS_PETD_01` holding a
+    parameter at `0009,1027`, the tag the first file's date uses (#1132).
+    A sweeps all three; B keeps all three; C's creator-scoped REMOVE
+    removes the two dates and keeps the parameter. Values invented."""
+    first = ct("private_creators", inst=1)
+    first.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(first, out / "private_creators-1.dcm")
+    second = ct("private_creators", inst=2)
+    second.private_block(0x0009, "GEMS_PETD_01", create=True).add_new(0x27, "LO", "1.5")
+    second.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(second, out / "private_creators-2.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -1009,7 +1266,9 @@ MEMBERS = {f.__name__: f for f in (
     source_says_unmodified, linkage_key_not_text,
     sop_classes_in_the_file_meta, label_spelling, one_bit_excess,
     offset_table_edges, fewer_fragments_than_frames,
-    no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary)}
+    no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
+    no_planar_configuration, structured_report, private_creators,
+    declared_planar_configuration)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

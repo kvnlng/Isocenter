@@ -113,7 +113,7 @@ are in the paragraphs below.
 | `IsocenterConfiguration.add_rule` | `serial_number, manufacturer='Unknown', model_name='Unknown', redaction_zones=None` |
 | `IsocenterConfiguration.update_rule` | `serial_number, updates` |
 | `IsocenterConfiguration.delete_rule` | `serial_number` |
-| `IsocenterConfiguration.set_phi_tag` | `tag, action, value=None` |
+| `IsocenterConfiguration.set_phi_tag` | `tag, action, value=None, target=None` |
 | `IsocenterConfiguration.get_rule` | `serial_number` |
 | `DicomItem.set_attr` | `tag, value` |
 | `Instance.set_attr` | `tag, value` |
@@ -337,7 +337,9 @@ no configuration, `phi_tags` is a copy of the floor policy
 held under is tier 2), and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line, or a null one, extends it, and one with
 `privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
-keys, stores its `value` argument as the rule's `value`, and raises
+keys (a private creator's case kept), stores its `value` argument as the
+rule's `value` and its `target` argument as the rule's `target`, which
+only `SCRUB` takes and `SCRUB` requires, and raises
 `ValueError`, leaving the policy and its file unchanged, for an unknown
 action or a rule `load_config` would refuse. `add_rule()` and
 `update_rule()` raise `ValueError`, leaving the rules and the file

@@ -25,6 +25,14 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
   applied (#808, #814, #899). Then the store is redacted under the rules
   the suggestions leave: `"*"` and a new exact rule both cover the
   synthetic image (#908).
+- `basic@2026c` with private tags kept and the opt-in rules of #1130,
+  #1131 and #1132 (`OPT_IN_CONFIG`), over two more files: a REMOVE keyed
+  by private creator over a file holding that creator's block beside
+  another creator's at the same element offset, `SCRUB` with `[names,
+  dates, ids]` on a Study Description holding an id, a date and the
+  patient's own name, and a kept Content Sequence whose TEXT item is
+  scrubbed. No target names `orgs`, which needs a model 3.14t cannot
+  install, so the digest stays the same on every interpreter.
 
 The files are CT_small and MR_small (bundled with pydicom) and five
 synthetic images built from CT_small. One holds an element of every
@@ -164,6 +172,74 @@ KITCHEN_SINK = {
     "0018,1000": {"action": "REPLACE", "value": "SERIAL-X"},  # Device Serial
     "60xx,xxxx": {"action": "REMOVE"},                        # overlay mask
 }
+
+
+#: The opt-in scenario's file (#1130, #1131, #1132).
+OPT_IN_CONFIG = (
+    "privacy_profile: basic\n"
+    "remove_private_tags: false\n"
+    "phi_tags:\n"
+    "  '0009,\"B3 DIGEST\",27': {action: REMOVE}\n"
+    "  0008,1030: {action: SCRUB, target: [names, dates, ids]}\n"
+    "  0040,a730: {action: KEEP}\n"
+    "  0040,a160: {action: SCRUB, target: [names, dates, ids]}\n")
+
+
+def _opt_in_inputs(directory):
+    """Two files for `OPT_IN_CONFIG`: CT_small with another creator's
+    block before `B3 DIGEST`'s, both holding element offset 0x27 (one
+    removed by creator, one kept), and a Study Description to scrub; and
+    a Comprehensive SR whose Content Sequence holds a TEXT item to scrub
+    beside a PNAME, a DATE and a UIDREF that the nested rows reach."""
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.remove_private_tags()
+    ds.SOPInstanceUID = "1.2.826.0.1.3680043.8.498.782.91"
+    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    ds.SeriesInstanceUID = "1.2.826.0.1.3680043.8.498.782.92"
+    ds.StudyInstanceUID = "1.2.826.0.1.3680043.8.498.782.93"
+    ds.PatientID = "DIGEST-782-9"
+    ds.PatientName = "Quill^Tamsin"
+    ds.StudyDescription = "CHEST Quill 20040119 for 4815162342"
+    ds.private_block(0x0009, "B3 OTHER", create=True).add_new(0x27, "LO", "kept")
+    ds.private_block(0x0009, "B3 DIGEST", create=True).add_new(0x27, "LO", "removed")
+    ds.save_as(os.path.join(directory, "creators.dcm"))
+
+    sr = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    for keyword in ("PixelData", "Rows", "Columns", "BitsAllocated", "BitsStored",
+                    "HighBit", "PixelRepresentation", "SamplesPerPixel",
+                    "PhotometricInterpretation"):
+        if keyword in sr:
+            delattr(sr, keyword)
+    sr.remove_private_tags()
+    sr.SOPClassUID = "1.2.840.10008.5.1.4.1.1.88.33"
+    sr.file_meta.MediaStorageSOPClassUID = sr.SOPClassUID
+    sr.SOPInstanceUID = "1.2.826.0.1.3680043.8.498.782.94"
+    sr.file_meta.MediaStorageSOPInstanceUID = sr.SOPInstanceUID
+    sr.SeriesInstanceUID = "1.2.826.0.1.3680043.8.498.782.95"
+    # The first file's patient and study, so `names` reads Quill^Tamsin.
+    sr.StudyInstanceUID = ds.StudyInstanceUID
+    sr.PatientID, sr.PatientName = ds.PatientID, ds.PatientName
+    sr.Modality = "SR"
+    sr.ValueType = "CONTAINER"
+
+    def item(value_type, meaning, **values):
+        one = Dataset()
+        one.RelationshipType, one.ValueType = "CONTAINS", value_type
+        code = Dataset()
+        code.CodeValue, code.CodingSchemeDesignator, code.CodeMeaning = "1", "99D", meaning
+        one.ConceptNameCodeSequence = Sequence([code])
+        for keyword, value in values.items():
+            setattr(one, keyword, value)
+        return one
+
+    sr.ContentSequence = Sequence([
+        item("TEXT", "Comment", TextValue="MASS Quill 20040119 for 4815162342"),
+        item("TEXT", "Tracking Identifier", TextValue="Nodule 1"),
+        item("PNAME", "Observer", PersonName="Observer^One"),
+        item("DATE", "Date", Date="20040119"),
+        item("UIDREF", "Source", UID="1.2.826.0.1.3680043.8.498.782.96"),
+    ])
+    sr.save_as(os.path.join(directory, "sr.dcm"))
 
 
 def _synthetic(path):
@@ -340,13 +416,15 @@ def _leaks_on_the_synthetic_image(session):
     }
 
 
-def _scenario(root, name, configure, redact=False, inspect=None):
+def _scenario(root, name, configure, redact=False, inspect=None, more_inputs=None):
     """Ingest the files into a fresh store and reopen it, apply
     `configure`, audit and anonymize twice, run `inspect` (its record kept
     under `"inspected"`), redact if asked, and return what was found and
     written."""
     directory = os.path.join(root, name)
     _inputs(os.path.join(directory, "input"))
+    if more_inputs:
+        more_inputs(os.path.join(directory, "input"))
     db = os.path.join(directory, "s.db")
     with DicomSession(db) as session:
         load_fixed_secret(session)
@@ -431,6 +509,9 @@ def behaviour(root):
                                inspect=_leaks_on_the_synthetic_image),
         # Selects by manufacturer, whatever the serial (#1108).
         "match-zone": _scenario(root, "match", _load(MATCH_CONFIG), redact=True),
+        # Creator-keyed REMOVE, SCRUB, and a kept report (#1130-#1132).
+        "opt-in": _scenario(root, "opt-in", _load(OPT_IN_CONFIG),
+                            more_inputs=_opt_in_inputs),
     }
 
 

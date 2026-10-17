@@ -12,11 +12,13 @@ zero-item sequence -- or, where the row's code has a D arm, hold its
 VR's dummy (#557), or, on a `U` row, a `2.25.` UID the source did not
 carry (#544) -- unless the table gives it no rule or a named
 departure says why not. Every even-group 50xx and 60xx element must be
-absent outright, whatever its row (#556). The probe list only makes sure
+absent outright, whatever its row (#556). An element the table has no
+row for but `ADDED_RULES` removes (#1133) must be absent too. The probe
+list only makes sure
 each kind of identifier is in the input, so an edit to the fixture
 cannot quietly stop testing one.
 
-Both worker paths, because the process path pickles the 648-rule policy
+Both worker paths, because the process path pickles the 649-rule policy
 into every scan task and the thread path does not.
 """
 import os
@@ -31,8 +33,8 @@ from pydicom.sequence import Sequence
 from isocenter import Session
 from isocenter import parallel
 
-from support.annex_e import (DEVIATIONS, GROUP_RULES, NO_ENTRY, NO_ENTRY_CODES,
-                             load_table)
+from support.annex_e import (ADDED_RULES, DEVIATIONS, GROUP_RULES, NO_ENTRY,
+                             NO_ENTRY_CODES, load_table)
 
 #: What a value-less REPLACE writes, by VR (#557). Literal, never read
 #: from `config_manager.VR_DUMMY`.
@@ -93,6 +95,7 @@ CURVE_ELEMENT = 0x50000005
 #: Overlay Description in group 6002: free text Table E.1-1 does not list,
 #: removed with its group by the `60xx,xxxx` rule (#556).
 OVERLAY_DESCRIPTION = 0x60020022
+REFERENCED_FILE_ID = 0x00041500
 
 
 def _build(path):
@@ -134,6 +137,9 @@ def _build(path):
 
     ds.add_new(CURVE_ELEMENT, "US", 1)                          # Curve Dimensions
     ds.add_new(OVERLAY_DESCRIPTION, "LO", "Overlay by Jane Doe")
+    # Not a probe: PROBES are table rows, and Referenced File ID has none.
+    # `ADDED_RULES` removes it (#1133).
+    ds.add_new(REFERENCED_FILE_ID, "CS", ["E2EDIR", "1"])
     ds.save_as(path)
     return ds
 
@@ -269,6 +275,12 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
         # group rules cover the rows folded into them (#556).
         if _is_repeating(element.tag):
             survivors.append((_key(element.tag), "repeating group", element.value))
+            continue
+        # No row, so the table's walk below would pass it by; the added
+        # rule removes it outright (#1133).
+        added = ADDED_RULES.get(_key(element.tag))
+        if added is not None and added["action"] == "REMOVE":
+            survivors.append((_key(element.tag), added["name"], element.value))
             continue
         row = _row_for(rows, element.tag)
         if row is None or row["basic"] in NO_ENTRY_CODES:

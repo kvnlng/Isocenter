@@ -558,7 +558,7 @@ fixes, never features.
    last line of each shard's `Run Tests` step, added up over the twelve
    shards of a version. Since #966 the runners fetch every tag and
    `origin/main`, and what skips is a short, fixed list. On 3.12, 3.13
-   and 3.14 (3.14t skips one fewer, as marked):
+   and 3.14 (3.14t differs, as marked):
    - 12 parametrized combinations that do not exist, skipped everywhere:
      the rules `set_phi_tag` cannot spell, in
      `test_a_rule_that_cannot_be_honoured_is_refused.py` (6),
@@ -575,6 +575,25 @@ fixes, never features.
    - 2 by platform: `test_the_store_location_advice.py`'s macOS test, and
      `test_redaction_names_its_strategy.py`'s free-threaded test, which
      runs on 3.14t (so 1 there);
+   - 17 on 3.14t only: every test of
+     `test_burned_in_text_with_the_real_text_detector.py`. Since #1123
+     `tests.yml` installs the `textdetect` extra (OpenCV) and sets
+     `ISOCENTER_REQUIRE_TEXT_DETECTOR=1` only on the entries that are not
+     free-threaded, because OpenCV publishes no free-threaded wheel. On
+     3.14t, 16 skip for `No module named 'cv2'` and one because the
+     variable is not 1. On the other three the variable makes a detector
+     that cannot run a failure, not a skip, so none skips there;
+   - 5 on 3.14t only: every test of
+     `test_scrub_orgs_with_the_real_model.py` but its registry check
+     (#1130). `tests.yml` installs the `nlp` extra and, with
+     `python -m spacy download`, the `en_core_web_sm` compatible with it,
+     and sets `ISOCENTER_REQUIRE_NLP_MODEL=1`, only on the entries that
+     are not free-threaded, because spaCy and thinc publish no
+     free-threaded wheel. On 3.14t, 4 skip for the load failure
+     (`No module named 'spacy'`) and one because the variable is not 1.
+     On the other three a model that cannot load is a failure, so none
+     skips there. A contributor's local run without the model skips the
+     same 5;
    - 1 until a final release from v1.0.0 on carries
      `tests/test_config_behaviour_is_versioned.py`:
      `test_no_row_the_previous_final_release_shipped_has_moved` (step 1);
@@ -585,13 +604,19 @@ fixes, never features.
      does not, until step 8), none in a dispatch from `main`.
 
    That is **24 in a rehearsal, 23 in the publish run and 22 in a
-   dispatch from `main`**, and one fewer each on 3.14t. **The first two
-   have been seen on a runner**, at 1.0.0rc17, the first release after
-   #975: its green rehearsal (run 38052494952) skipped 24 on each of 3.12,
-   3.13 and 3.14 and 23 on 3.14t, and its publish run (38053967678) 23
-   on each and 22 on 3.14t. **The dispatch's 22 is still derived**: the
-   last dispatch read (run 37846349518) skipped 19 on 3.12 and 18 on
-   3.14t, before #975 added three cases that need `coverage`. **Any other
+   dispatch from `main`** on 3.12, 3.13 and 3.14, and **45, 44 and 43**
+   on 3.14t (one fewer by platform, 17 more for the detector, 5 more for
+   the spaCy model). **The first two have been seen on a runner** for
+   3.12, 3.13 and 3.14, at 1.0.0rc20, the first release after #1123: its
+   green rehearsal (run 38914679748) skipped 24 on each of 3.12, 3.13
+   and 3.14 and 40 on 3.14t, and its publish run (38917913905) 23 on
+   each and 39 on 3.14t. **The 3.14t figures 45 and 44 are derived**
+   from those by #1130's 5, until a release run shows them. The figures for 3.12, 3.13
+   and 3.14 are the ones 1.0.0rc17, the first release after #975, showed
+   (runs 38052494952 and 38053967678). **The dispatch's 22 and 43 are
+   still derived**: the last dispatch read (run 37846349518) skipped 19
+   on 3.12 and 18 on 3.14t, before #975 added three cases that need
+   `coverage`, #1123 the 17 and #1130 the 5. **Any other
    number is a finding**: find the test (`pytest -rs` prints the reason;
    a runner's `-v` log prints only `SKIPPED`), and either it is a test
    that has stopped running, or this list is out of date and the same

@@ -63,13 +63,13 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: a leak's metadata names a `match:` rule (`rule_match`), and a `match:`
 #: scenario was added.
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "f40834034c154ce10bfacd3acb659bff249111b16972230bd34ac712f31cb4be",
+    "2.0": "e00a02a9f17d6bdcb6a85c54528b85839e64306e1e6c0d5d5953ef5b8565604f",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "f40834034c154ce10bfacd3acb659bff249111b16972230bd34ac712f31cb4be",
+    "2.0": "e00a02a9f17d6bdcb6a85c54528b85839e64306e1e6c0d5d5953ef5b8565604f",
 }
 
 _WHAT_TO_DO = (
@@ -339,6 +339,36 @@ def test_the_fixture_reaches_a_second_pass_an_id_less_subject_and_a_legacy_patie
         ids = [patient["id"] for patient in scenario["graph"]]
         assert sum(is_synthetic_patient_id(pid) for pid in ids) == 1, (name, ids)
         assert legacy in ids, (name, legacy, ids)
+
+
+def _instances(scenario):
+    return [instance for patient in scenario["graph"] for study in patient["studies"]
+            for series in study["series"] for instance in series["instances"]]
+
+
+def test_the_opt_in_scenario_reaches_a_creator_a_scrub_and_a_kept_report(record):
+    """The opt-in scenario (#1130, #1131, #1132) is what makes a change to
+    creator matching, `CONNECTORS` or the tidy rule move the digest. Kills
+    a fixture that stopped reaching any of the three: the creator's
+    element removed and the other creator's kept, the description and the
+    TEXT item scrubbed of the id, the date and the patient's name, and the
+    rows nested in the kept tree still applied."""
+    instances = _instances(record["opt-in"])
+    [creators] = [i for i in instances if "CHEST" in str(i["attributes"].get("0008,1030"))]
+    assert creators["attributes"]["0008,1030"] == "CHEST"
+    private = {tag: value for tag, value in creators["attributes"].items()
+               if tag.startswith("0009,")}
+    assert "kept" in private.values() and "removed" not in private.values(), private
+    [report] = [i for i in instances if "0040,a730" in i["sequences"]]
+    items = report["sequences"]["0040,a730"]
+    texts = [item["attributes"].get("0040,a160") for item in items]
+    assert texts[:2] == ["MASS", "Nodule 1"], texts
+    assert items[2]["attributes"]["0040,a123"] != "Observer^One"
+    assert items[3]["attributes"]["0040,a121"] != "20040119"
+    assert items[4]["attributes"]["0040,a124"].startswith("2.25.")
+    for name, scenario in record.items():
+        if name != "opt-in":
+            assert not any("0040,a730" in i["sequences"] for i in _instances(scenario)), name
 
 
 def test_one_behaviour_row_per_schema_row():

@@ -652,7 +652,7 @@ def _string_literals_in_package():
     `f"{RESOURCES_DIR}/redaction_rules.json"` that is
     `"/redaction_rules.json"`, which is not the basename the caller
     checks for. Measured by review of #391: that rewrite of the
-    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 847 turns
+    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 848 turns
     `test_every_shipped_resource_is_named_by_the_package` red. That is
     the safe direction (a resource the walk cannot
     see reads as unnamed, never as named), and it is the same rule the
@@ -1518,6 +1518,31 @@ def _install_tesseract_step():
         "tests.yml no longer has exactly one step named 'Install "
         "tesseract'; RELEASING.md's rerun rule names it")
     return found[0]
+
+
+def test_the_model_is_installed_where_the_variable_requires_it():
+    """The spaCy model is installed on exactly the entries whose Run Tests
+    sets ISOCENTER_REQUIRE_NLP_MODEL=1 (#1130, owner rulings R15 and R18).
+    The step's command and the model version are deliberately not pinned:
+    the model bumps with spaCy. Kills the step dropped (every real-model
+    test then fails in CI), its `if:` widened to the free-threaded entries
+    (no spaCy there), and the variable set by another expression than the
+    text detector's."""
+    import yaml
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    found = [step for step in steps if step.get("name") == "Install the spaCy model"]
+    assert len(found) == 1, "tests.yml has no single 'Install the spaCy model' step"
+    assert found[0].get("if") == "${{ !endsWith(matrix.python-version, 't') }}"
+    names = [step.get("name") for step in steps]
+    assert (names.index("Install Dependencies") < names.index("Install the spaCy model")
+            < names.index("Run Tests"))
+    [run_tests] = [step for step in steps if step.get("name") == "Run Tests"]
+    env = run_tests.get("env") or {}
+    assert env.get("ISOCENTER_REQUIRE_NLP_MODEL") == env.get(
+        "ISOCENTER_REQUIRE_TEXT_DETECTOR") == (
+            "${{ endsWith(matrix.python-version, 't') && '0' || '1' }}")
 
 
 def _run_the_install_step(tmp_path, failing_downloads, update_status=0):
