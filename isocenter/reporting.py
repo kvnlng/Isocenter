@@ -373,6 +373,34 @@ def _planar_configuration_line(report: "ComplianceReport") -> str:
             f"(color-by-pixel), because the source file stated none.\n")
 
 
+def _planar_configuration_override_line(report: "ComplianceReport") -> str:
+    """How many images and icons were read as 0 over a declared Planar
+    Configuration under a syntax whose stream fixes the layout, one line,
+    or nothing when none were (#1137, owner ruling R20b).
+
+    Rendered after #1134's line, which does not count these, as this one
+    does not count inferences. Counts only, no grade effect.
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The bullet, or "".
+    """
+    counts = report.planar_configuration_overridden or {}
+    parts = []
+    if counts.get("images"):
+        parts.append(f"{counts['images']} image(s)")
+    if counts.get("icons"):
+        parts.append(f"{counts['icons']} icon(s)")
+    if not parts:
+        return ""
+    return (f"*   **Planar Configuration:** {' and '.join(parts)} read as 0 "
+            f"(color-by-pixel) over a declared Planar Configuration "
+            f"(0028,0006), under a compressed transfer syntax whose stream "
+            f"fixes the layout.\n")
+
+
 @dataclass
 class ComplianceReport:
     """
@@ -457,6 +485,11 @@ class ComplianceReport:
             so a report made before any export or after a reopen says the
             same. Rendered in section 5 when either is above 0; not a
             grade term.
+        planar_configuration_overridden (Dict[str, int]): How many images
+            and icons in the store declared a Planar Configuration other
+            than 0 under a syntax whose compressed stream fixes the
+            layout, read and written as 0 (#1137), keyed "images" and
+            "icons". Counted, rendered and ungraded as the field above.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
@@ -556,6 +589,8 @@ class ComplianceReport:
     phi_status_recorded: bool = False
     # #1134: images and icons whose Planar Configuration was inferred.
     planar_configuration_inferred: Dict[str, int] = field(default_factory=dict)
+    # #1137: images and icons whose declared value was read as 0.
+    planar_configuration_overridden: Dict[str, int] = field(default_factory=dict)
 
 
 class ReportRenderer(Protocol):
@@ -737,6 +772,7 @@ The following actions were recorded in the secure audit trail:
         md_content += _pixel_scan_line(report)
         md_content += _burned_in_text_line(report)
         md_content += _planar_configuration_line(report)
+        md_content += _planar_configuration_override_line(report)
         md_content += (f"*   **Methodology:** {report.deid_method}. "
                        f"{_METHODOLOGY_DISCLAIMER}\n")
         md_content += """

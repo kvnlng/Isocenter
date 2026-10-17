@@ -70,7 +70,7 @@ from ._version import __version__
 from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree,
                        exported_patient_id, is_synthetic_patient_id, PASS_WRITING)
-from .pixel_geometry import PLANAR_INFERRED_ATTR
+from .pixel_geometry import PLANAR_INFERRED_ATTR, PLANAR_OVERRIDDEN_ATTR
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read.
@@ -4700,6 +4700,9 @@ class DicomSession:
         # report before any export, or after a reopen, says the same.
         # Icons apart from images: an icon is not an image instance.
         planar_inferred = {"images": 0, "icons": 0}
+        # #1137: the same count, apart, for a declared value read as 0
+        # under a syntax whose stream fixes the layout.
+        planar_overridden = {"images": 0, "icons": 0}
         walked = 0
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
@@ -4726,6 +4729,12 @@ class DicomSession:
                             1 for item, path in iter_item_tree(instance)
                             if path and item.attributes.get(
                                 PLANAR_INFERRED_ATTR))
+                        planar_overridden["images"] += bool(
+                            instance.attributes.get(PLANAR_OVERRIDDEN_ATTR))
+                        planar_overridden["icons"] += sum(
+                            1 for item, path in iter_item_tree(instance)
+                            if path and item.attributes.get(
+                                PLANAR_OVERRIDDEN_ATTR))
         # At least one of the entities walked holds a recorded status.
         status_recorded = sum(never_scanned.values()) < walked
 
@@ -4775,6 +4784,7 @@ class DicomSession:
             never_scanned=never_scanned,
             phi_status_recorded=status_recorded,
             planar_configuration_inferred=planar_inferred,
+            planar_configuration_overridden=planar_overridden,
         )
 
         renderer.render(report, output_path)
