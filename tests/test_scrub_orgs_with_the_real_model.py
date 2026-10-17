@@ -98,15 +98,23 @@ def _is_subsequence(short, long):
     return all(ch in letters for ch in short)
 
 
-def test_scrub_with_the_real_model_only_deletes():
+def test_scrub_with_the_real_model_only_deletes_and_settles_in_one_pass():
     """The design's invariant whatever spans a model returns (owner ruling
-    Q10 (a)): the result is the source with characters deleted."""
+    Q10 (a)): the result is the source with characters deleted. And a
+    second pass over the written value changes nothing and finds nothing,
+    the dummy `ANONYMIZED` included, so a second `audit()` and
+    `anonymize()` leave a scrubbed value as the first wrote it: `scrub`
+    repeats to its own fixpoint within one pass, so whatever `orgs` takes
+    away, it takes away the first time. One test, so the skip count does
+    not move (RELEASING.md)."""
     kinds, names = ["names", "dates", "ids", "orgs"], ("HOOVER", "AMANDA")
     for text in CORPUS:
         cleaned, counts = scrub(text, kinds, names)
         assert len(cleaned) <= len(text)
         assert _is_subsequence(cleaned, text), (text, cleaned)
         assert all(isinstance(n, int) and n > 0 for n in counts.values())
+        written = cleaned or "ANONYMIZED"
+        assert scrub(written, kinds, names) == (written, {}), (text, written)
 
 
 HOSPITALS = [
