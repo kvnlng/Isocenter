@@ -527,8 +527,13 @@ def test_the_report_counts_images_and_icons_before_any_export(tmp_path):
         session.generate_report(str(tmp_path / "r1.md"))
         section = _section_5((tmp_path / "r1.md").read_text())
         assert want in section, section
-        # After the burned-in text bullet's place, before Methodology.
-        assert section.index(want) < section.index("*   **Methodology:**")
+        # In the burned-in text bullet's place's wake: no pass ran, so that
+        # bullet is "" and the line sits between the Pixel Scan bullet and
+        # Methodology, directly.
+        lines = section.splitlines(keepends=True)
+        at = lines.index(want)
+        assert lines[at - 1].startswith("*   **Pixel Scan"), lines[at - 1]
+        assert lines[at + 1].startswith("*   **Methodology:**"), lines[at + 1]
         session.anonymize(session.audit())
         session.generate_report(str(tmp_path / "r2.md"))
         r2 = (tmp_path / "r2.md").read_text()
@@ -653,6 +658,37 @@ def test_no_file_meta_still_raises_on_file_meta():
         _decode_pixels(ds)
     assert "file_meta" in str(caught.value), str(caught.value)
     assert "PlanarConfiguration" not in ds
+
+
+def test_a_colour_header_with_no_pixel_element_gets_nothing(tmp_path, caplog):
+    """The predicate's `"PixelData" not in ds` arm (review of #1138).
+
+    SamplesPerPixel 3, no Planar Configuration and no pixel element at
+    all: there are no samples to lay out, so nothing is inferred. Without
+    the arm the graph gained 0 and the key, the export wrote 0, and the
+    report counted an image.
+    """
+    ds = _base()
+    ds.Rows = ds.Columns = 2
+    ds.SamplesPerPixel = 3
+    ds.PhotometricInterpretation = "RGB"
+    ds.BitsAllocated = ds.BitsStored = 8
+    ds.HighBit, ds.PixelRepresentation = 7, 0
+    path = _save(tmp_path / "src", "nopix", ds)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        with DicomSession(str(tmp_path / "s.db")) as session:
+            summary = session.ingest(os.path.dirname(path))
+            assert summary.ingested == 1, summary.failures
+            (inst,) = _instances(session)
+            assert PLANAR_INFERRED_ATTR not in inst.attributes
+            assert "0028,0006" not in inst.attributes
+            (written,) = _export(session, tmp_path / "out", False).values()
+            assert "PixelData" not in written
+            assert "PlanarConfiguration" not in written
+            session.generate_report(str(tmp_path / "r.md"))
+    assert LINE not in (tmp_path / "r.md").read_text()
+    assert "Planar Configuration (0028,0006)" not in caplog.text
 
 
 def test_a_syntax_with_no_decoder_is_refused_as_before(tmp_path):
