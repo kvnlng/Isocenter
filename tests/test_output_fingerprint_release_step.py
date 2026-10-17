@@ -224,6 +224,7 @@ COMMITTED = {
                        "one_bit_excess-no-frames-value.dcm",
                        "one_bit_excess-padded.dcm"],
     "prior_markers": ["prior_markers-1.dcm"],
+    "private_creators": ["private_creators-1.dcm", "private_creators-2.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "private_vr_unlike_the_dictionary": [
         "private_vr_unlike_the_dictionary-sl.dcm",
@@ -231,6 +232,7 @@ COMMITTED = {
     "redacted": ["redacted-1.dcm"],
     "sop_classes_in_the_file_meta": ["sop_classes_in_the_file_meta-1.dcm"],
     "source_says_unmodified": ["source_says_unmodified-1.dcm"],
+    "structured_report": ["structured_report-1.dcm"],
     "unstated_private_vr": ["unstated_private_vr-explicit-un.dcm",
                             "unstated_private_vr-implicit.dcm",
                             "unstated_private_vr-mismatch.dcm"],
@@ -263,7 +265,8 @@ def test_the_generator_builds_what_is_listed_and_never_overwrites_a_member(tmp_p
 def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_tags():
     import yaml
     assert fp.CONFIGS == {"A": ROOT / "fingerprint" / "config-a.yaml",
-                          "B": ROOT / "fingerprint" / "config-b.yaml"}
+                          "B": ROOT / "fingerprint" / "config-b.yaml",
+                          "C": ROOT / "fingerprint" / "config-c.yaml"}
     a = yaml.safe_load(fp.CONFIGS["A"].read_text(encoding="utf-8"))
     b = yaml.safe_load(fp.CONFIGS["B"].read_text(encoding="utf-8"))
     serials = {str(pydicom.dcmread(str(p)).get("DeviceSerialNumber", ""))
@@ -277,6 +280,35 @@ def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_ta
     assert "machines" not in b
     assert {k: v for k, v in a.items() if k not in ("machines", "remove_private_tags")} \
         == {k: v for k, v in b.items() if k != "remove_private_tags"}
+
+
+#: What configuration C adds to B (owner ruling Q9 (b) on the batch of
+#: #1130, #1131 and #1132), and nothing else: A and B do not move.
+C_OVER_B = {
+    '0009,"GEMS_IDEN_01",27': {"action": "REMOVE", "name": "GE Image actual date"},
+    "0008,1030": {"action": "SCRUB", "target": ["names", "dates", "ids"],
+                  "name": "Study Description"},
+    "0008,103e": {"action": "SCRUB", "target": ["names", "dates", "ids"],
+                  "name": "Series Description"},
+    "0040,a730": {"action": "KEEP", "name": "Content Sequence"},
+    "0040,a160": {"action": "SCRUB", "target": ["names", "dates", "ids"],
+                  "name": "Text Value"},
+}
+
+
+def test_configuration_c_is_b_with_the_opt_in_rules_and_no_model():
+    """C is B plus the rules above; no SCRUB target names `orgs`, which
+    needs a model that 3.14t cannot install and that is not pinned. Kills
+    C drifting from B, and `orgs` added to it."""
+    import yaml
+    b = yaml.safe_load(fp.CONFIGS["B"].read_text(encoding="utf-8"))
+    c = yaml.safe_load(fp.CONFIGS["C"].read_text(encoding="utf-8"))
+    assert {k: v for k, v in c.items() if k != "phi_tags"} == \
+        {k: v for k, v in b.items() if k != "phi_tags"}
+    assert c["phi_tags"] == {**b["phi_tags"], **C_OVER_B}
+    assert not any("orgs" in (rule.get("target") or [])
+                   for rule in c["phi_tags"].values())
+    assert fp.C_ARMS == (("C.dicom", "dicom", {"use_compression": False}),)
 
 
 def _uids(ds):

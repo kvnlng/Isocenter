@@ -1093,6 +1093,89 @@ def no_planar_configuration(out: Path):
     write(ds, out / f"{member}-icon.dcm")
 
 
+COMPREHENSIVE_SR = "1.2.840.10008.5.1.4.1.1.88.33"
+
+
+def _code(value, scheme, meaning):
+    code = Dataset()
+    code.CodeValue, code.CodingSchemeDesignator, code.CodeMeaning = value, scheme, meaning
+    return code
+
+
+def _content_item(value_type, concept, relationship="CONTAINS", **values):
+    item = Dataset()
+    item.RelationshipType, item.ValueType = relationship, value_type
+    item.ConceptNameCodeSequence = Sequence([_code(*concept)])
+    for keyword, value in values.items():
+        setattr(item, keyword, value)
+    return item
+
+
+def structured_report(out: Path):
+    """A dcmqi-style Comprehensive SR (#1131): a TEXT holding an injected
+    ID, a tracking identifier and two provenance strings kept verbatim
+    (#1131 quotes `Nodule 1`, `pylidc`, `0.2.0`), a PNAME observer, a
+    DATE, a NUM with units and a UIDREF, and Study and Series Descriptions
+    holding an ID and none. A and B remove the Content Sequence
+    (`basic@2026c`, #848) and the descriptions; C keeps the tree and
+    scrubs the Text Values and the descriptions (#1130). Values invented."""
+    sop = uid("structured_report", 1, 1, 1)
+    ds = FileDataset(None, {}, file_meta=_meta(COMPREHENSIVE_SR, sop, ExplicitVRLittleEndian),
+                     preamble=b"\0" * 128)
+    ds.SpecificCharacterSet = "ISO_IR 100"
+    ds.PatientID, ds.PatientName = "GOLD-structured_report", "GOLDEN^REPORT"
+    ds.PatientBirthDate, ds.PatientSex = "19600101", "F"
+    ds.StudyInstanceUID = uid("structured_report", 1)
+    ds.SeriesInstanceUID = uid("structured_report", 1, 1)
+    ds.SOPInstanceUID, ds.SOPClassUID = sop, COMPREHENSIVE_SR
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "SR", 1, 1
+    ds.StudyDate, ds.ContentDate, ds.StudyTime = "20230101", "20230101", "120000"
+    ds.StudyID, ds.AccessionNumber = "S1", "ACC1"
+    ds.ReferringPhysicianName = "REF^DOC"
+    ds.StudyDescription = "CHEST for 8675309421"
+    ds.SeriesDescription = "Lesion 1 - Reader 2"
+    ds.Manufacturer = "Acme"
+    ds.ValueType = "CONTAINER"
+    ds.ConceptNameCodeSequence = Sequence([_code("126000", "DCM",
+                                                 "Imaging Measurement Report")])
+    ds.ContinuityOfContent, ds.CompletionFlag = "SEPARATE", "COMPLETE"
+    ds.VerificationFlag = "UNVERIFIED"
+    measured = Dataset()
+    measured.NumericValue = "71.06"
+    measured.MeasurementUnitsCodeSequence = Sequence([_code("mm", "UCUM", "millimeter")])
+    ds.ContentSequence = Sequence([
+        _content_item("TEXT", ("121106", "DCM", "Comment"),
+                      TextValue="GOLD MASS for 8675309421"),
+        _content_item("TEXT", ("112039", "DCM", "Tracking Identifier"),
+                      TextValue="Nodule 1"),
+        _content_item("TEXT", ("111526", "DCM", "Algorithm Name"), TextValue="pylidc"),
+        _content_item("TEXT", ("111528", "DCM", "Algorithm Version"), TextValue="0.2.0"),
+        _content_item("PNAME", ("121008", "DCM", "Person Observer Name"),
+                      relationship="HAS OBS CONTEXT", PersonName="OBSERVER^ONE"),
+        _content_item("DATE", ("111060", "DCM", "Study Date"), Date="20221111"),
+        _content_item("NUM", ("G-D705", "SRT", "Volume"),
+                      MeasuredValueSequence=Sequence([measured])),
+        _content_item("UIDREF", ("121232", "DCM", "Source series for segmentation"),
+                      UID=uid("structured_report", "source series")),
+    ])
+    write(ds, out / "structured_report-1.dcm")
+
+
+def private_creators(out: Path):
+    """GE's `GEMS_IDEN_01` "Image actual date" (offset 27) in block 10 of
+    one file and block 11 of another, and `GEMS_PETD_01` holding a
+    parameter at `0009,1027`, the tag the first file's date uses (#1132).
+    A sweeps all three; B keeps all three; C's creator-scoped REMOVE
+    removes the two dates and keeps the parameter. Values invented."""
+    first = ct("private_creators", inst=1)
+    first.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(first, out / "private_creators-1.dcm")
+    second = ct("private_creators", inst=2)
+    second.private_block(0x0009, "GEMS_PETD_01", create=True).add_new(0x27, "LO", "1.5")
+    second.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
+    write(second, out / "private_creators-2.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
@@ -1105,7 +1188,7 @@ MEMBERS = {f.__name__: f for f in (
     sop_classes_in_the_file_meta, label_spelling, one_bit_excess,
     offset_table_edges, fewer_fragments_than_frames,
     no_pixels_under_an_undecodable_syntax, private_vr_unlike_the_dictionary,
-    no_planar_configuration)}
+    no_planar_configuration, structured_report, private_creators)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
