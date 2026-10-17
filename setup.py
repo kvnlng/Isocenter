@@ -178,8 +178,15 @@ setup(
         # dependency". ZoneDiscoverer falls back to regex when the model
         # is absent, so the extra is still useful without it; install the
         # model with `python -m spacy download en_core_web_sm`.
+        #
+        # Capped below 4.0 (owner ruling R19, 2026-10-16), as pydicom is:
+        # `SCRUB` target `orgs` and burned-in `names` read `nlp(text).ents`,
+        # `label_`, `start_char`/`end_char` and `meta["version"]`, and a
+        # major release is installed before a model is built for it or
+        # anyone has checked those still hold. The model itself is not
+        # pinned and bumps freely within 3.x (R18).
         "nlp": [
-            "spacy>=3.7.0"
+            "spacy>=3.7.0,<4.0"
         ],
         # Optional: isocenter/text_detection.py guards `import cv2` and
         # sets HAS_DETECTOR=False when absent; `burned_in_text: {detector:

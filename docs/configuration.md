@@ -109,7 +109,7 @@ see [Configuration files](migration.md#configuration-files) on the upgrade page.
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) | none |
 | machine rule | `redaction_zones` | a list of zones | no zones |
 | zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) | |
-| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the [actions](#phi-tags); `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default) | |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value`, `target` | `action`: one of the [actions](#phi-tags); `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default); `target`: a list of distinct `names`, `dates`, `ids`, `orgs`, which `SCRUB` requires and no other action takes | |
 
 Three of these are traps YAML sets, and are refused rather than read:
 
@@ -526,8 +526,9 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 | **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined. | `action: "SHIFT"` |
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
+| **`SCRUB`** | Keeps a description and removes the identifiers inside it: the kinds its `target` names (`names`, `dates`, `ids`, `orgs`), with a connecting word directly before each. A value left with nothing is written as `ANONYMIZED`. LO, LT, SH, ST, UC and UT only, and private tags. See [Cleaning descriptions](#cleaning-descriptions). | `action: "SCRUB"`, `target: [dates, ids]` |
 
-A rule mapping's keys are `action`, `name` and `value`; any other key raises `ValueError` naming it. Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
+A rule mapping's keys are `action`, `name`, `value` and `target`; any other key raises `ValueError` naming it. Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
 
 * a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (a 0.9.x spelling; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
@@ -536,6 +537,8 @@ A rule mapping's keys are `action`, `name` and `value`; any other key raises `Va
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT;
 * `REPLACE` on a standard tag whose VR cannot hold what it writes. With no `value:`, that is a VR with no dummy: a numeric VR (US, SS, UL, SL, UV, SV, FL, FD, DS, IS), AT, and a VR the dictionary gives as a choice (`US or SS`). With a `value:`, a value the VR cannot hold, such as text in a DA. Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
 * a [repeating-group key](#repeating-groups) with an action other than `REMOVE` or `KEEP`, or in its string form;
+* `SCRUB` with no `target`, or a `target` that is not a list of distinct `names`, `dates`, `ids` and `orgs` (`any`, an empty list, a bare string, a kind twice), or a `target` under any other action;
+* `SCRUB` on a standard tag whose VR is not LO, LT, SH, ST, UC or UT (a Person Name, a code string, a UID, a date, a number, a sequence), or on Patient ID;
 * a `REPLACE` `value:` holding a range: a `-` in a DA or TM, or in a DT anywhere but its UTC offset at the end (`20230515104822-0500` is one DateTime; `20230101-20230201` is a range);
 * a `REPLACE` `value:` whose count of `\`-separated values the standard tag's value multiplicity does not allow: a `\` on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.
 
@@ -568,6 +571,46 @@ phi_tags:
 ```
 
 An element a key covers is matched only where it holds a value in the graph; an Overlay Data over 65534 bytes never reaches it, and has its `DATA_LOSS` row from ingest (see [The 65534-byte limit](#the-65534-byte-limit)). Every element removed has its own `REMEDIATION_REMOVE` row.
+
+#### Cleaning descriptions
+
+A description can carry an identifier inside clinical text a study selects series by: `MR BREAS UNIT for 736-69-8140`. `REMOVE` loses the clinical part with it. `SCRUB` is PS3.15's Clean Descriptors Option (E.3.5, the `C` of Table E.1-1's Clean Desc. column) as a rule: keep the value, remove the identifying information inside it ([#1130](https://github.com/kvnlng/Isocenter/issues/1130)).
+
+```yaml
+phi_tags:
+  "0008,1030": { action: SCRUB, target: [names, dates, ids], name: Study Description }
+  "0008,103e": { action: SCRUB, target: [names, dates, ids], name: Series Description }
+```
+
+| Source value | `target: [names, dates, ids]` |
+| :--- | :--- |
+| `MR BREAS UNIT for 736-69-8140` | `MR BREAS UNIT` |
+| `MA SURGICAL SPECIMEN for 7516817726` | `MA SURGICAL SPECIMEN` |
+| `MA SURGICAL SPECIMEN 20170707` | `MA SURGICAL SPECIMEN` |
+| `Standard Breast Imaging Report for Amanda Hoover`, in a file whose Patient's Name is `HOOVER^AMANDA` | `Standard Breast Imaging Report` |
+
+`target` is required, and lists the kinds to remove, in an order that decides only how a span two kinds find is counted:
+
+* **`dates`**: a date shape: `D-M-Y`, `M-D-Y` or `Y-M-D` with one separator (`/`, `.`, `-` or a space) used twice, `YYYYMMDD`, or a month name beside a day or a year. Digits only, unlike burned-in text, which reads OCR's confusables. A dotted triple whose last field has two digits reads as a date: `Version 3.10.21` becomes `Version`, while `0.2.0` and `dcmqi 1.2.4` are kept.
+* **`ids`**: a run of 6 or more letters and digits (with `-` or `_` inside) holding 5 or more digits. A shorter accession number, such as `A1234`, is not removed.
+* **`names`**: the words of the Person Names the same instance holds, at any depth, and its patient's name: the family, given and middle components, 2 or more characters each, matched whole-word in any case. A name prefix or suffix (`Dr`, `Jr`) is not a word to remove, and a name already replaced (`ANONYMIZED`) is none. No model is used: spaCy's person finder, measured on header text, emptied clinical descriptions (`SAG T1`, `MAMMO SCREENING BILATERAL`) and missed `Amanda Hoover`. Its cost is a patient or physician whose name is also a clinical word (`LONG`, `HEAD`, `WHITE`): that word is removed from that patient's descriptions.
+* **`orgs`**: spaCy's `ORG`, `FAC` and `GPE` entities (organisations, facilities, countries and cities), read on the value title-cased, since `en_core_web_sm` misses most upper-case names. It needs the `nlp` extra and its model (`pip install "isocenter[nlp]"`, `python -m spacy download en_core_web_sm`); without them `audit()` raises `NlpUnavailableError` (a `RuntimeError`) before anything is scanned, never `load_config()`. spaCy publishes no free-threaded wheel, so on the free-threaded build `orgs` is unavailable. **It removes text that is not a site.** Measured with en_core_web_sm 3.8.0 and spaCy 3.8.16 on 2026-10-16; Isocenter does not pin the model, and these figures may change as the model changes:
+    * of 47 typical clinical descriptions, it changed 14 on the corpus the design was measured on, and 13 on the corpus the tests carry (`tests/support/scrub_corpus.py`). Among them `MR BREAST BILATERAL` became `MR`, `US ABDOMEN COMPLETE` became `ABDOMEN COMPLETE`, and `Nodule 1`, `Brain Tumor Protocol`, `Mayo Protocol`, `Boston Scientific` and `Siemens Somatom Definition` were emptied. Read as written and title-cased together, which does not ship, it changed 28 of 47;
+    * it damages text it is not aimed at: `MR BREAS UNIT for 736-69-8140` became `MR UNIT`, reading `Breas` as an organisation, and `MR BREAS, UNIT at MSCH` became `MR, UNIT at MSCH`, missing `MSCH`;
+    * it found `Harris Community Clinic` in `LUNG CA ACCRIN 6668 at Harris Community Clinic`, which became `LUNG CA ACCRIN 6668`.
+
+  `orgs` is for text known to carry site names, and keeps the model's mistakes. `REMOVE` remains the exact answer.
+
+What is removed with a span, and what is left:
+
+* **A connecting word** directly before a span goes with it: `for`, `at`, `by`, `per`, `from`, in any case, with an optional `.`. A title (`Dr`, `Mr`, `Mrs`, `Ms`, `Miss`, `Prof`) goes with a `names` span only. A connecting word elsewhere stays: `Report for Breast` is unchanged.
+* **The tidy.** Where two of `,;:-/|` would meet at a cut, one is kept (`A - 1234567 - B` becomes `A - B`); whitespace a cut leaves before `,`, `;` or `:` is removed; runs of whitespace become one space; and the ends are stripped of whitespace and ` ,;:-/_|.`. Brackets are not balanced: `(1234567) scan` becomes `() scan`. A value nothing is found in is left exactly as it is.
+* **A value left with nothing** is written as `ANONYMIZED`, the dummy `REPLACE` writes, never empty: a Type 1C element such as a TEXT item's Text Value cannot be zero-length. A value that is not text (bytes, a number) is replaced by that dummy too, with a row saying `SCRUB could not read the value as text; replaced by its dummy`. A multi-valued element is cleaned value by value.
+* SCRUB only deletes characters, so the result is never longer than the value. It is repeated until it finds nothing more, so a second `audit()`, here or after a reopen, finds nothing.
+
+Each element cleaned has one `REMEDIATION_REPLACE` row of counts only: `Scrubbed <uid> (Tag 0008,103e): removed 1 id, 1 date`. Neither the source text nor the cleaned text is written to the audit log or the session's log; the finding's own value is the source, as for every finding.
+
+`SCRUB` applies to a standard tag whose VR is LO, LT, SH, ST, UC or UT, at any depth, and to a private tag, by its tag or its [creator](#private-elements-by-creator). It is refused on any other VR, on Patient ID, on a [repeating-group key](#repeating-groups), and without a `target`. In code: `set_phi_tag("0008,103e", "SCRUB", target=["dates", "ids"])`, or assign `configuration.phi_tags["0008,103e"] = {"action": "SCRUB", "target": ["dates", "ids"]}`, which `audit()` checks; an assignment is not saved by `auto_save`.
 
 #### Private elements by creator
 
@@ -807,9 +850,9 @@ session.configuration.update_rule(
 
 #### set_phi_tag()
 
-`set_phi_tag(tag, action, value=None)`
+`set_phi_tag(tag, action, value=None, target=None)`
 
-Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
+Update the policy for a specific DICOM tag. `action` is one of the [actions](#phi-tags); `value` is stored as the rule's `value:`, which `REPLACE` writes; `target` is stored as the rule's `target:`, the kinds [`SCRUB`](#cleaning-descriptions) removes, a list or tuple kept in its order. `SCRUB` requires `target`, and no other action takes it. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
 # Remove Manufacturer's Model Name, which basic@2026c keeps
@@ -817,6 +860,9 @@ session.configuration.set_phi_tag("0008,1090", "REMOVE")
 
 # Keep Study Description, which basic@2026c empties
 session.configuration.set_phi_tag("0008,1030", "KEEP")
+
+# Keep Series Description, and remove the dates and IDs inside it
+session.configuration.set_phi_tag("0008,103e", "SCRUB", target=["dates", "ids"])
 ```
 
 ## What to keep

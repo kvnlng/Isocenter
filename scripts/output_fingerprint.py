@@ -181,6 +181,8 @@ NOT_OUTPUT_ENV = {
     "ISOCENTER_WORKER_FAULTHANDLER": "a diagnostic traceback dump",
     "ISOCENTER_REQUIRE_TEXT_DETECTOR": "read by the test suite only, "
                                        "never by the package",
+    "ISOCENTER_REQUIRE_NLP_MODEL": "read by the test suite only, never by "
+                                   "the package",
 }
 
 #: Audit rows left out of the accounting, and only these: each records

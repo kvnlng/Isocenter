@@ -117,6 +117,83 @@ def _rule_for(phi_tags, tag):
     return phi_tags.get(f"{prefix}xx,{tag[5:]}") or phi_tags.get(f"{prefix}xx,xxxx")
 
 
+#: The metadata key a `SCRUB` proposal carries (#1130): the per-kind
+#: counts of what it removed, or `"unreadable"` for a value that is not
+#: text. Remediation writes the counts as the row, never the text.
+SCRUBBED = "scrubbed"
+#: `SCRUBBED`'s value for a value `SCRUB` could not read as text.
+SCRUB_UNREADABLE = "unreadable"
+
+
+def _standard_pn_tags() -> frozenset:
+    """Every standard tag whose dictionary VR is PN, as `gggg,eeee`. Read
+    once: an SR tree walks thousands of items."""
+    from pydicom.datadict import DicomDictionary  # pylint: disable=import-outside-toplevel
+    return frozenset(f"{tag >> 16:04x},{tag & 0xFFFF:04x}"
+                     for tag, entry in DicomDictionary.items() if entry[0] == "PN")
+
+
+_PN_TAGS = None
+
+
+def _person_names_in(instance, patient=None) -> List[str]:
+    """The Person Name values the instance holds at every depth, and its
+    patient's name: what a `SCRUB` target `names` removes (#1130, owner
+    ruling Q2 (a)). A private element counts when its recorded VR is PN.
+
+    Args:
+        instance (Instance): The instance.
+        patient (Patient, optional): Its patient.
+
+    Returns:
+        List[str]: The values, text only, in walk order.
+    """
+    global _PN_TAGS  # pylint: disable=global-statement
+    if _PN_TAGS is None:
+        _PN_TAGS = _standard_pn_tags()
+    found = []
+    if patient is not None and isinstance(patient.patient_name, str):
+        found.append(patient.patient_name)
+    for item, _ in iter_item_tree(instance):
+        vrs = getattr(item, "attribute_vrs", None) or {}
+        for tag, value in item.attributes.items():
+            if tag in _PN_TAGS or vrs.get(tag) == "PN":
+                values = value if isinstance(value, (list, tuple, MultiValue)) else [value]
+                found.extend(v for v in values if isinstance(v, str))
+    return found
+
+
+def _scrubbed(val, kinds, names):
+    """`(new value, counts)` for a `SCRUB` of `val`, or `(None, None)` when
+    there is nothing to remove (#1130).
+
+    A `str` is scrubbed whole, and a list or tuple of `str` value by
+    value; anything else (bytes, a number, a mixed list) gives
+    `(SCRUB_UNREADABLE, SCRUB_UNREADABLE)`, for the caller to write the
+    tag's dummy. A blank value is nothing to remove. A value scrubbed to
+    nothing is `""` here; the caller writes the dummy.
+    """
+    from .text_scrub import scrub  # pylint: disable=import-outside-toplevel
+    if isinstance(val, str):
+        if not val.strip():
+            return None, None
+        cleaned, counts = scrub(val, kinds, names)
+        return (cleaned, counts) if cleaned != val else (None, None)
+    if isinstance(val, (list, tuple, MultiValue)) and all(isinstance(v, str) for v in val):
+        if not any(v.strip() for v in val):
+            return None, None
+        out, counts = [], {}
+        for one in val:
+            cleaned, found = scrub(one, kinds, names) if one.strip() else (one, {})
+            out.append(cleaned)
+            for kind, number in found.items():
+                counts[kind] = counts.get(kind, 0) + number
+        return (out, counts) if out != list(val) else (None, None)
+    if isinstance(val, (bytes, bytearray)) and not bytes(val).strip(b"\x00 "):
+        return None, None
+    return SCRUB_UNREADABLE, SCRUB_UNREADABLE
+
+
 #: The metadata key a finding matched by a private-creator key carries,
 #: naming the creator, so the audit row can say whose element it was
 #: (#1132).
@@ -1289,6 +1366,9 @@ class PhiInspector:
                 found = creators_of[id(item)] = _item_creators(item)
             return found
 
+        # The instance's Person Names, read on the first SCRUB (#1130).
+        person_names = None
+
         def rule_for(item, tag):
             if not self._creator_rules:
                 return _rule_for(self.phi_tags, tag), None
@@ -1436,10 +1516,36 @@ class PhiInspector:
             new_val = None
             uid_replacement = False
 
+            scrubbed = None
             if action_code == "REMOVE":
                 # If user wants it gone, and it exists (val is not None), finding!
                 needs_remediation = True
                 remediation_action = "REMOVE_TAG"
+            elif action_code == "SCRUB":
+                # The identifiers inside the text, and not the text (#1130,
+                # Clean Descriptors). The names are the instance's own
+                # Person Names, read here in the worker that holds them.
+                if person_names is None:
+                    person_names = _person_names_in(instance, patient)
+                from .text_scrub import name_tokens  # pylint: disable=import-outside-toplevel
+                new_val, scrubbed = _scrubbed(
+                    val, config_val.get("target") or (),
+                    name_tokens(person_names))
+                if scrubbed is not None:
+                    needs_remediation = True
+                    remediation_action = "REPLACE_TAG"
+                    dummy = _vr_dummy(tag) or "ANONYMIZED"
+                    if scrubbed == SCRUB_UNREADABLE:
+                        # Not text: the dummy, visibly, rather than a
+                        # decline that keeps the value (the architect's
+                        # call on #1130).
+                        new_val = dummy
+                    elif isinstance(new_val, list):
+                        new_val = [one if one else dummy for one in new_val]
+                    elif not new_val:
+                        # Emptied: the dummy (owner ruling Q7 (a)). A Type
+                        # 1C Text Value cannot be zero-length.
+                        new_val = dummy
             elif action_code == "EMPTY":
                 # Zero-length bytes are empty too: a binary element EMPTY
                 # wrote reads back as `b""`, from the file and from the
@@ -1552,7 +1658,8 @@ class PhiInspector:
                         "jitter_scheme": getattr(
                             patient, "_jitter_scheme", JITTER_SCHEME_KEYED),
                     } if remediation_action == "SHIFT_DATE"
-                    else {UID_REPLACEMENT: True} if uid_replacement else {})
+                    else {UID_REPLACEMENT: True} if uid_replacement
+                    else {SCRUBBED: scrubbed} if scrubbed is not None else {})
                 if creator_key is not None:
                     # The row names the creator (#1132): a vendor block
                     # name, not PHI, and already in the store.

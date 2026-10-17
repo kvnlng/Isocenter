@@ -55,7 +55,10 @@ TESTS = ROOT / "tests"
 # has no free-threaded wheel, so the 3.14t gate is a documented
 # environment without it; `tests.yml` installs it on the other jobs and
 # sets ISOCENTER_REQUIRE_TEXT_DETECTOR=1 there, which turns the real-model
-# test's skip into a failure.
+# test's skip into a failure. `nlp` (#1130): `tests.yml` installs it and,
+# through `python -m spacy download`, the en_core_web_sm compatible with it
+# (unpinned, owner ruling R18) on the jobs that are not free-threaded, and
+# sets ISOCENTER_REQUIRE_NLP_MODEL=1 there.
 OPTIONAL_EXTRAS = {"ocr", "nlp", "docs", "dev", "textdetect"}
 
 # Import name != distribution name for a handful of packages. Only the

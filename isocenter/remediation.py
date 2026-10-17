@@ -650,7 +650,7 @@ class RemediationService:
         # is imported at module scope for other names already.
         from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
         from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
-        from .privacy import UID_REPLACEMENT  # pylint: disable=import-outside-toplevel
+        from .privacy import SCRUBBED, UID_REPLACEMENT  # pylint: disable=import-outside-toplevel
 
         proposal = finding.remediation_proposal
         tag = _canonical_tag(proposal.target_attr)
@@ -680,15 +680,18 @@ class RemediationService:
             return (f"Emptied Sequence {proposal.target_attr} on "
                     f"{finding.entity_uid}"), None
 
+        # A SCRUB's new value is header text, cleaned: a decline names
+        # it no more than its row does (#1130).
+        written = _written_text(proposal)
         if isinstance(attributes, dict) and tag not in attributes:
             if tag in sequences:
                 reason = (f"{tag} is a sequence on the "
                           f"{type(entity).__name__}, and "
-                          f"{proposal.new_value!r} cannot be written to one")
+                          f"{written} cannot be written to one")
             else:
                 reason = (f"{tag} is no longer on the "
                           f"{type(entity).__name__}; writing "
-                          f"{proposal.new_value!r} would create an element "
+                          f"{written} would create an element "
                           "the graph did not hold")
             self.logger.warning(
                 f"Remediation declined for {self._log_subject(finding)}: "
@@ -711,7 +714,7 @@ class RemediationService:
             refused_vr = _dictionary_vr_refuses(tag, value)
             if refused_vr is not None:
                 reason = (f"{tag} is {refused_vr}, which cannot hold "
-                          f"{value!r}; the value is left unchanged")
+                          f"{written}; the value is left unchanged")
                 self.logger.warning(
                     f"Remediation declined for {self._log_subject(finding)}: "
                     f"{reason}")
@@ -774,6 +777,12 @@ class RemediationService:
             entity._take_sop_uid(value, pixels_changed=False)
         else:
             entity.set_attr(proposal.target_attr, value)
+        scrubbed = (proposal.metadata or {}).get(SCRUBBED)
+        if scrubbed is not None:
+            # Counts only: the cleaned text is header text, and the log of
+            # what was removed is the counts (#1130).
+            return (f"Scrubbed {finding.entity_uid} (Tag "
+                    f"{_tag_and_creator(proposal)}): {_scrub_said(scrubbed)}"), None
         return (f"Remediated {finding.entity_uid} (Tag {_tag_and_creator(proposal)}) "
                 f"-> {proposal.new_value}"), None
 
@@ -2969,3 +2978,42 @@ def _tag_and_creator(proposal: PhiRemediation) -> str:
     if creator is None:
         return f"{proposal.target_attr}"
     return f"{proposal.target_attr} (creator {creator})"
+
+
+#: How a `SCRUB` row names each kind it counts (#1130).
+_SCRUB_NOUNS = {"names": ("name", "names"), "dates": ("date", "dates"),
+                "ids": ("id", "ids"), "orgs": ("organisation or place",
+                                               "organisations or places")}
+
+
+def _scrub_said(scrubbed) -> str:
+    """A `SCRUB` row's account of what it removed: `removed 1 id, 1 date`,
+    in the order the counts were taken, or that the value was not text.
+
+    Args:
+        scrubbed: The proposal's `SCRUBBED` metadata: `{kind: count}`, or
+            `privacy.SCRUB_UNREADABLE`.
+
+    Returns:
+        str: The text; it names no value.
+    """
+    if not isinstance(scrubbed, dict):
+        return "SCRUB could not read the value as text; replaced by its dummy"
+    said = [_count(number, *_SCRUB_NOUNS.get(kind, (kind, kind)))
+            for kind, number in scrubbed.items() if number]
+    return "removed " + ", ".join(said) if said else "tidied"
+
+
+def _written_text(proposal: PhiRemediation) -> str:
+    """How a decline names the value a proposal would write: `repr` of it,
+    or, for a `SCRUB`, `the cleaned text`, which is header text (#1130).
+
+    Args:
+        proposal (PhiRemediation): The proposal.
+
+    Returns:
+        str: The words.
+    """
+    if "scrubbed" in (proposal.metadata or {}):
+        return "the cleaned text"
+    return repr(proposal.new_value)

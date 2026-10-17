@@ -1520,6 +1520,31 @@ def _install_tesseract_step():
     return found[0]
 
 
+def test_the_model_is_installed_where_the_variable_requires_it():
+    """The spaCy model is installed on exactly the entries whose Run Tests
+    sets ISOCENTER_REQUIRE_NLP_MODEL=1 (#1130, owner rulings R15 and R18).
+    The step's command and the model version are deliberately not pinned:
+    the model bumps with spaCy. Kills the step dropped (every real-model
+    test then fails in CI), its `if:` widened to the free-threaded entries
+    (no spaCy there), and the variable set by another expression than the
+    text detector's."""
+    import yaml
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    found = [step for step in steps if step.get("name") == "Install the spaCy model"]
+    assert len(found) == 1, "tests.yml has no single 'Install the spaCy model' step"
+    assert found[0].get("if") == "${{ !endsWith(matrix.python-version, 't') }}"
+    names = [step.get("name") for step in steps]
+    assert (names.index("Install Dependencies") < names.index("Install the spaCy model")
+            < names.index("Run Tests"))
+    [run_tests] = [step for step in steps if step.get("name") == "Run Tests"]
+    env = run_tests.get("env") or {}
+    assert env.get("ISOCENTER_REQUIRE_NLP_MODEL") == env.get(
+        "ISOCENTER_REQUIRE_TEXT_DETECTOR") == (
+            "${{ endsWith(matrix.python-version, 't') && '0' || '1' }}")
+
+
 def _run_the_install_step(tmp_path, failing_downloads, update_status=0):
     """Run the step's script against the recorders; (exit status, calls)."""
     bash = shutil.which("bash")

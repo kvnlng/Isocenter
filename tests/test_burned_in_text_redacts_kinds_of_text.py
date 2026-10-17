@@ -142,8 +142,11 @@ def test_save_and_create_config_write_the_target(tmp_path, policy):
 
 
 def test_the_kinds_are_one_list_in_two_modules():
-    assert config_manager.BURNED_IN_TEXT_KINDS == text_kinds.KINDS == (
-        "names", "dates", "ids")
+    """Every burned-in kind is a kind the finders hold. `orgs` is a finder
+    for header text only (#1130); Q-B12 keeps it out of burned-in text."""
+    assert config_manager.BURNED_IN_TEXT_KINDS == ("names", "dates", "ids")
+    assert set(config_manager.BURNED_IN_TEXT_KINDS) <= set(text_kinds.KINDS)
+    assert "orgs" not in config_manager.BURNED_IN_TEXT_KINDS
     assert "target" in config_manager._BURNED_IN_TEXT_KEYS
 
 

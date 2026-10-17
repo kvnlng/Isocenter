@@ -1,0 +1,138 @@
+"""`SCRUB` target `orgs`, and burned-in `names`, with the real spaCy model
+(#1130, owner rulings R15, R17 and R18 of 2026-10-16).
+
+The model is deliberately not pinned (R18): CI installs whichever
+`en_core_web_sm` `python -m spacy download` picks for the installed spaCy.
+So nothing here pins a figure a model bump could move. Each test asserts
+a property that holds whatever spans a model returns:
+
+- `orgs` never takes away what `dates` and `ids` remove, because those
+  are regular expressions and SCRUB takes the union;
+- SCRUB only deletes characters;
+- a multi-word institution ending in `Hospital`, `Clinic` or `Center`,
+  the most canonical `ORG` shape, goes with its connector;
+- the burned-in `names` kind finds a mixed-case given-plus-family name.
+
+**Skipped where the model cannot load**, naming the load's failure: the
+`nlp` extra and its model are optional, and the free-threaded build can
+never install them (spaCy and thinc publish no free-threaded wheel).
+**Except** under `ISOCENTER_REQUIRE_NLP_MODEL=1`, which `tests.yml` sets
+on every job that is not free-threaded: there the skip is a failure
+(#44's shape, as `ISOCENTER_REQUIRE_TEXT_DETECTOR` does for OpenCV).
+
+The institution names are invented, but for `Harris Community Clinic`,
+which #1130 quotes.
+"""
+import os
+from pathlib import Path
+
+import pytest
+
+from isocenter import text_kinds
+from isocenter.text_scrub import scrub
+
+from support.scrub_corpus import CLINICAL, ISSUE_SOURCES
+
+REQUIRED = os.environ.get("ISOCENTER_REQUIRE_NLP_MODEL") == "1"
+CORPUS = CLINICAL + ISSUE_SOURCES
+
+
+def _unavailable():
+    return text_kinds._nlp_unavailable_reason()  # pylint: disable=protected-access
+
+
+def test_the_model_is_installed_where_ci_requires_it():
+    """Fails, never skips, when the variable says the model must load."""
+    if not REQUIRED:
+        pytest.skip("ISOCENTER_REQUIRE_NLP_MODEL is not 1: the 'nlp' extra "
+                    "and en_core_web_sm are optional here")
+    assert _unavailable() is None, (
+        "ISOCENTER_REQUIRE_NLP_MODEL=1 and the spaCy model cannot load: "
+        f"{_unavailable()}. Install the 'nlp' extra and run "
+        "python -m spacy download en_core_web_sm.")
+    # Which model, with any version (R18: no version is asserted).
+    assert " en_core_web_sm " in text_kinds._names_by()  # pylint: disable=protected-access
+
+
+@pytest.fixture(autouse=True)
+def _needs_the_model(request):
+    if request.node.name in ("test_the_model_is_installed_where_ci_requires_it",
+                             "test_the_variable_is_in_the_registry"):
+        return
+    reason = _unavailable()
+    if reason is None:
+        return
+    if REQUIRED:
+        pytest.fail(f"ISOCENTER_REQUIRE_NLP_MODEL=1 and the spaCy model "
+                    f"cannot load: {reason}")
+    pytest.skip("Requires the 'nlp' extra and en_core_web_sm, which have no "
+                f"free-threaded wheel: {reason}")
+
+
+def test_the_variable_is_in_the_registry():
+    """Read by the suite only, and registered beside the text detector's.
+    Needs no model, so it never skips."""
+    registry = (Path(__file__).resolve().parents[1] / "docs" / "environment.md"
+                ).read_text(encoding="utf-8")
+    assert "| **`ISOCENTER_REQUIRE_NLP_MODEL`** |" in registry
+
+
+def _regex_spans(text):
+    return (text_kinds.date_spans(text, ocr=False) + text_kinds.id_spans(text))
+
+
+def test_orgs_never_changes_what_dates_and_ids_remove():
+    """Every date and id `[dates, ids]` removes is gone under `[dates,
+    ids, orgs]` too: a model can add removals, never take one away. One
+    test over the corpus, so the skip count is one test (RELEASING.md)."""
+    for text in CORPUS:
+        with_orgs, _ = scrub(text, ["dates", "ids", "orgs"])
+        without, _ = scrub(text, ["dates", "ids"])
+        for start, end in _regex_spans(text):
+            assert text[start:end] not in without
+            assert text[start:end] not in with_orgs, (text, with_orgs)
+
+
+def _is_subsequence(short, long):
+    letters = iter(long)
+    return all(ch in letters for ch in short)
+
+
+def test_scrub_with_the_real_model_only_deletes():
+    """The design's invariant whatever spans a model returns (owner ruling
+    Q10 (a)): the result is the source with characters deleted."""
+    kinds, names = ["names", "dates", "ids", "orgs"], ("HOOVER", "AMANDA")
+    for text in CORPUS:
+        cleaned, counts = scrub(text, kinds, names)
+        assert len(cleaned) <= len(text)
+        assert _is_subsequence(cleaned, text), (text, cleaned)
+        assert all(isinstance(n, int) and n > 0 for n in counts.values())
+
+
+HOSPITALS = [
+    ("CT HEAD at Northwind General Hospital", "Northwind General Hospital"),
+    ("LUNG CA ACCRIN 6668 at Harris Community Clinic", "Harris Community Clinic"),
+    ("MR BRAIN at Lakeshore Regional Medical Center",
+     "Lakeshore Regional Medical Center"),
+]
+
+
+def test_orgs_removes_a_named_hospital():
+    """Deliberately not asserted: that the clinical half survives, which
+    is what moves between model versions."""
+    for text, name in HOSPITALS:
+        cleaned, counts = scrub(text, ["orgs"])
+        words = cleaned.upper().split()
+        assert not any(word.upper() in words for word in name.split()), cleaned
+        assert "AT" not in words, cleaned
+        assert counts.get("orgs", 0) >= 1
+
+
+def test_burned_in_names_reads_a_full_name_with_the_real_model():
+    """#1121's burned-in `names` (spaCy `PERSON`), not SCRUB's PN-token
+    `names`. Not `SMITH^JOHN`: the `^` rule is a regular expression and
+    would pass with no model."""
+    for line, name in [("Report for John Smith", "John Smith"),
+                       ("Seen by Dr. Mary Johnson", "Mary Johnson")]:
+        start = line.index(name)
+        assert (start, start + len(name)) in text_kinds.name_spans(line), line

@@ -174,7 +174,10 @@ jobs:
     # Step sum 45 since the tesseract download is retried in its step
     # (#984, 2026-10-08: that step went from 3 to 8), so the cap is 50:
     # the same 5-minute margin.
-    timeout-minutes: 50
+    # Step sum 48 since the spaCy model is installed in a step of its own
+    # (#1130, owner ruling R15, 2026-10-16: 3 minutes), so the cap is 53:
+    # the same 5-minute margin.
+    timeout-minutes: 53
 
     steps:
     - uses: actions/checkout@v7
@@ -297,7 +300,28 @@ jobs:
         # the detector's tests through its stubbed seam; the real model
         # runs on the others, where ISOCENTER_REQUIRE_TEXT_DETECTOR below
         # makes a lost install a failure, not a skip (#44).
-        pip install -e ".[tests,ocr${{ !endsWith(matrix.python-version, 't') && ',textdetect' || '' }}]"
+        #
+        # `nlp` (spaCy, #1130, owner ruling R15) on the same entries and
+        # for the same reason: spaCy and thinc publish no free-threaded
+        # wheel. Its model is installed in the next step, and
+        # ISOCENTER_REQUIRE_NLP_MODEL below makes a lost model a failure.
+        pip install -e ".[tests,ocr${{ !endsWith(matrix.python-version, 't') && ',textdetect,nlp' || '' }}]"
+
+    - name: Install the spaCy model
+      # en_core_web_sm for `SCRUB` target `orgs` and burned-in `names`
+      # (#1130, owner rulings R15 and R18). Deliberately unpinned:
+      # `spacy download` reads spaCy's compatibility table for the spaCy
+      # just installed and installs, through pip, the newest model built
+      # for it, so the model bumps when spaCy does. The real-model tests
+      # assert properties, not figures, for that reason. A failure here is
+      # the "no compatible model yet" signal, and shows as the variable's
+      # red tests below. Arguments after the model name go to pip, which
+      # retries on its own: one HTTPS fetch from GitHub, no loop needed.
+      # Not on free-threaded entries, which have no spaCy; the `if:` here
+      # decides no test's outcome, so it is allowed (Run Tests has none).
+      if: ${{ !endsWith(matrix.python-version, 't') }}
+      timeout-minutes: 3
+      run: python -m spacy download en_core_web_sm --retries 5 --timeout 30
 
     - name: Run Tests
       id: suite
@@ -397,6 +421,11 @@ jobs:
         # the version as PYTHON_GIL is, and the order of `&&`/`||` is the
         # one where the value after `&&` is never empty.
         ISOCENTER_REQUIRE_TEXT_DETECTOR: ${{ endsWith(matrix.python-version, 't') && '0' || '1' }}
+        # The real spaCy-model tests fail instead of skipping when the
+        # model cannot load (#1130, owner ruling R15): on every entry that
+        # installed the `nlp` extra and the model above, by the same
+        # expression.
+        ISOCENTER_REQUIRE_NLP_MODEL: ${{ endsWith(matrix.python-version, 't') && '0' || '1' }}
 
     - name: Upload the shard's timings
       # What tests/shard_timings.json is refreshed from at a release

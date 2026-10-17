@@ -3642,6 +3642,12 @@ class DicomSession:
             # range was judged by the loader above.
             config_manager._refuse_date_jitter_in_code(self.configuration.date_jitter)
 
+        # A SCRUB target naming `orgs` needs spaCy's model (#1130, R11):
+        # refused here, after the policy is judged and before the merge,
+        # the recorded policy, the project secret and any worker, so a
+        # refused audit leaves the session as it was. Never at load.
+        pixel_analysis._require_scrub_readers("audit", tags_to_use)
+
         # Two `Patient` objects holding one Patient ID are merged before the
         # scan, as `anonymize()` and a restore merge them. The scan
         # cannot see them as two: `_rehydrate_findings` binds a patient
@@ -8345,6 +8351,10 @@ class DicomSession:
         read_pixels = bool(check_burned_in) and policy is not None
         if read_pixels:
             _require_burned_in_text_reader(policy, "export(check_burned_in=True)")
+        if check_burned_in:
+            # The re-audit's own refusal, named for this call (#1130).
+            pixel_analysis._require_scrub_readers(
+                "export(check_burned_in=True)", self.configuration.phi_tags)
 
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them

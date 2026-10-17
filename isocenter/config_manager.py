@@ -101,7 +101,7 @@ _ZONE_KEYS = frozenset({"roi", "note"})
 #: `replacement` is deliberately absent and deliberately not reported as
 #: unknown: it is the one known-refused key, and `_refused_phi_rule`
 #: refuses it with its rename advice.
-_PHI_RULE_KEYS = frozenset({"name", "action", "value"})
+_PHI_RULE_KEYS = frozenset({"name", "action", "value", "target"})
 #: An external profile file contributes its `phi_tags` and nothing else,
 #: so any other key is refused: a profile carrying `privacy_profile: basic`
 #: beside one rule would otherwise load as that one rule.
@@ -133,9 +133,18 @@ BURNED_IN_TEXT_ACTIONS = ("report", "redact", "withhold")
 BURNED_IN_TEXT_SCOPES = ("flagged", "modalities", "all")
 #: The kinds of text a narrowed `target` names (#1121, owner ruling Q-B1
 #: (a)), in the order the refusal lists them; `text_kinds.KINDS` is the
-#: detectors' copy, and a test keeps the two equal. `target: any` (the
-#: default) is every region, as before the key. Compared exactly.
+#: detectors' list, which also holds `orgs` (a `SCRUB` kind only, #1130),
+#: and a test keeps this a subset of it. `target: any` (the default) is
+#: every region, as before the key. Compared exactly.
 BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
+#: The kinds a `SCRUB` rule's `target` names (#1130), in the order the
+#: refusal lists them. `text_scrub.SCRUB_KINDS` is the scrub's copy, and
+#: a test keeps the two equal. There is no `any`: `target` is required
+#: (owner ruling Q5 (b)). Compared exactly.
+SCRUB_KINDS = ("names", "dates", "ids", "orgs")
+#: The VRs `SCRUB` applies to on a standard tag: text a description can
+#: carry. A Person Name is a name whole, so `REPLACE` is its answer.
+_SCRUB_VRS = frozenset({"LO", "LT", "SH", "ST", "UC", "UT"})
 #: What decides "is this text?" (#1121, PR C), in the order the refusal
 #: lists them: `tesseract` (rc19's OCR, the default) or `db` (the
 #: PP-OCRv3 DB text detector run by OpenCV, the optional `textdetect`
@@ -465,7 +474,8 @@ def _names_no_profile(profile_name: Any) -> bool:
 #: The actions `PhiInspector._scan_instance` dispatches on (`REPLACE` is
 #: its `else` arm). Anything else is refused at load, because the scan
 #: would otherwise treat `action: OBLITERATE` as REPLACE without a word.
-_PHI_ACTIONS = frozenset({"KEEP", "REMOVE", "EMPTY", "REPLACE", "SHIFT", "JITTER"})
+_PHI_ACTIONS = frozenset({"KEEP", "REMOVE", "EMPTY", "REPLACE", "SHIFT", "JITTER",
+                          "SCRUB"})
 
 
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
@@ -929,6 +939,38 @@ def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
     if rule.get("name") is not None and not isinstance(rule["name"], str):
         return (f"phi_tags[{tag!r}] name must be a string, got "
                 f"{type(rule['name']).__name__}")
+    if "target" in rule:
+        return _scrub_target_refused(tag, rule["target"])
+    return None
+
+
+def _scrub_target_refused(tag: Any, target: Any) -> Optional[str]:
+    """Why a rule's `target` is not a list of distinct `SCRUB_KINDS`, or
+    None (#1130). Whether the action takes one is `_refused_phi_rule`'s.
+
+    Args:
+        tag (str): The rule's key, for the message.
+        target: The `target` value.
+
+    Returns:
+        Optional[str]: The refusal, or None.
+    """
+    kinds = ", ".join(SCRUB_KINDS)
+    if not isinstance(target, list):
+        # A string is refused rather than read as one kind: `set_phi_tag`
+        # would otherwise iterate it into letters.
+        return (f"phi_tags[{tag!r}] target must be a list of kinds, such as "
+                f"['dates'], got {target!r}")
+    if not target:
+        return (f"phi_tags[{tag!r}] target is an empty list; name at least "
+                f"one of {kinds}")
+    for item in target:
+        if not isinstance(item, str) or item not in SCRUB_KINDS:
+            return (f"phi_tags[{tag!r}] target item {item!r} is not one of "
+                    f"{kinds} (exact spelling)")
+    for item in target:
+        if target.count(item) > 1:
+            return f"phi_tags[{tag!r}] target lists {item!r} twice"
     return None
 
 
@@ -1333,6 +1375,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
         if "replacement" in rule:
             return (f"phi_tags[{tag!r}] has a 'replacement' key; the key is "
                     f"'value' (renamed in 0.9.8), so rename it")
+        if action == "SCRUB" and rule.get("target") is None:
+            return (f"phi_tags[{tag!r}] is SCRUB with no target; name the "
+                    f"kinds to remove, a list of {', '.join(SCRUB_KINDS)}")
+        if rule.get("target") is not None and action != "SCRUB":
+            return (f"phi_tags[{tag!r}] has a target under {action}; only "
+                    f"SCRUB takes a target")
         if value is not None and action != "REPLACE":
             return (f"phi_tags[{tag!r}] has a value under {action}; only "
                     f"REPLACE writes a value")
@@ -1367,7 +1415,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     # The ID is what keeps two patients apart, and `anonymize()` merges
     # patients that share one, so an emptied or literal ID would merge
     # every patient.
-    if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER")
+    if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER",
+                                          "SCRUB")
                                or value):
         said = f" with value {value!r}" if value else ""
         return (f"phi_tags['{tag}'] is {action}{said}; Patient ID can only be "
@@ -1411,6 +1460,23 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"would carry the source UID. Omit the value: key (or write "
                 f"value: null) for this project's keyed replacement UID, "
                 f"or use EMPTY or REMOVE")
+    if action == "SCRUB":
+        # Text a description carries (#1130). A concrete private tag loads,
+        # as a creator key did above: its value is read as text where it
+        # is text. Patient ID, LO, was refused above; the other owned tags
+        # are PN, DA and UI, refused here by their VR.
+        try:
+            private = int(tag[:4], 16) % 2 == 1
+        except ValueError:
+            private = False
+        vr = None if private else _standard_dictionary_vr(tag)
+        if private or vr in _SCRUB_VRS:
+            return None
+        said = f"{tag} is {vr}" if vr else f"{tag} is not in the dictionary"
+        return (f"phi_tags['{tag}'] is SCRUB, and {said}; SCRUB removes "
+                f"identifiers from text and applies only to LO, LT, SH, ST, "
+                f"UC and UT, and to private tags; use REMOVE, EMPTY or KEEP"
+                + (", or REPLACE for a name" if vr == "PN" else ""))
     if action in ("SHIFT", "JITTER"):
         # Otherwise it would decline on every pass. A sequence is exempt as
         # it is from REPLACE: the scan warns that the action has no meaning
