@@ -447,3 +447,46 @@ def test_orgs_through_a_session_with_a_stand_in_model(tmp_path, monkeypatch):
         rows = [r for r in _rows(session, "REMEDIATION_REPLACE") if "0008,103e" in r]
         assert _instance(session).attributes["0008,103e"] == "LUNG CA ACCRIN 6668"
     assert rows[0].endswith("removed 1 organisation or place"), rows
+
+
+def test_set_phi_tag_keeps_a_target_of_its_own(tmp_path):
+    """The stored target is a list of its own: changing the caller's list
+    afterwards does not change the policy."""
+    kinds = ["ids", "dates"]
+    with Session(str(tmp_path / "s.db")) as session:
+        session.configuration.set_phi_tag("0008,103e", "SCRUB", target=kinds)
+        kinds.append("orgs")
+        kinds[0] = "names"
+        assert session.configuration.phi_tags["0008,103e"]["target"] == ["ids", "dates"]
+
+
+def test_a_held_dummy_is_never_a_finding_whatever_a_model_makes_of_it(
+        tmp_path, monkeypatch):
+    """A model that reads the dummy's own text as an organisation scrubs
+    `ANONYMIZED` to nothing, which is written as `ANONYMIZED`: the value
+    the element already holds. `_scrubbed` compares the value as it would
+    be written, so that is no finding, and a description emptied to the
+    dummy re-audits clean."""
+    from types import SimpleNamespace
+
+    def model(text):
+        ents = []
+        for word in ("Anonymized", "Harris Community Clinic"):
+            if word in text:
+                start = text.index(word)
+                ents.append(SimpleNamespace(label_="ORG", start_char=start,
+                                            end_char=start + len(word)))
+        return SimpleNamespace(ents=ents)
+    monkeypatch.setattr(text_kinds, "_nlp", lambda: model)
+    _source(tmp_path, SeriesDescription="at Harris Community Clinic",
+            StudyDescription="ANONYMIZED")
+    with _session(tmp_path, ORGS) as session:
+        report = session.audit()
+        tags = sorted(f.tag for f in report.findings
+                      if f.tag in ("0008,1030", "0008,103e"))
+        assert tags == ["0008,103e"], tags
+        session.anonymize(report)
+        assert _instance(session).attributes["0008,103e"] == "ANONYMIZED"
+        again = session.audit()
+        assert [f.tag for f in again.findings
+                if f.tag in ("0008,1030", "0008,103e")] == []

@@ -744,11 +744,13 @@ class IsocenterConfiguration:
         # (owner ruling Q3 A).
         if value:
             val["value"] = value
-        # A tuple is stored as the list a file would hold; anything else is
-        # left for the loader's refusal, so a bare string is refused rather
-        # than iterated into letters.
+        # A list or tuple is stored as a list of its own, never the caller's
+        # list, so a later change to it does not change the policy; anything
+        # else is left for the loader's refusal, so a bare string is refused
+        # rather than iterated into letters.
         if target is not None:
-            val["target"] = list(target) if isinstance(target, tuple) else target
+            val["target"] = (list(target) if isinstance(target, (list, tuple))
+                             else target)
         elif str(action).strip().upper() == "SCRUB":
             # The loader's no-target refusal, naming this method's keyword.
             raise ValueError(

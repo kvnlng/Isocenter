@@ -163,28 +163,36 @@ def _person_names_in(instance, patient=None) -> List[str]:
     return found
 
 
-def _scrubbed(val, kinds, names):
-    """`(new value, counts)` for a `SCRUB` of `val`, or `(None, None)` when
-    there is nothing to remove (#1130).
+def _scrubbed(val, kinds, names, dummy):
+    """`(value to write, counts)` for a `SCRUB` of `val`, or `(None, None)`
+    when that value is the one already held (#1130).
 
     A `str` is scrubbed whole, and a list or tuple of `str` value by
-    value; anything else (bytes, a number, a mixed list) gives
-    `(SCRUB_UNREADABLE, SCRUB_UNREADABLE)`, for the caller to write the
-    tag's dummy. A blank value is nothing to remove. A value scrubbed to
-    nothing is `""` here; the caller writes the dummy.
+    value; a value scrubbed to nothing is written as `dummy` (owner ruling
+    Q7 (a)). The comparison is with the value as it would be written,
+    after that substitution, so a value already holding the dummy never
+    raises a finding, whatever a model makes of the dummy's text. Anything
+    else (bytes, a number, a mixed list) gives `(SCRUB_UNREADABLE,
+    SCRUB_UNREADABLE)`, for the caller to write the dummy. A blank value
+    is nothing to remove.
     """
     from .text_scrub import scrub  # pylint: disable=import-outside-toplevel
     if isinstance(val, str):
         if not val.strip():
             return None, None
         cleaned, counts = scrub(val, kinds, names)
-        return (cleaned, counts) if cleaned != val else (None, None)
+        written = cleaned or dummy
+        return (written, counts) if written != val else (None, None)
     if isinstance(val, (list, tuple, MultiValue)) and all(isinstance(v, str) for v in val):
         if not any(v.strip() for v in val):
             return None, None
         out, counts = [], {}
         for one in val:
-            cleaned, found = scrub(one, kinds, names) if one.strip() else (one, {})
+            if one.strip():
+                cleaned, found = scrub(one, kinds, names)
+                cleaned = cleaned or dummy
+            else:
+                cleaned, found = one, {}
             out.append(cleaned)
             for kind, number in found.items():
                 counts[kind] = counts.get(kind, 0) + number
@@ -1528,23 +1536,20 @@ class PhiInspector:
                 if person_names is None:
                     person_names = _person_names_in(instance, patient)
                 from .text_scrub import name_tokens  # pylint: disable=import-outside-toplevel
+                # Emptied: the dummy (owner ruling Q7 (a)); a Type 1C
+                # Text Value cannot be zero-length. `_scrubbed` writes it
+                # and compares the result, so a held dummy is no finding.
+                dummy = _vr_dummy(tag) or "ANONYMIZED"
                 new_val, scrubbed = _scrubbed(
                     val, config_val.get("target") or (),
-                    name_tokens(person_names))
+                    name_tokens(person_names), dummy)
                 if scrubbed is not None:
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"
-                    dummy = _vr_dummy(tag) or "ANONYMIZED"
                     if scrubbed == SCRUB_UNREADABLE:
                         # Not text: the dummy, visibly, rather than a
                         # decline that keeps the value (the architect's
                         # call on #1130).
-                        new_val = dummy
-                    elif isinstance(new_val, list):
-                        new_val = [one if one else dummy for one in new_val]
-                    elif not new_val:
-                        # Emptied: the dummy (owner ruling Q7 (a)). A Type
-                        # 1C Text Value cannot be zero-length.
                         new_val = dummy
             elif action_code == "EMPTY":
                 # Zero-length bytes are empty too: a binary element EMPTY

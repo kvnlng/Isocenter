@@ -32,7 +32,7 @@ from isocenter import Session
 ROOT = "1.2.826.0.1.3680043.10.9998"
 INJECTED = "CHEST NODULE for 4815162342"
 KEPT_TEXTS = ("Nodule 1", "pylidc", "0.2.0")
-SOURCE_DATE = "20190314"
+SOURCE_DATE = "20210623"
 OBSERVER = "OBSERVER^ONE"
 REF_UID = f"{ROOT}.77.1"
 
@@ -96,7 +96,7 @@ def _write_sr(tmp_path, content=None, acquisition_context=None, name="sr.dcm"):
     ds.SeriesInstanceUID = f"{ROOT}.2"
     ds.PatientID = "SR1131"
     ds.PatientName = "REPORT^SUBJECT"
-    ds.StudyDate = "20190314"
+    ds.StudyDate = "20210623"
     ds.Modality = "SR"
     ds.SeriesNumber = 1
     ds.InstanceNumber = 1
@@ -266,3 +266,18 @@ def test_no_row_names_a_text_value(tmp_path):
         with sqlite3.connect(session.persistence_file) as conn:
             details = [row[0] for row in conn.execute("SELECT details FROM audit_log")]
     assert not any("4815162342" in d or "CHEST NODULE" in d for d in details if d)
+
+
+def test_a_text_value_loses_a_name_the_report_holds_in_a_pname_item(tmp_path):
+    """`names` reads the Person Names the instance holds at every depth,
+    so an observer named only in a PNAME content item is removed from the
+    report's own text. The patient's name shares no word with it."""
+    _write_sr(tmp_path, content=[
+        _text("NODULE reviewed by Orla Vaske"),
+        _item("PNAME", ("121008", "DCM", "Person Observer Name"),
+              relationship="HAS OBS CONTEXT", PersonName="VASKE^ORLA"),
+    ])
+    with _session(tmp_path, KEEP_AND_SCRUB) as session:
+        session.anonymize(session.audit())
+        out = _export(session, tmp_path)
+    assert out.ContentSequence[0].TextValue == "NODULE reviewed"

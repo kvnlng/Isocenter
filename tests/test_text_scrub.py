@@ -61,7 +61,7 @@ def test_one_span_found_by_two_kinds_is_counted_once(target, counts):
 
 
 def test_a_full_name_is_one_name():
-    assert scrub("Report for Amanda Hoover", NO_MODEL, ("AMANDA", "HOOVER")) == (
+    assert scrub("Report for Elena Marsh", NO_MODEL, ("ELENA", "MARSH")) == (
         "Report", {"names": 1})
 
 
@@ -115,7 +115,7 @@ def test_ocr_dates_still_do():
 
 
 def test_name_tokens_skip_prefix_suffix_short_and_dummy_components():
-    assert name_tokens(["HOOVER^AMANDA^Q^Dr^Jr"]) == ("HOOVER", "AMANDA")
+    assert name_tokens(["MARSH^ELENA^Q^Dr^Jr"]) == ("MARSH", "ELENA")
     assert name_tokens(["ANONYMIZED", "ANON_1234", "O^Lee"]) == ("LEE",)
     assert name_tokens(["Smith Jones^Mary=Alpha^Beta\\Other^One"]) == (
         "SMITH", "JONES", "MARY", "ALPHA", "BETA", "OTHER", "ONE")
@@ -123,9 +123,9 @@ def test_name_tokens_skip_prefix_suffix_short_and_dummy_components():
 
 
 def test_a_name_is_matched_whole_word_and_in_any_case():
-    assert scrub("hoover report", ["names"], ("HOOVER",))[0] == "report"
-    assert scrub("Hoovering report", ["names"], ("HOOVER",)) == (
-        "Hoovering report", {})
+    assert scrub("marsh report", ["names"], ("MARSH",))[0] == "report"
+    assert scrub("Marshland report", ["names"], ("MARSH",)) == (
+        "Marshland report", {})
 
 
 def test_the_scrub_kinds_are_one_list():
@@ -228,3 +228,12 @@ def test_dates_and_ids_ask_no_model(monkeypatch):
         raise AssertionError("the model was asked")
     monkeypatch.setattr(text_kinds, "_nlp", fail)
     assert scrub("A 20170707", NO_MODEL, ("X",)) == ("A", {"dates": 1})
+
+
+@pytest.mark.parametrize("text", ["2O17O7O7", "O1/O2/1999"])
+def test_scrub_reads_dates_without_ocr_confusables(text):
+    """SCRUB reads header text, typed, never read by OCR: a letter O is not
+    a zero there, so these hold no date, although the burned-in reader,
+    which reads OCR's confusables, finds one in each."""
+    assert text_kinds.date_spans(text), text
+    assert scrub(text, ["dates"]) == (text, {})

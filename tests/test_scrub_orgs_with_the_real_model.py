@@ -107,7 +107,7 @@ def test_scrub_with_the_real_model_only_deletes_and_settles_in_one_pass():
     repeats to its own fixpoint within one pass, so whatever `orgs` takes
     away, it takes away the first time. One test, so the skip count does
     not move (RELEASING.md)."""
-    kinds, names = ["names", "dates", "ids", "orgs"], ("HOOVER", "AMANDA")
+    kinds, names = ["names", "dates", "ids", "orgs"], ("MARSH", "ELENA")
     for text in CORPUS:
         cleaned, counts = scrub(text, kinds, names)
         assert len(cleaned) <= len(text)
@@ -125,15 +125,54 @@ HOSPITALS = [
 ]
 
 
-def test_orgs_removes_a_named_hospital():
+def _words_gone(cleaned, name):
+    words = cleaned.upper().split()
+    assert not any(word.upper() in words for word in name.split()), cleaned
+    assert "AT" not in words, cleaned
+
+
+def test_orgs_removes_a_named_hospital(tmp_path, monkeypatch):
     """Deliberately not asserted: that the clinical half survives, which
-    is what moves between model versions."""
+    is what moves between model versions.
+
+    And once through a session whose audit runs in worker processes
+    (`ISOCENTER_FORCE_PROCESSES=1`), the path a default `audit()` takes on
+    a GIL build: each spawned worker loads the model for itself, which no
+    stand-in-model test reaches, since those patch the parent's loader and
+    force threads. In this test rather than one of its own, so the skip
+    count stays one test per property (RELEASING.md)."""
     for text, name in HOSPITALS:
         cleaned, counts = scrub(text, ["orgs"])
-        words = cleaned.upper().split()
-        assert not any(word.upper() in words for word in name.split()), cleaned
-        assert "AT" not in words, cleaned
+        _words_gone(cleaned, name)
         assert counts.get("orgs", 0) >= 1
+
+    import pydicom  # pylint: disable=import-outside-toplevel
+    from isocenter import Session  # pylint: disable=import-outside-toplevel
+    from support.ct_small_files import write_ct  # pylint: disable=import-outside-toplevel
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    # The parent's own reader refuses: a spawned worker imports its own
+    # `text_kinds`, so the hospital goes only if the scan ran in another
+    # process. Run in this process (threads), the audit fails here.
+    def not_in_this_process(*_args, **_kwargs):
+        raise AssertionError("orgs was read in the parent, not in a worker")
+    monkeypatch.setitem(text_kinds._FINDERS, "orgs", not_in_this_process)  # pylint: disable=protected-access
+    text, name = HOSPITALS[0]
+    path = write_ct(tmp_path / "in" / "a.dcm", "PORG", 1130)
+    ds = pydicom.dcmread(path)
+    ds.SeriesDescription = text
+    ds.save_as(path, enforce_file_format=True)
+    (tmp_path / "cfg.yaml").write_text(
+        "privacy_profile: basic\nphi_tags:\n"
+        "  0008,103e: {action: SCRUB, target: [orgs]}\n")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.load_config(str(tmp_path / "cfg.yaml"))
+        session.anonymize(session.audit())
+        [patient] = session.store.patients
+        written = patient.studies[0].series[0].instances[0].attributes["0008,103e"]
+    _words_gone(written, name)
 
 
 def test_burned_in_names_reads_a_full_name_with_the_real_model():

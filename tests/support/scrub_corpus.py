@@ -34,8 +34,8 @@ ISSUE_ROWS = [
     ("MA SURGICAL SPECIMEN for 7516817726", "MA SURGICAL SPECIMEN", ()),
     ("MA SURGICAL SPECIMEN 20170707", "MA SURGICAL SPECIMEN", ()),
     ("9.1 HIP FEMUR for 5471122351", "9.1 HIP FEMUR", ()),
-    ("Standard Breast Imaging Report for Amanda Hoover",
-     "Standard Breast Imaging Report", ("AMANDA", "HOOVER")),
+    ("Standard Breast Imaging Report for Elena Marsh",
+     "Standard Breast Imaging Report", ("ELENA", "MARSH")),
 ]
 
 #: Every row #1130's table and #1131's list quote, for the real-model
