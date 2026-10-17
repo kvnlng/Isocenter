@@ -24,10 +24,12 @@ answers. The counter proves the second route measured the fallback.
 Every expected string is pydicom's or the fallback's own words, written
 out here, never read back from the code under test.
 """
+import logging
 import os
 
 import imagecodecs
 import numpy as np
+import pydicom
 import pytest
 
 from support.decode_doors import (HTJ2K, J2K_LOSSLESS, JPEGLS, LJPEG_SV1,
@@ -79,21 +81,49 @@ def _refused_everywhere(tmp_path, ds, words, counter):
 # F1a -- a header pydicom rejects is rejected at every door, in its words
 # ---------------------------------------------------------------------------
 
-def test_a_j2k_file_missing_planar_configuration_is_refused_at_every_door(
-        tmp_path, route):
+def test_a_j2k_file_missing_planar_configuration_is_read_at_every_door(
+        tmp_path, route, caplog):
     """16-bit RGB JPEG 2000 with PlanarConfiguration absent (#453's cell).
 
-    Before: ingest and `_decode_pixels` refused it in pydicom's words, and
-    the Instance door read it through the handler, which ignores
-    PlanarConfiguration. On the `pydicom_cannot` route the fallback read
-    it at every door, because the fallback never validated.
+    Before #453: ingest and `_decode_pixels` refused it in pydicom's
+    words, and the Instance door read it through the handler, which
+    ignores PlanarConfiguration. On the `pydicom_cannot` route the
+    fallback read it at every door, because the fallback never validated.
+    From #453 every door refused it in pydicom's words.
+
+    Since #1134 (owner rulings of 2026-10-16) a colour image with no
+    Planar Configuration is read as 0 under every syntax but RLE, so every
+    door reads it, to one array, and the export writes 0 with its INFO
+    note. The codestream fixes the layout: PS3.5 (2026d) §8.2.4 says the
+    value "is irrelevant ... hence it shall be set to 0".
     """
     ds = dataset(J2K_LOSSLESS, [_j2k(RGB16)], rows=4, cols=4, samples=3,
                  bits_allocated=16, planar=None)
-    _refused_everywhere(
-        tmp_path, ds,
-        "Missing required element: (0028,0006) 'Planar Configuration'",
-        route)
+    path = write(tmp_path, ds)
+    arr, label = at_decode_pixels(path)
+    assert same(arr, RGB16) and label == "RGB", (arr, label)
+    arr, _label = at_instance(path)
+    assert same(arr, RGB16), arr
+    got = at_ingest(tmp_path, path)
+    assert got["failure"] is None, got
+    assert same(got["array"], RGB16) and got["label"] == "RGB", got
+    assert got["rows"] == [], got
+    if route is not None:
+        assert route["n"] > 0, "the fallback route was never taken"
+        assert got["pydicom_calls"] > 0, "ingest never took the fallback"
+    from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        with DicomSession(str(tmp_path / "s.db")) as session:
+            summary = session.export(str(tmp_path / "out"),
+                                     show_progress=False)
+    assert summary.written == 1, summary.failures
+    (written,) = list((tmp_path / "out").rglob("*.dcm"))
+    assert pydicom.dcmread(str(written)).PlanarConfiguration == 0
+    prefix = (f"{got['uid']}: Planar Configuration (0028,0006) was absent "
+              f"in the source file")
+    assert len([r for r in caplog.records
+                if r.getMessage().startswith(prefix)]) == 1, caplog.text
 
 
 @pytest.mark.parametrize("name, ts, codestream, kwargs, words", [
@@ -107,10 +137,6 @@ def test_a_j2k_file_missing_planar_configuration_is_refused_at_every_door(
      imagecodecs.ljpeg_encode(MONO16),
      dict(rows=4, cols=4, bits_allocated=16, drop=("PixelRepresentation",)),
      "Missing required element: (0028,0103) 'Pixel Representation'"),
-    ("jpeg-ls-ybr8-no-planar", JPEGLS, imagecodecs.jpegls_encode(RGB8),
-     dict(rows=4, cols=4, samples=3, bits_allocated=8,
-          photometric="YBR_FULL", planar=None),
-     "Missing required element: (0028,0006) 'Planar Configuration'"),
     ("j2k-mono16-no-pixel-representation", J2K_LOSSLESS, _j2k(MONO16),
      dict(rows=4, cols=4, bits_allocated=16, drop=("PixelRepresentation",)),
      "Missing required element: (0028,0103) 'Pixel Representation'"),

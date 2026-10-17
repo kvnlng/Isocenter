@@ -70,6 +70,7 @@ from ._version import __version__
 from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree,
                        exported_patient_id, is_synthetic_patient_id, PASS_WRITING)
+from .pixel_geometry import PLANAR_INFERRED_ATTR
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read.
@@ -4688,6 +4689,11 @@ class DicomSession:
         # instance is in exactly one of `edited` and `never_scanned`, so
         # with the gate open every instance section 5 counts is graded.
         never_scanned = {"patients": 0, "studies": 0, "instances": 0}
+        # #1134: images and icons read with a Planar Configuration inferred
+        # at ingest, counted over the store from the key ingest left, so a
+        # report before any export, or after a reopen, says the same.
+        # Icons apart from images: an icon is not an image instance.
+        planar_inferred = {"images": 0, "icons": 0}
         walked = 0
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
@@ -4708,6 +4714,12 @@ class DicomSession:
                         never_scanned["instances"] += (
                             _holds_no_recorded_status(instance))
                         walked += 1
+                        planar_inferred["images"] += bool(
+                            instance.attributes.get(PLANAR_INFERRED_ATTR))
+                        planar_inferred["icons"] += sum(
+                            1 for item, path in iter_item_tree(instance)
+                            if path and item.attributes.get(
+                                PLANAR_INFERRED_ATTR))
         # At least one of the entities walked holds a recorded status.
         status_recorded = sum(never_scanned.values()) < walked
 
@@ -4756,6 +4768,7 @@ class DicomSession:
             unscanned_instances=unscanned_instances,
             never_scanned=never_scanned,
             phi_status_recorded=status_recorded,
+            planar_configuration_inferred=planar_inferred,
         )
 
         renderer.render(report, output_path)
