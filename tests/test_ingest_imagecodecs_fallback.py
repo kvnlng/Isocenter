@@ -317,16 +317,19 @@ def test_a_16_bit_ybr_j2k_ingests_as_the_rgb_it_decodes_to(ingest, ts,
 def test_a_header_pydicom_rejects_is_not_decoded_by_the_fallback(ingest):
     """F7: validation is pydicom's to refuse, in its own words.
 
-    imagecodecs ignores PlanarConfiguration, so a fallback that caught
-    every exception would ingest this file with a missing Type 1
-    element. pydicom raises `AttributeError` for it, not `RuntimeError`.
+    A fallback that caught every exception would ingest this file with a
+    missing Type 1 element. pydicom raises `AttributeError` for it, not
+    `RuntimeError`. Until #1134 the element dropped was PlanarConfiguration,
+    which imagecodecs ignores; a missing one is now read as 0 under every
+    syntax but RLE, so BitsStored is dropped instead.
     """
-    ds = _dataset(J2K_LOSSLESS, [RGB16["uint16"]], planar=None)
+    ds = _dataset(J2K_LOSSLESS, [RGB16["uint16"]])
+    del ds.BitsStored
     _session, summary, _db = ingest(ds, expect=AttributeError)
     assert summary.ingested == 0
     reason = summary.failures[0][1]
     assert reason.startswith("Decompression Failed:"), reason
-    assert "Missing required element: (0028,0006)" in reason, reason
+    assert "Missing required element: (0028,0101)" in reason, reason
     assert "imagecodecs" not in reason, reason
 
 

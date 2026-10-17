@@ -345,6 +345,34 @@ def _burned_in_text_line(report: "ComplianceReport") -> str:
     return label + f"ran {len(runs)} times in this session -- {numbered}.{tail}"
 
 
+def _planar_configuration_line(report: "ComplianceReport") -> str:
+    """How many images and icons were read with an inferred Planar
+    Configuration, one line, or nothing when none were (#1134).
+
+    Counts only: it names no instance and quotes no header value; each
+    export names the instance at INFO in the log. Icons are counted apart
+    from images, because an icon is not an image instance. No grade
+    effect (owner ruling of 2026-10-16).
+
+    Args:
+        report (ComplianceReport): The report being rendered.
+
+    Returns:
+        str: The Planar Configuration bullet, or "".
+    """
+    counts = report.planar_configuration_inferred or {}
+    parts = []
+    if counts.get("images"):
+        parts.append(f"{counts['images']} image(s)")
+    if counts.get("icons"):
+        parts.append(f"{counts['icons']} icon(s)")
+    if not parts:
+        return ""
+    return (f"*   **Planar Configuration:** {' and '.join(parts)} read with "
+            f"an inferred Planar Configuration (0028,0006), as 0 "
+            f"(color-by-pixel), because the source file stated none.\n")
+
+
 @dataclass
 class ComplianceReport:
     """
@@ -422,6 +450,13 @@ class ComplianceReport:
             the report was assembled. `generate_report` always sets it;
             the False of a report built by hand is a default, not a
             measurement.
+        planar_configuration_inferred (Dict[str, int]): How many images
+            and icons in the store were read with a Planar Configuration
+            of 0 inferred at ingest because the source stated none
+            (#1134), keyed "images" and "icons". Counted over the store,
+            so a report made before any export or after a reopen says the
+            same. Rendered in section 5 when either is above 0; not a
+            grade term.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
@@ -519,6 +554,8 @@ class ComplianceReport:
     # gate to say whether the instances it counts are graded.
     never_scanned: Dict[str, int] = field(default_factory=dict)
     phi_status_recorded: bool = False
+    # #1134: images and icons whose Planar Configuration was inferred.
+    planar_configuration_inferred: Dict[str, int] = field(default_factory=dict)
 
 
 class ReportRenderer(Protocol):
@@ -699,6 +736,7 @@ The following actions were recorded in the secure audit trail:
         md_content += _phi_scan_line(report)
         md_content += _pixel_scan_line(report)
         md_content += _burned_in_text_line(report)
+        md_content += _planar_configuration_line(report)
         md_content += (f"*   **Methodology:** {report.deid_method}. "
                        f"{_METHODOLOGY_DISCLAIMER}\n")
         md_content += """

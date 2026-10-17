@@ -227,20 +227,22 @@ def test_a_validation_value_error_is_still_the_refusal(
 def test_a_missing_type_1_element_is_still_pydicoms_attribute_error(tmp_path):
     """`AttributeError` is deliberately not caught (#281), and need not be.
 
-    A file missing PlanarConfiguration under SamplesPerPixel 3 is refused
-    by `_validate_like_pydicom` before imagecodecs is asked -- which is
-    why the docstring clause that a `ValueError` must stay a refusal
-    "because imagecodecs ignores PlanarConfiguration" has been false since
-    #453.
+    A file missing a Type 1 element is refused by `_validate_like_pydicom`
+    before imagecodecs is asked. Until #1134 the element this test dropped
+    was PlanarConfiguration under SamplesPerPixel 3 -- which is why the
+    docstring clause that a `ValueError` must stay a refusal "because
+    imagecodecs ignores PlanarConfiguration" had been false since #453. A
+    missing PlanarConfiguration is now read as 0 under every syntax but
+    RLE (#1134), so BitsStored is dropped instead.
     """
     ds = dataset(LJPEG_SV1, [_ljpeg(IMG8, 8)], rows=8, cols=8, samples=3,
                  bits_allocated=8, bits_stored=8, photometric="RGB",
-                 drop=("PlanarConfiguration",))
+                 drop=("BitsStored",))
 
     with pytest.raises(AttributeError) as caught:
         _decode_pixels(ds)
 
-    assert "Planar Configuration" in str(caught.value), str(caught.value)
+    assert "Bits Stored" in str(caught.value), str(caught.value)
 
 
 # ---------------------------------------------------------------------------
