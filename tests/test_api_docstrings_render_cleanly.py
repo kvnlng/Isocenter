@@ -61,7 +61,8 @@ not graded.
 **R5 -- no Markdown code fence.** reST shows a ```` ``` ```` fence as
 text. Use a doctest or a `::` literal block.
 
-**R6 -- no line starting with `#`** outside a literal block or doctest.
+**R6 -- no line starting with `#`** outside a literal block or doctest,
+except reST's auto-numbered list item (`#. `).
 Python-Markdown read `#1108). When ...` as a heading (mkdocstrings gave
 it an anchor), and a `# Heading` is Markdown that reST shows as text;
 neither is what the author meant on either builder.
@@ -552,7 +553,9 @@ def _markup_offenders(lines):
             offenders.append((index, "a Markdown code fence, which "
                                      "reST shows as text; use a doctest "
                                      "or a `::` literal block (R5)"))
-        elif index not in code and stripped.startswith("#"):
+        elif (index not in code and stripped.startswith("#")
+              and not stripped.startswith("#. ")):
+            # `#. ` is reST's auto-numbered list item, not a heading.
             offenders.append((index, f"the line starts with "
                                      f"{stripped[:12]!r}: Markdown reads "
                                      "a heading there (R6)"))
@@ -1076,7 +1079,9 @@ def test_a_line_starting_with_a_hash_is_red():
     assert len(offenders) == 2, offenders
     assert all("(R6)" in o for o in offenders), offenders
     assert _one("def f():\n"
-                '    """The policy (see #1108) holds.\n'
+                '    """The policy (see #1108) holds.\n\n'
+                "    #. an auto-numbered item.\n"
+                "    #. and another.\n"
                 '    """\n') == []
 
 
