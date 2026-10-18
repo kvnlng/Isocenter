@@ -1245,7 +1245,9 @@ def private_creators(out: Path):
     one file and block 11 of another, and `GEMS_PETD_01` holding a
     parameter at `0009,1027`, the tag the first file's date uses (#1132).
     A sweeps all three; B keeps all three; C's creator-scoped REMOVE
-    removes the two dates and keeps the parameter. Values invented."""
+    removes the two dates and keeps the parameter. A third file spells the
+    creator `gems_iden_01`, which C's key matches since #1147 (owner ruling
+    Q8 (b)). Values invented."""
     first = ct("private_creators", inst=1)
     first.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
     write(first, out / "private_creators-1.dcm")
@@ -1253,6 +1255,9 @@ def private_creators(out: Path):
     second.private_block(0x0009, "GEMS_PETD_01", create=True).add_new(0x27, "LO", "1.5")
     second.private_block(0x0009, "GEMS_IDEN_01", create=True).add_new(0x27, "LO", "20230101")
     write(second, out / "private_creators-2.dcm")
+    third = ct("private_creators", inst=3)
+    third.private_block(0x0009, "gems_iden_01", create=True).add_new(0x27, "LO", "20230101")
+    write(third, out / "private_creators-3.dcm")
 
 
 MEMBERS = {f.__name__: f for f in (

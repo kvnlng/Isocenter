@@ -232,7 +232,8 @@ COMMITTED = {
                        "one_bit_excess-no-frames-value.dcm",
                        "one_bit_excess-padded.dcm"],
     "prior_markers": ["prior_markers-1.dcm"],
-    "private_creators": ["private_creators-1.dcm", "private_creators-2.dcm"],
+    "private_creators": ["private_creators-1.dcm", "private_creators-2.dcm",
+                         "private_creators-3.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "private_vr_unlike_the_dictionary": [
         "private_vr_unlike_the_dictionary-sl.dcm",

@@ -2983,7 +2983,11 @@ def _tag_and_creator(proposal: PhiRemediation) -> str:
 #: How a `SCRUB` row names each kind it counts (#1130).
 _SCRUB_NOUNS = {"names": ("name", "names"), "dates": ("date", "dates"),
                 "ids": ("id", "ids"), "orgs": ("organisation or place",
-                                               "organisations or places")}
+                                               "organisations or places"),
+                "phones": ("phone number", "phone numbers"),
+                "addresses": ("address", "addresses"),
+                "sites": ("site", "sites"),
+                "initials": ("set of initials", "sets of initials")}
 
 
 def _scrub_said(scrubbed) -> str:
