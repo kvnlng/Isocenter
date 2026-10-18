@@ -66,8 +66,8 @@ class BurnedInTextSummary:
     over a reopened store does not describe an earlier session's pass,
     whose `REDACTION` row section 2 still counts.
 
-    Also what one `export(check_burned_in=True)` read did (review of
-    #1110): that read records nothing and skips nothing, so its `skipped`
+    Also what one `export(check_burned_in=True)` read did (review
+    of #1110): that read records nothing and skips nothing, so its `skipped`
     is 0, its `with_text` counts the instances it found text on, and its
     `acted` the instances it wrote a row for, withheld under `redact` and
     `withhold` and written under `report` (text found, or not read in

@@ -282,6 +282,7 @@ class PersistenceManager:
     """Offloads persistence operations to a background thread to unblock the main thread.
 
     This manager:
+
     - Maintains a queue of patient snapshots to save.
     - Runs a background worker thread (`_persistence_worker_loop`) to
       process the queue.

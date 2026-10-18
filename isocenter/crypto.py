@@ -158,8 +158,8 @@ class KeyManager:
 
         Returns:
             bytes: The key at `key_path`: this one's, or the key another
-                session wrote first, which the caller must then plan under
-                again.
+            session wrote first, which the caller must then plan under
+            again.
 
         Raises:
             OSError: As `load_or_generate_key()`.

@@ -1098,7 +1098,7 @@ def _jpegls_precision(codestream) -> Optional[int]:
     """The sample precision P a JPEG-LS frame header declares, or None.
 
     Walks the marker segments from SOI to the SOF55 (`FF F7`) header, by
-    each segment's own length. **It does not search for `FF F7`.** A COM
+    each segment's own length. **It does not search for** `FF F7`. A COM
     or APPn payload is opaque bytes and can legally hold that pair, and a
     search would then read a precision out of a comment.
 

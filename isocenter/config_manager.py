@@ -884,9 +884,9 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
 
     Returns:
         Optional[Dict[str, Any]]: `{action, scope, detector,
-            min_confidence, target}` (the threshold's default is the
-            detector's), plus
-            `modalities` under `scope: modalities`; a new dict, or None.
+        min_confidence, target}` (the threshold's default is the
+        detector's), plus
+        `modalities` under `scope: modalities`; a new dict, or None.
 
     Raises:
         ValueError: `_refused_burned_in_text`'s refusal.
@@ -1246,7 +1246,7 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     Judged by pydicom's `validate_value`, with AT always refused and a
     compound VR (`US or SS`) refused only when no arm holds the value. On
     a tag whose multiplicity allows several values, a string is judged
-    one `\\`-separated value at a time; a list or tuple one element at a
+    one ``\\``-separated value at a time; a list or tuple one element at a
     time.
 
     Args:
@@ -1334,8 +1334,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
       REPLACE on UI and on Study Date is exempt;
     - a REPLACE `value:` that holds a range (`-` in a DA or TM; in a DT,
-      anywhere but the UTC offset), a `\\` on a tag of multiplicity 1, or
-      a count of `\\`-separated values the dictionary VM does not allow.
+      anywhere but the UTC offset), a ``\\`` on a tag of multiplicity 1, or
+      a count of ``\\``-separated values the dictionary VM does not allow.
 
     Args:
         tag: The rule's key, lowercased by the caller.

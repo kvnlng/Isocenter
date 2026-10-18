@@ -263,8 +263,8 @@ def _cs_spelling(value):
       returned, and the file fails, as it did.
 
     Text only. A `bytes` value is not spelled: it is returned as held,
-    ASCII or not, and written as held, which is what releases before
-    #612 did with it (owner ruling, 2026-10-11). A file can bring one
+    ASCII or not, and written as held, which is what releases
+    before #612 did with it (owner ruling, 2026-10-11). A file can bring one
     in by stating a binary VR for (0028,0004), so respelling it would
     change what a source's own label exports as.
 
@@ -317,7 +317,7 @@ def _contradiction(shape, s_d, f_d, r_d, c_d) -> ValueError:
 
     Returns:
         ValueError: The error for the caller to raise, naming the shape and
-            the four declared values.
+        the four declared values.
     """
     # Raising is the only outcome that neither corrupts nor lies. Trusting
     # the attributes writes descriptors that do not describe the bytes;
@@ -343,8 +343,8 @@ def _resolve_rank1(shape, s_d, f_d, r_d, c_d) -> PixelGeometry:
 
     Returns:
         PixelGeometry: DECLARED when the declared size fits in the buffer
-            (the caller truncates any padding); otherwise a single
-            STRUCTURAL row of ``shape[0]`` columns.
+        (the caller truncates any padding); otherwise a single
+        STRUCTURAL row of ``shape[0]`` columns.
     """
     # The sidecar loader returns a 1-D array only when the stored metadata
     # is too small for the buffer, so this consults the same metadata that
@@ -464,8 +464,8 @@ def resolve_pixel_geometry(shape: Sequence[int],
 
     Returns:
         PixelGeometry: The resolved layout, with the evidence that settled it.
-            **Never raises on GUESSED** -- it reports the evidence and lets
-            each caller apply its own policy.
+        **Never raises on GUESSED** -- it reports the evidence and lets
+        each caller apply its own policy.
 
     Raises:
         ValueError: If the declared SamplesPerPixel cannot be carried by any
@@ -520,8 +520,8 @@ def resolve_photometric_interpretation(attributes: Any,
 
     Returns:
         Optional[str]: The value to write, or **None meaning "leave it
-            alone"**. The None arm is what lets YBR_FULL, YBR_ICT and
-            MONOCHROME1 survive a round trip.
+        alone"**. The None arm is what lets YBR_FULL, YBR_ICT and
+        MONOCHROME1 survive a round trip.
     """
     pi = _declared_str(attributes, TAG_PHOTOMETRIC_INTERPRETATION)
 

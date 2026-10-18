@@ -128,7 +128,7 @@ class RemediationService:
 
         Returns:
             int: How many remediations were applied. Failures are logged and
-                excluded, so this is a count of what actually changed.
+            excluded, so this is a count of what actually changed.
         """
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
@@ -254,11 +254,11 @@ class RemediationService:
 
         Returns:
             bool: True when the entity was actually changed. False on
-                every declining path, and when the end state was already
-                there. `apply_remediation` keys its dedup set and its
-                returned count on this, so a decline neither counts as
-                applied nor suppresses a later finding against the same
-                attribute (the dedup key carries no action type).
+            every declining path, and when the end state was already
+            there. `apply_remediation` keys its dedup set and its
+            returned count on this, so a decline neither counts as
+            applied nor suppresses a later finding against the same
+            attribute (the dedup key carries no action type).
         """
         proposal = finding.remediation_proposal
         entity = finding.entity
@@ -610,7 +610,7 @@ class RemediationService:
           other than `""` aimed at a sequence.
         - **A value the tag's dictionary VR cannot hold declines** (a
           standard tag only; a private value is written as LO).
-        - **EMPTY on a binary VR writes `b""`.** The VR is the item's
+        - **EMPTY on a binary VR writes** `b""`. The VR is the item's
           recorded one for a private tag, the dictionary's otherwise, and
           the value's type only when neither knows.
         - **The SOP Instance UID under a UID replacement** moves the
@@ -635,11 +635,11 @@ class RemediationService:
 
         Returns:
             Tuple[Optional[str], Optional[str]]: `(details, decline_reason)`.
-                `details` is the audit row's text when the item was changed
-                and None when nothing was written; `decline_reason` is set
-                when that was a decline. `(None, None)` means the item
-                already holds what the rule asks, and the caller stamps the
-                entity REMEDIATED on the strength of it.
+            `details` is the audit row's text when the item was changed
+            and None when nothing was written; `decline_reason` is set
+            when that was a decline. `(None, None)` means the item
+            already holds what the rule asks, and the caller stamps the
+            entity REMEDIATED on the strength of it.
         """
         # The caller writes both rows, so the action type and
         # `audit_buffer` stay in `_apply_single_remediation`, where the
@@ -799,12 +799,12 @@ class RemediationService:
 
         Returns:
             bool: True when `entity` is an `Instance` that holds exactly
-                `value` at `tag` and its remediation record vouches for
-                it (`remediation_vouches_for`). False for a nested item,
-                which keeps no record, so a nested `REPLACE` still writes
-                again; and for a value the element holds with no record,
-                a source value that happens to equal the rule's, which is
-                written once so that the record exists.
+            `value` at `tag` and its remediation record vouches for
+            it (`remediation_vouches_for`). False for a nested item,
+            which keeps no record, so a nested `REPLACE` still writes
+            again; and for a value the element holds with no record,
+            a source value that happens to equal the rule's, which is
+            written once so that the record exists.
         """
         # The record is the gate, not equality: `lock_identities()` reads
         # the record to tell a replacement from an original, so a value
@@ -834,8 +834,8 @@ class RemediationService:
 
         Returns:
             str: `"a patient"` for a patient finding, never its
-                `entity_uid` (the original Patient ID); the `entity_uid`
-                otherwise.
+            `entity_uid` (the original Patient ID); the `entity_uid`
+            otherwise.
         """
         # The audit row keeps the Patient ID, because the store holds the
         # ID-to-pseudonym map and is guarded as the project secret is; the
@@ -911,8 +911,8 @@ class RemediationService:
         Two reasons from `_owner_stamps_copy` are not declines and write
         no row: a `_CopyLeftEmpty` is routed to `_satisfied`, and an
         `_OwnerNotHandedIn` does nothing, leaving the finding unhandled
-        for the scan tally. Its three callers -- REPLACE, SHIFT and, since
-        #764, a REMOVE that reached no arm -- all route them here.
+        for the scan tally. Its three callers -- REPLACE, SHIFT and,
+        since #764, a REMOVE that reached no arm -- all route them here.
 
         Args:
             finding (PhiFinding): The finding that declined.
@@ -972,7 +972,7 @@ class RemediationService:
 
         Returns:
             str: The reason, on one line with `|` escaped, saying the value
-                may be unchanged or partly written.
+            may be unchanged or partly written.
         """
         # Flattened and pipe-escaped: the reason lands in `details`, which
         # the report renders into a markdown table cell, and an exception's
@@ -1044,7 +1044,7 @@ class RemediationService:
           holder declines. A service used without a session checks
           nothing here.
         - **The target** may be written when it still holds the audited
-          value **or already holds `new_date`**, so `anonymize(report)`
+          value **or already holds** `new_date`, so `anonymize(report)`
           handed the same report twice is idempotent. Anything else
           declines, absent included. An unparseable original (`new_date`
           None) on a target still holding it passes, so the arm's own
@@ -1066,7 +1066,7 @@ class RemediationService:
 
         Returns:
             Optional[str]: The decline reason, or None when the shift may
-                be written.
+            be written.
         """
         # The arm's output is a function of `proposal.original_value`, not
         # of what the target holds now, so without this check a date
@@ -1159,7 +1159,7 @@ class RemediationService:
 
         Returns:
             Optional[str]: The refusal reason, or None when the write may
-                go ahead.
+            go ahead.
         """
         # Takes no `audit_buffer`: the frozen-surface pin (Pin A) refuses a
         # new callee that takes one. Called twice from the arm, once as the
@@ -1394,7 +1394,7 @@ class RemediationService:
 
         Returns:
             bool: True when both hold; False with no holder or no
-                original.
+            original.
         """
         from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
         from .privacy import (  # pylint: disable=import-outside-toplevel
@@ -1613,7 +1613,7 @@ class RemediationService:
 
         Returns:
             Optional[str]: The UID; None for a patient the snapshot does
-                not hold, and for a nested item.
+            not hold, and for a nested item.
         """
         # A nested item's owner is not consulted because it could add
         # nothing: `Session._nested_finding_owners` finds an owner
@@ -1640,7 +1640,7 @@ class RemediationService:
 
         Returns:
             Optional[str]: The SOP, Study or Series Instance UID; None for a
-                nested item, which has none.
+            nested item, which has none.
         """
         # The Series arm feeds only `_live_uid`, and through it
         # `_pass_start_uids`; it is redundant with the Series settle at the
@@ -1928,9 +1928,9 @@ class RemediationService:
 
         Returns:
             Optional[str]: None when the copy is not owner-stamped; `""`
-                when the end state is already there (never for a
-                removal); otherwise a reason (a plain str, a
-                `_CopyLeftEmpty` or an `_OwnerNotHandedIn`).
+            when the end state is already there (never for a
+            removal); otherwise a reason (a plain str, a
+            `_CopyLeftEmpty` or an `_OwnerNotHandedIn`).
         """
         # An owner's write in this pass reaches the copy and the instance
         # finding folds into it before any arm runs, so a finding here is
@@ -2071,12 +2071,12 @@ class RemediationService:
 
         Returns:
             Optional[tuple]: `(owner, value)` -- the Patient, Study or
-                Series, and its value as the export renders it
-                (`exported_patient_id`, `format_study_date`), None for a
-                field holding none. None as the whole answer when there
-                is no session (`_copy_owners` unset), `entity` is not an
-                instance of the graph (a nested item never is), or `tag`
-                is not one the export stamps from an owner.
+            Series, and its value as the export renders it
+            (`exported_patient_id`, `format_study_date`), None for a
+            field holding none. None as the whole answer when there
+            is no session (`_copy_owners` unset), `entity` is not an
+            instance of the graph (a nested item never is), or `tag`
+            is not one the export stamps from an owner.
         """
         # The same five tags as `ENTITY_FIELD_TAGS`, spelled as arms
         # because each owner's value is rendered its own way.
@@ -2113,9 +2113,9 @@ class RemediationService:
 
         Returns:
             bool: True when `_stamping_owner` names an owner for it and
-                that owner holds a value. False when the owner holds None
-                or `''` (the export then writes the element empty), with
-                no session, for a nested item, and for any other tag.
+            that owner holds a value. False when the owner holds None
+            or `''` (the export then writes the element empty), with
+            no session, for a nested item, and for any other tag.
         """
         from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
 
@@ -2131,9 +2131,9 @@ class RemediationService:
 
         Returns:
             Optional[str]: None for any other action, for an entity that
-                is not a `DicomItem`, and for a copy no owner stamps;
-                otherwise `_owner_stamps_copy`'s answer for a removal,
-                which is never `""`.
+            is not a `DicomItem`, and for a copy no owner stamps;
+            otherwise `_owner_stamps_copy`'s answer for a removal,
+            which is never `""`.
         """
         if (finding.remediation_proposal.action_type != "REMOVE_TAG"
                 or not hasattr(entity, "set_attr")):
@@ -2260,11 +2260,11 @@ class RemediationService:
 
         Returns:
             Optional[Tuple[int, int]]: `(written, folds)` -- how many
-                instance copies were written, and how many instance
-                findings in this pass are waiting to fold into them -- or
-                None when the write does not apply: `entity` has `set_attr`
-                (an item, whose tag the arm wrote directly), or `field` is
-                not one the exporter stamps.
+            instance copies were written, and how many instance
+            findings in this pass are waiting to fold into them -- or
+            None when the write does not apply: `entity` has `set_attr`
+            (an item, whose tag the arm wrote directly), or `field` is
+            not one the exporter stamps.
         """
         # The value is read back off the entity rather than passed in from
         # the arm: that is the one source the exporter reads too
@@ -2403,7 +2403,7 @@ class RemediationService:
 
         Returns:
             dict: `(id(instance), tag, removed) -> count`, where `removed`
-                is whether the owner's write removed the copy.
+            is whether the owner's write removed the copy.
         """
         # Counted up front so no row is rewritten after it is appended
         # (the frozen-surface Pin A refuses that). Only a copy an owner's
@@ -2541,7 +2541,7 @@ class RemediationService:
           The date moves; everything after it is re-attached exactly as
           written.
         - The dotted DT `YYYYMMDD.HHMMSS[.F...]`, the same way.
-        - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
+        - ISO `YYYY-MM-DD`, optionally with a space and `HH:MM:SS` or with `THH:MM:SS`,
           rendered zero-padded.
 
         The time part must be a clock time (hour < 24, minute and second
@@ -2556,7 +2556,7 @@ class RemediationService:
 
         Returns:
             Optional[str]: The shifted value (a `date`/`datetime` for one),
-                or None when the value is declined.
+            or None when the value is declined.
         """
         # Matching is by whole-string, length-strict pattern, not
         # `strptime`, whose `%Y%m%d` is not length-strict and would read a
@@ -2589,7 +2589,7 @@ class RemediationService:
 
             Returns:
                 Optional[datetime]: The moved date, or None when the date
-                    is invalid or the result leaves years 1-9999.
+                is invalid or the result leaves years 1-9999.
             """
             try:
                 return datetime(int(year), int(month), int(day)) + timedelta(days=days)
@@ -2681,7 +2681,7 @@ def _remediation_key(finding: PhiFinding) -> tuple:
 
     Returns:
         tuple: `(entity_uid, entity_path, target_attr)`: the attribute the
-            proposal writes, and where it lives.
+        proposal writes, and where it lives.
     """
     # One spelling for both readers, so "already handled" and "what the
     # audit raised" cannot drift apart. See the comment at the dedup in
@@ -2886,7 +2886,7 @@ class _ScanTally:
 
         Returns:
             _ScanTally: A fresh tally with the same raised counts and
-                token and no partial progress.
+            token and no partial progress.
         """
         # Never hand out the session's own tally: it is drained as its
         # passes complete uids, and a report sharing it would name nothing
@@ -2926,8 +2926,8 @@ class _ScanTally:
 
         Returns:
             Optional[bool]: None when nothing is raised under `uid`; True
-                when the merged set is exactly the raised set; False
-                otherwise.
+            when the merged set is exactly the raised set; False
+            otherwise.
         """
         raised = self._raised.get(uid)
         if raised is None:

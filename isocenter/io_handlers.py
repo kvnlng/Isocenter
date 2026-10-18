@@ -1,7 +1,7 @@
-"""
-IO Handlers for Isocenter.
+"""IO Handlers for Isocenter.
 
 This module provides classes for:
+
 - DicomStore: The central catalog of DICOM objects.
 - DicomImporter: Parallel file ingestion.
 - DicomExporter: Writing DICOM files to disk.
@@ -655,7 +655,7 @@ def _code_points(chars) -> str:
 def _cs_quoted(value) -> str:
     """`value` quoted for a note or a row, at most a Code String's length
     of it, in ASCII: a character outside printable ASCII is written as
-    its escape (`'RGB\\t'`, `'RG\\xdf'`, `'MONOCHROME2\\u0131'`), never
+    its escape (``'RGB\\t'``, ``'RG\\xdf'``, ``'MONOCHROME2\\u0131'``), never
     raw."""
     # `ascii`, not `repr`: `repr` leaves a printable character outside
     # ASCII as it is, and a row is flattened on its way to the audit log,
@@ -739,7 +739,7 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     The spelling is `_cs_spelling`'s: whitespace is removed from the ends
     and only `a`-`z` are upper-cased, so a label holding a letter outside
     ASCII keeps it (`'rgß'` is written `RGß`). Whitespace other than the
-    space that was removed (`'RGB\\t'` is written `RGB`) is named in the
+    space that was removed (``'RGB\\t'`` is written `RGB`) is named in the
     note by code point. A label the file could not hold so spelled is
     written by `_cs_spelling`'s fallback, and `_label_fallback_warning`
     speaks for it, not this note. A multi-valued declaration has each
@@ -869,8 +869,8 @@ def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
         than the space that went from its ends (the INFO note, which
         names that for every other label, is not written for this one);
         None when there is none, or when the fallback cannot be encoded
-        either (the file fails, with its own row, as it did before
-        #612).
+        either (the file fails, with its own row, as it did
+        before #612).
     """
     said = []
     for text in _label_values(attributes):
@@ -2561,7 +2561,7 @@ def _pn_text(value) -> str:
 
     Returns:
         str: One value's text, or several joined by the backslash that
-            delimited them in the file (PS3.5 6.4).
+        delimited them in the file (PS3.5 6.4).
     """
     # `str()` of a `MultiValue` is the text of a Python list, so a name
     # written `A^B\C^D` was held, and exported as one value, `[A^B, C^D]`
@@ -2814,8 +2814,8 @@ def _planar_configuration_to_infer(ds) -> Optional[str]:
     runs. By the owner's ruling of 2026-10-16 such an image is read
     color-by-pixel (0) under every transfer syntax but RLE Lossless, with
     no check of the pixels and no setting. That is: the dataset holds
-    `PixelData` (Float and Double Float Pixel Data are not decoded here,
-    #226), more than one sample per pixel, and (0028,0006) either missing
+    `PixelData` (Float and Double Float Pixel Data are not decoded
+    here, #226), more than one sample per pixel, and (0028,0006) either missing
     (`"absent"`) or present with no value (`"empty"`).
 
     Read only; `_decode_pixels` writes the element.
@@ -2950,8 +2950,8 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     (`_planar_configuration_to_infer`), is given `PlanarConfiguration` 0
     on the dataset passed in, before any check of the header (#1134); and
     so is a colour image declaring a value other than 0 under a syntax
-    whose stream fixes the layout (`_planar_configuration_to_override`,
-    #1137). The file it was read from is not modified. A caller that
+    whose stream fixes the layout (`_planar_configuration_to_override`, #1137).
+    The file it was read from is not modified. A caller that
     records the inference or the override asks the predicate before
     calling this.
 
@@ -4105,7 +4105,7 @@ def _item_path_words(path) -> str:
             yields them.
 
     Returns:
-        str: The steps joined with ` > `.
+        str: The steps joined with ``" > "``.
     """
     return " > ".join(f"{tag}[{index}]" for tag, index in path)
 
@@ -4999,8 +4999,8 @@ def _instance_number_of(ds) -> int:
     file, and that includes an infinite value (`inf`, `-inf`, `1e400`),
     whose read makes pydicom raise `OverflowError` even in its default
     reading mode: it reads as 0 too (#870), and `_read_element` holds the
-    element as the file's text for the export to drop with its row. Until
-    #870 that `OverflowError` refused the file.
+    element as the file's text for the export to drop with its row.
+    Until #870 that `OverflowError` refused the file.
     What pydicom does read as one integer is taken as it reads it,
     including spellings a conformant IS string would not use: `1e3` and
     `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
@@ -5012,7 +5012,7 @@ def _instance_number_of(ds) -> int:
 
     Returns:
         int: A plain `int`, never pydicom's `IS`, so the field pickles and
-            binds to sqlite as the builtin.
+        binds to sqlite as the builtin.
     """
     # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
     # `str` pydicom leaves unconverted are not, and read as 0. No `str`
@@ -5077,8 +5077,8 @@ def _refuse_an_infinite_frame_count(ds) -> None:
     frames, and every decode -- pydicom's and ours -- converts it to an
     integer first. So the file is refused, as before #870, but with a
     reason that names the element; pydicom's own was `OverflowError:
-    cannot convert float infinity to integer`, naming nothing (review of
-    #900, F3). A file with no Pixel Data is not refused: the count lays
+    cannot convert float infinity to integer`, naming nothing (review
+    of #900, F3). A file with no Pixel Data is not refused: the count lays
     nothing out there.
 
     Raises:
@@ -5111,8 +5111,8 @@ _LINKAGE_KEY_NAMES = (
 def _refuse_a_multi_valued_key(ds) -> None:
     """Refuse a file one of whose linkage keys holds several values (#747).
 
-    A value holding a backslash is read by pydicom as a `MultiValue`. Until
-    #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
+    A value holding a backslash is read by pydicom as a `MultiValue`.
+    Until #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
     maps as an unhashable key and was refused as `Linkage Failed: TypeError:
     unhashable type: 'MultiValue'`, after its frame had been appended to
     the sidecar; a multi-valued Study or Series Instance UID was linked
@@ -5163,7 +5163,7 @@ def _states_no_vr(raw) -> bool:
 
     Returns:
         bool: True for a VR of None (an Implicit VR file) and for `UN`
-            while pydicom will read this `UN` under the dictionary's VR.
+        while pydicom will read this `UN` under the dictionary's VR.
     """
     # `UN` is "unknown", not a claim about the value: three files of
     # pydicom's own corpus state it for all four linkage keys
@@ -5195,7 +5195,7 @@ def _vr_as_stated(vr) -> str:
 
     Returns:
         str: `as XX` for two upper-case ASCII letters, and otherwise a
-            phrase that quotes nothing.
+        phrase that quotes nothing.
     """
     # pydicom takes any two bytes from `AA` to `ZZ` as an explicit VR, so
     # the second is the file's to choose: `Z\n` put a newline in
@@ -5217,7 +5217,7 @@ def _refuse_a_key_that_is_not_text(ds) -> None:
     `Sequence`. Until #1022 a SOP Instance UID or Patient ID held that way
     reached the save that ends `ingest()`, which refused the whole graph
     (#721, #949), so one file cost the folder; a Study or Series Instance
-    UID was linked under `str()` of the value (`"b'1.2.3.4\\x00'"`, `'7'`,
+    UID was linked under `str()` of the value (``"b'1.2.3.4\\x00'"``, `'7'`,
     `'[]'`) with no row; an `SQ` was refused in the interpreter's words,
     which differ between 3.12 and 3.14t.
 
@@ -5816,8 +5816,8 @@ class DicomImporter:
 
         Returns:
             IngestSummary: what reached the graph and what did not. A
-                per-file failure is in `failures`, not only on the console,
-                with an `ERROR` audit row when `store_backend` is given.
+            per-file failure is in `failures`, not only on the console,
+            with an `ERROR` audit row when `store_backend` is given.
         """
         all_files = []
         # Skipped, not read: a `.DS_Store` or an AppleDouble `._*` file read
@@ -7344,7 +7344,7 @@ def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
 
     Returns:
         Optional[str]: One sentence naming every disagreeing descriptor
-            in tag order, or None.
+        in tag order, or None.
     """
     # Read by `declared_int`, as the PixelRepresentation note's is: nothing
     # declared is not a correction of anything. That is the whole rule for
@@ -7909,7 +7909,7 @@ def _readback_label_mismatch(readback) -> Optional[str]:
 def _readback_waveform_mismatch(readback, written: bytes) -> Optional[str]:
     """Why the file's `WaveformData` is not `written`, or None if it is.
 
-    One trailing `\\x00` on an odd-length value is not a difference, and
+    One trailing ``\\x00`` on an odd-length value is not a difference, and
     only on an odd-length value: an even-length value is written as it
     is, so any tail there is a difference.
 
@@ -8302,8 +8302,8 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             written.
         warnings (list): Appended to with label warnings. Keyword-only,
             no default.
-        corrections (list): Appended to with width notes, and with the
-            #1134 note for an icon whose Planar Configuration was inferred
+        corrections (list): Appended to with width notes, and with
+            the #1134 note for an icon whose Planar Configuration was inferred
             at ingest. Keyword-only, no default.
     """
     # A post-pass rather than a change to `_merge_sequences`: the merge
@@ -8682,9 +8682,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
     Returns:
         ExportOutcome: the write's result, plus any elements lost on the
-            way out, descriptor corrections and warnings for the parent
-            to log and audit; `ok=False` with `error` set when the
-            instance could not be written.
+        way out, descriptor corrections and warnings for the parent
+        to log and audit; `ok=False` with `error` set when the
+        instance could not be written.
     """
     losses: List[Tuple[str, str]] = []
     corrections: List[str] = []
@@ -9786,7 +9786,7 @@ def _refuse_unencodable_j2k_frame(arr, ds, samples):
     """Raise before the encode, naming what the codec will not say.
 
     Call with the array in its final shape and dtype -- `bool` already
-    viewed as `uint8` -- and **before any mutation of `ds`**, so a refused
+    viewed as `uint8` -- and **before any mutation of** `ds`, so a refused
     instance is left exactly as it was.
 
     Args:
@@ -10663,11 +10663,11 @@ def exported_number_text(attributes, tag) -> str:
 
     Returns:
         str: `"0"` when the tag is absent (a rule removed it, or the source
-            never had it) or holds anything a name cannot carry as a
-            number (multi-valued, decimal, unparseable text, out of the
-            IS range, a bool); `""` when it is zero-length, which each
-            caller spells its own way; otherwise the value's text,
-            stripped, so an IS read as `04` keeps its `0`.
+        never had it) or holds anything a name cannot carry as a
+        number (multi-valued, decimal, unparseable text, out of the
+        IS range, a bool); `""` when it is zero-length, which each
+        caller spells its own way; otherwise the value's text,
+        stripped, so an IS read as `04` keeps its `0`.
     """
     # The text, not `int(value)`: pydicom's IS keeps its source spelling
     # (`str(IS('04')) == '04'`) and writes it, and the store keeps it
@@ -10808,9 +10808,9 @@ def export_file_name(instance) -> str:
     - `ConfigLoader.clean_filename` would change it. That function strips
       surrounding whitespace, turns a space into `_`, and removes every
       character but word characters, `-` and `.`; so a path separator
-      (`/`, `\\`), a NUL, a newline or any other control character, a
+      (`/`, ``\\``), a NUL, a newline or any other control character, a
       space, and any of `:*?"<>|` are each refused. A word character is
-      Unicode's (`\\w` under `(?u)`): a letter or digit of any script and
+      Unicode's (``\\w`` under `(?u)`): a letter or digit of any script and
       `_`.
     - It begins with `.`, which covers `.` and `..` and any name a
       directory listing hides.
@@ -10903,7 +10903,7 @@ def export_output_path(directory, instance):
 
     Returns:
         tuple: `(path, None)`, or `("", refusal)` with the
-            `FileNameRefused` that `export_file_name` raised.
+        `FileNameRefused` that `export_file_name` raised.
     """
     # `""`, not the folder and not None: the parent asks
     # `os.path.exists(task.output_path)` of every planned task
@@ -10966,8 +10966,8 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
 
     Returns:
         Optional[tuple]: `None` for every one; otherwise the elements in
-            the order given (a `set`'s order is its iteration order),
-            possibly empty.
+        the order given (a `set`'s order is its iteration order),
+        possibly empty.
 
     Raises:
         TypeError: As above, before anything is read or written.
@@ -11073,8 +11073,8 @@ def select_patient_ids(patient_ids, patients, option="patient_ids"):
 
     Returns:
         PatientSelection: `ids` is `None` for every patient, else a
-            frozenset; `unmatched` counts a duplicated unknown id at each
-            position it appears.
+        frozenset; `unmatched` counts a duplicated unknown id at each
+        position it appears.
 
     Raises:
         TypeError: `patient_ids` is wrongly shaped (`normalize_id_filter`).
@@ -11184,7 +11184,7 @@ def export_stamp_attributes(patient, study, series):
 
     Returns:
         Tuple[dict, dict, dict]: `(patient_attributes, study_attributes,
-            series_attributes)`, keyed by `"gggg,eeee"`.
+        series_attributes)`, keyed by `"gggg,eeee"`.
     """
     # Three things this deliberately does not stamp; do not add any:
     #
@@ -12799,7 +12799,7 @@ class DicomExporter:
         instance whose write failed says the file itself was not written.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 
@@ -12857,7 +12857,7 @@ class DicomExporter:
         is written. Only written files are reported.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
 
         Returns:
@@ -12894,7 +12894,7 @@ class DicomExporter:
         costs the run its `PASS` grade. Only written files are reported.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 
@@ -12952,7 +12952,7 @@ class DicomExporter:
         truncated.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 
@@ -13176,8 +13176,8 @@ class DicomExporter:
 
         Returns:
             ExportSummary: what reached disk and what did not. An
-                instance that was written but lost an element counts as
-                written; the loss is reported separately.
+            instance that was written but lost an element counts as
+            written; the loss is reported separately.
         """
         logger = get_logger()
         # No early return for an empty batch: `export_tasks` may be an
