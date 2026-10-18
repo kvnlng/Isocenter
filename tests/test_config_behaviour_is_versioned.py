@@ -63,15 +63,19 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: a leak's metadata names a `match:` rule (`rule_match`), and a `match:`
 #: scenario was added; and again on the #1147 PR, when the opt-in SR was
 #: given a block naming its creator in another case and spacing (the
-#: earlier inputs did not move: the digest held with the fold alone).
+#: earlier inputs did not move: the digest held with the fold alone);
+#: and again on the #1146 commit, when the opt-in SR was given a Study
+#: Description cut at 64 inside a name and two TEXT items, and its Text
+#: Value rule every kind that needs no model (the earlier inputs did not
+#: move: the digest held with the new SCRUB alone).
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "1c75ed7dfe890591ae409283b1f20e3a7c9470a1e7a5e510549e205f4a917c86",
+    "2.0": "94baafad5460ea40d6926528552c42270aa4fb97ce7a3efea29d1cda169834d1",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "1c75ed7dfe890591ae409283b1f20e3a7c9470a1e7a5e510549e205f4a917c86",
+    "2.0": "94baafad5460ea40d6926528552c42270aa4fb97ce7a3efea29d1cda169834d1",
 }
 
 _WHAT_TO_DO = (
@@ -370,6 +374,11 @@ def test_the_opt_in_scenario_reaches_a_creator_a_scrub_and_a_kept_report(record)
     assert items[4]["attributes"]["0040,a124"].startswith("2.25.")
     # `b3  digest` is `B3 DIGEST` folded (#1147): its element is removed.
     assert "removed" not in report["attributes"].values(), report["attributes"]
+    # #1146: a name cut at LO's 64, the tidy at a cut only, a protocol
+    # token and a decimal kept, and the regular kinds.
+    assert (report["attributes"]["0008,1030"]
+            == "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA2")
+    assert texts[5:] == ["flair_sag_3d_p2  0.488281", "Ordered; call"], texts
     for name, scenario in record.items():
         if name != "opt-in":
             assert not any("0040,a730" in i["sequences"] for i in _instances(scenario)), name

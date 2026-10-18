@@ -10312,6 +10312,12 @@ class DicomSession:
                     # Key: Ensure attributes are copied so workers can scan tags
                     if hasattr(i, 'attributes'):
                         i_new.attributes = i.attributes.copy()
+                    # The private tags' recorded VRs travel too. The scan
+                    # reads them for a private Person Name's words and a
+                    # private text element's length limit under SCRUB;
+                    # before #1146 the clone carried none, so neither was
+                    # ever read in an audit.
+                    i_new.attribute_vrs = dict(i.attribute_vrs)
 
                     # Sequences travel too: without them the worker gets
                     # a top-level-only instance, and the scan reports

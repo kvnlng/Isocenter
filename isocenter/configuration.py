@@ -701,7 +701,7 @@ class IsocenterConfiguration:
                 although a file's `value: ''` on a UI tag is refused (#883).
             target (Sequence[str], optional): The kinds `SCRUB` removes,
                 stored as the rule's `target`, the key a file spells it
-                with: a list or tuple of `names`, `dates`, `ids` and `orgs`,
+                with: a list or tuple of `config_manager.SCRUB_KINDS`,
                 kept in the order given, which decides how a span two kinds
                 find is counted (#1130). Only `SCRUB` takes it, and `SCRUB`
                 requires it.

@@ -17,7 +17,8 @@ from pydicom.multival import MultiValue
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, SOURCE_SOP_UID_ATTR,
                        is_synthetic_patient_id, iter_item_tree)
-from .config_manager import _canonical_rule_key, _creator_identity, _vr_dummy
+from .config_manager import (_canonical_rule_key, _creator_identity,
+                             _text_max_characters, _vr_dummy)
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
 
@@ -163,12 +164,13 @@ def _person_names_in(instance, patient=None) -> List[str]:
     return found
 
 
-def _scrubbed(val, kinds, names, dummy):
+def _scrubbed(val, kinds, names, dummy, max_length=None):
     """`(value to write, counts)` for a `SCRUB` of `val`, or `(None, None)`
     when that value is the one already held (#1130).
 
     A `str` is scrubbed whole, and a list or tuple of `str` value by
-    value; a value scrubbed to nothing is written as `dummy` (owner ruling
+    value, each against `max_length`, the VR's limit per value (#1146);
+    a value scrubbed to nothing is written as `dummy` (owner ruling
     Q7 (a)). The comparison is with the value as it would be written,
     after that substitution, so a value already holding the dummy never
     raises a finding, whatever a model makes of the dummy's text. Anything
@@ -180,7 +182,7 @@ def _scrubbed(val, kinds, names, dummy):
     if isinstance(val, str):
         if not val.strip():
             return None, None
-        cleaned, counts = scrub(val, kinds, names)
+        cleaned, counts = scrub(val, kinds, names, max_length)
         written = cleaned or dummy
         return (written, counts) if written != val else (None, None)
     if isinstance(val, (list, tuple, MultiValue)) and all(isinstance(v, str) for v in val):
@@ -189,7 +191,7 @@ def _scrubbed(val, kinds, names, dummy):
         out, counts = [], {}
         for one in val:
             if one.strip():
-                cleaned, found = scrub(one, kinds, names)
+                cleaned, found = scrub(one, kinds, names, max_length)
                 cleaned = cleaned or dummy
             else:
                 cleaned, found = one, {}
@@ -1554,9 +1556,14 @@ class PhiInspector:
                 # Text Value cannot be zero-length. `_scrubbed` writes it
                 # and compares the result, so a held dummy is no finding.
                 dummy = _vr_dummy(tag) or "ANONYMIZED"
+                # A value at its VR's maximum may have been cut there, a
+                # name with it (#1146): a private tag's VR is the one the
+                # source recorded.
+                max_length = _text_max_characters(
+                    tag, (getattr(item, "attribute_vrs", None) or {}).get(tag))
                 new_val, scrubbed = _scrubbed(
                     val, config_val.get("target") or (),
-                    name_tokens(person_names), dummy)
+                    name_tokens(person_names), dummy, max_length)
                 if scrubbed is not None:
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"

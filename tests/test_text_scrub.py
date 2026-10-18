@@ -21,8 +21,10 @@ from isocenter.text_scrub import name_tokens, scrub
 
 from support.scrub_corpus import CLINICAL, ISSUE_ROWS
 
-ALL = ("names", "dates", "ids", "orgs")
+ALL = ("names", "dates", "ids", "orgs", "phones", "addresses", "sites",
+       "initials")
 NO_MODEL = ("names", "dates", "ids")
+REGULAR = NO_MODEL + ("phones", "addresses", "sites", "initials")
 
 @pytest.mark.parametrize("text, expected, names", ISSUE_ROWS)
 def test_the_issue_shapes_are_cleaned(text, expected, names):
@@ -67,10 +69,20 @@ def test_a_full_name_is_one_name():
 
 @pytest.mark.parametrize("text", CLINICAL + [row[0] for row in ISSUE_ROWS] + [
     "A - 1234567 - B", "x, 1234567, y", "for for 1234567", "Dr. Dr. Smith",
-    "(1234567) scan", "a/1234567/b", "1234567 1234567 tail"])
+    "(1234567) scan", "a/1234567/b", "1234567 1234567 tail",
+    "AP Routine  5.0  B40f 20190901", "Thorax  1.0  B45f for 4826153907",
+    "for 4826153907 Brain MRI.", "Line one\n4826153907\nLine three",
+    "Ordered for 2675888487 by SS", "PET-CT STUDY at CHAJH",
+    "x 4826153907 , y"])
 def test_scrub_is_a_fixpoint(text):
-    once, _ = scrub(text, NO_MODEL, ("SMITH",))
-    assert scrub(once, NO_MODEL, ("SMITH",)) == (once, {})
+    once, _ = scrub(text, REGULAR, ("SMITH",))
+    assert scrub(once, REGULAR, ("SMITH",)) == (once, {})
+
+
+@pytest.mark.parametrize("text", CLINICAL)
+def test_the_regular_kinds_leave_clinical_descriptions_as_they_are(text):
+    """None of the new kinds takes anything from the clinical corpus."""
+    assert scrub(text, REGULAR) == (text, {})
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -78,6 +90,25 @@ def test_scrub_is_a_fixpoint(text):
     ("(1234567) scan", "() scan"), ("for 1234567", "")])
 def test_the_tidy_rule(text, expected):
     """One separator survives a cut; brackets are not balanced, as stated."""
+    assert scrub(text, NO_MODEL)[0] == expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("AP Routine  5.0  B40f 20190901", "AP Routine  5.0  B40f"),   # quoted, #1146
+    ("Thorax  1.0  B45f for 4826153907", "Thorax  1.0  B45f"),
+    ("for 4826153907 Brain MRI.", "Brain MRI."),
+    ("  Brain MRI for 4826153907", "  Brain MRI"),
+    ("Line one\n4826153907\nLine three", "Line one\nLine three"),
+    ("Line one\r\n4826153907 Line three", "Line one\r\nLine three"),
+    ("x 4826153907 , y", "x, y"),
+    ("A  4826153907  B", "A B")])
+def test_the_tidy_is_only_at_a_cut(text, expected):
+    """#1146 (3): whitespace away from a cut is the text's own, and an end
+    a cut did not reach keeps its characters. At a cut the whitespace
+    becomes one space, or its first line break. Kills the global collapse
+    restored (rows 1 and 2), both ends stripped whatever the cut (rows 3
+    and 4), the joint always a space (rows 5 and 6), and the comma arm
+    not eating the whitespace on its right (row 7)."""
     assert scrub(text, NO_MODEL)[0] == expected
 
 
@@ -129,8 +160,127 @@ def test_a_name_is_matched_whole_word_and_in_any_case():
 
 
 def test_the_scrub_kinds_are_one_list():
+    """Every kind but `initials` is a `text_kinds` finder; `initials` is a
+    widening of a span another kind found, so it has none (#1146)."""
     assert config_manager.SCRUB_KINDS == text_scrub.SCRUB_KINDS == ALL
-    assert set(text_scrub.SCRUB_KINDS) <= set(text_kinds.KINDS)
+    assert set(text_scrub.SCRUB_KINDS) - {"initials"} <= set(text_kinds.KINDS)
+    assert "initials" not in text_kinds.KINDS
+    # Q-B12 stands for pixels: none of the new kinds is a burned-in kind.
+    for kind in ("phones", "addresses", "sites", "initials"):
+        assert kind not in config_manager.BURNED_IN_TEXT_KINDS
+
+
+# --- ids in header text, and a name cut at the VR's length (#1146) ------------
+
+@pytest.mark.parametrize("text, expected", [
+    ("ep2d_diff_b50_400_800_tra_p3 for 310-50-9582",            # quoted
+     "ep2d_diff_b50_400_800_tra_p3"),
+    ("P4^P114^S301^I00004, Gated, 10.0%A for 337-04-5046",      # quoted
+     "P4^P114^S301^I00004, Gated, 10.0%A"),
+    ("t2_tse_tra_320_p2 for 4826153907", "t2_tse_tra_320_p2"),
+    ("PROCESSED\\0.781250 \\0.781250", "PROCESSED\\0.781250 \\0.781250"),  # quoted
+    ("Kidney^K12^Phase2^S00417 for 4826153907", "Kidney^K12^Phase2^S00417"),
+    ("Pixel spacing 0.488281 \\0.488281", "Pixel spacing 0.488281 \\0.488281"),
+    ("Run_A 12.718204 mm", "Run_A 12.718204 mm"),
+    ("SUBJ_4826153907 baseline", "baseline"),
+    ("dwi_b800_tra for 512-77-0314", "dwi_b800_tra")])
+def test_scrub_reads_ids_without_the_pixel_rule(text, expected):
+    """#1146 (4): SCRUB asks `id_spans(text, ocr=False)`. Kills `ids`
+    still routed through `text_kinds.spans`, the pixels' arm."""
+    assert scrub(text, NO_MODEL)[0] == expected
+
+
+FENWICK = ("FENWICK-ORR", "DALIA")
+CUT = "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA for Dalia Fenwic"
+
+
+@pytest.mark.parametrize("text, names, max_length, expected", [
+    (CUT, FENWICK, 64, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA"),
+    # Quoted, #1146: a Series Description cut at LO's 64.
+    ("ep2d_diff_b50_400_800_tra_p3_TRACEW_DFC_MIX for Christopher Powe",
+     ("POWERS", "CHRISTOPHER"), 64, "ep2d_diff_b50_400_800_tra_p3_TRACEW_DFC_MIX"),
+    # One short of the limit: not cut, so `Fenwic` is a word, not a name.
+    ("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TR for Dalia Fenwic",
+     FENWICK, 64, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TR Fenwic"),
+    # Two characters are too few.
+    ("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA_SAG for Dalia Fe",
+     FENWICK, 64, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA_SAG Fe"),
+    # A protocol segment is not a word: only whitespace may precede it.
+    ("t2_tse_cor_384_p2_fs_BH_ND_RR_MOCO_SUMMARY_COMPOSED_SER_1717_tra",
+     ("TRANH", "MINH"), 64,
+     "t2_tse_cor_384_p2_fs_BH_ND_RR_MOCO_SUMMARY_COMPOSED_SER_1717_tra"),
+    ("Report for Fenw", FENWICK, 64, "Report for Fenw"),
+    (CUT, FENWICK, None, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA Fenwic"),
+])
+def test_a_name_cut_at_the_limit_is_removed(text, names, max_length, expected):
+    """#1146 (2): a value exactly at its VR's maximum whose last word, 3 or
+    more letters, begins one of the instance's names. Kills the length
+    gate removed or loosened (the 63-character row), the floor lowered to
+    2 (the `Fe` row), and the boundary loosened to admit `_` (the `_tra`
+    row)."""
+    cleaned, counts = scrub(text, NO_MODEL, names, max_length=max_length)
+    assert cleaned == expected
+    if expected != text and len(text) == max_length:
+        assert counts == {"names": 1}, counts
+
+
+def test_the_cut_rows_are_the_lengths_they_say():
+    assert len(CUT) == 64
+    assert len("ep2d_diff_b50_400_800_tra_p3_TRACEW_DFC_MIX for Christopher Powe") == 64
+    assert len("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TR for Dalia Fenwic") == 63
+    assert len("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA_SAG for Dalia Fe") == 64
+    assert len("t2_tse_cor_384_p2_fs_BH_ND_RR_MOCO_SUMMARY_COMPOSED_SER_1717_tra") == 64
+
+
+def test_a_cut_name_is_read_only_in_the_first_round():
+    """Only the value as read can have been cut at its VR's length: a
+    scrubbed value read again, even with the limit set to its own length,
+    loses nothing more. (Within one call a later round's value is always
+    shorter than the first's, since a round that changes nothing ends the
+    loop, so the gate never holds there; the round counter says so.)"""
+    once, _ = scrub(CUT, NO_MODEL, FENWICK, max_length=64)
+    assert scrub(once, NO_MODEL, FENWICK, max_length=len(once)) == (once, {})
+
+
+# --- the new kinds (#1146, owner rulings Q3-Q6 (a)) ---------------------------
+
+@pytest.mark.parametrize("text, kinds, expected, counts", [
+    ("Questions call (312)555-0147x12", ["phones"], "Questions call", {"phones": 1}),
+    ("call (606)066-5106x76", ["phones", "ids"], "call", {"phones": 1}),  # quoted
+    ("call (606)066-5106x76", ["ids"], "call (606)", {"ids": 1}),         # quoted, rc21
+    ("Terry Lara : 157 Chisholm Trl Thibodaux, LA 70301",                  # quoted
+     ["names", "addresses"], "", {"names": 1, "addresses": 1}),
+    ("PET-CT STUDY at CHAJH", ["sites"], "PET-CT STUDY", {"sites": 1}),    # quoted
+    ("Performed at HWACMC", ["sites"], "Performed", {"sites": 1}),         # quoted
+    ("Ordered for 2675888487 by SS", ["ids", "initials"], "Ordered",       # quoted
+     {"ids": 1, "initials": 1}),
+    ("Ordered for 2675888487 by SS", ["ids"], "Ordered by SS", {"ids": 1}),
+])
+def test_the_new_kinds_remove_their_shapes(text, kinds, expected, counts):
+    names = ("TERRY", "LARA")
+    assert scrub(text, kinds, names) == (expected, counts)
+
+
+@pytest.mark.parametrize("text", [
+    "Ordered by SS", "Confirmed by CT", "Seen by ENT", "Read by MR today",
+    "Contrast by IV for review"])
+def test_initials_go_only_with_a_span_removed_beside_them(text):
+    """Owner ruling Q6 (a): `by` and 1 to 3 capitals only directly right of
+    a span the same round removes. Kills a free-standing `by SS` taken."""
+    assert scrub(text, ["ids", "dates", "initials"]) == (text, {})
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Ordered 20170803 by SS today", "Ordered today"),
+    ("Ordered for 2675888487 BY SS", "Ordered BY SS"),
+    ("Ordered for 2675888487 by SSSS", "Ordered by SSSS"),
+    ("Ordered for 2675888487 by Smith", "Ordered by Smith"),
+    ("Ordered for 2675888487, by SS", "Ordered, by SS"),
+])
+def test_initials_shape(text, expected):
+    """Lower-case `by`, then 1 to 3 capitals as a whole word, directly
+    right of the span (whitespace only between)."""
+    assert scrub(text, ["dates", "ids", "initials"])[0] == expected
 
 
 def test_this_module_never_logs_prints_or_warns():

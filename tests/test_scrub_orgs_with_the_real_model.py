@@ -78,7 +78,8 @@ def test_the_variable_is_in_the_registry():
 
 
 def _regex_spans(text):
-    return (text_kinds.date_spans(text, ocr=False) + text_kinds.id_spans(text))
+    return (text_kinds.date_spans(text, ocr=False)
+            + text_kinds.id_spans(text, ocr=False))
 
 
 def test_orgs_never_changes_what_dates_and_ids_remove():

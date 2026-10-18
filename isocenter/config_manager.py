@@ -140,11 +140,20 @@ BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
 #: The kinds a `SCRUB` rule's `target` names (#1130), in the order the
 #: refusal lists them. `text_scrub.SCRUB_KINDS` is the scrub's copy, and
 #: a test keeps the two equal. There is no `any`: `target` is required
-#: (owner ruling Q5 (b)). Compared exactly.
-SCRUB_KINDS = ("names", "dates", "ids", "orgs")
+#: (owner ruling Q5 (b)). Compared exactly. `phones`, `addresses`,
+#: `sites` and `initials` are new values of the unshipped 2.0 row
+#: (#1146), as `orgs` was.
+SCRUB_KINDS = ("names", "dates", "ids", "orgs", "phones", "addresses",
+               "sites", "initials")
 #: The VRs `SCRUB` applies to on a standard tag: text a description can
 #: carry. A Person Name is a name whole, so `REPLACE` is its answer.
 _SCRUB_VRS = frozenset({"LO", "LT", "SH", "ST", "UC", "UT"})
+#: The maximum length in characters of the text VRs that have one (PS3.5
+#: Table 6.2-1). UC and UT have none. A local table, as
+#: `_CREATOR_MAX_CHARACTERS` is, not pydicom's `MAX_VALUE_LEN`: a value
+#: exactly this long may have been cut there, so `SCRUB`'s `names` reads
+#: its last word as a name's beginning (#1146).
+_TEXT_MAX_CHARACTERS = {"LO": 64, "SH": 16, "ST": 1024, "LT": 10240}
 #: What decides "is this text?" (#1121, PR C), in the order the refusal
 #: lists them: `tesseract` (rc19's OCR, the default) or `db` (the
 #: PP-OCRv3 DB text detector run by OpenCV, the optional `textdetect`
@@ -1185,6 +1194,27 @@ def _standard_dictionary_vr(tag: str) -> Optional[str]:
         return str(dictionary_VR(number))
     except KeyError:
         return None
+
+
+def _text_max_characters(tag: str, recorded_vr: Optional[str] = None) -> Optional[int]:
+    """The maximum length in characters of `tag`'s text VR, or None (#1146).
+
+    A standard tag's VR is its dictionary's; a tag the dictionary does
+    not know (a private one) takes the VR the source recorded for it.
+    Characters, not bytes: a value a site cut by bytes under a multi-byte
+    character set is shorter in characters, and is not seen as cut.
+
+    Args:
+        tag (str): A `gggg,eeee` key.
+        recorded_vr (str, optional): The item's recorded VR for `tag`
+            (`DicomItem.attribute_vrs`).
+
+    Returns:
+        Optional[int]: From `_TEXT_MAX_CHARACTERS` (LO, SH, ST, LT); None
+        for UC, UT, any other VR and an unknown one.
+    """
+    vr = _standard_dictionary_vr(tag) or recorded_vr
+    return _TEXT_MAX_CHARACTERS.get(vr) if isinstance(vr, str) else None
 
 
 def _dictionary_vm(tag: str) -> Optional[str]:
