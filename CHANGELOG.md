@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Not matched, as before:** a creator that differs in anything else, such as `GEMS_IDEN_1` against `GEMS_IDEN_01`, a space taken out, or a non-ASCII letter's case. Not changed: the `remove_private_tags: true` sweep, and the #765 private-UID-copy arm, which leaves alone an element a creator key names, now in any spelling.
   - **Run `audit()` and `anonymize()` again on a store audited under 1.0.0rc21 with a creator key.** The policy fingerprint does not move, so a file of the other spelling that was scanned clean under rc21 still reads as current, exports its value and draws no #555 notice until the store is audited again.
   - **`CONFIG_VERSION` stays 2.0.** No key or shape is added; this changes how the unshipped 2.0 row applies, before the final tag. The behaviour digest's opt-in SR gained a block naming `B3 DIGEST` as `b3  digest`, whose element is now removed; both `"2.0"` rows moved for that alone (the digest held with the fold before the fixture was widened).
+  - **Output:** one difference, the input of `synthetic:private_creators`, which gained a third file, `private_creators-3.dcm`, whose creator is spelt `gems_iden_01` (owner ruling Q8 (b)); configuration C's creator key removes its date, and A sweeps it and B keeps it as for the other two. No other cell moved: `check` against the rc21 recording at the two code commits exited 0 on 3.12, so neither #1147 nor #1146 changes any existing member's output.
 
 ### Added
 
