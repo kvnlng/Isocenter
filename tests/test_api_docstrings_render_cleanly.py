@@ -10,7 +10,7 @@ from the source text. The test imports neither Sphinx nor docutils;
 the rules were measured against Sphinx 9.1's napoleon and docutils
 0.22, not guessed from the style guides.
 
-**Scope (owner rulings D3 and S8, 2026-10-18).** R1, R4, R5 and R6
+**Scope (owner rulings D3 and S8, 2026-10-18).** R1 and R4 to R7
 grade every docstring in the package: module, class, def, private
 helper, dunder and closure alike, whether or not a page renders it. A
 docstring a page does not show today is one a page may show tomorrow,
@@ -66,8 +66,12 @@ Python-Markdown read `#1108). When ...` as a heading (mkdocstrings gave
 it an anchor), and a `# Heading` is Markdown that reST shows as text;
 neither is what the author meant on either builder.
 
+**R7 -- no Markdown link** outside code. mkdocstrings resolved
+`[ExportSummary][...]` to a link; reST shows the brackets. A role
+(`:class:`) does the same job under Sphinx.
+
 Literal blocks (after a `::` paragraph), doctest blocks and the
-contents of a fence are code and are not graded by R4 or R6. Fixtures
+contents of a fence are code and are not graded by R4, R6 or R7. Fixtures
 below spell each rule on a red string and a clean one, so the sweep's
 verdict and the rules' own behaviour are pinned separately.
 
@@ -155,6 +159,14 @@ _END_SUFFIX_CATEGORIES = {"Pe", "Pi", "Pf", "Pd", "Po"}
 # reference suffix (`x`_, `x`__) before the suffix proper.
 _INTERPRETED_TAIL = re.compile(r":[\w.+-]+:|__?")
 _TOKEN = re.compile(r"``|`|\*\*")
+# R7: `[text][target]` (mkdocstrings' cross-reference) and `[text](url)`,
+# read with code spans blanked to the same length.
+_MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\](?:\[[\w.]*\]|\([^)\s]+\))")
+_CODE_SPAN = re.compile(r"``.+?``|`[^`]*`", re.DOTALL)
+
+
+def _blank(match):
+    return " " * len(match.group())
 
 
 def _rendered_targets(pages_dir=API_PAGES):
@@ -530,7 +542,7 @@ def _span_offenders(text):
 
 
 def _markup_offenders(lines):
-    """`(line index, message)` for R4, R5 and R6 over cleandoc'd lines."""
+    """`(line index, message)` for R4 to R7 over cleandoc'd lines."""
     offenders = []
     code = _code_lines(lines)
     for index, line in enumerate(lines):
@@ -554,6 +566,12 @@ def _markup_offenders(lines):
         for at, message in _span_offenders(text):
             index = max(i for o, i in starts if o <= at)
             offenders.append((index, f"{message} (R4)"))
+        for link in _MARKDOWN_LINK.finditer(_CODE_SPAN.sub(_blank, text)):
+            index = max(i for o, i in starts if o <= link.start())
+            offenders.append((index, f"{link.group()!r} is a Markdown "
+                                     "link, which reST shows as text; use "
+                                     "a role (`:class:`) or a reST link "
+                                     "(R7)"))
     return offenders
 
 
@@ -577,7 +595,7 @@ def _node_name(node):
 
 
 def _node_offenders(node, where):
-    """R1, R4, R5 and R6 for one documented node, as strings."""
+    """R1 and R4 to R7 for one documented node, as strings."""
     doc = ast.get_docstring(node, clean=False)
     lines = inspect.cleandoc(doc).splitlines()
     origin = _origin(node, doc)
@@ -653,7 +671,7 @@ def _typed_offenders(node, where):
 # --- The two scopes ----------------------------------------------------------
 
 def check_source(source, where="<string>"):
-    """`(offenders, graded)`: R1, R4, R5, R6 over every docstring."""
+    """`(offenders, graded)`: R1 and R4 to R7 over every docstring."""
     tree = ast.parse(source, where)
     offenders = []
     nodes = _every_documented_node(tree)
@@ -702,7 +720,7 @@ def check_rendered_scope(pages_dir=API_PAGES, package=PACKAGE):
 
 
 def test_every_docstring_in_the_package_renders_under_napoleon():
-    """The sweep, R1 and R4 to R6, over the whole package (D3)."""
+    """The sweep, R1 and R4 to R7, over the whole package (D3)."""
     offenders, graded, files = check_package()
 
     # #299's precedent: a scope that resolves to nothing is a broken
@@ -1059,6 +1077,22 @@ def test_a_line_starting_with_a_hash_is_red():
     assert all("(R6)" in o for o in offenders), offenders
     assert _one("def f():\n"
                 '    """The policy (see #1108) holds.\n'
+                '    """\n') == []
+
+
+def test_a_markdown_link_is_red_and_a_role_or_code_is_not():
+    """R7: both Markdown link shapes; the same text in code is clean."""
+    offenders = _one("def f():\n"
+                     '    """Returns an\n'
+                     "    [ExportSummary][pkg.mod.ExportSummary], see\n"
+                     "    [the docs](https://example.org/x).\n"
+                     '    """\n')
+    assert len(offenders) == 2, offenders
+    assert all("(R7)" in o for o in offenders), offenders
+    assert "fixture.py:3:" in offenders[0], offenders
+    assert _one("def f():\n"
+                '    """Returns an :class:`ExportSummary <pkg.mod.E>`, and\n'
+                "    `grid[r][c]` and ``a[i](x)`` are code.\n"
                 '    """\n') == []
 
 
