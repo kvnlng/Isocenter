@@ -1860,7 +1860,7 @@ class RedactionService:
         The caller must call `inst.mark_modified()` when this returns
         True. A read-only array's copy goes through `set_pixel_data`,
         which marks the instance modified; a writeable array is redacted
-        in place and leaves `has_unsaved_changes` False:
+        in place and leaves `has_unsaved_changes` False::
 
             writeable=False  returned=True  dirty=True   zone_zeroed=True
             writeable=True   returned=True  dirty=False  zone_zeroed=True

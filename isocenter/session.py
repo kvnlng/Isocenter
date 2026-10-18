@@ -8051,7 +8051,7 @@ class DicomSession:
         attested by Isocenter, so the report grades `REVIEW_REQUIRED`. None
         of the export gates runs for it, and it writes no `EXPORT` row. The
         registry is provisional until 1.1; see
-        [Exporter registry][isocenter.exporters].
+        :mod:`Exporter registry <isocenter.exporters>`.
 
         Args:
             folder (str): Output directory.
@@ -8064,7 +8064,7 @@ class DicomSession:
         Returns:
             Any: The selected format's own result object. The DICOM
             exporter returns an
-            [ExportSummary][isocenter.io_handlers.ExportSummary], whose
+            :class:`ExportSummary <isocenter.io_handlers.ExportSummary>`, whose
             `written` counts the files that reached disk and whose
             `failures` names the instances that did not. `written` is
             counted over *de-duplicated* UIDs, because the UID names the
