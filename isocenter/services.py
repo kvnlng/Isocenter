@@ -1002,9 +1002,9 @@ class RedactionService:
 
         Returns:
             List[dict]: A list of task dictionaries ready for
-                `execute_redaction_task`, each carrying its instance's
-                pre-redaction and new SOP Instance UIDs; empty when the
-                rule has no serial, no zones, no targets or no valid ROI.
+            `execute_redaction_task`, each carrying its instance's
+            pre-redaction and new SOP Instance UIDs; empty when the
+            rule has no serial, no zones, no targets or no valid ROI.
 
         Raises:
             RuntimeError: When a rule has targets and there is no project
@@ -1124,9 +1124,9 @@ class RedactionService:
 
         Returns:
             List[dict]: One task per instance, in first-seen order. A folded
-                task carries every rule's zones in rule order and every
-                rule's `pass_keys`, and no `machine_sn`: it is no one
-                rule's.
+            task carries every rule's zones in rule order and every
+            rule's `pass_keys`, and no `machine_sn`: it is no one
+            rule's.
         """
         grouped = {}
         for task in tasks:
@@ -1168,12 +1168,12 @@ class RedactionService:
 
         Returns:
             RedactionOutcome: `ok=True` with a mutation dict when zones were
-                applied, `ok=True` with `mutation=None` for a legitimate
-                skip (already redacted under this configuration, no pixel
-                data, or **no configured zone landed inside the image**),
-                and `ok=False` with an `error` string on any exception
-                (a zone that could not be applied, a failed pixel load, a
-                failed persist).
+            applied, `ok=True` with `mutation=None` for a legitimate
+            skip (already redacted under this configuration, no pixel
+            data, or **no configured zone landed inside the image**),
+            and `ok=False` with an `error` string on any exception
+            (a zone that could not be applied, a failed pixel load, a
+            failed persist).
 
         The mutation dict exists only when a zone landed. On success the
         instance carries the redaction flags, the new SOP Instance UID and

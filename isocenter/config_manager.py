@@ -884,9 +884,9 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
 
     Returns:
         Optional[Dict[str, Any]]: `{action, scope, detector,
-            min_confidence, target}` (the threshold's default is the
-            detector's), plus
-            `modalities` under `scope: modalities`; a new dict, or None.
+        min_confidence, target}` (the threshold's default is the
+        detector's), plus
+        `modalities` under `scope: modalities`; a new dict, or None.
 
     Raises:
         ValueError: `_refused_burned_in_text`'s refusal.

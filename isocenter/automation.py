@@ -20,8 +20,8 @@ def _rule_for_machine(finding, meta, zone):
 
     Returns:
         Optional[dict]: The suggestion; None when the finding names no
-            machine. A machine with no serial (`""`) gets a rule for
-            `serial_number: ""` (owner ruling on #1108).
+        machine. A machine with no serial (`""`) gets a rule for
+        `serial_number: ""` (owner ruling on #1108).
     """
     machine = meta.get("machine_serial")
     # `is None`, never falsy: `""` is the serial-less machine (#1108).
@@ -83,11 +83,11 @@ class ConfigAutomator:
 
         Returns:
             List[Dict[str, Any]]: One dict per suggestion, with `serial`,
-                `action` and `reason`; an `ADD_ZONE` suggestion carries
-                `zone`, an `EXPAND_ZONE` one `original_zone` and
-                `new_zone`, each `[y1, y2, x1, x2]`. An `ADD_RULE`
-                suggestion carries `zone`, `manufacturer` and
-                `model_name`, and its `serial` is the machine's.
+            `action` and `reason`; an `ADD_ZONE` suggestion carries
+            `zone`, an `EXPAND_ZONE` one `original_zone` and
+            `new_zone`, each `[y1, y2, x1, x2]`. An `ADD_RULE`
+            suggestion carries `zone`, `manufacturer` and
+            `model_name`, and its `serial` is the machine's.
         """
         suggestions = []
 

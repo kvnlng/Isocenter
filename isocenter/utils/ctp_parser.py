@@ -26,7 +26,7 @@ class CTPParser:
 
         Returns:
             list: Rule dicts with `manufacturer`, `model_name`, `comment`
-                and `redaction_zones` keys, in script order.
+            and `redaction_zones` keys, in script order.
         """
         rules = []
 

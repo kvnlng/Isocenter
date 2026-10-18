@@ -358,10 +358,10 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
 
     Returns:
         List[TextRegion]: Detected text regions. Also `[]` when OCR is
-            unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
-            here does not mean "no text". `Session.scan_pixel_content()` and
-            `discover_redaction_zones()` check availability first and refuse
-            instead, and report the failures this function only logs.
+        unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
+        here does not mean "no text". `Session.scan_pixel_content()` and
+        `discover_redaction_zones()` check availability first and refuse
+        instead, and report the failures this function only logs.
     """
     if not HAS_OCR:
         return []
@@ -380,7 +380,7 @@ def detect_text(pixel_data: np.ndarray) -> str:
 
     Returns:
         str: The joined text; empty when OCR is unavailable, failed, or
-            found nothing.
+        found nothing.
     """
     regions = detect_text_regions(pixel_data)
     return " ".join([r.text for r in regions])
@@ -454,7 +454,7 @@ def _ocr_instance(instance: Instance, prepare=None, reader=None) -> _InstanceOcr
 
     Returns:
         _InstanceOcr: The regions found, whether any frame was read, and
-            the failure, if any.
+        the failure, if any.
     """
     # The one place an instance's pixels are loaded and read for text; the
     # Session worker and the tier-2 `analyze_pixels` both come through
@@ -593,9 +593,9 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
 
     Returns:
         List[TextRegion]: Raw findings, not filtered against any zone. Also
-            `[]` when OCR is unavailable or nothing could be read, so `[]`
-            is not "no text"; the Session methods check availability first
-            and report what this only logs.
+        `[]` when OCR is unavailable or nothing could be read, so `[]`
+        is not "no text"; the Session methods check availability first
+        and report what this only logs.
     """
     # Returns a list rather than raising: it runs per instance inside
     # workers, where raising would turn one precondition into N worker
@@ -698,8 +698,8 @@ def _pixels_digest(instance: Instance, zones=()) -> Optional[str]:
 
     Returns:
         Optional[str]: The digest, or None when the pixels could not be
-            loaded or there are none: a digest that cannot be taken never
-            equals one a record holds.
+        loaded or there are none: a digest that cannot be taken never
+        equals one a record holds.
     """
     was_resident = instance.pixel_array is not None
     try:
@@ -850,8 +850,8 @@ def _regions_of_kinds(regions: Sequence[TextRegion], target):
 
     Returns:
         tuple: `(kept, counts, left_frames)`: the regions to redact;
-            None under `any`, else `{kind: n, ..., "left": k}`; and the
-            frame of each region left in place.
+        None under `any`, else `{kind: n, ..., "left": k}`; and the
+        frame of each region left in place.
     """
     if target == "any":
         return list(regions), None, []
@@ -908,8 +908,8 @@ def _text_boxes(instance: Instance, min_confidence: float,
 
     Returns:
         _InstanceBoxes: The boxes, with whether the instance was read and
-            why not, when it was not, and under a narrowed target the
-            counts of what was read and left.
+        why not, when it was not, and under a narrowed target the
+        counts of what was read and left.
     """
     zones = [tuple(z) for z in zones]
     size = {}
@@ -1103,8 +1103,8 @@ def _db_text_boxes(instance: Instance, min_confidence: float, prepare,
 
     Returns:
         _InstanceBoxes: As `_text_boxes`, with `oversized` and `regions`
-            (the regions boxed); under a narrowed target `counts` holds
-            `unread` beside the kinds and `left`.
+        (the regions boxed); under a narrowed target `counts` holds
+        `unread` beside the kinds and `left`.
     """
     # Imported here: `text_detection` imports this module at its top.
     from . import text_detection  # pylint: disable=import-outside-toplevel

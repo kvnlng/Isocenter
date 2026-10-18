@@ -121,10 +121,10 @@ def _lead_for(waveform, referenced_channels,
 
     Returns:
         Optional[str]: The lead name, as the `.hea` signal line of that
-            channel carries it. None when the reference names no single
-            channel of the ingested group, and when it names a defined
-            channel that `descriptions` has no entry for: one past the
-            record's sample columns, which has no signal line (#963).
+        channel carries it. None when the reference names no single
+        channel of the ingested group, and when it names a defined
+        channel that `descriptions` has no entry for: one past the
+        record's sample columns, which has no signal line (#963).
     """
     # The name comes from the list the `.hea` writer reads, never from
     # `wfdb_description()` here: that is one channel's answer, and a name
@@ -178,7 +178,7 @@ def _sample_positions(item, waveform) -> List[int]:
 
     Returns:
         List[int]: The positions; `[]` when neither attribute yields one or
-            the sampling frequency is zero.
+        the sampling frequency is zero.
     """
     positions = _as_list(item.attributes.get(TAG_REFERENCED_SAMPLE_POSITIONS))
     resolved = []
@@ -221,11 +221,11 @@ def _concept(item, include_text: bool = False):
 
     Returns:
         tuple: `(category, label)`, the category `f"{scheme}:{code}"` (the
-            Code Value alone when the scheme is empty);
-            `(UNCODED_CATEGORY, None)` for a site-defined concept without
-            `include_text`; `(None, None)` with
-            no concept, and `(None, meaning)` for a concept with no Code
-            Value.
+        Code Value alone when the scheme is empty);
+        `(UNCODED_CATEGORY, None)` for a site-defined concept without
+        `include_text`; `(None, None)` with
+        no concept, and `(None, meaning)` for a concept with no Code
+        Value.
     """
     seq = item.sequences.get(TAG_CONCEPT_NAME_CODE_SEQ)
     if seq is None or not seq.items:

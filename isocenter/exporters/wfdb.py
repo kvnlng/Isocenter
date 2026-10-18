@@ -109,7 +109,7 @@ def record_name_for(patient, study, series, instance) -> str:
 
     Returns:
         str: `<patient>_<series number>_<instance number>`, each part
-            sanitized for a record name.
+        sanitized for a record name.
     """
     return "_".join([
         # Never `patient_id` itself: a subject with no Patient ID is keyed
@@ -131,7 +131,7 @@ def _format_number(value) -> str:
 
     Returns:
         str: An integer spelling for a whole number, otherwise the repr
-            rounded to 6 places.
+        rounded to 6 places.
     """
     as_float = float(value)
     if as_float.is_integer():
@@ -190,10 +190,10 @@ def _signal_descriptions(waveform: Waveform, n_signals: Optional[int] = None):
 
     Returns:
         tuple[List[str], Dict[str, List[int]]]: `(descriptions, clashes)`.
-            `clashes` maps each lead name that was shared to the 1-based
-            numbers of the channels the lead table gave it, which are the
-            ones written as their Code Value; in the order of each name's
-            first channel. Empty when nothing fell back.
+        `clashes` maps each lead name that was shared to the 1-based
+        numbers of the channels the lead table gave it, which are the
+        ones written as their Code Value; in the order of each name's
+        first channel. Empty when nothing fell back.
     """
     # One list for the whole record, computed once by `_write_instance`
     # and handed to both writers. `format_header` and `murmur._lead_for`
@@ -431,7 +431,7 @@ def _parse_dicom_tm(value: str):
 
     Returns:
         datetime.time: The time, or None for anything not a legal TM length
-            or not parseable.
+        or not parseable.
     """
     # Keyed by length rather than tried longest-format-first: `strptime`
     # accepts one- or two-digit fields and so *succeeds* on the wrong format
@@ -460,7 +460,7 @@ def _parse_dicom_dt(value: str):
 
     Returns:
         datetime.datetime: The timestamp, or None for anything not a legal DT
-            length or not parseable.
+        length or not parseable.
     """
     # Keyed by length, for the reason `_parse_dicom_tm` gives.
     from datetime import datetime
@@ -829,7 +829,7 @@ class WfdbExporter(Exporter):
 
         Returns:
             Optional[str]: The `.hea` path, or None if the instance holds no
-                waveform or no samples.
+            waveform or no samples.
         """
         # `used_names` is required, not `=None`: it is what `_unique_record_name`
         # deduplicates against, and without it two instances missing
@@ -1064,9 +1064,9 @@ class WfdbExporter(Exporter):
 
         Returns:
             tuple[Optional[datetime], Optional[str]]: the record-line
-                value, or None with a note (`start date: DD/MM/YYYY`) for
-                the caller to write as a comment when a date is known but
-                no time of day is.
+            value, or None with a note (`start date: DD/MM/YYYY`) for
+            the caller to write as a comment when a date is known but
+            no time of day is.
         """
         # Real, possibly un-shifted timing on purpose, not a leak: it
         # behaves like every other field this tool has not remediated.
@@ -1121,12 +1121,12 @@ class WfdbExporter(Exporter):
 
         Returns:
             tuple[Optional[datetime], Optional[str]]: `(start_datetime,
-                start_date_note)`. `start_datetime` is the record-line value, or
-                None. `start_date_note` is None whenever `start_datetime` is set
-                or no date is known; otherwise it is the complete comment text
-                around a `DD/MM/YYYY` date: `de-identified start date: ...` when
-                `study.date_shifted` is true, `start date: ...` when the study
-                date was not shifted or came from the instance-only fallback.
+            start_date_note)`. `start_datetime` is the record-line value, or
+            None. `start_date_note` is None whenever `start_datetime` is set
+            or no date is known; otherwise it is the complete comment text
+            around a `DD/MM/YYYY` date: `de-identified start date: ...` when
+            `study.date_shifted` is true, `start date: ...` when the study
+            date was not shifted or came from the instance-only fallback.
         """
         # `study` is required: without it this would read the instance's own date
         # tags, which SHIFT_DATE never writes, and leak the unshifted date past

@@ -79,7 +79,7 @@ class RedactionVerifier:
 
         Returns:
             Dict[str, Any]: The rule dictionary, or None when no rule
-                covers it.
+            covers it.
         """
         for rule in self.rules:
             if rule_covers(rule, equipment):
@@ -173,9 +173,9 @@ class RedactionVerifier:
 
         Returns:
             List[PhiFinding]: One finding per leaked region. Also `[]` when
-                OCR is unavailable, which is not "nothing leaks":
-                `Session.scan_pixel_content()` checks first and refuses
-                instead.
+            OCR is unavailable, which is not "nothing leaks":
+            `Session.scan_pixel_content()` checks first and refuses
+            instead.
         """
         return self._findings_for(instance, analyze_pixels(instance), equipment)
 
@@ -193,7 +193,7 @@ class RedactionVerifier:
 
         Returns:
             List[PhiFinding]: One finding per region not covered by at least
-                80% by a zone.
+            80% by a zone.
         """
         # Split out of `verify_instance` so the Session worker can read the
         # instance through `pixel_analysis._ocr_instance`, which reports a

@@ -87,7 +87,7 @@ class IODValidator:
 
         Returns:
             List[str]: The module names, or `[]` for an SOP class this
-                table does not know.
+            table does not know.
         """
         # One spelling for `validate` and `absent_type2`, so the fill and
         # the refusal cannot read two SOP classes.
@@ -117,7 +117,7 @@ class IODValidator:
 
         Returns:
             List[BaseTag]: The absent Type 2 tags, in table order; `[]` for
-                an SOP class this table does not know.
+            an SOP class this table does not know.
         """
         absent = []
         for module in IODValidator._modules_for(ds):

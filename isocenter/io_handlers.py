@@ -2561,7 +2561,7 @@ def _pn_text(value) -> str:
 
     Returns:
         str: One value's text, or several joined by the backslash that
-            delimited them in the file (PS3.5 6.4).
+        delimited them in the file (PS3.5 6.4).
     """
     # `str()` of a `MultiValue` is the text of a Python list, so a name
     # written `A^B\C^D` was held, and exported as one value, `[A^B, C^D]`
@@ -5012,7 +5012,7 @@ def _instance_number_of(ds) -> int:
 
     Returns:
         int: A plain `int`, never pydicom's `IS`, so the field pickles and
-            binds to sqlite as the builtin.
+        binds to sqlite as the builtin.
     """
     # `IS` is an `int` subclass. A `MultiValue`, an `ISfloat`, None and the
     # `str` pydicom leaves unconverted are not, and read as 0. No `str`
@@ -5163,7 +5163,7 @@ def _states_no_vr(raw) -> bool:
 
     Returns:
         bool: True for a VR of None (an Implicit VR file) and for `UN`
-            while pydicom will read this `UN` under the dictionary's VR.
+        while pydicom will read this `UN` under the dictionary's VR.
     """
     # `UN` is "unknown", not a claim about the value: three files of
     # pydicom's own corpus state it for all four linkage keys
@@ -5195,7 +5195,7 @@ def _vr_as_stated(vr) -> str:
 
     Returns:
         str: `as XX` for two upper-case ASCII letters, and otherwise a
-            phrase that quotes nothing.
+        phrase that quotes nothing.
     """
     # pydicom takes any two bytes from `AA` to `ZZ` as an explicit VR, so
     # the second is the file's to choose: `Z\n` put a newline in
@@ -5816,8 +5816,8 @@ class DicomImporter:
 
         Returns:
             IngestSummary: what reached the graph and what did not. A
-                per-file failure is in `failures`, not only on the console,
-                with an `ERROR` audit row when `store_backend` is given.
+            per-file failure is in `failures`, not only on the console,
+            with an `ERROR` audit row when `store_backend` is given.
         """
         all_files = []
         # Skipped, not read: a `.DS_Store` or an AppleDouble `._*` file read
@@ -7344,7 +7344,7 @@ def _geometry_rewrite_note(geom, attributes) -> Optional[str]:
 
     Returns:
         Optional[str]: One sentence naming every disagreeing descriptor
-            in tag order, or None.
+        in tag order, or None.
     """
     # Read by `declared_int`, as the PixelRepresentation note's is: nothing
     # declared is not a correction of anything. That is the whole rule for
@@ -8682,9 +8682,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
     Returns:
         ExportOutcome: the write's result, plus any elements lost on the
-            way out, descriptor corrections and warnings for the parent
-            to log and audit; `ok=False` with `error` set when the
-            instance could not be written.
+        way out, descriptor corrections and warnings for the parent
+        to log and audit; `ok=False` with `error` set when the
+        instance could not be written.
     """
     losses: List[Tuple[str, str]] = []
     corrections: List[str] = []
@@ -10663,11 +10663,11 @@ def exported_number_text(attributes, tag) -> str:
 
     Returns:
         str: `"0"` when the tag is absent (a rule removed it, or the source
-            never had it) or holds anything a name cannot carry as a
-            number (multi-valued, decimal, unparseable text, out of the
-            IS range, a bool); `""` when it is zero-length, which each
-            caller spells its own way; otherwise the value's text,
-            stripped, so an IS read as `04` keeps its `0`.
+        never had it) or holds anything a name cannot carry as a
+        number (multi-valued, decimal, unparseable text, out of the
+        IS range, a bool); `""` when it is zero-length, which each
+        caller spells its own way; otherwise the value's text,
+        stripped, so an IS read as `04` keeps its `0`.
     """
     # The text, not `int(value)`: pydicom's IS keeps its source spelling
     # (`str(IS('04')) == '04'`) and writes it, and the store keeps it
@@ -10903,7 +10903,7 @@ def export_output_path(directory, instance):
 
     Returns:
         tuple: `(path, None)`, or `("", refusal)` with the
-            `FileNameRefused` that `export_file_name` raised.
+        `FileNameRefused` that `export_file_name` raised.
     """
     # `""`, not the folder and not None: the parent asks
     # `os.path.exists(task.output_path)` of every planned task
@@ -10966,8 +10966,8 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
 
     Returns:
         Optional[tuple]: `None` for every one; otherwise the elements in
-            the order given (a `set`'s order is its iteration order),
-            possibly empty.
+        the order given (a `set`'s order is its iteration order),
+        possibly empty.
 
     Raises:
         TypeError: As above, before anything is read or written.
@@ -11073,8 +11073,8 @@ def select_patient_ids(patient_ids, patients, option="patient_ids"):
 
     Returns:
         PatientSelection: `ids` is `None` for every patient, else a
-            frozenset; `unmatched` counts a duplicated unknown id at each
-            position it appears.
+        frozenset; `unmatched` counts a duplicated unknown id at each
+        position it appears.
 
     Raises:
         TypeError: `patient_ids` is wrongly shaped (`normalize_id_filter`).
@@ -11184,7 +11184,7 @@ def export_stamp_attributes(patient, study, series):
 
     Returns:
         Tuple[dict, dict, dict]: `(patient_attributes, study_attributes,
-            series_attributes)`, keyed by `"gggg,eeee"`.
+        series_attributes)`, keyed by `"gggg,eeee"`.
     """
     # Three things this deliberately does not stamp; do not add any:
     #
@@ -13176,8 +13176,8 @@ class DicomExporter:
 
         Returns:
             ExportSummary: what reached disk and what did not. An
-                instance that was written but lost an element counts as
-                written; the loss is reported separately.
+            instance that was written but lost an element counts as
+            written; the loss is reported separately.
         """
         logger = get_logger()
         # No early return for an empty batch: `export_tasks` may be an

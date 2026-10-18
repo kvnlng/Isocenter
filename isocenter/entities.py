@@ -126,8 +126,8 @@ def normalize_study_date(value):
 
     Returns:
         Any: The `date` it names; None for None; anything it cannot read
-            comes back exactly as it was given, neither invented nor
-            discarded.
+        comes back exactly as it was given, neither invented nor
+        discarded.
     """
     if value is None:
         return None
@@ -357,7 +357,7 @@ class TrackedEntity:
 
         Returns:
             tuple: `(PhiStatus, Optional[ScanPolicy])`; `(UNSCANNED, None)`
-                when the status is stale, unset, or being written.
+            when the status is stale, unset, or being written.
         """
         # The save thread reads both halves for one row and must never pair
         # a status with another status's policy. `record_phi_status` writes
@@ -522,8 +522,8 @@ class DicomItem(TrackedEntity):
 
         Returns:
             bool: True only when a shift recorded exactly `value` at `tag`.
-                False for a tag with no record, and for a value replaced
-                after the shift, so that value is raised again.
+            False for a tag with no record, and for a value replaced
+            after the shift, so that value is raised again.
         """
         if not self._shifted_dates:
             return False
@@ -741,7 +741,7 @@ class Equipment:
 
         Returns:
             Optional[Equipment]: the equipment, or `None` when none of the
-                three is present.
+            three is present.
         """
         if not (manufacturer or model_name or device_serial_number):
             return None
@@ -764,8 +764,8 @@ def iter_item_tree(item: 'DicomItem', path: tuple = ()):
 
     Yields:
         tuple: `(DicomItem, path)`, where `path` is a tuple of
-            `(sequence_tag, index)` steps from the root, empty for the root
-            itself.
+        `(sequence_tag, index)` steps from the root, empty for the root
+        itself.
     """
     yield item, path
     for tag, sequence in item.sequences.items():
@@ -788,8 +788,8 @@ def resolve_item_path(root: 'DicomItem', path: tuple) -> Optional['DicomItem']:
 
     Returns:
         Optional[DicomItem]: The item at `path`, or None when the graph
-            changed after the path was recorded (an item removed, or a
-            sequence shortened).
+        changed after the path was recorded (an item removed, or a
+        sequence shortened).
     """
     item = root
     for tag, index in path or ():
@@ -950,10 +950,10 @@ def _decode_from_file(ds):
 
     Returns:
         tuple: `(array, photometric)`, where `photometric` is the colour
-            space the decoder produced, which can differ from the file's
-            label (an 8-bit YBR source comes back RGB). The
-            `ds.pixel_array` branch puts None beside its array in form
-            only: every case that reaches it raises.
+        space the decoder produced, which can differ from the file's
+        label (an 8-bit YBR source comes back RGB). The
+        `ds.pixel_array` branch puts None beside its array in form
+        only: every case that reaches it raises.
 
     Raises:
         AttributeError: Propagated from `ds.pixel_array` for a file with
@@ -1194,7 +1194,7 @@ class _FileReadCapture:
 
         Returns:
             bool: True when its descriptors, with the carrier, are those
-                this read was shaped by.
+            this read was shaped by.
 
         Raises:
             ValueError: Propagated from the `descriptors_of` callable this
@@ -1589,8 +1589,8 @@ class Instance(DicomItem):
 
         Returns:
             bool: For a non-blank value, whether a remediation wrote exactly
-                that value; for a blank value or None, whether one emptied
-                or removed the tag.
+            that value; for a blank value or None, whether one emptied
+            or removed the tag.
         """
         tag = _canonical_tag(tag)
         recorded = self._as_recorded(value)
@@ -1873,9 +1873,9 @@ class Instance(DicomItem):
 
         Returns:
             bool: True if unloaded (or already absent), False if it was
-                unsafe to unload: either the data is in memory only and
-                nothing could bring it back, or it has diverged from what
-                is stored.
+            unsafe to unload: either the data is in memory only and
+            nothing could bring it back, or it has diverged from what
+            is stored.
         """
         # The check and the drop under one hold of `PIXEL_STATE_LOCK`:
         # checked outside it, a `set_pixel_data()` landing between the
@@ -1928,7 +1928,7 @@ class Instance(DicomItem):
 
         Returns:
             bool: True if discarded (or already absent), False if there
-                is nowhere to reload from at all.
+            is nowhere to reload from at all.
         """
         with PIXEL_STATE_LOCK:
             if self.pixel_array is None:
@@ -1947,7 +1947,7 @@ class Instance(DicomItem):
 
         Returns:
             bool: True when dropped; False, touching nothing, when there is
-                nowhere to reload from.
+            nowhere to reload from.
         """
         if self.file_path or self._pixel_loader:
             dropped_unwritten = self._pixel_array_unwritten
@@ -2021,18 +2021,18 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-                when the instance carries no pixel element. From a file,
-                that is decided by the dataset alone: None when it was
-                read and holds none of Pixel Data (7FE0,0010), Float
-                Pixel Data (7FE0,0008) and Double Float Pixel Data
-                (7FE0,0009), whatever its transfer syntax, and never
-                because of what a failure's message says. A frame that
-                could not be decoded is not None: it raises. So does a
-                file with no pixel element whose pixels are elsewhere,
-                where pydicom has no decoder for its transfer syntax:
-                one that holds Pixel Data Provider URL (0028,7FE0)
-                at the top level, or
-                is under a JPIP Referenced syntax.
+            when the instance carries no pixel element. From a file,
+            that is decided by the dataset alone: None when it was
+            read and holds none of Pixel Data (7FE0,0010), Float
+            Pixel Data (7FE0,0008) and Double Float Pixel Data
+            (7FE0,0009), whatever its transfer syntax, and never
+            because of what a failure's message says. A frame that
+            could not be decoded is not None: it raises. So does a
+            file with no pixel element whose pixels are elsewhere,
+            where pydicom has no decoder for its transfer syntax:
+            one that holds Pixel Data Provider URL (0028,7FE0)
+            at the top level, or
+            is under a JPIP Referenced syntax.
 
         Raises:
             RuntimeError: If loading fails due to transfer syntax issues,
@@ -2405,7 +2405,7 @@ class Instance(DicomItem):
 
         Returns:
             bool: True if unloaded (or already absent), False if unsafe --
-                i.e. the samples are in memory only and nothing could reload them.
+            i.e. the samples are in memory only and nothing could reload them.
         """
         # Narrower than `unload_pixel_data` on purpose: `get_waveform_data`
         # has no file fallback (cached array, else loader, else None), so
@@ -2428,7 +2428,7 @@ class Instance(DicomItem):
 
         Returns:
             Optional[bytes]: Raw sample bytes, or None when this instance
-                has no waveform or its samples are not backed by the sidecar.
+            has no waveform or its samples are not backed by the sidecar.
         """
         loader = self._waveform_loader
         if loader is None or not hasattr(loader, "read_raw"):
@@ -2440,8 +2440,8 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: int16 array of shape
-                (num_samples, num_channels), or None if this instance has no
-                waveform.
+            (num_samples, num_channels), or None if this instance has no
+            waveform.
         """
         if self.waveform_array is not None:
             return self.waveform_array
@@ -2550,10 +2550,10 @@ class Instance(DicomItem):
 
         Returns:
             np.ndarray: The published frame, the resident array a set put
-                there first, or `_STALE_CAPTURE` when a descriptor edit
-                landed during the read (the sidecar arm reads again, the
-                file arm reinterprets its decode under the new
-                descriptors).
+            there first, or `_STALE_CAPTURE` when a descriptor edit
+            landed during the read (the sidecar arm reads again, the
+            file arm reinterprets its decode under the new
+            descriptors).
         """
         # The read arms load with no lock held, since a decode can take
         # seconds and `PIXEL_STATE_LOCK` is a leaf held for microseconds.
@@ -3120,8 +3120,8 @@ class Study(TrackedEntity):
 
         Returns:
             bool: False with no record, and False as soon as `study_date`
-                stops holding what the shift wrote, so a new original date
-                assigned to `study_date` is scanned again.
+            stops holding what the shift wrote, so a new original date
+            assigned to `study_date` is scanned again.
         """
         if not self._shifted_study_date:
             return False

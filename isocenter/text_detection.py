@@ -259,7 +259,7 @@ def _detect_boxes(image: np.ndarray, input_size: Tuple[int, int],
 
     Returns:
         list: `(quad, score)` per region at or above `min_score`, the quad
-            a `(4, 2)` array of `(x, y)` in `image`'s coordinates.
+        a `(4, 2)` array of `(x, y)` in `image`'s coordinates.
     """
     model = _model()
     model.setPolygonThreshold(float(min_score))
