@@ -10,25 +10,27 @@ a real session over three small files and reading what it produces.
 It follows one question end to end. For a tour of every step in the
 pipeline, read the [Quick Start](../quickstart.md) first.
 
-!!! tip "Run it yourself"
+:::{admonition} Run it yourself
+:class: tip
 
-    Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked.
+Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.
 
-    - **Start in a new, empty folder.** Each tutorial creates its own
-      `tutorial.db` and export folders, and running one in another
-      tutorial's folder changes what it prints. The first block below
-      copies the input files from pydicom into `input/`.
-    - Paste the blocks into a Python prompt or a notebook. In a `.py`
-      script, put them under `if __name__ == "__main__":`
-      ([why](../quickstart.md#1-initialize-a-session)).
-    - In a block with `>>>`, type what follows each `>>>`; the lines
-      under it are what Python prints. A `...` inside a printed value
-      stands for a part that differs on every run, such as a pseudonym or
-      a UID.
-    - The session also prints progress bars, status lines and `WARNING`
-      lines as it works. They are not shown here.
-      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+- **Start in a new, empty folder.** Each tutorial creates its own
+  `tutorial.db` and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input files from pydicom into `input/`.
+- Paste the blocks into a Python prompt or a notebook. In a `.py`
+  script, put them under `if __name__ == "__main__":`
+  ([why](../quickstart.md#1-initialize-a-session)).
+- In a block with `>>>`, type what follows each `>>>`; the lines
+  under it are what Python prints. A `...` inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.
+- The session also prints progress bars, status lines and `WARNING`
+  lines as it works. They are not shown here.
+  `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+:::
 
 ```python
 import shutil
@@ -181,14 +183,16 @@ def grade_basis(path):
     *   2 entities read IDENTIFIED: the last PHI scan raised a finding under the policy it ran with, and no `anonymize()` pass since acted on it (patients 0, studies 0, instances 2)
 ```
 
-!!! note "These helpers read the report's layout, which can change"
+:::{admonition} These helpers read the report's layout, which can change
+:class: note
 
-    The grade values `PASS` and `REVIEW_REQUIRED` are frozen for 1.x. The
-    report's layout and the wording of each Grade Basis line are not
-    ([API stability](../api/stability.md)). `grade_line` and
-    `grade_basis` are for reading a report, not for gating automation on
-    one. If a 1.x release changes the layout, this page goes red in
-    Isocenter's own tests and is updated with it.
+The grade values `PASS` and `REVIEW_REQUIRED` are frozen for 1.x. The
+report's layout and the wording of each Grade Basis line are not
+([API stability](../api/stability.md)). `grade_line` and
+`grade_basis` are for reading a report, not for gating automation on
+one. If a 1.x release changes the layout, this page goes red in
+Isocenter's own tests and is updated with it.
+:::
 
 The run did what it was asked. But the scan found two values your policy
 acts on, and nothing acted on them, so the report will not call the

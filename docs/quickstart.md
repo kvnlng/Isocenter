@@ -18,21 +18,33 @@ The store is the file you name (with no name, `$ISOCENTER_DB_PATH`, else `isocen
 - `my_project_pixels.bin`, the pixel and waveform data (two `.lock` files appear beside it at the first `ingest()`);
 - `isocenter.log` in the current directory.
 
-!!! warning "Keep the store on local disk"
-    Keep the store (the `.db` with its `-wal` and `-shm` files, the `_pixels.bin` and its two `.lock` files) on a filesystem local to the machine running the session, and open a store from one host at a time. The store uses SQLite's WAL mode, which SQLite documents as not working over a network filesystem, and its locks are `flock`, whose behaviour on NFS, SMB, Lustre and GPFS depends on the mount. Isocenter has not been tested on one. When `Session()` recognises the store's filesystem as a network type (NFS, SMB, AFP, WebDAV, Lustre, GPFS, Ceph, BeeGFS, GlusterFS, SSHFS and a few others), it logs one `WARNING` saying so and opens the store anyway; it cannot recognise every network filesystem, so no warning is not proof the disk is local. With `Session(":memory:")` the pixel file goes in the temporary directory (`$TMPDIR`), which should be local too.
+:::{admonition} Keep the store on local disk
+:class: warning
 
-    The source files `ingest()` reads, and the folder `export()` writes, may be on network storage: ingest only reads, and export writes each file under a temporary name beside its target and renames it, with no lock.
+Keep the store (the `.db` with its `-wal` and `-shm` files, the `_pixels.bin` and its two `.lock` files) on a filesystem local to the machine running the session, and open a store from one host at a time. The store uses SQLite's WAL mode, which SQLite documents as not working over a network filesystem, and its locks are `flock`, whose behaviour on NFS, SMB, Lustre and GPFS depends on the mount. Isocenter has not been tested on one. When `Session()` recognises the store's filesystem as a network type (NFS, SMB, AFP, WebDAV, Lustre, GPFS, Ceph, BeeGFS, GlusterFS, SSHFS and a few others), it logs one `WARNING` saying so and opens the store anyway; it cannot recognise every network filesystem, so no warning is not proof the disk is local. With `Session(":memory:")` the pixel file goes in the temporary directory (`$TMPDIR`), which should be local too.
 
-!!! warning "The session store holds PHI"
-    `my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report, a manifest or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
+The source files `ingest()` reads, and the folder `export()` writes, may be on network storage: ingest only reads, and export writes each file under a temporary name beside its target and renames it, with no lock.
+:::
 
-!!! tip "Context manager"
-    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.
+:::{admonition} The session store holds PHI
+:class: warning
 
-    Leaving the block does **not** save: edits made since the last `save()` or `export()` are dropped, and `close()` warns naming the instances. Call `session.save(sync=True)` first to keep them. `export()` saves the session itself before it writes.
+`my_project.db` and `my_project_pixels.bin` keep the original identifiers and pixels. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report, a manifest or a cohort table). Keep the store where PHI may live, and do not hand it out with the export.
+:::
 
-!!! warning "Scripts need a main guard"
-    Isocenter starts its worker processes by *spawn*, and a spawned worker re-imports the script that launched it. In a `.py` file, put everything that uses the session under `if __name__ == "__main__":`. Without it the first `ingest()` fails with `BrokenProcessPool`. Notebooks and the interactive interpreter need no guard.
+:::{admonition} Context manager
+:class: tip
+
+`Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()`, which releases the session's background threads and worker pool. Steps 2 to 6 work the same way inside that block. Step 7 opens a separate `Session`, with its own `with` block.
+
+Leaving the block does **not** save: edits made since the last `save()` or `export()` are dropped, and `close()` warns naming the instances. Call `session.save(sync=True)` first to keep them. `export()` saves the session itself before it writes.
+:::
+
+:::{admonition} Scripts need a main guard
+:class: warning
+
+Isocenter starts its worker processes by *spawn*, and a spawned worker re-imports the script that launched it. In a `.py` file, put everything that uses the session under `if __name__ == "__main__":`. Without it the first `ingest()` fails with `BrokenProcessPool`. Notebooks and the interactive interpreter need no guard.
+:::
 
 ## 2. Ingest & Examine
 

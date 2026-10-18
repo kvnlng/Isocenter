@@ -16,7 +16,9 @@ helper, dunder and closure alike, whether or not a page renders it. A
 docstring a page does not show today is one a page may show tomorrow,
 and one rule for the whole tree is one a contributor can learn. R2 and
 R3 grade only what the API pages render (the targets their
-`.. auto*::` lines name, by autodoc's default member filter), because
+`.. auto*::` lines name, by autodoc's default member filter, and not
+narrowed by a `:members:` list: a member a page drops today is graded
+as one it may list tomorrow), because
 under napoleon they are questions about the rendered page and not
 about the source: an untyped `Args:` entry renders without a type and
 draws nothing.
@@ -72,11 +74,12 @@ neither is what the author meant on either builder.
 `[ExportSummary][...]` to a link; reST shows the brackets. A role
 (`:class:`) does the same job under Sphinx.
 
-**R8 -- a line introducing with a single `:` is followed by a blank
-line, or by text at its own indent.** A list directly under it is the
-paragraph's text (Python-Markdown read it the same way), and a deeper
-line directly under it is an unexpected indentation. Napoleon section
-bodies and list items' wrapped lines are exempt from the second arm.
+**R8 -- a line of text is followed by a blank line, or by text at its
+own indent.** A list directly under a line introducing with a single
+`:` is the paragraph's text (Python-Markdown read it the same way), and
+a deeper line directly under any line of text is an unexpected
+indentation. Napoleon section bodies and list items' wrapped lines are
+exempt from the second arm.
 
 What no rule here catches, and only a napoleon-and-docutils render
 does: a paragraph followed by a blank line and a deeper block, which
@@ -105,17 +108,25 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
 API_PAGES = REPO / "docs" / "api"
 
-# The API pages' targets, in both spellings the branch carries: the
-# mkdocstrings line `::: <package>.<module>[.<Class>]`, and an autodoc
-# directive inside an `{eval-rst}` fence. The `:::` reader goes with the
-# last `:::` line. (Not spelled with a real module here: the targets
-# guard reads this file's text for dotted module names.)
-_DIRECTIVE = re.compile(r"^:::\s+(?P<target>[\w.]+)\s*$", re.MULTILINE)
-_EVAL_RST = re.compile(r"^```\{eval-rst\}[^\n]*\n(?P<body>.*?)^```[ \t]*$",
-                       re.MULTILINE | re.DOTALL)
+# The API pages' targets: autodoc directives inside an `{eval-rst}`
+# fence, of any fence MyST reads (three or more backticks, or three or
+# more colons). A directive nested in another's content names its member
+# relative to the enclosing one (`.. automethod:: ingest` under
+# `.. autoclass:: <module>.DicomSession`), which is how a page keeps a
+# member order other than the source's. An autodoc directive written as
+# a MyST fence of its own (```` ```{autoclass} x ````) is read too, so it
+# is graded, though tests/test_the_docs_are_myst.py refuses it: MyST
+# renders its reST as text. (Not spelled with a real module here: the
+# targets guard reads this file's text for dotted module names.)
+_EVAL_RST = re.compile(
+    r"^(?P<fence>`{3,}|:{3,})\{eval-rst\}[^\n]*\n(?P<body>.*?)^(?P=fence)[ \t]*$",
+    re.MULTILINE | re.DOTALL)
 _AUTO_DIRECTIVE = re.compile(
-    r"^[ \t]*\.\.[ \t]+auto(?:class|module|function|exception|data|method"
-    r"|attribute)::[ \t]+(?P<target>[\w.]+)[ \t]*$", re.MULTILINE)
+    r"^(?P<indent>[ \t]*)\.\.[ \t]+auto(?:class|module|function|exception"
+    r"|data|method|attribute)::[ \t]+(?P<target>[\w.]+)[ \t]*$", re.MULTILINE)
+_AUTO_FENCE = re.compile(
+    r"^[ \t]*(?:`{3,}|:{3,})\{auto(?:class|module|function|exception|data"
+    r"|method|attribute)\}[ \t]+(?P<target>[\w.]+)[ \t]*$", re.MULTILINE)
 
 _RETURNS = re.compile(r"^(?:Returns?|Yields?):\s*$", re.IGNORECASE)
 _ARGS = re.compile(r"^(?:Args|Arguments|Params|Parameters):\s*$",
@@ -184,15 +195,41 @@ def _blank(match):
 
 
 def _rendered_targets(pages_dir=API_PAGES):
-    """The dotted targets `docs/api/*.md` hand to the API builder."""
+    """The dotted targets `docs/api/*.md` hand to the API builder, in
+    page order, nested names made whole."""
     targets = []
     for page in sorted(pages_dir.glob("*.md")):
         text = page.read_text(encoding="utf-8")
-        targets.extend(m.group("target") for m in _DIRECTIVE.finditer(text))
+        found = []
         for block in _EVAL_RST.finditer(text):
-            targets.extend(m.group("target") for m in
-                           _AUTO_DIRECTIVE.finditer(block.group("body")))
+            enclosing = []  # (indent width, dotted target)
+            for m in _AUTO_DIRECTIVE.finditer(block.group("body")):
+                width = len(m.group("indent").expandtabs())
+                while enclosing and enclosing[-1][0] >= width:
+                    enclosing.pop()
+                target = m.group("target")
+                if enclosing:
+                    target = f"{enclosing[-1][1]}.{target}"
+                enclosing.append((width, target))
+                found.append((block.start() + m.start(), target))
+        found.extend((m.start(), m.group("target"))
+                     for m in _AUTO_FENCE.finditer(text))
+        targets.extend(target for _, target in sorted(found))
     return targets
+
+
+def _graded_targets(targets):
+    """`targets` less each name whose parent is itself a target.
+
+    A class or module target grades every rendered member, so
+    `<Class>.ingest` named again by a nested directive, or a class named
+    beside its module's target, would count it twice. A member the default filter hides (`_export_dicom`) is not
+    graded by its class, so it stays.
+    """
+    named = set(targets)
+    return [target for target in targets
+            if not (target.rpartition(".")[0] in named
+                    and _is_rendered(target.rpartition(".")[2]))]
 
 
 def _resolve(target, package=PACKAGE):
@@ -600,13 +637,18 @@ def _markup_offenders(lines):
 
 
 def _colon_offenders(lines, code):
-    """R8: what directly follows a line introducing with a single `:`.
+    """R8: what directly follows a line of text.
 
-    A list item with no blank line above it is the paragraph's text, so
-    the dashes print inline; a deeper line with no blank line above it
-    is docutils' "Unexpected indentation". The second arm skips napoleon
-    section bodies, where an item's continuation sits deeper by design,
-    and list items, whose wrapped lines do too.
+    A list item with no blank line above it, under a line introducing
+    with a single `:`, is the paragraph's text, so the dashes print
+    inline. A deeper line with no blank line above it, under any line
+    of text, is docutils' "Unexpected indentation" (or, on a page, a
+    definition list). The second arm skips napoleon section bodies,
+    where an item's continuation sits deeper by design, and list items,
+    whose wrapped lines do too. It covered only lines ending `:` until
+    docs/sphinx C2; widened, it drew no new red over the package
+    (1,205 docstrings, measured), so the shape is refused before one
+    lands rather than found on a rendered page.
     """
     offenders = []
     in_section = {index for _, _, body in _blocks(lines, _SECTION)
@@ -617,9 +659,10 @@ def _colon_offenders(lines, code):
         # A line ending `::` needs no test of its own: what follows it
         # is a literal block, which `code` already holds.
         if (index in code or index + 1 in code or not following.strip()
-                or not stripped.endswith(":") or _SECTION.match(stripped)):
+                or not stripped or _SECTION.match(stripped)):
             continue
-        if _LIST_ITEM.match(following.strip()):
+        introduces = stripped.endswith(":")
+        if introduces and _LIST_ITEM.match(following.strip()):
             offenders.append((index + 1, "a list item directly under a "
                                          "line ending ':' is that "
                                          "paragraph's text; put a blank "
@@ -627,8 +670,9 @@ def _colon_offenders(lines, code):
         elif (_indent(following) > _indent(line)
               and index not in in_section
               and not _LIST_ITEM.match(stripped)):
+            under = "a line ending ':'" if introduces else "a line of text"
             offenders.append((index + 1, "a line indented deeper, directly "
-                                         "under a line ending ':', is an "
+                                         f"under {under}, is an "
                                          "unexpected indentation; use '::' "
                                          "for code or a blank line and a "
                                          "list (R8)"))
@@ -769,7 +813,7 @@ def check_rendered_scope(pages_dir=API_PAGES, package=PACKAGE):
     offenders = []
     graded = 0
     targets = _rendered_targets(pages_dir)
-    for target in targets:
+    for target in _graded_targets(targets):
         path, class_name = _resolve(target, package)
         found, count = check_typed(
             path.read_text(encoding="utf-8"),
@@ -799,8 +843,11 @@ def test_every_rendered_docstring_is_typed_where_the_page_reads_a_type():
     """R2 and R3 over what the API pages render."""
     offenders, graded, targets = check_rendered_scope()
 
-    assert len(targets) >= 9, targets
-    assert graded >= 100, (
+    # The real counts when the reader last changed (docs/sphinx C2): 37
+    # directives, 41 nested in them; 174 members graded. A reader that
+    # stops seeing a fence form or the nested names falls below.
+    assert len(targets) >= 78, targets
+    assert graded >= 174, (
         f"only {graded} documented members found under the API pages' "
         "targets; the walk is broken and this would pass vacuously")
 
@@ -1274,8 +1321,12 @@ def test_an_args_continuation_holding_a_colon_is_the_same_entry():
                   '    """\n') == []
 
 
+def _rst(*lines):
+    return "```{eval-rst}\n" + "".join(line + "\n" for line in lines) + "```\n"
+
+
 def test_a_module_level_constant_target_grades_nothing(tmp_path):
-    """`::: pkg.mod.CONST` resolves, and a constant has no docstring."""
+    """`.. autodata:: pkg.mod.CONST` resolves, and a constant has no docstring."""
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
@@ -1283,7 +1334,8 @@ def test_a_module_level_constant_target_grades_nothing(tmp_path):
                                 encoding="utf-8")
     pages = tmp_path / "api"
     pages.mkdir()
-    (pages / "m.md").write_text("::: pkg.mod.CONST\n\n::: pkg.mod.OTHER\n",
+    (pages / "m.md").write_text(_rst(".. autodata:: pkg.mod.CONST") + "\n"
+                                + _rst(".. autodata:: pkg.mod.OTHER"),
                                 encoding="utf-8")
     offenders, graded, targets = check_rendered_scope(pages, pkg)
     assert targets == ["pkg.mod.CONST", "pkg.mod.OTHER"], targets
@@ -1291,7 +1343,8 @@ def test_a_module_level_constant_target_grades_nothing(tmp_path):
 
 
 def test_the_typed_scope_is_read_from_the_api_pages_in_both_spellings(tmp_path):
-    """A page's target is R2/R3's scope: a `:::` line or an autodoc line."""
+    """A page's target is R2/R3's scope, a class's whole: an autodoc line,
+    not narrowed by its `:members:` list."""
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
@@ -1307,7 +1360,8 @@ def test_the_typed_scope_is_read_from_the_api_pages_in_both_spellings(tmp_path):
         encoding="utf-8")
     pages = tmp_path / "api"
     pages.mkdir()
-    (pages / "k.md").write_text("# K\n\n::: pkg.mod.K\n", encoding="utf-8")
+    (pages / "k.md").write_text("# K\n\n" + _rst(".. autoclass:: pkg.mod.K"),
+                                encoding="utf-8")
 
     offenders, graded, targets = check_rendered_scope(pages, pkg)
 
@@ -1325,18 +1379,72 @@ def test_the_typed_scope_is_read_from_the_api_pages_in_both_spellings(tmp_path):
     assert graded == 3, graded
     assert any(" loose: " in o for o in offenders), offenders
 
-    (pages / "k.md").write_text("::: pkg.mod.K._m\n", encoding="utf-8")
+    # `m` is graded though `:members:` names only `n` (R2/R3 do not follow it).
+    (pages / "k.md").write_text(_rst(".. autoclass:: pkg.mod.K", "   :members: n"),
+                                encoding="utf-8")
+    offenders, graded, _ = check_rendered_scope(pages, pkg)
+    assert graded == 2 and " m: " in offenders[0], offenders
+
+    (pages / "k.md").write_text(_rst(".. automethod:: pkg.mod.K._m"),
+                                encoding="utf-8")
     offenders, graded, _ = check_rendered_scope(pages, pkg)
     assert graded == 1 and " _m: " in offenders[0], offenders
 
     for absent in ("pkg.mod.absent", "pkg.mod.K.absent"):
-        (pages / "k.md").write_text(f"::: {absent}\n", encoding="utf-8")
+        (pages / "k.md").write_text(_rst(f".. autofunction:: {absent}"),
+                                    encoding="utf-8")
         try:
             check_rendered_scope(pages, pkg)
         except ValueError as error:
             assert "absent" in str(error)
         else:
             raise AssertionError(f"{absent} resolved")
+
+
+def test_the_reader_sees_every_fence_form_and_nested_names(tmp_path):
+    """Finding 6 of the C1 review: four-backtick and colon `{eval-rst}`
+    fences, a MyST `{autoclass}` fence, and directives nested in another's
+    content, named relative to it."""
+    pages = tmp_path / "api"
+    pages.mkdir()
+    (pages / "a.md").write_text(
+        "````{eval-rst}\n.. autoclass:: pkg.mod.A\n\n"
+        "   .. automethod:: second\n   .. automethod:: first\n\n"
+        ".. autofunction:: pkg.mod.loose\n````\n\n"
+        ":::{eval-rst}\n.. automodule:: pkg.other\n\n"
+        "   .. autoclass:: B\n\n      .. automethod:: m\n"
+        "   .. autofunction:: f\n:::\n\n"
+        "```{autoclass} pkg.mod.C\n:members:\n```\n\n"
+        "```python\n.. autoclass:: pkg.mod.NotRendered\n```\n",
+        encoding="utf-8")
+    targets = _rendered_targets(pages)
+    assert targets == [
+        "pkg.mod.A", "pkg.mod.A.second", "pkg.mod.A.first", "pkg.mod.loose",
+        "pkg.other", "pkg.other.B", "pkg.other.B.m", "pkg.other.f",
+        "pkg.mod.C"], targets
+    assert _graded_targets(targets + ["pkg.mod.A._private"]) == [
+        "pkg.mod.A", "pkg.mod.loose", "pkg.other", "pkg.mod.C",
+        "pkg.mod.A._private"]
+
+
+def test_a_deeper_line_directly_under_any_line_of_text_is_red():
+    """R8's second arm, widened in C2 (the r2 finding of the C1 review):
+    a prose line not ending in `:` is no exemption."""
+    offenders = _one("def f():\n"
+                     '    """Summary.\n\n'
+                     "    A prose line that ends here.\n"
+                     "        a deeper line directly under it.\n"
+                     '    """\n')
+    assert len(offenders) == 1, offenders
+    assert "fixture.py:5:" in offenders[0], offenders
+    assert "under a line of text" in offenders[0], offenders
+    assert _one("def f():\n"
+                '    """Summary.\n\n'
+                "    A prose line that ends here.\n\n"
+                "        a block quote, on purpose.\n\n"
+                "    - an item\n"
+                "      wrapped.\n"
+                '    """\n') == []
 
 
 def test_the_package_sweep_reads_every_file(tmp_path):

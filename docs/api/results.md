@@ -24,66 +24,62 @@ Import the two exceptions from the package:
 
 ## Summaries
 
-::: isocenter.io_handlers.IngestSummary
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.IngestSummary
+   :members:
+```
 
-::: isocenter.io_handlers.ExportSummary
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.ExportSummary
+   :members:
+```
 
 ## Findings
 
-::: isocenter.privacy.PhiReport
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
-      members:
-        - to_dataframe
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiReport
+   :members: to_dataframe
+   :class-doc-from: both
+```
 
-::: isocenter.privacy.PhiFinding
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiFinding
+   :members:
+```
 
-::: isocenter.privacy.PhiRemediation
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiRemediation
+   :members:
+```
 
 ## Identity locks
 
-::: isocenter.session.LockingResult
-    handler: python
-    options:
-      show_root_full_path: false
-      members: false
+```{eval-rst}
+.. autoclass:: isocenter.session.LockingResult
+```
 
 ## Exceptions
 
-::: isocenter.services.RedactionError
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
+```{eval-rst}
+.. autoclass:: isocenter.services.RedactionError
+   :members:
+   :class-doc-from: both
+```
 
-::: isocenter.io_handlers.ExportError
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.ExportError
+   :members:
+   :class-doc-from: both
+```
 
 ## Building a graph by hand
 
 `isocenter.Builder` is the frozen name of the class below; only
 `start_patient()` is frozen, and the chain it starts is tier 2.
 
-::: isocenter.builders.DicomBuilder
-    handler: python
-    options:
-      heading: Builder
-      members:
-        - start_patient
+## Builder
+
+```{eval-rst}
+.. autoclass:: isocenter.builders.DicomBuilder
+   :members: start_patient
+```
