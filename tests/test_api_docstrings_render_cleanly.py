@@ -50,8 +50,9 @@ closing punctuation (`docutils.utils.punctuation_chars`). So
 `` `RuntimeError`s `` does not close at its second backtick: docutils
 searches on, and either warns or swallows the text up to a later
 backtick into one span. A backslash escapes the next character in
-reST, so `` `\\` `` never closes either: a backslash goes in a double-backtick
-literal, which does no escape processing. reST does not nest inline
+reST, so `` `\\` `` never closes either, and one inside a span that
+does close is dropped (`'RGB\\t'` renders as 'RGBt'): a backslash goes
+in a double-backtick literal, which does no escape processing. reST does not nest inline
 markup, so a backtick inside `**strong**` is shown as a backtick (S9).
 A lone backtick that opens nothing is shown as itself, and is red
 too. A `**` that cannot open a span (`x ** 2`) is plain text and is
@@ -511,6 +512,11 @@ def _span_offenders(text):
                                      "past it"))
             i = close + len(token)
             continue
+        if token == "`" and "\\" in text[start + 1:close]:
+            offenders.append((start, "a backslash inside a single-backtick "
+                                     "span is read as an escape and "
+                                     "dropped; use a double-backtick "
+                                     "literal"))
         if token == "**" and "`" in text[start + 2:close]:
             offenders.append((start, "a backtick inside a '**' span is "
                                      "shown as a backtick: reST does not "
@@ -943,9 +949,16 @@ def test_a_span_never_closed_is_red_and_a_backslash_escapes_the_close():
     assert "fixture.py:2:" in offenders[0] and "never closed" in offenders[0]
     assert "fixture.py:4:" in offenders[1], offenders
     assert "does not close" in offenders[1], offenders
+    # Inside a span that does close, the backslash is still an escape:
+    # `'RGB\\t'` renders as 'RGBt'.
+    offenders = _one("def f():\n"
+                     '    """Quoted as `\'RGB\\\\t\'`.\n'
+                     '    """\n')
+    assert len(offenders) == 1 and "read as an escape" in offenders[0], (
+        offenders)
     # A double-backtick literal does no escape processing.
     assert _one("def f():\n"
-                '    """Separated by ``\\\\``, as written.\n'
+                '    """Separated by ``\\\\``, as ``\'RGB\\\\t\'``.\n'
                 '    """\n') == []
 
 
