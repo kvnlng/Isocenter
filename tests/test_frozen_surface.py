@@ -1124,7 +1124,7 @@ def test_the_session_page_renders_its_methods_in_pipeline_order():
     (":::{eval-rst}\n.. autoclass:: isocenter.session.DicomSession\n"
      "   .. automethod:: close\n:::\n", [], ["close"]),
     # Another class's members and a directive outside a fence are not Session's.
-    ("```{eval-rst}\n.. autoclass:: isocenter.builders.DicomBuilder\n"
+    ("```{eval-rst}\n.. autoclass:: pkg.mod.Other\n"
      "   :members: start_patient\n.. automethod:: x\n```\n"
      ".. autoclass:: isocenter.session.DicomSession\n   :members: ingest\n",
      [], []),

@@ -41,7 +41,9 @@ those under a directory `docs/conf.py`'s `exclude_patterns` names.
    linked from nowhere, and Sphinx says so only as a warning.
 
 No `scripts/mutation_probe.py` `TARGETS` row: this reads documentation
-text and imports no package module.
+text and imports no package module. It spells no dotted module name of
+the package either (fixtures say `pkg.x`), because
+`tests/test_mutation_probe_targets.py` reads one as an import.
 """
 import ast
 import pathlib
@@ -314,7 +316,7 @@ def _site(root, pages, conf=None):
     ("    ??? warning", "rule 1"),
     ('=== "macOS"', "rule 2"),
     ('===+ "Linux"', "rule 2"),
-    ("::: isocenter.exporters", "rule 3"),
+    ("::: pkg.exporters", "rule 3"),
     ("```{autoclass} isocenter.x.Y", "rule 4"),
     ("::::{automodule} isocenter.x", "rule 4"),
     ('--8<-- "x.md"', "rule 5"),
