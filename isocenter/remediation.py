@@ -610,7 +610,7 @@ class RemediationService:
           other than `""` aimed at a sequence.
         - **A value the tag's dictionary VR cannot hold declines** (a
           standard tag only; a private value is written as LO).
-        - **EMPTY on a binary VR writes `b""`.** The VR is the item's
+        - **EMPTY on a binary VR writes** `b""`. The VR is the item's
           recorded one for a private tag, the dictionary's otherwise, and
           the value's type only when neither knows.
         - **The SOP Instance UID under a UID replacement** moves the
@@ -911,8 +911,8 @@ class RemediationService:
         Two reasons from `_owner_stamps_copy` are not declines and write
         no row: a `_CopyLeftEmpty` is routed to `_satisfied`, and an
         `_OwnerNotHandedIn` does nothing, leaving the finding unhandled
-        for the scan tally. Its three callers -- REPLACE, SHIFT and, since
-        #764, a REMOVE that reached no arm -- all route them here.
+        for the scan tally. Its three callers -- REPLACE, SHIFT and,
+        since #764, a REMOVE that reached no arm -- all route them here.
 
         Args:
             finding (PhiFinding): The finding that declined.
@@ -1044,7 +1044,7 @@ class RemediationService:
           holder declines. A service used without a session checks
           nothing here.
         - **The target** may be written when it still holds the audited
-          value **or already holds `new_date`**, so `anonymize(report)`
+          value **or already holds** `new_date`, so `anonymize(report)`
           handed the same report twice is idempotent. Anything else
           declines, absent included. An unparseable original (`new_date`
           None) on a target still holding it passes, so the arm's own
@@ -2541,7 +2541,7 @@ class RemediationService:
           The date moves; everything after it is re-attached exactly as
           written.
         - The dotted DT `YYYYMMDD.HHMMSS[.F...]`, the same way.
-        - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
+        - ISO `YYYY-MM-DD`, optionally with a space and `HH:MM:SS`, or `THH:MM:SS`,
           rendered zero-padded.
 
         The time part must be a clock time (hour < 24, minute and second

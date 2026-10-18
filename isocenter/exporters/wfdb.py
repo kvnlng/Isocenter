@@ -103,8 +103,8 @@ def record_name_for(patient, study, series, instance) -> str:
         patient (Patient): The instance's patient; its exported Patient ID is
             used, never a synthetic no-Patient-ID key.
         study (Study): The instance's study (not used in the name).
-        series (Series): The instance's series (not used in the name since
-            #869: `Series.series_number` is the source's number).
+        series (Series): The instance's series (not used in the
+            name since #869: `Series.series_number` is the source's number).
         instance (Instance): The instance.
 
     Returns:

@@ -263,8 +263,8 @@ def _cs_spelling(value):
       returned, and the file fails, as it did.
 
     Text only. A `bytes` value is not spelled: it is returned as held,
-    ASCII or not, and written as held, which is what releases before
-    #612 did with it (owner ruling, 2026-10-11). A file can bring one
+    ASCII or not, and written as held, which is what releases
+    before #612 did with it (owner ruling, 2026-10-11). A file can bring one
     in by stating a binary VR for (0028,0004), so respelling it would
     change what a source's own label exports as.
 

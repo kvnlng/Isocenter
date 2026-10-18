@@ -724,8 +724,8 @@ def _without_ocr_messages(failure: Optional[str]) -> Optional[str]:
     failure cut to its frame and exception class.
 
     The message of an exception raised while OCR ran is tesseract's own
-    output, and nothing promises it holds no text it read (review O7 of
-    #1108). A load failure, which runs before OCR, is quoted whole.
+    output, and nothing promises it holds no text it read (review O7
+    of #1108). A load failure, which runs before OCR, is quoted whole.
     """
     if failure is None:
         return None
@@ -753,7 +753,7 @@ BURNED_IN_TEXT_MIN_ALNUM = 2
 
 def _alnum_count(text: str) -> int:
     """How many letters or digits `text` holds, by `str.isalnum()`:
-    Unicode-aware, so punctuation, `|`, `\\` and spaces do not count."""
+    Unicode-aware, so punctuation, `|`, ``\\`` and spaces do not count."""
     return sum(ch.isalnum() for ch in text)
 
 

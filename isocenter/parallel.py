@@ -901,8 +901,8 @@ def _end_recycling_pool(pool, finished: bool) -> list[int]:
     or a recycled replacement) can never read its sentinel; then it SIGTERMs
     each worker and joins every one with no timeout. A worker that also
     outlives SIGTERM (a handler a script installs at module level runs again
-    in every spawned worker; coverage's `sigterm = True`, set here until
-    #886, can deadlock) hung
+    in every spawned worker; coverage's `sigterm = True`, set here
+    until #886, can deadlock) hung
     `export()` for good after every file was written (#860).
 
     So the stdlib's whole exit runs on a daemon helper thread: on success,
@@ -1075,7 +1075,8 @@ class _RecyclingPool(multiprocessing.pool.Pool):  # pylint: disable=abstract-met
 
     Args:
         exit_grace (float): Keyword-only: each worker's exit bound.
-        *args, **kwargs: `multiprocessing.pool.Pool`'s.
+        *args: `multiprocessing.pool.Pool`'s.
+        **kwargs: `multiprocessing.pool.Pool`'s.
     """
     # The hook is `Pool.Process`: `__init__` starts the first workers
     # through `self.Process`, and hands `self.Process` to the worker-handler
@@ -1105,7 +1106,8 @@ class _RecyclingPool(multiprocessing.pool.Pool):  # pylint: disable=abstract-met
 
         Args:
             ctx: The pool's multiprocessing context.
-            *args, **kwds: `ctx.Process`'s.
+            *args: `ctx.Process`'s.
+            **kwds: `ctx.Process`'s.
 
         Returns:
             multiprocessing.process.BaseProcess: The worker, not yet started.

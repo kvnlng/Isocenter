@@ -389,7 +389,8 @@ def _text_blocks(lines, code):
     """Runs of text lines docutils pairs inline markup within.
 
     A block ends at a blank line or code, before a section header, a
-    list item, a line indented shallower than the one above it, and
+    list item that follows another, a line indented shallower than the
+    one above it, and
     before each new field of a field section (`Args:`, `Raises:`, ...),
     since napoleon gives every field its own body. Each block is a list
     of `(index, text)`; a field's leading `*`/`**` is dropped, because
@@ -423,7 +424,11 @@ def _text_blocks(lines, code):
         text = stripped
         if new_field:
             text = text.lstrip("*")
-        if current and (new_field or _LIST_ITEM.match(stripped)
+        # A list item ends the item above it, but not a paragraph: with
+        # no blank line between, `0301) NO` is the paragraph's text.
+        next_item = (current and _LIST_ITEM.match(stripped)
+                     and _LIST_ITEM.match(lines[current[0][0]].strip()))
+        if current and (new_field or next_item
                         or indent < _indent(lines[current[-1][0]])):
             blocks.append(current)
             current = []
@@ -973,6 +978,20 @@ def test_a_span_does_not_pair_across_two_fields_or_paragraphs():
     assert len(offenders) == 2, offenders
     assert "fixture.py:5:" in offenders[0], offenders
     assert "fixture.py:6:" in offenders[1], offenders
+
+
+def test_a_wrapped_number_is_paragraph_text_and_list_items_are_blocks():
+    """R4's blocks: `0301) NO` mid-paragraph is text; each item is its own."""
+    assert _one("def f():\n"
+                '    """A zone redaction writes `(0028,\n'
+                "    0301) NO` beside it.\n"
+                '    """\n') == []
+    offenders = _one("def f():\n"
+                     '    """Summary.\n\n'
+                     "    - opens `here\n"
+                     "    - and closes` here.\n"
+                     '    """\n')
+    assert len(offenders) == 2, offenders
 
 
 def test_a_backtick_inside_strong_is_red():

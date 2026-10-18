@@ -110,7 +110,7 @@ def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
     """The v1 canonical form of a tag policy. Never change it (see above).
 
     Args:
-        phi_tags (dict): The tag policy. Rule `name`s and a string rule's
+        phi_tags (dict): The tag policy. Rule `name` fields and a string rule's
             text are left out.
         remove_private_tags (bool): The private-tag switch.
 
@@ -188,8 +188,8 @@ def _deid_method_label(base: str) -> str:
     `external profile` for anything else, which is a path.
 
     Exact matches only, so no string that merely looks like one of them
-    (a pinned name in another case, a relative path beginning `floor
-    over `) is written verbatim.
+    (a pinned name in another case, a relative path beginning
+    `floor over` and a space) is written verbatim.
 
     Args:
         base: A recorded `ScanPolicy.base`.

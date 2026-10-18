@@ -655,7 +655,7 @@ def _code_points(chars) -> str:
 def _cs_quoted(value) -> str:
     """`value` quoted for a note or a row, at most a Code String's length
     of it, in ASCII: a character outside printable ASCII is written as
-    its escape (`'RGB\\t'`, `'RG\\xdf'`, `'MONOCHROME2\\u0131'`), never
+    its escape (``'RGB\\t'``, ``'RG\\xdf'``, ``'MONOCHROME2\\u0131'``), never
     raw."""
     # `ascii`, not `repr`: `repr` leaves a printable character outside
     # ASCII as it is, and a row is flattened on its way to the audit log,
@@ -739,7 +739,7 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     The spelling is `_cs_spelling`'s: whitespace is removed from the ends
     and only `a`-`z` are upper-cased, so a label holding a letter outside
     ASCII keeps it (`'rgß'` is written `RGß`). Whitespace other than the
-    space that was removed (`'RGB\\t'` is written `RGB`) is named in the
+    space that was removed (``'RGB\\t'`` is written `RGB`) is named in the
     note by code point. A label the file could not hold so spelled is
     written by `_cs_spelling`'s fallback, and `_label_fallback_warning`
     speaks for it, not this note. A multi-valued declaration has each
@@ -869,8 +869,8 @@ def _label_fallback_warning(attributes, in_file=None) -> Optional[str]:
         than the space that went from its ends (the INFO note, which
         names that for every other label, is not written for this one);
         None when there is none, or when the fallback cannot be encoded
-        either (the file fails, with its own row, as it did before
-        #612).
+        either (the file fails, with its own row, as it did
+        before #612).
     """
     said = []
     for text in _label_values(attributes):
@@ -2814,8 +2814,8 @@ def _planar_configuration_to_infer(ds) -> Optional[str]:
     runs. By the owner's ruling of 2026-10-16 such an image is read
     color-by-pixel (0) under every transfer syntax but RLE Lossless, with
     no check of the pixels and no setting. That is: the dataset holds
-    `PixelData` (Float and Double Float Pixel Data are not decoded here,
-    #226), more than one sample per pixel, and (0028,0006) either missing
+    `PixelData` (Float and Double Float Pixel Data are not decoded
+    here, #226), more than one sample per pixel, and (0028,0006) either missing
     (`"absent"`) or present with no value (`"empty"`).
 
     Read only; `_decode_pixels` writes the element.
@@ -2950,8 +2950,8 @@ def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
     (`_planar_configuration_to_infer`), is given `PlanarConfiguration` 0
     on the dataset passed in, before any check of the header (#1134); and
     so is a colour image declaring a value other than 0 under a syntax
-    whose stream fixes the layout (`_planar_configuration_to_override`,
-    #1137). The file it was read from is not modified. A caller that
+    whose stream fixes the layout (`_planar_configuration_to_override`, #1137).
+    The file it was read from is not modified. A caller that
     records the inference or the override asks the predicate before
     calling this.
 
@@ -4105,7 +4105,7 @@ def _item_path_words(path) -> str:
             yields them.
 
     Returns:
-        str: The steps joined with ` > `.
+        str: The steps joined with ``" > "``.
     """
     return " > ".join(f"{tag}[{index}]" for tag, index in path)
 
@@ -4999,8 +4999,8 @@ def _instance_number_of(ds) -> int:
     file, and that includes an infinite value (`inf`, `-inf`, `1e400`),
     whose read makes pydicom raise `OverflowError` even in its default
     reading mode: it reads as 0 too (#870), and `_read_element` holds the
-    element as the file's text for the export to drop with its row. Until
-    #870 that `OverflowError` refused the file.
+    element as the file's text for the export to drop with its row.
+    Until #870 that `OverflowError` refused the file.
     What pydicom does read as one integer is taken as it reads it,
     including spellings a conformant IS string would not use: `1e3` and
     `1_000` read as 1000, `4.0` as 4. The range check is also what keeps a
@@ -5077,8 +5077,8 @@ def _refuse_an_infinite_frame_count(ds) -> None:
     frames, and every decode -- pydicom's and ours -- converts it to an
     integer first. So the file is refused, as before #870, but with a
     reason that names the element; pydicom's own was `OverflowError:
-    cannot convert float infinity to integer`, naming nothing (review of
-    #900, F3). A file with no Pixel Data is not refused: the count lays
+    cannot convert float infinity to integer`, naming nothing (review
+    of #900, F3). A file with no Pixel Data is not refused: the count lays
     nothing out there.
 
     Raises:
@@ -5111,8 +5111,8 @@ _LINKAGE_KEY_NAMES = (
 def _refuse_a_multi_valued_key(ds) -> None:
     """Refuse a file one of whose linkage keys holds several values (#747).
 
-    A value holding a backslash is read by pydicom as a `MultiValue`. Until
-    #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
+    A value holding a backslash is read by pydicom as a `MultiValue`.
+    Until #747 a multi-valued Patient ID or SOP Instance UID reached the parent's
     maps as an unhashable key and was refused as `Linkage Failed: TypeError:
     unhashable type: 'MultiValue'`, after its frame had been appended to
     the sidecar; a multi-valued Study or Series Instance UID was linked
@@ -5217,7 +5217,7 @@ def _refuse_a_key_that_is_not_text(ds) -> None:
     `Sequence`. Until #1022 a SOP Instance UID or Patient ID held that way
     reached the save that ends `ingest()`, which refused the whole graph
     (#721, #949), so one file cost the folder; a Study or Series Instance
-    UID was linked under `str()` of the value (`"b'1.2.3.4\\x00'"`, `'7'`,
+    UID was linked under `str()` of the value (``"b'1.2.3.4\\x00'"``, `'7'`,
     `'[]'`) with no row; an `SQ` was refused in the interpreter's words,
     which differ between 3.12 and 3.14t.
 
@@ -7909,7 +7909,7 @@ def _readback_label_mismatch(readback) -> Optional[str]:
 def _readback_waveform_mismatch(readback, written: bytes) -> Optional[str]:
     """Why the file's `WaveformData` is not `written`, or None if it is.
 
-    One trailing `\\x00` on an odd-length value is not a difference, and
+    One trailing ``\\x00`` on an odd-length value is not a difference, and
     only on an odd-length value: an even-length value is written as it
     is, so any tail there is a difference.
 
@@ -8302,8 +8302,8 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
             written.
         warnings (list): Appended to with label warnings. Keyword-only,
             no default.
-        corrections (list): Appended to with width notes, and with the
-            #1134 note for an icon whose Planar Configuration was inferred
+        corrections (list): Appended to with width notes, and with
+            the #1134 note for an icon whose Planar Configuration was inferred
             at ingest. Keyword-only, no default.
     """
     # A post-pass rather than a change to `_merge_sequences`: the merge
@@ -9786,7 +9786,7 @@ def _refuse_unencodable_j2k_frame(arr, ds, samples):
     """Raise before the encode, naming what the codec will not say.
 
     Call with the array in its final shape and dtype -- `bool` already
-    viewed as `uint8` -- and **before any mutation of `ds`**, so a refused
+    viewed as `uint8` -- and **before any mutation of** `ds`, so a refused
     instance is left exactly as it was.
 
     Args:
@@ -10808,9 +10808,9 @@ def export_file_name(instance) -> str:
     - `ConfigLoader.clean_filename` would change it. That function strips
       surrounding whitespace, turns a space into `_`, and removes every
       character but word characters, `-` and `.`; so a path separator
-      (`/`, `\\`), a NUL, a newline or any other control character, a
+      (`/`, ``\\``), a NUL, a newline or any other control character, a
       space, and any of `:*?"<>|` are each refused. A word character is
-      Unicode's (`\\w` under `(?u)`): a letter or digit of any script and
+      Unicode's (``\\w`` under `(?u)`): a letter or digit of any script and
       `_`.
     - It begins with `.`, which covers `.` and `..` and any name a
       directory listing hides.
@@ -12799,7 +12799,7 @@ class DicomExporter:
         instance whose write failed says the file itself was not written.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 
@@ -12857,7 +12857,7 @@ class DicomExporter:
         is written. Only written files are reported.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
 
         Returns:
@@ -12894,7 +12894,7 @@ class DicomExporter:
         costs the run its `PASS` grade. Only written files are reported.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 
@@ -12952,7 +12952,7 @@ class DicomExporter:
         truncated.
 
         Args:
-            results (list): The workers' `ExportOutcome`s, and any bare
+            results (list): The workers' `ExportOutcome` objects, and any bare
                 exception `run_parallel` returned for a lost worker.
             store_backend (SqliteStore, optional): Where the audit rows go.
 

@@ -332,8 +332,8 @@ def _burned_in_text_worker(args):
             threshold, the caller's `tesseract_cmd` (see
             `_caller_tesseract_cmd`), the pixel digest of the instance's
             current record, or None, the policy's target (`"any"` or a
-            list of kinds, #1121), and its detector (`tesseract` or `db`,
-            #1121; under `db` with `target: any` no tesseract is asked
+            list of kinds, #1121), and its detector (`tesseract` or
+            `db`, #1121; under `db` with `target: any` no tesseract is asked
             anything).
             When the pixels still match `expected`, nothing is read by OCR
             and the outcome says `unchanged`.
@@ -577,7 +577,7 @@ def _in_burned_in_text_scope(instance, modality, policy) -> bool:
       the source's value is upper-cased here, so a source writing `cr`
       falls in `[CR]` rather than silently leaving the scope.
 
-    **Why the two extra `flagged` arms.** A zone redaction writes `(0028,
+    Why the two extra `flagged` arms. A zone redaction writes `(0028,
     0301) NO` beside the attestation, in the same `redact()` that runs the
     pass. Under `action: withhold` the pass reads a `YES` image and records
     text the zone missed; the zone then writes `NO`. Read by the flag
@@ -1180,8 +1180,8 @@ def _a_date_this_store_took(instance, stamps) -> bool:
     Read from the instance's own record (`Instance.record_remediation`), which
     is stored, so the answer is the same from a reopened store. DA and DT
     only, by the dictionary's VR: TM is not a date here, as it is not for the
-    stamp. Not seen: a date inside a sequence (a nested item keeps no record,
-    #991), a private date (the record holds one word for every odd-group tag),
+    stamp. Not seen: a date inside a sequence (a nested item keeps no
+    record, #991), a private date (the record holds one word for every odd-group tag),
     and a date replaced by a value that is not the dummy.
 
     Args:
@@ -2756,7 +2756,7 @@ class DicomSession:
         Two behaviours are contract, observable from any thread of this
         session:
 
-        1. It **raises `RuntimeError`** while a `redact()` or `ingest()`
+        1. It **raises** `RuntimeError` while a `redact()` or `ingest()`
            pass is open on the same store. The check comes first, before
            the leading save, so a refused call has done nothing.
         2. A `redact()` or `ingest()` that starts while it is saving or
@@ -6150,7 +6150,7 @@ class DicomSession:
         this key. Every failure raises; nothing is printed, and no message
         names a Patient ID.
 
-        **What `restore=True` writes.** Every instance of the patient
+        What `restore=True` writes. Every instance of the patient
         in memory takes the locked identity tags from the token it
         carries. The restore is recorded, so a later `save()` stores it, and
         a patient already holding the restored Patient ID is merged into
@@ -6647,8 +6647,8 @@ class DicomSession:
         Instance UID, derived from its source SOP Instance UID and the zones
         of every rule that matches it, whatever order the work runs in.
 
-        **The `burned_in_text` policy** (`configuration.burned_in_text`,
-        #1108). When the configuration holds one, this call also reads
+        The `burned_in_text` policy (`configuration.burned_in_text`, #1108).
+        When the configuration holds one, this call also reads
         every instance in the policy's `scope` with OCR (#1121: `flagged`,
         `modalities` or `all`; one out of scope is neither read nor gated
         at export), serial or not, after the zones its rules hold, and
@@ -6713,7 +6713,7 @@ class DicomSession:
                 that grades `REVIEW_REQUIRED`. `.failures` carries
                 `(sop_uid, detail)` per failed instance. It subclasses
                 `RuntimeError`, so `except RuntimeError` catches it and the
-                `RuntimeError`s below alike. A failed instance is
+                `RuntimeError` exceptions below alike. A failed instance is
                 left exactly as it was found: no `DERIVED` flag, no record
                 of the redaction, nothing persisted, so a corrected
                 configuration retries it.
@@ -9193,7 +9193,7 @@ class DicomSession:
         is found.
 
         Args:
-            tasks (list): The plan's `ExportContext`s.
+            tasks (list): The plan's `ExportContext` objects.
             policy (dict): The normalised policy.
             folder (str): The export's folder, for the row text.
             show_progress (bool): Show the read's progress bar.
@@ -9848,7 +9848,7 @@ class DicomSession:
 
     @staticmethod
     def _owner_candidates(finding, by_pid, by_study, secret, by_series=None) -> list:
-        """The live `Patient`s, `Study`s or `Series` a finding's address names.
+        """The live `Patient`, `Study` or `Series` objects a finding's address names.
 
         A patient under its `entity_uid`, under this store's keyed pseudonym
         for that ID, and under the unkeyed one only for a patient its store

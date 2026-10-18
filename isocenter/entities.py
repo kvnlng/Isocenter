@@ -577,7 +577,7 @@ class DicomItem(TrackedEntity):
         where the source file's VR is kept, and the DICOM export writes the
         tag under it rather than guessing one from the value's Python type.
 
-        **Odd group only, and never `UN`.** An even-group tag takes its VR from
+        **Odd group only, and never** `UN`. An even-group tag takes its VR from
         the dictionary. `UN` is the absence of an answer, so it is not
         recorded; an Implicit VR source, whose private elements all arrive
         `UN`, records nothing.
@@ -1907,7 +1907,7 @@ class Instance(DicomItem):
         the next `get_pixel_data()` reloads the stored frame, read under the
         instance's current descriptors.
 
-        **It undoes the whole `set_pixel_data()` it discards**: the pixels,
+        It undoes the whole `set_pixel_data()` it discards: the pixels,
         and every descriptor that call wrote (Rows, Columns,
         SamplesPerPixel, NumberOfFrames, PhotometricInterpretation,
         PlanarConfiguration, BitsAllocated, PixelRepresentation and the
@@ -2707,7 +2707,7 @@ class Instance(DicomItem):
                 caught `ValueError` leaves the instance exactly as it was.
             ValueError: If the instance declares a SamplesPerPixel that no
                 axis of `array` can carry, or if the rank is unsupported.
-                **This one raises after `pixel_array` has been assigned.**
+                This one raises after `pixel_array` has been assigned.
         """
         # **Before any mutation, and that is the whole of it.** The
         # assignment below is this method's first side effect and the

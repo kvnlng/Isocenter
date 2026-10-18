@@ -7,7 +7,7 @@ no text: it returns where text is, with a score, and nothing else. So
 nothing it found can be quoted, logged, stored or hashed; only boxes
 leave this module.
 
-**OpenCV is the optional `textdetect` extra** (owner ruling Q-C1 (a)).
+OpenCV is the optional `textdetect` extra (owner ruling Q-C1 (a)).
 It publishes no free-threaded wheel, so on 3.14t the import fails,
 `HAS_DETECTOR` is False, and `detector: db` raises
 `TextDetectorUnavailableError`. Every function here except

@@ -132,7 +132,7 @@ class DiscoveryResult:
 
         Returns:
             str: A title line, then one `|...|` line per grid row, each cell
-            drawn as ` `, `.`, `o`, `O` or `#` by increasing count.
+            drawn as a space, `.`, `o`, `O` or `#` by increasing count.
         """
         grid = self.get_density_matrix(bins)
         rows, cols = bins

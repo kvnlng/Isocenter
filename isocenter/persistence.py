@@ -3054,7 +3054,7 @@ class SqliteStore:
         - **Refused** the same way when instances carry a replaced SOP
           Instance UID (`_replaced_uid_evidence`): a new secret would
           replace them a second time.
-        - **Generated, with a `WARNING` row**, when keyed `ANON_`
+        - **Generated**, with a `WARNING` row, when keyed `ANON_`
           pseudonyms are present but nothing was shifted: an export from
           another project ingested into a fresh store. The split is
           across stores, not inside this one.
@@ -5163,7 +5163,7 @@ class SqliteStore:
         - **Iteration is not one snapshot.** Each page is its own query, so
           writes that land between pages are visible and rows deleted between
           pages are not returned.
-        - **Order is by `instances.id`.**
+        - **Order is by** `instances.id`.
 
         Args:
             patient_ids (Iterable[str], optional): Restrict the rows to

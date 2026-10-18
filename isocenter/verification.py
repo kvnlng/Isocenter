@@ -187,7 +187,7 @@ class RedactionVerifier:
 
         Args:
             instance (Instance): The instance the regions were read from.
-            text_regions (List[Any]): `TextRegion`s from OCR.
+            text_regions (List[Any]): `TextRegion` objects from OCR.
             equipment (Equipment, optional): Selects the redaction rules
                 (`services.rules_matching`).
 
