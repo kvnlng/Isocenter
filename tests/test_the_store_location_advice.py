@@ -200,6 +200,9 @@ def test_the_quickstart_names_what_may_be_on_network_storage():
     block = re.search(r"^:::\{admonition\} Keep the store on local disk\n"
                       r":class: warning\n(.*?)^:::$", text, re.S | re.M)
     assert block, "the admonition has no body closed by `:::`"
+    assert ":::" not in block.group(1), (
+        "the admonition is not closed before the next directive opens, so "
+        "MyST renders the two as one")
     body = " ".join(block.group(1).split())
     assert "WAL" in body and "flock" in body
     assert "export()" in body and "ingest()" in body
