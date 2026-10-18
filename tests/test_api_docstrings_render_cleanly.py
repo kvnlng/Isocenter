@@ -10,7 +10,7 @@ from the source text. The test imports neither Sphinx nor docutils;
 the rules were measured against Sphinx 9.1's napoleon and docutils
 0.22, not guessed from the style guides.
 
-**Scope (owner rulings D3 and S8, 2026-10-18).** R1 and R4 to R7
+**Scope (owner rulings D3 and S8, 2026-10-18).** R1 and R4 to R8
 grade every docstring in the package: module, class, def, private
 helper, dunder and closure alike, whether or not a page renders it. A
 docstring a page does not show today is one a page may show tomorrow,
@@ -55,7 +55,8 @@ does close is dropped (`'RGB\\t'` renders as 'RGBt'): a backslash goes
 in a double-backtick literal, which does no escape processing. reST does not nest inline
 markup, so a backtick inside `**strong**` is shown as a backtick (S9).
 A lone backtick that opens nothing is shown as itself, and is red
-too. A `**` that cannot open a span (`x ** 2`) is plain text and is
+too, and so is a reference (`` `x`_ ``), whose target no docstring
+defines. A `**` that cannot open a span (`x ** 2`) is plain text and is
 not graded.
 
 **R5 -- no Markdown code fence.** reST shows a ```` ``` ```` fence as
@@ -71,8 +72,20 @@ neither is what the author meant on either builder.
 `[ExportSummary][...]` to a link; reST shows the brackets. A role
 (`:class:`) does the same job under Sphinx.
 
+**R8 -- a line introducing with a single `:` is followed by a blank
+line, or by text at its own indent.** A list directly under it is the
+paragraph's text (Python-Markdown read it the same way), and a deeper
+line directly under it is an unexpected indentation. Napoleon section
+bodies and list items' wrapped lines are exempt from the second arm.
+
+What no rule here catches, and only a napoleon-and-docutils render
+does: a paragraph followed by a blank line and a deeper block, which
+docutils renders as a block quote (`pixel_geometry`'s module docstring
+quotes a rule that way on purpose, and a rule would refuse it), and a
+mistake inside a napoleon section item's continuation.
+
 Literal blocks (after a `::` paragraph), doctest blocks and the
-contents of a fence are code and are not graded by R4, R6 or R7. Fixtures
+contents of a fence are code and are not graded by R4, R6, R7 or R8. Fixtures
 below spell each rule on a red string and a clean one, so the sweep's
 verdict and the rules' own behaviour are pinned separately.
 
@@ -211,9 +224,12 @@ def _resolve(target, package=PACKAGE):
 def _is_rendered(name):
     """Whether R2/R3 grade a member: `_private` is not, `__dunder__` is.
 
-    Modelled on the API builder's default member filter, which hides
-    `_private`. Graded, not rendered: a page's explicit member list can
-    leave a graded member off the site.
+    A superset of what the pages render, not a copy of autodoc's filter:
+    autodoc's defaults hide `_private` members and special members
+    (`__dunder__`) both, and a page's `:members:` list narrows further.
+    Dunders are graded anyway, as they were under mkdocstrings, so one a
+    page later names with `:special-members:` is already clean. A red on
+    a member you cannot find on the site is that case.
     """
     return not (name.startswith("_") and not name.startswith("__"))
 
@@ -530,6 +546,10 @@ def _span_offenders(text):
                                      "past it"))
             i = close + len(token)
             continue
+        if token == "`" and _char(text, close + 1) == "_":
+            offenders.append((start, "a reference (`x`_) names a target, "
+                                     "and no docstring defines one; use a "
+                                     "role or a plain span"))
         if token == "`" and "\\" in text[start + 1:close]:
             offenders.append((start, "a backslash inside a single-backtick "
                                      "span is read as an escape and "
@@ -543,7 +563,7 @@ def _span_offenders(text):
 
 
 def _markup_offenders(lines):
-    """`(line index, message)` for R4 to R7 over cleandoc'd lines."""
+    """`(line index, message)` for R4 to R8 over cleandoc'd lines."""
     offenders = []
     code = _code_lines(lines)
     for index, line in enumerate(lines):
@@ -559,6 +579,7 @@ def _markup_offenders(lines):
             offenders.append((index, f"the line starts with "
                                      f"{stripped[:12]!r}: Markdown reads "
                                      "a heading there (R6)"))
+    offenders.extend(_colon_offenders(lines, code))
     for block in _text_blocks(lines, code):
         text = "\n".join(line for _, line in block)
         starts = []
@@ -575,6 +596,41 @@ def _markup_offenders(lines):
                                      "link, which reST shows as text; use "
                                      "a role (`:class:`) or a reST link "
                                      "(R7)"))
+    return offenders
+
+
+def _colon_offenders(lines, code):
+    """R8: what directly follows a line introducing with a single `:`.
+
+    A list item with no blank line above it is the paragraph's text, so
+    the dashes print inline; a deeper line with no blank line above it
+    is docutils' "Unexpected indentation". The second arm skips napoleon
+    section bodies, where an item's continuation sits deeper by design,
+    and list items, whose wrapped lines do too.
+    """
+    offenders = []
+    in_section = {index for _, _, body in _blocks(lines, _SECTION)
+                  for index, _ in body}
+    for index in range(len(lines) - 1):
+        line, following = lines[index], lines[index + 1]
+        stripped = line.strip()
+        if (index in code or index + 1 in code or not following.strip()
+                or not stripped.endswith(":") or stripped.endswith("::")
+                or _SECTION.match(stripped)):
+            continue
+        if _LIST_ITEM.match(following.strip()):
+            offenders.append((index + 1, "a list item directly under a "
+                                         "line ending ':' is that "
+                                         "paragraph's text; put a blank "
+                                         "line above the list (R8)"))
+        elif (_indent(following) > _indent(line)
+              and index not in in_section
+              and not _LIST_ITEM.match(stripped)):
+            offenders.append((index + 1, "a line indented deeper, directly "
+                                         "under a line ending ':', is an "
+                                         "unexpected indentation; use '::' "
+                                         "for code or a blank line and a "
+                                         "list (R8)"))
     return offenders
 
 
@@ -598,7 +654,7 @@ def _node_name(node):
 
 
 def _node_offenders(node, where):
-    """R1 and R4 to R7 for one documented node, as strings."""
+    """R1 and R4 to R8 for one documented node, as strings."""
     doc = ast.get_docstring(node, clean=False)
     lines = inspect.cleandoc(doc).splitlines()
     origin = _origin(node, doc)
@@ -674,7 +730,7 @@ def _typed_offenders(node, where):
 # --- The two scopes ----------------------------------------------------------
 
 def check_source(source, where="<string>"):
-    """`(offenders, graded)`: R1 and R4 to R7 over every docstring."""
+    """`(offenders, graded)`: R1 and R4 to R8 over every docstring."""
     tree = ast.parse(source, where)
     offenders = []
     nodes = _every_documented_node(tree)
@@ -723,7 +779,7 @@ def check_rendered_scope(pages_dir=API_PAGES, package=PACKAGE):
 
 
 def test_every_docstring_in_the_package_renders_under_napoleon():
-    """The sweep, R1 and R4 to R7, over the whole package (D3)."""
+    """The sweep, R1 and R4 to R8, over the whole package (D3)."""
     offenders, graded, files = check_package()
 
     # #299's precedent: a scope that resolves to nothing is a broken
@@ -796,6 +852,16 @@ def test_a_returns_continuation_indented_deeper_is_red():
     assert "indented 8 spaces where the item sits at 4" in offenders[0]
     assert "fixture.py:7:" in offenders[1], offenders
     assert "indented 6 spaces" in offenders[1]
+    # Shallower than the item, still inside the block: red as well.
+    offenders = _one(
+        "def f() -> int:\n"
+        '    """Summary.\n\n'
+        "    Returns:\n"
+        "        int: how many,\n"
+        "      counted.\n"
+        '    """\n')
+    assert len(offenders) == 1, offenders
+    assert "indented 2 spaces where the item sits at 4" in offenders[0]
     # A Yields block is the same block.
     offenders = _one(
         "def f():\n"
@@ -958,7 +1024,7 @@ def test_a_span_closed_before_punctuation_or_a_suffix_is_clean():
     """R4, negative: docutils' closing punctuation, roles and wrapping."""
     assert _one("def f():\n"
                 '    """Raise `RuntimeError` exceptions, `a`\'s, (`b`),\n'
-                "    `c`/`d`, `e`-`f`, `g`: h; `i`! `j`? :class:`k`, `l`_,\n"
+                "    `c`/`d`, `e`-`f`, `g`: h; `i`! `j`? :class:`k`, `l`:class:,\n"
                 "    ``m``. A span may wrap: `(0028,\n"
                 "    0301)` and **strong\n"
                 "    text** too, and x ** 2 is arithmetic.\n"
@@ -1013,6 +1079,67 @@ def test_a_wrapped_number_is_paragraph_text_and_list_items_are_blocks():
                      "    - and closes` here.\n"
                      '    """\n')
     assert len(offenders) == 2, offenders
+
+
+def test_a_shallower_line_ends_the_text_block():
+    """R4: a span does not pair across a section's end into a paragraph."""
+    offenders = _one("def f(a):\n"
+                     '    """Summary.\n\n'
+                     "    Args:\n"
+                     "        a (int): opens `here\n"
+                     "            and continues.\n"
+                     "    Then a paragraph closes` it.\n"
+                     '    """\n')
+    assert len(offenders) == 2, offenders
+    assert "fixture.py:5:" in offenders[0], offenders
+    assert "fixture.py:7:" in offenders[1], offenders
+
+
+def test_an_escaped_backtick_is_text_and_a_mid_word_one_opens_nothing():
+    """R4: `\\`` is a backtick on purpose; `x`y`` opens no span at all."""
+    assert _one("def f():\n"
+                '    """Write \\\\` for a backtick.\n'
+                '    """\n') == []
+    offenders = _one("def f():\n"
+                     '    """The x`y` form.\n'
+                     '    """\n')
+    assert len(offenders) == 2, offenders
+    assert all("opens no span here" in o for o in offenders), offenders
+
+
+def test_a_reference_span_is_red():
+    """R4: `x`_ needs a target, and no docstring defines one."""
+    offenders = _one("def f():\n"
+                     '    """See `the docs`_ for more.\n'
+                     '    """\n')
+    assert len(offenders) == 1 and "a reference" in offenders[0], offenders
+
+
+def test_a_list_or_a_deeper_line_directly_under_a_colon_is_red():
+    """R8, both arms, and what each leaves alone."""
+    offenders = _one("def f():\n"
+                     '    """This module provides:\n'
+                     "    - one thing,\n"
+                     "      wrapped.\n\n"
+                     "    Sets up two handlers:\n"
+                     "    1. a file handler.\n\n"
+                     "    The table:\n"
+                     "        a  b\n"
+                     '    """\n')
+    assert len(offenders) == 3, offenders
+    assert all("(R8)" in o for o in offenders), offenders
+    assert ["fixture.py:3:" in offenders[0], "fixture.py:7:" in offenders[1],
+            "fixture.py:10:" in offenders[2]] == [True] * 3, offenders
+    assert _one("def f(a):\n"
+                '    """This module provides:\n\n'
+                "    - one thing:\n"
+                "      wrapped.\n\n"
+                "    The table::\n"
+                "        a  b\n\n"
+                "    Args:\n"
+                "        a (int): one of:\n"
+                "            many.\n"
+                '    """\n') == []
 
 
 def test_a_backtick_inside_strong_is_red():
@@ -1121,6 +1248,45 @@ def test_private_members_closures_modules_and_dunders_are_graded():
         assert any(f" {name}: " in o for o in offenders), (name, offenders)
     assert all("indented 8 spaces where the item sits at 4" in o
                for o in offenders), offenders
+
+
+def test_r2_r3_grade_dunders_and_not_privates():
+    """R2/R3's scope: `_hidden` is not graded, `__call__` is."""
+    source = ("class C:\n"
+              '    """A class."""\n'
+              "    def _hidden(self):\n"
+              '        """Summary.\n\n        Returns:\n            Some prose: here.\n        """\n'
+              "    def __call__(self):\n"
+              '        """Summary.\n\n        Returns:\n            Some prose: here.\n        """\n')
+    offenders, graded = check_typed(source, "fixture.py")
+    assert graded == 2, graded
+    assert len(offenders) == 1 and " __call__: " in offenders[0], offenders
+
+
+def test_an_args_continuation_holding_a_colon_is_the_same_entry():
+    """R3: a deeper line under an entry continues it, colon or not."""
+    assert _typed("def f(folder: str):\n"
+                  '    """Summary.\n\n'
+                  "    Args:\n"
+                  "        folder (str): where,\n"
+                  "            continued: with a colon.\n"
+                  '    """\n') == []
+
+
+def test_a_module_level_constant_target_grades_nothing(tmp_path):
+    """`::: pkg.mod.CONST` resolves, and a constant has no docstring."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "mod.py").write_text("CONST = 1\nOTHER: int = 2\n",
+                                encoding="utf-8")
+    pages = tmp_path / "api"
+    pages.mkdir()
+    (pages / "m.md").write_text("::: pkg.mod.CONST\n\n::: pkg.mod.OTHER\n",
+                                encoding="utf-8")
+    offenders, graded, targets = check_rendered_scope(pages, pkg)
+    assert targets == ["pkg.mod.CONST", "pkg.mod.OTHER"], targets
+    assert (offenders, graded) == ([], 0), (offenders, graded)
 
 
 def test_the_typed_scope_is_read_from_the_api_pages_in_both_spellings(tmp_path):
