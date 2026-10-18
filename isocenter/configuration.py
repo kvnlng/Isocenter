@@ -716,8 +716,10 @@ class IsocenterConfiguration:
                 tag whose VR cannot hold the value, `SCRUB` with no
                 `target` or on a tag that does not hold text, and a
                 `target` that is not a list of distinct kinds or is given
-                with another action. Raised before the policy or its file
-                is changed.
+                with another action, and a private-creator key whose
+                creator another key names in another case or spacing
+                with a different rule (#1147). Raised before the policy
+                or its file is changed.
                 Under `auto_save`, also with no `config_path` and when
                 `save()` refuses; the policy is then as it was.
             OSError: Under `auto_save`, when the write fails; the policy
@@ -764,6 +766,14 @@ class IsocenterConfiguration:
         # too (`OBLITERATE`), with the loader's words, rather than storing
         # it to be scanned as REPLACE.
         config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
+        if config_manager._is_creator_key(tag):
+            # A creator key against the policy it joins: a twin spelling of
+            # its creator with another rule is refused here, before the
+            # write, rather than at the next `audit()` (#1147).
+            twins = config_manager._creator_twins_refused(
+                {**(self.phi_tags or {}), tag: val})
+            if twins is not None:
+                raise ValueError(f"set_phi_tag: {twins}")
 
         def change(configuration):
             configuration.phi_tags[tag] = val

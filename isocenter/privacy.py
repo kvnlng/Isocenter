@@ -17,7 +17,7 @@ from pydicom.multival import MultiValue
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, SOURCE_SOP_UID_ATTR,
                        is_synthetic_patient_id, iter_item_tree)
-from .config_manager import _canonical_rule_key, _vr_dummy
+from .config_manager import _canonical_rule_key, _creator_identity, _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
 
@@ -209,8 +209,14 @@ PRIVATE_CREATOR = "private_creator"
 
 
 def _creator_index(phi_tags) -> Dict[Tuple[int, str, int], str]:
-    """`{(group, creator, offset): key}` for the private-creator keys of
-    `phi_tags` (#1132), built once per inspector.
+    """`{(group, creator identity, offset): key}` for the private-creator
+    keys of `phi_tags` (#1132), built once per inspector.
+
+    The creator is its `_creator_identity`, so a key matches its creator
+    in any case and spacing (#1147). Two keys with one identity (rules
+    equal apart from `name`; any other pair is refused at every door,
+    `config_manager._creator_twins_refused`) give the first key in the
+    policy: it names the finding.
 
     Args:
         phi_tags (dict): The policy, keys in their canonical spelling.
@@ -219,9 +225,14 @@ def _creator_index(phi_tags) -> Dict[Tuple[int, str, int], str]:
         dict: The index; empty when the policy holds no creator key.
     """
     from .config_manager import (  # pylint: disable=import-outside-toplevel
-        _creator_key_parts, _is_creator_key)
-    return {_creator_key_parts(key): key for key in (phi_tags or {})
-            if _is_creator_key(key)}
+        _creator_identity, _creator_key_parts, _is_creator_key)
+    index: Dict[Tuple[int, str, int], str] = {}
+    for key in (phi_tags or {}):
+        if _is_creator_key(key):
+            group, creator, offset = _creator_key_parts(key)
+            # `setdefault`: the first key wins, never the last.
+            index.setdefault((group, _creator_identity(creator), offset), key)
+    return index
 
 
 def _item_creators(item) -> Dict[Tuple[int, int], str]:
@@ -229,8 +240,9 @@ def _item_creators(item) -> Dict[Tuple[int, int], str]:
     elements (`gggg,0010`-`gggg,00ff` of an odd group, PS3.5 7.8.1).
 
     Per item, never per instance: a sequence item has its own creators.
-    The value is stripped of spaces, which are LO padding; its case is
-    kept, because PS3.5 does not fold it.
+    The value is stripped of spaces, which are LO padding; its case and
+    inner spacing are kept, so a row names the creator as the file spells
+    it. Matching folds both (`_rule_and_key_for`, #1147).
 
     Args:
         item: A `DicomItem`.
@@ -256,7 +268,8 @@ def _rule_and_key_for(phi_tags, tag, item=None, index=None, creators=None):
     named it (None when another key did).
 
     A private element (odd group, element >= 0x1000) of an item whose
-    block `gggg,00BB` holds a creator with a key in `index` takes that
+    block `gggg,00BB` holds a creator with a key in `index`, compared by
+    `_creator_identity` (case and runs of spaces folded, #1147), takes that
     key's rule: the creator key names the element's identity, a concrete
     key only its slot, so it wins (owner ruling Q4 (a) on #1132). Then
     `_rule_for`: the concrete tag, then the masks.
@@ -285,7 +298,8 @@ def _rule_and_key_for(phi_tags, tag, item=None, index=None, creators=None):
                 if creators is None:
                     creators = _item_creators(item)
                 creator = creators.get((group, element >> 8))
-                key = (index.get((group, creator, element & 0xFF))
+                # The file's creator folded as the index's are (#1147).
+                key = (index.get((group, _creator_identity(creator), element & 0xFF))
                        if creator is not None else None)
                 if key is not None and phi_tags.get(key):
                     return phi_tags[key], key

@@ -61,15 +61,17 @@ from test_config_schema_version import SCHEMA_BY_VERSION
 #: and again on the #1108 PR: `"*"` now covers the serial-less CT_small
 #: images too (owner ruling, a behaviour change of the 2.0 row before 1.0.0),
 #: a leak's metadata names a `match:` rule (`rule_match`), and a `match:`
-#: scenario was added.
+#: scenario was added; and again on the #1147 PR, when the opt-in SR was
+#: given a block naming its creator in another case and spacing (the
+#: earlier inputs did not move: the digest held with the fold alone).
 BEHAVIOUR_BY_VERSION = {
-    "2.0": "e00a02a9f17d6bdcb6a85c54528b85839e64306e1e6c0d5d5953ef5b8565604f",
+    "2.0": "1c75ed7dfe890591ae409283b1f20e3a7c9470a1e7a5e510549e205f4a917c86",
 }
 
 #: A literal copy of the rows a release has shipped; never
 #: `dict(BEHAVIOUR_BY_VERSION)`, which would pin nothing.
 SHIPPED_BEHAVIOUR = {
-    "2.0": "e00a02a9f17d6bdcb6a85c54528b85839e64306e1e6c0d5d5953ef5b8565604f",
+    "2.0": "1c75ed7dfe890591ae409283b1f20e3a7c9470a1e7a5e510549e205f4a917c86",
 }
 
 _WHAT_TO_DO = (
@@ -366,6 +368,8 @@ def test_the_opt_in_scenario_reaches_a_creator_a_scrub_and_a_kept_report(record)
     assert items[2]["attributes"]["0040,a123"] != "Observer^One"
     assert items[3]["attributes"]["0040,a121"] != "20040119"
     assert items[4]["attributes"]["0040,a124"].startswith("2.25.")
+    # `b3  digest` is `B3 DIGEST` folded (#1147): its element is removed.
+    assert "removed" not in report["attributes"].values(), report["attributes"]
     for name, scenario in record.items():
         if name != "opt-in":
             assert not any("0040,a730" in i["sequences"] for i in _instances(scenario)), name

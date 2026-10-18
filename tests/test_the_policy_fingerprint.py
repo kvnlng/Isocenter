@@ -352,9 +352,11 @@ UNFOLDED = {
     # Memory only: the loader refuses `Action` as an unknown key.
     "a rule key's case": ({NAME: {"action": "KEEP"}},
                           {NAME: {"Action": "KEEP"}}),
-    # A private creator's case is significant to the scan (#1132), so to
-    # the form; and a creator key's hex case, assigned in code, is another
-    # policy, like an upper-case tag (the loader folds it).
+    # The form keeps a creator as written; the scan folds its case and
+    # spacing (#1147), so two such policies act alike and are still two
+    # policies (one re-audit, never a wrong PASS). A creator key's hex
+    # case, assigned in code, is another policy, like an upper-case tag
+    # (the loader folds it).
     "a creator's case": ({'0009,"GEMS_IDEN_01",27': {"action": "REMOVE"}},
                          {'0009,"gems_iden_01",27': {"action": "REMOVE"}}),
     "a creator key's hex case": ({'0009,"GEMS_IDEN_01",2a': {"action": "REMOVE"}},

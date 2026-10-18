@@ -514,7 +514,7 @@ private attribute and the entry reads `removed before export` (grading
 
 ### PHI Tags
 
-Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`), [repeating-group keys](#repeating-groups), or [private-creator keys](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`); hex case is normalised on load, so either case works, and a private creator's case is kept. **Default:** no overrides; the profile's rules apply.
+Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`), [repeating-group keys](#repeating-groups), or [private-creator keys](#private-elements-by-creator) (`'0009,"GEMS_IDEN_01",27'`); hex case is normalised on load, so either case works, and a private creator's case is kept in the key and ignored in matching. **Default:** no overrides; the profile's rules apply.
 
 **Supported Actions:**
 
@@ -645,7 +645,8 @@ phi_tags:
 ```
 
 * It matches the element `gggg,BBee` of a dataset or sequence item whose own `gggg,00BB` holds `CREATOR`. A sequence item has its own creators, and they are the ones read.
-* Spaces around the creator's value are padding and are ignored; its case is compared exactly (`gems_iden_01` is another creator). The key's hex digits may be written in either case.
+* Spaces around the creator's value are padding and are ignored. Its case and the runs of spaces inside it are not compared: the key's creator and the file's are each upper-cased (ASCII `a`-`z` only) and each run of spaces made one, so `'0009,"GEMS_IDEN_01",27'` matches a file whose creator is `gems_iden_01` or `GEMS_IDEN_01`, and `ACME  IMAGING 01` with two spaces is `ACME IMAGING 01` ([#1147](https://github.com/kvnlng/Isocenter/issues/1147)). PS3.5 7.8.1 has no rule for comparing two creators, and vendors write one creator in more than one case: pydicom's own private dictionary holds `HOLOGIC` and `Hologic`, and `SPI RELEASE 1` and `SPI Release 1`, with the same elements. The key keeps the creator as you wrote it, and the audit row names the creator as the file spells it. A creator that differs in anything else is another creator and is not matched: `GEMS_IDEN_1` is not `GEMS_IDEN_01`, a space taken out (`ACMEIMAGING 01`) is another creator, and a non-ASCII letter's case is compared exactly. The key's hex digits may be written in either case.
+* Two keys that name one creator in different case or spacing, at one group and offset, must have one rule: rules that differ in anything but `name` raise `ValueError` naming both keys, at `load_config()` and every other door. Rules that differ only in `name` load, and the first key in the file names the finding.
 * It never touches another creator's element, whatever tag that element sits at, and an element whose block names no creator matches no creator key.
 * For one element, a creator key wins over a concrete-tag key. A concrete-tag key keeps its meaning for every other element at that tag.
 * Every action loads on it that loads on a concrete private tag. A private sequence can be named this way too.

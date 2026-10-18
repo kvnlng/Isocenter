@@ -606,14 +606,50 @@ def _creator_key_parts(key: str):
             int(match.group(3), 16))
 
 
+#: ASCII `a`-`z` to `A`-`Z` and nothing else, so no other letter is
+#: touched (`'ß'` stays `'ß'`, never `'SS'`): `pixel_geometry._cs_spelling`'s
+#: rule.
+_ASCII_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz",
+                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_SPACE_RUN = re.compile(" +")
+
+
+def _creator_identity(creator: str) -> str:
+    """The one identity a private creator is matched by (#1147).
+
+    Surrounding spaces stripped, each run of interior spaces made one, and
+    ASCII `a`-`z` upper-cased. PS3.5 7.8.1 says a creator is an LO
+    "identification code" and has no rule for comparing two of them;
+    vendors write one creator in more than one case (pydicom's own private
+    dictionary holds `HOLOGIC` and `Hologic` with the same elements, and
+    #1147's collection both `...011710XX` and `...011710xx`). Only the
+    space is folded: an LO holds no control character but ESC, and a key
+    with a tab is refused. A creator that differs in anything else
+    (`GEMS_IDEN_1` against `GEMS_IDEN_01`, a non-ASCII letter's case) is
+    another creator.
+
+    Matching folds; a key's spelling never does (`_canonical_rule_key`).
+
+    Args:
+        creator (str): A creator, from a key or from a file.
+
+    Returns:
+        str: Its identity.
+    """
+    return _SPACE_RUN.sub(" ", creator.strip(" ")).translate(_ASCII_UPPER)
+
+
 def _canonical_rule_key(key: str) -> str:
     """The one spelling of a `phi_tags` key.
 
     A tag or mask is lowercased. A private-creator key has its group and
     offset lowercased and its creator kept as written, stripped of
-    surrounding spaces: PS3.5 does not fold a creator's case, and a
-    lowercased `GEMS_IDEN_01` would match nothing, silently. Every site
-    that spells a key goes through here (#1132).
+    surrounding spaces. The key keeps the creator's case and spacing
+    because the policy form hashes keys as held (`configuration.
+    _canonical_policy_v1`): folding here would move every creator-keyed
+    store's fingerprint. The scan folds instead, at matching
+    (`_creator_identity`, #1147). Every site that spells a key goes
+    through here (#1132).
 
     Args:
         key (str): The key as written.
@@ -1551,7 +1587,9 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
             calling method).
 
     Raises:
-        ValueError: For the first rule `_refused_phi_rule` refuses.
+        ValueError: For the first rule `_refused_phi_rule` refuses, then
+            for two creator keys naming one creator with different rules
+            (`_creator_twins_refused`, #1147).
     """
     # Every door a policy comes in by calls this: the merged policy a
     # config file resolves to (`ConfigLoader.load_unified_config`, so
@@ -1565,6 +1603,62 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
         reason = _refused_phi_rule(key, rule)
         if reason is not None:
             raise ValueError(f"{source}: {reason}")
+    reason = _creator_twins_refused(tags)
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
+
+
+def _rule_apart_from_name(rule) -> Dict[str, Any]:
+    """What a rule does, without its `name`: the action as the scan reads
+    it (upper-cased, `REPLACE` when absent or for a bare-name string) and
+    every other key as written."""
+    if not isinstance(rule, dict):
+        return {"action": "REPLACE"}
+    done = {k: v for k, v in rule.items() if k not in ("name", "action")}
+    action = rule.get("action", "REPLACE")
+    done["action"] = action.upper() if isinstance(action, str) else action
+    return done
+
+
+def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
+    """Why two creator keys of `tags` that name one creator cannot both
+    stand, or None (#1147, owner ruling Q2 (a)).
+
+    Two keys whose group, offset and `_creator_identity` agree name one
+    element. With rules that do different things, which one applied would
+    be a silent precedence between, say, a KEEP and a REMOVE: #1147's
+    shape again. Rules equal apart from `name` load, and the first key in
+    the policy names the finding (`privacy._creator_index`). Keys are
+    taken in their canonical spelling first, the later of two spellings of
+    one key winning, as `PhiInspector._normalize_tag_keys` does, so a
+    hex-case twin is that method's collision WARNING, never this refusal.
+
+    Args:
+        tags (dict): The policy.
+
+    Returns:
+        Optional[str]: The refusal, naming both keys, or None.
+    """
+    canonical = {}
+    for tag, rule in tags.items():
+        if isinstance(tag, str) and _is_creator_key(tag):
+            canonical[_canonical_rule_key(tag)] = rule
+    first = {}
+    for key, rule in canonical.items():
+        group, creator, offset = _creator_key_parts(key)
+        identity = (group, _creator_identity(creator), offset)
+        if identity not in first:
+            first[identity] = key
+            continue
+        earlier = first[identity]
+        if _rule_apart_from_name(canonical[earlier]) != _rule_apart_from_name(rule):
+            # The fold is #1147's; the text names the rule, not the issue
+            # (runtime strings carry no issue numbers, #811).
+            return (f"phi_tags keys {earlier!r} and {key!r} name one private "
+                    f"creator with different rules: a creator is matched "
+                    f"whatever its case and runs of spaces, which PS3.5 "
+                    f"7.8.1 does not distinguish; give them one rule")
+    return None
 
 
 def load_unified_config(path: str) -> Dict[str, Any]:
