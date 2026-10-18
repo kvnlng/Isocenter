@@ -614,9 +614,10 @@ def _colon_offenders(lines, code):
     for index in range(len(lines) - 1):
         line, following = lines[index], lines[index + 1]
         stripped = line.strip()
+        # A line ending `::` needs no test of its own: what follows it
+        # is a literal block, which `code` already holds.
         if (index in code or index + 1 in code or not following.strip()
-                or not stripped.endswith(":") or stripped.endswith("::")
-                or _SECTION.match(stripped)):
+                or not stripped.endswith(":") or _SECTION.match(stripped)):
             continue
         if _LIST_ITEM.match(following.strip()):
             offenders.append((index + 1, "a list item directly under a "
