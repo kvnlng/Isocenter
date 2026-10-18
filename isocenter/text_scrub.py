@@ -206,8 +206,9 @@ def _widened(text: str, start: int, kinds_found) -> int:
 
 
 #: Staff initials directly right of a removed span (owner ruling Q6 (a)):
-#: whitespace, a lower-case `by`, then 1 to 3 capitals as a whole word.
-_INITIALS_RIGHT = re.compile(r"\s+by\s+[A-Z]{1,3}(?![^\W_])")
+#: whitespace, a lower-case `by`, then 1 to 3 capitals as a whole word,
+#: `_` included in the word (`by SS_2` is not taken).
+_INITIALS_RIGHT = re.compile(r"\s+by\s+[A-Z]{1,3}(?!\w)")
 
 
 def _initials_right(text: str, end: int) -> int:
@@ -236,7 +237,8 @@ def _cut(text: str, spans) -> str:
     none at all when the cut is at either end of what is left, or when
     `,`, `;` or `:` follows. Of two `,;:-/|` meeting at a cut, one
     survives. An end of the value a cut reached is stripped of
-    ` ,;:-/_|.`. Whitespace away from a cut is the text's own.
+    whitespace and `,;:-/_|.`. Whitespace away from a cut is the text's
+    own.
     """
     out = ""
     position = 0
@@ -305,7 +307,7 @@ def scrub(text: str, kinds: Sequence[str], names: Sequence[str] = (),
     cut only (#1146): the whitespace there becomes one space, or the
     line break it held, or nothing before `,`, `;` or `:`; one of two
     separators meeting there is dropped; and an end of the value a cut
-    reached is stripped of ` ,;:-/_|.`. Whitespace away from a cut is
+    reached is stripped of whitespace and `,;:-/_|.`. Whitespace away from a cut is
     kept as written. Brackets are not balanced. Repeated until nothing
     more is found, at most three rounds, so `scrub` of its own result
     changes nothing. A value nothing is found in is returned as it is.

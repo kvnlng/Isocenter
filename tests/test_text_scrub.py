@@ -176,10 +176,11 @@ def test_the_scrub_kinds_are_one_list():
     ("ep2d_diff_b50_400_800_tra_p3 for 310-50-9582",            # quoted
      "ep2d_diff_b50_400_800_tra_p3"),
     ("P4^P114^S301^I00004, Gated, 10.0%A for 337-04-5046",      # quoted
-     "P4^P114^S301^I00004, Gated, 10.0%A"),
+     "P4^P114^S301^, Gated, 10.0%A"),                           # R2: accepted
     ("t2_tse_tra_320_p2 for 4826153907", "t2_tse_tra_320_p2"),
     ("PROCESSED\\0.781250 \\0.781250", "PROCESSED\\0.781250 \\0.781250"),  # quoted
-    ("Kidney^K12^Phase2^S00417 for 4826153907", "Kidney^K12^Phase2^S00417"),
+    ("Kidney^K12^Phase2^S00417 for 4826153907", "Kidney^K12^Phase2^"),
+    ("Doe^482615", "Doe^"),                                     # R2
     ("Pixel spacing 0.488281 \\0.488281", "Pixel spacing 0.488281 \\0.488281"),
     ("Run_A 12.718204 mm", "Run_A 12.718204 mm"),
     ("SUBJ_4826153907 baseline", "baseline"),
@@ -210,12 +211,15 @@ CUT = "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA for Dalia Fenwic"
      ("TRANH", "MINH"), 64,
      "t2_tse_cor_384_p2_fs_BH_ND_RR_MOCO_SUMMARY_COMPOSED_SER_1717_tra"),
     ("Report for Fenw", FENWICK, 64, "Report for Fenw"),
+    # Longer than the maximum (a non-conformant source): not cut there.
+    ("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRAX for Dalia Fenwic",
+     FENWICK, 64, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRAX Fenwic"),
     (CUT, FENWICK, None, "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA Fenwic"),
 ])
 def test_a_name_cut_at_the_limit_is_removed(text, names, max_length, expected):
     """#1146 (2): a value exactly at its VR's maximum whose last word, 3 or
     more letters, begins one of the instance's names. Kills the length
-    gate removed or loosened (the 63-character row), the floor lowered to
+    gate removed or loosened (the 63- and 65-character rows), the floor lowered to
     2 (the `Fe` row), and the boundary loosened to admit `_` (the `_tra`
     row)."""
     cleaned, counts = scrub(text, NO_MODEL, names, max_length=max_length)
@@ -228,16 +232,18 @@ def test_the_cut_rows_are_the_lengths_they_say():
     assert len(CUT) == 64
     assert len("ep2d_diff_b50_400_800_tra_p3_TRACEW_DFC_MIX for Christopher Powe") == 64
     assert len("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TR for Dalia Fenwic") == 63
+    assert len("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRAX for Dalia Fenwic") == 65
     assert len("t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA_SAG for Dalia Fe") == 64
     assert len("t2_tse_cor_384_p2_fs_BH_ND_RR_MOCO_SUMMARY_COMPOSED_SER_1717_tra") == 64
 
 
-def test_a_cut_name_is_read_only_in_the_first_round():
-    """Only the value as read can have been cut at its VR's length: a
-    scrubbed value read again, even with the limit set to its own length,
-    loses nothing more. (Within one call a later round's value is always
-    shorter than the first's, since a round that changes nothing ends the
-    loop, so the gate never holds there; the round counter says so.)"""
+def test_a_scrubbed_value_read_again_at_its_own_length_loses_no_more():
+    """A scrubbed value handed back with the limit set to its own length
+    loses nothing more: its last word is no longer the start of a name.
+    This does not test the round counter in `scrub`, which is equivalent
+    to reading the limit every round (a later round's value is always
+    shorter than the first's, since a round that changes nothing ends
+    the loop, so the length gate never holds there)."""
     once, _ = scrub(CUT, NO_MODEL, FENWICK, max_length=64)
     assert scrub(once, NO_MODEL, FENWICK, max_length=len(once)) == (once, {})
 
@@ -276,9 +282,12 @@ def test_initials_go_only_with_a_span_removed_beside_them(text):
     ("Ordered for 2675888487 by SSSS", "Ordered by SSSS"),
     ("Ordered for 2675888487 by Smith", "Ordered by Smith"),
     ("Ordered for 2675888487, by SS", "Ordered, by SS"),
+    ("Ordered for 2675888487 by SS_2", "Ordered by SS_2"),
+    ("Ordered for 2675888487 by SS2", "Ordered by SS2"),
 ])
 def test_initials_shape(text, expected):
-    """Lower-case `by`, then 1 to 3 capitals as a whole word, directly
+    """Lower-case `by`, then 1 to 3 capitals as a whole word (`_` and
+    digits are word characters, so `SS_2` is not cut to `_2`), directly
     right of the span (whitespace only between)."""
     assert scrub(text, ["dates", "ids", "initials"])[0] == expected
 

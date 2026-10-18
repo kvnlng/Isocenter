@@ -170,9 +170,6 @@ ID_MIN_CHARACTERS = 6
 ID_MIN_DIGITS = 5
 
 
-#: SCRUB's run (#1146): `^` joins too, so `P4^P114^S301^I00004` is one
-#: protocol token, not four runs of which the last looks like an id.
-_HEADER_RUN = re.compile(r"[A-Za-z0-9]+(?:[-_^][A-Za-z0-9]+)*")
 #: Inside a protocol token only an SSN shape or this many consecutive
 #: digits is an identifier (#1146).
 ID_MIN_RUN_IN_TOKEN = 7
@@ -199,11 +196,11 @@ def id_spans(line: str, ocr: bool = True) -> List[Span]:
     least `ID_MIN_DIGITS` digits.
 
     With `ocr` (the default, for burned-in text) that is the whole rule.
-    Without it (SCRUB's header text, #1146) `^` joins a run too, and two
-    shapes are spared: a run joined by `.` to a digit on either side (a
-    decimal's part, so `0.781250` keeps `781250`), and a protocol token,
-    a run joined by `_` or `^` that holds a letter (`t2_tse_tra_320_p2`),
-    which is an identifier only when it holds an SSN shape
+    Without it (SCRUB's header text, #1146) two shapes are spared: a
+    run joined by `.` to a digit on either side (a decimal's part, so
+    `0.781250` keeps `781250`), and a protocol token, a run joined by
+    `_` that holds a letter (`t2_tse_tra_320_p2`), which is an
+    identifier only when it holds an SSN shape
     (`ddd-dd-dddd`) or `ID_MIN_RUN_IN_TOKEN` consecutive digits; then the
     whole token is the span. Burned-in `ids` keeps the first rule (owner
     ruling Q7 (a)), so no record is read again.
@@ -211,12 +208,15 @@ def id_spans(line: str, ocr: bool = True) -> List[Span]:
     if ocr:
         return [m.span() for m in _RUN.finditer(line) if _is_an_id(m.group(0))]
     found = []
-    for match in _HEADER_RUN.finditer(line):
+    # `^` neither joins nor protects (owner ruling R2): a Person Name's
+    # separator beside an identifier (`Doe^482615`) must not shelter it,
+    # so `P4^P114^S301^I00004` loses `I00004`, accepted.
+    for match in _RUN.finditer(line):
         start, end = match.span()
         run = match.group(0)
         if _in_a_decimal(line, start, end):
             continue
-        if (("_" in run or "^" in run) and any(ch.isalpha() for ch in run)
+        if ("_" in run and any(ch.isalpha() for ch in run)
                 and _ID_IN_TOKEN.search(run) is None):
             continue
         if _is_an_id(run):
@@ -267,8 +267,9 @@ def address_spans(line: str) -> List[Span]:
 
 
 #: A site acronym: 4 to 8 capitals as a whole word directly after a
-#: lower-case `at` (owner ruling Q5 (a)).
-_SITE = re.compile(r"(?<![^\W_])at\s+([A-Z]{4,8})(?![^\W_])")
+#: lower-case `at` (owner ruling Q5 (a)). It ends where a word does,
+#: `_` included, so `at HASCC_2` is not cut to `_2`.
+_SITE = re.compile(r"(?<![^\W_])at\s+([A-Z]{4,8})(?!\w)")
 
 
 def site_spans(line: str) -> List[Span]:

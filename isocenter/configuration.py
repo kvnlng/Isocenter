@@ -688,6 +688,9 @@ class IsocenterConfiguration:
         Set or replace the PHI rule for one tag.
 
         Changes memory; writes `config_path` only when `auto_save` is on.
+        A private-creator key also sets the same rule on every key of the
+        policy that names its element under another case or spacing of
+        its creator, since both keys name one element (#1147).
 
         Args:
             tag (str): The DICOM tag to target (e.g. "0010,0010"), stored
@@ -716,10 +719,8 @@ class IsocenterConfiguration:
                 tag whose VR cannot hold the value, `SCRUB` with no
                 `target` or on a tag that does not hold text, and a
                 `target` that is not a list of distinct kinds or is given
-                with another action, and a private-creator key whose
-                creator another key names in another case or spacing
-                with a different rule (#1147). Raised before the policy
-                or its file is changed.
+                with another action. Raised before the policy or its file
+                is changed.
                 Under `auto_save`, also with no `config_path` and when
                 `save()` refuses; the policy is then as it was.
             OSError: Under `auto_save`, when the write fails; the policy
@@ -766,16 +767,17 @@ class IsocenterConfiguration:
         # too (`OBLITERATE`), with the loader's words, rather than storing
         # it to be scanned as REPLACE.
         config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
-        if config_manager._is_creator_key(tag):
-            # A creator key against the policy it joins: a twin spelling of
-            # its creator with another rule is refused here, before the
-            # write, rather than at the next `audit()` (#1147).
-            twins = config_manager._creator_twins_refused(
-                {**(self.phi_tags or {}), tag: val})
-            if twins is not None:
-                raise ValueError(f"set_phi_tag: {twins}")
+        # A creator key names one element whatever its creator's case and
+        # spacing (#1147), so the policy's other spellings of it (twins)
+        # take the same rule: setting one twin alone would leave two keys
+        # that act differently on one element, which every door refuses
+        # (`_creator_twins_refused`) at the next `audit()`.
+        twins = (config_manager._creator_twins(self.phi_tags or {}, tag)
+                 if config_manager._is_creator_key(tag) else [])
 
         def change(configuration):
+            for key in twins:
+                configuration.phi_tags[key] = copy.deepcopy(val)
             configuration.phi_tags[tag] = val
         self._apply(change)
 

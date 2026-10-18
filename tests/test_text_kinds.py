@@ -121,16 +121,29 @@ def _header_ids(line):
 
 
 @pytest.mark.parametrize("line", [
-    "t2_tse_tra_320_p2", "ep2d_diff_b50_400_800_tra_p3",
-    "Kidney^K12^Phase2^S00417", "P4^P114^S301^I00004", "ACC_2024_0001"])
+    "t2_tse_tra_320_p2", "ep2d_diff_b50_400_800_tra_p3", "ACC_2024_0001"])
 def test_header_ids_spare_protocol_tokens(line):
-    """A run joined by `_` or `^` and holding a letter is a protocol token,
-    not an id. Kills the letter condition dropped (`310-50-9582`, with no
-    `_` or `^`, is still an id below) and `^` not joining."""
+    """A run joined by `_` and holding a letter is a protocol token, not
+    an id. Kills the letter condition dropped (`310-50-9582`, with no
+    `_`, is still an id below)."""
     assert _header_ids(line) == []
     assert _header_ids("310-50-9582") == [(0, 11)]
     # Digits joined by `_` with no letter are not a token: the old rule.
     assert _header_ids("4826_153907") == [(0, 11)]
+
+
+@pytest.mark.parametrize("line, taken", [
+    ("Doe^482615", "482615"),                       # quoted in the ruling
+    ("P4^P114^S301^I00004", "I00004"),              # quoted: accepted
+    ("Kidney^K12^Phase2^S00417", "S00417"),
+    ("t2_tse^4826153", "4826153")])
+def test_a_caret_neither_joins_nor_protects_an_id(line, taken):
+    """Owner ruling R2: only `_` makes a protocol token. A Person Name's
+    `^` beside an identifier must not shelter it, so `P4^P114^S301^I00004`
+    loses `I00004`, accepted. Kills `^` joining a run again (the whole
+    token would be spared, or taken whole) and `^` read as a token's
+    joiner in the letter test."""
+    assert _texts(line, _header_ids) == [taken]
 
 
 @pytest.mark.parametrize("line, taken", [
@@ -227,6 +240,7 @@ def test_what_is_not_an_address(line):
     ("PET-CT STUDY at CHAJH", "CHAJH"), ("Performed at HWACMC", "HWACMC"),
     ("t2_tse_tra_320_p2 at HASCC", "HASCC"),                    # quoted
     ("CT ABDOMEN at QRMC", "QRMC"), ("Outside read at BVCHKLMN", "BVCHKLMN"),
+    ("Perfusion at REST", "REST"),        # the documented cost of the rule
 ])
 def test_capitals_after_at_are_a_site(line, taken):
     assert _texts(line, text_kinds.site_spans) == [taken]
@@ -237,13 +251,14 @@ def test_capitals_after_at_are_a_site(line, taken):
     "Colo_supine  1.0  B30f at FGH",          # quoted: 3 letters, missed
     "PERFUSION AT REST", "SCAN AT DELAY", "Scanned at NVRHKLMNO",
     "Stenosis at ICA origin", "Seen at Mercy", "Seen at QRMCs",
-    "seat QRMC",
+    "seat QRMC", "t2_tse_tra_320_p2 at HASCC_2", "Seen at QRMC2",
 ])
 def test_what_is_not_a_site(line):
     """Owner ruling Q5 (a): lower-case `at`, then 4 to 8 capitals as a
     whole word. Kills 2 or 3 capitals admitted (`RUL`, `FGH`), `AT`
-    read in any case, the upper bound dropped (9 letters), and `at`
-    matched inside a word (`seat`)."""
+    read in any case, the upper bound dropped (9 letters), `at`
+    matched inside a word (`seat`), and the word's end read without
+    `_` or a digit (`HASCC_2` would lose `HASCC` and keep `_2`)."""
     assert text_kinds.site_spans(line) == []
 
 

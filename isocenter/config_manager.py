@@ -631,9 +631,9 @@ def _creator_identity(creator: str) -> str:
     "identification code" and has no rule for comparing two of them;
     vendors write one creator in more than one case (pydicom's own private
     dictionary holds `HOLOGIC` and `Hologic` with the same elements, and
-    #1147's collection both `...011710XX` and `...011710xx`). Only the
-    space is folded: an LO holds no control character but ESC, and a key
-    with a tab is refused. A creator that differs in anything else
+    the collection of issue 1147 both `...011710XX` and `...011710xx`).
+    Only the space is folded: an LO holds no control character but ESC,
+    and a key with a tab is refused. A creator that differs in anything else
     (`GEMS_IDEN_1` against `GEMS_IDEN_01`, a non-ASCII letter's case) is
     another creator.
 
@@ -1640,14 +1640,46 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
 
 def _rule_apart_from_name(rule) -> Dict[str, Any]:
     """What a rule does, without its `name`: the action as the scan reads
-    it (upper-cased, `REPLACE` when absent or for a bare-name string) and
-    every other key as written."""
+    it (upper-cased, `REPLACE` when absent or for a bare-name string),
+    `value: null` read as no `value` (`REPLACE` writes the VR's dummy
+    under either, though the policy fingerprint tells them apart), a `SCRUB`
+    `target` as a set of kinds, and every other key as written.
+
+    A target's order decides only which kind a span two kinds found is
+    counted for in the row, never what is removed; and of two twin keys
+    the first one's rule is the one applied (`privacy._creator_index`),
+    so its order is the one the rows follow.
+    """
     if not isinstance(rule, dict):
         return {"action": "REPLACE"}
     done = {k: v for k, v in rule.items() if k not in ("name", "action")}
+    if done.get("value", 0) is None:
+        del done["value"]
+    target = done.get("target")
+    if (isinstance(target, (list, tuple))
+            and all(isinstance(kind, str) for kind in target)):
+        done["target"] = frozenset(target)
     action = rule.get("action", "REPLACE")
     done["action"] = action.upper() if isinstance(action, str) else action
     return done
+
+
+def _creator_key_identity(key: str):
+    """`(group, creator identity, offset)`: the element a creator key names."""
+    group, creator, offset = _creator_key_parts(key)
+    return group, _creator_identity(creator), offset
+
+
+def _creator_twins(tags: Dict[str, Any], key: str) -> List[str]:
+    """The keys of `tags`, as held, that name the element creator key `key`
+    names under another spelling of its creator (#1147). A key that is
+    `key` itself in another hex case is not a twin: it is one key."""
+    identity = _creator_key_identity(key)
+    canonical = _canonical_rule_key(key)
+    return [tag for tag in tags
+            if isinstance(tag, str) and _is_creator_key(tag)
+            and _canonical_rule_key(tag) != canonical
+            and _creator_key_identity(tag) == identity]
 
 
 def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
@@ -1655,7 +1687,8 @@ def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
     stand, or None (#1147, owner ruling Q2 (a)).
 
     Two keys whose group, offset and `_creator_identity` agree name one
-    element. With rules that do different things, which one applied would
+    element. With rules that act differently (`_rule_apart_from_name`),
+    which one applied would
     be a silent precedence between, say, a KEEP and a REMOVE: #1147's
     shape again. Rules equal apart from `name` load, and the first key in
     the policy names the finding (`privacy._creator_index`). Keys are
@@ -1675,8 +1708,7 @@ def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
             canonical[_canonical_rule_key(tag)] = rule
     first = {}
     for key, rule in canonical.items():
-        group, creator, offset = _creator_key_parts(key)
-        identity = (group, _creator_identity(creator), offset)
+        identity = _creator_key_identity(key)
         if identity not in first:
             first[identity] = key
             continue
@@ -1684,10 +1716,11 @@ def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
         if _rule_apart_from_name(canonical[earlier]) != _rule_apart_from_name(rule):
             # The fold is #1147's; the text names the rule, not the issue
             # (runtime strings carry no issue numbers, #811).
-            return (f"phi_tags keys {earlier!r} and {key!r} name one private "
-                    f"creator with different rules: a creator is matched "
-                    f"whatever its case and runs of spaces, which PS3.5 "
-                    f"7.8.1 does not distinguish; give them one rule")
+            return (f"phi_tags keys {earlier!r} and {key!r} name the same "
+                    f"private element with rules that act differently: a "
+                    f"creator key matches its creator whatever its case and "
+                    f"runs of spaces (PS3.5 7.8.1 gives no rule for comparing "
+                    f"two creators); give both keys one rule, or keep one key")
     return None
 
 

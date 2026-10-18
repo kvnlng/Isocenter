@@ -122,14 +122,19 @@ def test_creator_padding_and_case_are_ignored(creator, matches):
     ("ACME IMAGING 01", "ACME  IMAGING 01", True),
     ("ACME  IMAGING 01", "acme imaging 01", True),
     ("ACME IMAGING 01", "ACME IMAGING 02", False),
-    ("ACME IMAGING 01", "ACMEIMAGING 01", False)])
+    ("ACME IMAGING 01", "ACMEIMAGING 01", False),
+    ("ÉCLAIR IMAGING 01", "Éclair Imaging 01", True),
+    ("ÉCLAIR IMAGING 01", "éclair imaging 01", False),
+    ("STRASSE IMAGING 01", "Straße Imaging 01", False)])
 def test_a_creator_key_matches_its_creator_in_any_case_and_spacing(
         key_creator, file_creator, matches):
     """#1147: PS3.5 7.8.1 has no rule for comparing two creators, and
     vendors write one creator in more than one case. Kills the key folded
     and not the file's creator, and the reverse (rows 1 and 2); case
     folded and not spaces (rows 3 and 4); spaces removed rather than
-    collapsed (the last row: a space taken out is another creator)."""
+    collapsed (a space taken out is another creator); and the fold
+    widened past ASCII `a`-`z` (the `É`/`é` and `ß` rows: a non-ASCII
+    letter's case is compared exactly, as the docs say)."""
     inst = _instance({"0009,0010": file_creator, "0009,1027": "20000101"})
     key = f'0009,"{key_creator}",27'
     assert bool(_hits({key: {"action": "REMOVE"}}, inst)) is matches
@@ -189,7 +194,7 @@ def test_two_keys_for_one_creator_with_different_rules_are_refused(tmp_path):
         config_manager.ConfigLoader.load_unified_config(path)
     for key in _TWINS:
         assert repr(key) in str(caught.value), str(caught.value)
-    assert "name one private creator" in str(caught.value)
+    assert "name the same private element" in str(caught.value)
     with pytest.raises(ValueError) as caught:
         PhiInspector(config_tags={_TWINS[0]: {"action": "REMOVE"},
                                   _TWINS[1]: {"action": "KEEP"}})
@@ -199,28 +204,69 @@ def test_two_keys_for_one_creator_with_different_rules_are_refused(tmp_path):
 @pytest.mark.parametrize("first, second", [
     ("{action: REMOVE}", "{action: REMOVE}"),
     ("{action: REMOVE, name: Visit date}", "{action: REMOVE, name: Other name}"),
-    ("{action: REMOVE}", "{action: remove}")])
+    ("{action: REMOVE}", "{action: remove}"),
+    ("{action: REPLACE, value: null}", "{action: REPLACE}"),
+    ("{action: SCRUB, target: [dates, ids]}", "{action: SCRUB, target: [ids, dates]}")])
 def test_two_keys_for_one_creator_with_one_rule_load_and_the_first_names_it(
         tmp_path, first, second):
-    """Rules equal apart from `name` load (MIDI-B's two UCSF keys are this
-    case). Kills the comparison taking `name` in."""
+    """Rules that act the same load (MIDI-B's two UCSF keys are this
+    case): apart from `name`, `value: null` beside no `value`, and a
+    `SCRUB` target in another order. Kills the comparison taking `name`
+    in, reading `value: null` as a value, or comparing a target's order."""
     loaded = config_manager.ConfigLoader.load_unified_config(
         _twin_file(tmp_path, first, second))[0]
     assert set(_TWINS) <= set(loaded)
-    inst = _instance({"0009,0010": "acme imaging 01", "0009,1027": "20000101"})
+    inst = _instance({"0009,0010": "acme imaging 01", "0009,1027": "20000101 1234567"})
     [finding] = _scan(loaded, inst)
     assert _TWINS[0] in finding.reason, finding.reason
 
 
-def test_set_phi_tag_refuses_a_twin_with_another_rule(tmp_path):
-    """The twin is refused before the write, not at the next `audit()`."""
+@pytest.mark.parametrize("first, second", [
+    ("{action: REPLACE, value: X}", "{action: REPLACE}"),
+    ("{action: SCRUB, target: [dates, ids]}", "{action: SCRUB, target: [ids]}"),
+    ("{action: REMOVE}", "REMOVE")])
+def test_two_keys_for_one_creator_that_act_differently_are_still_refused(
+        tmp_path, first, second):
+    """The normalising reads only what acts the same as the same: a value
+    against none, another set of kinds, a bare string (a name, so a
+    REPLACE) against a REMOVE. Kills the normalising widened to drop
+    `value` or `target`."""
+    with pytest.raises(ValueError, match="name the same private element"):
+        config_manager.ConfigLoader.load_unified_config(
+            _twin_file(tmp_path, first, second))
+
+
+def test_set_phi_tag_on_one_twin_sets_the_rule_on_both(tmp_path):
+    """Both keys name one element, so a rule set through one is set on
+    the other too: the policy stays loadable, and the element gets the
+    new rule whichever key the scan finds first. Kills the twins left
+    as they were (the next `audit()` would refuse the policy)."""
     _source(tmp_path)
-    with _session(tmp_path, f"  {_yaml_key(_TWINS[0])}: {{action: REMOVE}}\n") as session:
-        with pytest.raises(ValueError, match="name one private creator"):
-            session.configuration.set_phi_tag(_TWINS[1], "KEEP")
-        assert _TWINS[1] not in session.configuration.phi_tags
-        session.configuration.set_phi_tag(_TWINS[1], "REMOVE")
-        assert _TWINS[1] in session.configuration.phi_tags
+    rules = (f"  {_yaml_key(_TWINS[0])}: {{action: REMOVE}}\n"
+             f"  {_yaml_key(_TWINS[1])}: {{action: REMOVE}}\n")
+    with _session(tmp_path, rules) as session:
+        session.configuration.set_phi_tag(_TWINS[1], "KEEP")
+        tags = session.configuration.phi_tags
+        assert tags[_TWINS[0]]["action"] == "KEEP"
+        assert tags[_TWINS[1]]["action"] == "KEEP"
+        assert tags[_TWINS[0]] is not tags[_TWINS[1]]
+        config_manager.validate_phi_policy(tags, "test")
+        inst = _instance({"0009,0010": "Acme Imaging 01", "0009,1027": "20000101"})
+        twins = {key: tags[key] for key in _TWINS}
+        assert _scan(twins, inst, remove_private_tags=False) == []
+
+
+def test_set_phi_tag_leaves_a_key_for_another_element_alone(tmp_path):
+    """Only a key naming the same element is a twin: another offset, or
+    another creator, keeps its rule. Kills the identity compared without
+    its offset or its creator."""
+    _source(tmp_path)
+    others = ('0009,"ACME IMAGING 01",28', '0009,"ACME IMAGING 02",27')
+    rules = "".join(f"  {_yaml_key(key)}: {{action: REMOVE}}\n" for key in others)
+    with _session(tmp_path, rules) as session:
+        session.configuration.set_phi_tag(_TWINS[1], "KEEP")
+        for key in others:
+            assert session.configuration.phi_tags[key]["action"] == "REMOVE"
 
 
 def test_an_element_with_no_creator_in_its_block_matches_no_creator_key():
