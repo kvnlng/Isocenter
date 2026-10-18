@@ -185,7 +185,7 @@ RLELossless = UID("1.2.840.10008.1.2.5")
 #: is a JPEG 2000 codestream with another block coder: the same SOC and
 #: SIZ, so the same signedness, precision and colour transform. openjpeg's
 #: `jpeg2k_decode` reads it exactly -- mono 8/16, signed 16, RGB 8/16 with
-#: and without the reversible colour transform. **Not `htj2k_decode`**:
+#: and without the reversible colour transform. **Not** `htj2k_decode`:
 #: openjph returns an RGB stream written without the transform planar,
 #: `(3, rows, cols)`, the same samples in another image. Do not "use the
 #: matching codec".

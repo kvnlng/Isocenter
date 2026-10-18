@@ -327,13 +327,13 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
 #:   would show); `ljpeg_encode` refuses three components, so measure with
 #:   `jpeg8_encode` before concluding a colour row is unmeasured. YBR
 #:   stays out under JPEG Lossless: no YBR stream was measured.
-#: - **`YBR_RCT` and `YBR_ICT` map to RGB under JPEG 2000.**
+#: - `YBR_RCT` and `YBR_ICT` **map to RGB under JPEG 2000.**
 #:   `jpeg2k_decode` undoes the codestream's colour transform and returns
 #:   RGB, whatever the multiple-component-transform flag says (8- and
 #:   16-bit), and pydicom's own plugins label that output RGB too.
 #:   Repeating the declared label over RGB samples would mislabel them;
 #:   refusing would turn away a file both doors can read.
-#: - **8-bit `YBR_FULL` maps to RGB under JPEG-LS.** A JPEG-LS stream has
+#: - 8-bit `YBR_FULL` **maps to RGB under JPEG-LS.** A JPEG-LS stream has
 #:   no colour transform, and `jpegls_decode` returns the YBR samples as
 #:   stored, so the *handler* converts, with pydicom's
 #:   `convert_color_space` -- the function pydicom's door applies, and
@@ -1128,7 +1128,7 @@ _UNDEFINED_SIGNEDNESS = "neither 0 nor 1, the only values defined"
 #: `uint16 if bits > 8 else uint8` decodes a 32-bit frame two times too
 #: wide and a 64-bit one four times too wide.
 #:
-#: **Callers must keep the `bits > 8` rule as a fallback rather than
+#: **Callers must keep the** `bits > 8` **rule as a fallback rather than
 #: subscripting this table directly** (`_integer_dtype` does). The keys
 #: are the four widths a numpy integer array can actually have, and DICOM
 #: declares widths that are not among them: `BitsAllocated 1` is a real
@@ -7724,7 +7724,7 @@ def _width_notes(widened, declared_high_bit, bits_stored, high_bit) -> list:
 #: side. This is the descriptor half; the pixels are decoded and compared
 #: after it, so a descriptor failure keeps its own message.
 #:
-#: **`PhotometricInterpretation` is deliberately not a sixth row.** Every
+#: `PhotometricInterpretation` **is deliberately not a sixth row.** Every
 #: keyword here is compared against the dataset the *worker serialized*,
 #: and the worker writes that label onto that dataset itself -- so both
 #: sides would come from the same assignment and agree by construction,
@@ -9634,13 +9634,13 @@ class _J2kFrameRefusal(RuntimeError):
 #: anticipate it. The standard is what this library can read back, which
 #: `_refuse_unencodable_j2k_frame` states.
 #:
-#: **The `(2, True)` cell depends on ingest's imagecodecs fallback.**
+#: The `(2, True)` cell **depends on ingest's imagecodecs fallback.**
 #: Pillow -- the only JPEG 2000 plugin pydicom has here -- reports
 #: `Pillow cannot decode 16-bit multi-sample data correctly`; ingest falls
 #: back to `imagecodecs` when pydicom cannot decode (`_decode_pixels`),
 #: which reads those frames bit-exactly, `uint16` and `int16`, at the
 #: install floor too (imagecodecs 2024.6.1, pydicom 3.0.2, numpy 2.2.6).
-#: **Before narrowing `_IMAGECODECS_FALLBACK_SYNTAXES` to exclude JPEG
+#: **Before narrowing** `_IMAGECODECS_FALLBACK_SYNTAXES` **to exclude JPEG
 #: 2000, remove this cell**, or the export writes a file ingest refuses.
 #:
 #: What the cell costs: a third-party reader with pydicom and only

@@ -99,9 +99,11 @@ no dotted module name, for the reason that file gives.
 """
 import ast
 import inspect
+import io
 import pathlib
 import re
 import time
+import tokenize
 import unicodedata
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -774,14 +776,44 @@ def _typed_offenders(node, where):
 
 # --- The two scopes ----------------------------------------------------------
 
+def _doc_comments(source):
+    """`[(first line number, [text lines])]`: each `#:` doc-comment block.
+
+    autodoc documents a module or class attribute from a `#:` comment
+    block above it (or a trailing `#:` on its line) as it documents a
+    function from its docstring, through the same napoleon and docutils,
+    so the same rules hold. Read with `tokenize`, so a `#:` inside a
+    string is not one.
+    """
+    blocks = []
+    previous = None
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type != tokenize.COMMENT or not token.string.startswith("#:"):
+            continue
+        row = token.start[0]
+        text = token.string[2:].removeprefix(" ")
+        own_line = not token.line[:token.start[1]].strip()
+        if own_line and previous == row - 1 and blocks and blocks[-1][2]:
+            blocks[-1][1].append(text)
+        else:
+            blocks.append((row, [text], own_line))
+        previous = row if own_line else None
+    return [(row, lines) for row, lines, _ in blocks]
+
+
 def check_source(source, where="<string>"):
-    """`(offenders, graded)`: R1 and R4 to R8 over every docstring."""
+    """`(offenders, graded)`: R1 and R4 to R8 over every docstring, and R4
+    to R8 over every `#:` doc-comment block."""
     tree = ast.parse(source, where)
     offenders = []
     nodes = _every_documented_node(tree)
     for node in nodes:
         offenders.extend(_node_offenders(node, where))
-    return offenders, len(nodes)
+    comments = _doc_comments(source)
+    for row, lines in comments:
+        for index, message in _markup_offenders(lines):
+            offenders.append(f"{where}:{row + index}: #: comment: {message}")
+    return offenders, len(nodes) + len(comments)
 
 
 def check_package(package=PACKAGE):
@@ -1445,6 +1477,27 @@ def test_a_deeper_line_directly_under_any_line_of_text_is_red():
                 "    - an item\n"
                 "      wrapped.\n"
                 '    """\n') == []
+
+
+def test_a_doc_comment_is_graded_as_a_docstring_is():
+    """autodoc renders `#:` comments (`SOURCE_SOP_UID_ATTR` on
+    api/entities showed `**... `set_attr`**` with its backticks, found in
+    docs/sphinx C2). A block is one paragraph source; a trailing `#:` is
+    its own block; a `#:` inside a string is not a comment."""
+    offenders, graded = check_source(
+        "#: Assigned **directly, never through `set_attr`**,\n"
+        "#: and a second line.\n"
+        "X = 1\n"
+        "Y = 2  #: a lone backtick ` here\n"
+        "Z = '#: **not `a` comment**'\n", "fixture.py")
+    assert (len(offenders), graded) == (2, 2), offenders
+    assert offenders[0].startswith("fixture.py:1: #: comment: "), offenders
+    assert "inside a '**' span" in offenders[0], offenders
+    assert offenders[1].startswith("fixture.py:4: #: comment: "), offenders
+    assert _one("#: Assigned **directly**, never through `set_attr`.\n"
+                "X = 1\n") == []
+    assert _doc_comments("#: one\n#: two\nX = 1\n\n#: three\nY = 2\n") == [
+        (1, ["one", "two"]), (5, ["three"])]
 
 
 def test_the_package_sweep_reads_every_file(tmp_path):

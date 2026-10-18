@@ -141,7 +141,7 @@ def normalize_study_date(value):
 #: was ingested under, before UID replacement or redaction first moved it
 #: (`Instance._take_sop_uid`).
 #:
-#: Assigned into `attributes` **directly, never through `set_attr`** --
+#: Assigned into `attributes` **directly**, never through `set_attr` --
 #: `set_attr` runs the key through `_canonical_tag`, which lowercases it,
 #: and every reader spells it upper-case. `_ISOCENTER_REDACTION_HASH` is
 #: written the same way in `services.py` for the same reason.
