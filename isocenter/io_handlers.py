@@ -1,7 +1,7 @@
-"""
-IO Handlers for Isocenter.
+"""IO Handlers for Isocenter.
 
 This module provides classes for:
+
 - DicomStore: The central catalog of DICOM objects.
 - DicomImporter: Parallel file ingestion.
 - DicomExporter: Writing DICOM files to disk.

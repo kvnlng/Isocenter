@@ -1907,7 +1907,7 @@ class Instance(DicomItem):
         the next `get_pixel_data()` reloads the stored frame, read under the
         instance's current descriptors.
 
-        It undoes the whole `set_pixel_data()` it discards: the pixels,
+        **It undoes the whole** `set_pixel_data()` **it discards**: the pixels,
         and every descriptor that call wrote (Rows, Columns,
         SamplesPerPixel, NumberOfFrames, PhotometricInterpretation,
         PlanarConfiguration, BitsAllocated, PixelRepresentation and the
@@ -2707,7 +2707,7 @@ class Instance(DicomItem):
                 caught `ValueError` leaves the instance exactly as it was.
             ValueError: If the instance declares a SamplesPerPixel that no
                 axis of `array` can carry, or if the rank is unsupported.
-                This one raises after `pixel_array` has been assigned.
+                **This one raises after** `pixel_array` **has been assigned.**
         """
         # **Before any mutation, and that is the whole of it.** The
         # assignment below is this method's first side effect and the

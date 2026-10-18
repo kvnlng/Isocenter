@@ -193,7 +193,7 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
     `"*"` on one image, #908) are a `"serials"` list instead, which no
     one-serial input can equal.
 
-    The `burned_in_text` boxes (#1108) are a third input, `ocr`,
+    **The** `burned_in_text` **boxes (#1108)** are a third input, `ocr`,
     present only when the pass found text to blank: `{"policy", "boxes"}`
     beside the zones, the boxes sorted. With no boxes the key is exactly
     the zone-only one, so a store redacted by zones before the policy was
@@ -1857,8 +1857,8 @@ class RedactionService:
         array is copied and handed to `set_pixel_data`, so the array the
         instance holds may be a different object.
 
-        The caller must call `inst.mark_modified()` when this returns
-        True. A read-only array's copy goes through `set_pixel_data`,
+        **The caller must call** `inst.mark_modified()` **when this returns
+        True.** A read-only array's copy goes through `set_pixel_data`,
         which marks the instance modified; a writeable array is redacted
         in place and leaves `has_unsaved_changes` False::
 

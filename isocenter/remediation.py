@@ -2541,7 +2541,7 @@ class RemediationService:
           The date moves; everything after it is re-attached exactly as
           written.
         - The dotted DT `YYYYMMDD.HHMMSS[.F...]`, the same way.
-        - ISO `YYYY-MM-DD`, optionally with a space and `HH:MM:SS`, or `THH:MM:SS`,
+        - ISO `YYYY-MM-DD`, optionally with a space and `HH:MM:SS` or with `THH:MM:SS`,
           rendered zero-padded.
 
         The time part must be a clock time (hour < 24, minute and second

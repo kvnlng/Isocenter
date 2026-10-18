@@ -577,7 +577,7 @@ def _in_burned_in_text_scope(instance, modality, policy) -> bool:
       the source's value is upper-cased here, so a source writing `cr`
       falls in `[CR]` rather than silently leaving the scope.
 
-    Why the two extra `flagged` arms. A zone redaction writes `(0028,
+    **Why the two extra** `flagged` **arms.** A zone redaction writes `(0028,
     0301) NO` beside the attestation, in the same `redact()` that runs the
     pass. Under `action: withhold` the pass reads a `YES` image and records
     text the zone missed; the zone then writes `NO`. Read by the flag
@@ -6150,7 +6150,7 @@ class DicomSession:
         this key. Every failure raises; nothing is printed, and no message
         names a Patient ID.
 
-        What `restore=True` writes. Every instance of the patient
+        **What** `restore=True` **writes.** Every instance of the patient
         in memory takes the locked identity tags from the token it
         carries. The restore is recorded, so a later `save()` stores it, and
         a patient already holding the restored Patient ID is merged into
@@ -6647,7 +6647,7 @@ class DicomSession:
         Instance UID, derived from its source SOP Instance UID and the zones
         of every rule that matches it, whatever order the work runs in.
 
-        The `burned_in_text` policy (`configuration.burned_in_text`, #1108).
+        **The** `burned_in_text` **policy** (`configuration.burned_in_text`, #1108).
         When the configuration holds one, this call also reads
         every instance in the policy's `scope` with OCR (#1121: `flagged`,
         `modalities` or `all`; one out of scope is neither read nor gated
