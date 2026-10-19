@@ -396,8 +396,7 @@ def broken_file_links(root):
 # which imports Sphinx-side modules a fixture has no use for.
 _FIXTURE_CONF = (
     'myst_enable_extensions = ["colon_fence", "attrs_inline", "attrs_block"]\n'
-    'exclude_patterns = ["superpowers/**", "overrides/**", "_build/**", '
-    '"_ext/**"]\n')
+    'exclude_patterns = ["superpowers/**", "_build/**", "_ext/**"]\n')
 
 
 def _fixture_site(root, body):
@@ -649,7 +648,7 @@ def test_a_root_page_link_to_a_missing_file_is_broken(tmp_path):
 def test_an_exclude_pattern_the_check_cannot_read_stops_it(tmp_path):
     _site(tmp_path, {"docs/a.md": "# A\n"})
     assert _excluded_directories(tmp_path) == {
-        "superpowers", "overrides", "_build", "_ext"}
+        "superpowers", "_build", "_ext"}
     assert _excluded_directories(ROOT) == _excluded_directories(tmp_path), (
         "the fixtures' conf.py and the site's disagree on exclude_patterns")
 
