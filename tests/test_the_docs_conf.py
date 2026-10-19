@@ -10,8 +10,9 @@ for. What a hook does inside a real build is the docs build's to show
 (`sphinx-build -W`, and the review's scans of the built pages); what each
 hook decides, and that `setup()` connects it, is pinned here.
 
-The `TARGETS` row for `isocenter/entities.py` lists this file: the skip
-hook is asked about that module's real members.
+The `TARGETS` rows for `isocenter/entities.py` and `isocenter/session.py`
+list this file: the skip hook is asked about the first module's real
+members, and the display name is checked against the second's class.
 """
 import dataclasses
 import importlib
@@ -115,15 +116,80 @@ def test_setup_connects_every_hook():
     connected = []
 
     class App:
-        def connect(self, event, handler):
-            connected.append((event, handler))
+        def connect(self, event, handler, priority=500):
+            connected.append((event, handler, priority))
 
     CONF.setup(App())
-    assert sorted(connected, key=lambda pair: pair[0]) == [
-        ("autodoc-process-signature", CONF._dataclass_signature),
-        ("autodoc-skip-member", CONF._skip_entity_member),
-        ("doctree-read", CONF._slug_first),
+    assert sorted(connected, key=lambda c: (c[0], c[2])) == [
+        ("autodoc-process-signature", CONF._dataclass_signature, 500),
+        ("autodoc-skip-member", CONF._skip_entity_member, 500),
+        # Below 500: Sphinx's table-of-contents collector reads each
+        # signature's `_toc_name` at doctree-read, priority 500, once.
+        ("doctree-read", CONF._present_objects, 400),
+        ("doctree-read", CONF._slug_first, 500),
     ]
+
+
+# --- How API objects are presented (review of #1156, owner ruling S10) ------------
+
+def test_on_this_page_lists_members_by_their_own_names():
+    """The MkDocs site's table of contents listed `ingest`, `save`, ...
+    under each class's heading. Sphinx adds them only with
+    `toc_object_entries`, names them `ingest()` with `hide` (the class
+    prefix otherwise), and pydata opens them only at `show_toc_level` 2."""
+    assert CONF.toc_object_entries is True
+    assert CONF.toc_object_entries_show_parents == "hide"
+    assert CONF.html_theme_options.get("show_toc_level") == 2
+    assert CONF._member_toc_name("ingest()") == "ingest"
+    assert CONF._member_toc_name("store") == "store"
+    assert CONF._member_toc_name("") == ""
+
+
+def test_session_is_presented_as_session_under_dicomsessions_id():
+    """The class every page teaches as `Session` keeps its documented id,
+    `isocenter.session.DicomSession`, which deep links name."""
+    from isocenter import Session
+    from isocenter.session import DicomSession
+
+    assert Session is DicomSession
+    assert CONF._DISPLAY_NAMES == {"isocenter.session.DicomSession": "Session"}
+    assert CONF._shown_name(["isocenter.session.DicomSession"],
+                            "DicomSession") == "Session"
+    assert CONF._shown_name(["pkg.mod.ExportSummary"],
+                            "ExportSummary") == "ExportSummary"
+    assert CONF._shown_name([], "") == ""
+
+
+@pytest.mark.parametrize("children, parts", [
+    # `store (DicomStore) – The object graph.`
+    ([("literal_strong", "store"), ("Text", " ("), ("pending_xref", "DicomStore"),
+      ("Text", ")"), ("Text", " \u2013 "), ("Text", "The object graph.")],
+     ("store", slice(2, 3), slice(5, 6))),
+    # A type of several nodes: `Optional[str]`.
+    ([("literal_strong", "path"), ("Text", " ("), ("pending_xref", "Optional"),
+      ("literal_emphasis", "["), ("pending_xref", "str"), ("literal_emphasis", "]"),
+      ("Text", ")"), ("Text", " \u2013 "), ("Text", "Where."), ("literal", "x")],
+     ("path", slice(2, 6), slice(8, 10))),
+    # No type.
+    ([("literal_strong", "count"), ("Text", " \u2013 "), ("Text", "How many.")],
+     ("count", slice(1, 1), slice(2, 3))),
+])
+def test_an_attribute_item_splits_into_name_type_and_description(children, parts):
+    assert CONF._attribute_parts(children) == parts
+
+
+@pytest.mark.parametrize("children", [
+    [],
+    [("Text", "store"), ("Text", " \u2013 "), ("Text", "x")],
+    [("literal_strong", "store"), ("Text", " ("), ("pending_xref", "T")],
+    [("literal_strong", "store"), ("Text", " ("), ("pending_xref", "T"),
+     ("Text", ")"), ("Text", "x")],
+    [("literal_strong", "store")],
+])
+def test_any_other_item_shape_is_left_as_the_list_it_was(children):
+    """An item the split does not recognise keeps napoleon's rendering,
+    rather than becoming a table row that misplaces its text."""
+    assert CONF._attribute_parts(children) is None
 
 
 # --- The entity filters --------------------------------------------------------

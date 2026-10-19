@@ -1,7 +1,7 @@
-<!-- The MkDocs site drew a hero (the one-line claim, the install
-     command, the report excerpt) and a pipeline band above this file's
-     content from docs/overrides/home.html; the Sphinx site's home
-     template is docs/sphinx C4's. This file carries the rest of the
+<!-- The hero (the one-line claim, the install command, the report
+     excerpt) and the pipeline band above this file's content are drawn
+     by docs/_templates/layout.html, and docs/_static/ledger.css styles
+     the sections below as the ledger. This file carries the rest of the
      landing page as ordinary Markdown, and starts at `##` on purpose
      (docs/conf.py, `suppress_warnings`). The toctree at the foot is the
      site's navigation: every page is reachable from it
