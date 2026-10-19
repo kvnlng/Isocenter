@@ -1,16 +1,19 @@
 {#
-  Landing page template (#350). Selected by `template: home.html` in
-  docs/index.md's front matter. It adds the hero, the report excerpt, and
-  the pipeline band above the page's markdown, which renders below in the
-  ledger style from docs/stylesheets/extra.css. The report figures are
+  The landing page's hero, report excerpt and pipeline band (#350),
+  above index.md's own content, which ledger.css styles as the ledger
+  sections. Carried verbatim from the MkDocs site's
+  docs/overrides/home.html; only the quick-start link changed, from
+  MkDocs' `url` filter to Sphinx's `pathto`. The report figures are
   illustrative sample values, not a recorded run; the copy is the same
   copy the README carries, and the claims policy in the positioning
-  document applies to every word here.
+  document applies to every word here. Every other page renders exactly
+  as pydata-sphinx-theme's layout does.
 #}
-{% extends "main.html" %}
+{% extends "!layout.html" %}
 
-{% block tabs %}
-  {{ super() }}
+{% block docs_main %}
+{%- if pagename == "index" %}
+<div class="ledger-home">
   <section class="ledger-hero">
     <div class="ledger-hero__inner">
       <div class="ledger-hero__copy">
@@ -19,7 +22,7 @@
         <p class="ledger-hero__lede">And hand compliance a report that names anything the run could not do.</p>
         <div class="ledger-hero__actions">
           <div class="ledger-install"><span>$</span><code>pip install isocenter</code></div>
-          <a href="{{ 'quickstart/' | url }}">Read the quick start</a>
+          <a href="{{ pathto('quickstart') }}">Read the quick start</a>
         </div>
         <p class="ledger-hero__note">Python 3.12 or later, on Linux or macOS. Release candidates: <code>pip install --pre isocenter</code>. Apache-2.0. No command-line tool: the Python API is the whole interface.</p>
       </div>
@@ -63,14 +66,9 @@
       </svg>
     </div>
   </section>
-{% endblock %}
-
-{% block container %}
-  <div class="md-content ledger-home" data-md-component="content">
-    <article class="md-content__inner md-typeset">
-      {% block content %}
-        {% include "partials/content.html" %}
-      {% endblock %}
-    </article>
-  </div>
-{% endblock %}
+{{ super() }}
+</div>
+{%- else %}
+{{ super() }}
+{%- endif %}
+{% endblock docs_main %}

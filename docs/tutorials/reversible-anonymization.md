@@ -13,25 +13,27 @@ you are handing out. It runs a real session over one CT file: lock, then
 de-identify, export and read the disclosure. It then recovers the identity
 from the pseudonym, and shows what happens without the key.
 
-!!! tip "Run it yourself"
+:::{admonition} Run it yourself
+:class: tip
 
-    Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked.
+Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.
 
-    - **Start in a new, empty folder.** Each tutorial creates its own
-      `tutorial.db` and export folders, and running one in another
-      tutorial's folder changes what it prints. The first block below
-      copies the input file from pydicom into `input/`.
-    - Paste the blocks into a Python prompt or a notebook. In a `.py`
-      script, put them under `if __name__ == "__main__":`
-      ([why](../quickstart.md#1-initialize-a-session)).
-    - In a block with `>>>`, type what follows each `>>>`; the lines
-      under it are what Python prints. A `...` inside a printed value
-      stands for a part that differs on every run, such as a pseudonym or
-      a UID.
-    - The session also prints progress bars, status lines and `WARNING`
-      lines as it works. They are not shown here.
-      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+- **Start in a new, empty folder.** Each tutorial creates its own
+  `tutorial.db` and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input file from pydicom into `input/`.
+- Paste the blocks into a Python prompt or a notebook. In a `.py`
+  script, put them under `if __name__ == "__main__":`
+  ([why](../quickstart.md#1-initialize-a-session)).
+- In a block with `>>>`, type what follows each `>>>`; the lines
+  under it are what Python prints. A `...` inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.
+- The session also prints progress bars, status lines and `WARNING`
+  lines as it works. They are not shown here.
+  `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+:::
 
 ```python
 import shutil
@@ -110,16 +112,18 @@ locked = session.lock_identities(report)
 True
 ```
 
-!!! warning "Check the count: a lock after `anonymize()` secures nothing"
+:::{admonition} Check the count: a lock after `anonymize()` secures nothing
+:class: warning
 
-    `len(locked)` is the number of instances that now carry a token.
-    Called after `anonymize()`, `lock_identities(report)` does not
-    raise. It looks for the report's patients by their original Patient
-    IDs, and after `anonymize()` no patient holds them, so it logs one
-    `ERROR` line saying the IDs matched no patient, and returns an empty
-    result. The count is 0, and no key file is created: only a lock that
-    writes a token creates one. (Passing one patient's new `ANON_` ID
-    instead raises `RuntimeError`, and creates no key file either.)
+`len(locked)` is the number of instances that now carry a token.
+Called after `anonymize()`, `lock_identities(report)` does not
+raise. It looks for the report's patients by their original Patient
+IDs, and after `anonymize()` no patient holds them, so it logs one
+`ERROR` line saying the IDs matched no patient, and returns an empty
+result. The count is 0, and no key file is created: only a lock that
+writes a token creates one. (Passing one patient's new `ANON_` ID
+instead raises `RuntimeError`, and creates no key file either.)
+:::
 
 The key is a file of its own. Here it sits next to the store; step 6
 moves it where it belongs. Keep its contents to yourself: anyone who
@@ -214,14 +218,16 @@ says the run did what your policy asked. The `REVERSIBLE_EXPORT` row says
 who can undo it. Read both before this export leaves. If the recipient
 must not be able to re-identify, the key must never reach them.
 
-!!! note "These helpers read the report's layout, which can change"
+:::{admonition} These helpers read the report's layout, which can change
+:class: note
 
-    The action name `REVERSIBLE_EXPORT` and the grade values `PASS` and
-    `REVIEW_REQUIRED` are frozen for 1.x. The report's layout, the log's
-    line format, the warning's wording, and a new session overwriting the
-    log are not
-    ([API stability](../api/stability.md)). If a 1.x release changes it,
-    this page goes red in Isocenter's own tests and is updated with it.
+The action name `REVERSIBLE_EXPORT` and the grade values `PASS` and
+`REVIEW_REQUIRED` are frozen for 1.x. The report's layout, the log's
+line format, the warning's wording, and a new session overwriting the
+log are not
+([API stability](../api/stability.md)). If a 1.x release changes it,
+this page goes red in Isocenter's own tests and is updated with it.
+:::
 
 Keep the pseudonym, as a collaborator would quote it back to you, and
 close the session:

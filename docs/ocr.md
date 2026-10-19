@@ -25,15 +25,22 @@ pip install "isocenter[ocr]"
 
 and the Tesseract binary, which pip cannot install:
 
-=== "macOS"
-    ```bash
-    brew install tesseract
-    ```
+::::{tab-set}
+:::{tab-item} macOS
+:sync: macos
 
-=== "Linux (Ubuntu/Debian)"
-    ```bash
-    sudo apt-get install tesseract-ocr
-    ```
+```bash
+brew install tesseract
+```
+:::
+:::{tab-item} Linux (Ubuntu/Debian)
+:sync: linux-ubuntu-debian
+
+```bash
+sudo apt-get install tesseract-ocr
+```
+:::
+::::
 
 Without either, `scan_pixel_content()` and `discover_redaction_zones()` raise
 `OcrUnavailableError`, a `RuntimeError`, naming what is missing, before they scan

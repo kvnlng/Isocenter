@@ -10,55 +10,44 @@ Everything on this page is *documented but internal* (see
 `session.discover_redaction_zones()` returns a `DiscoveryResult`, which
 holds one `DiscoveryCandidate` per text region read at or above `min_confidence`.
 
-::: isocenter.discovery.DiscoveryResult
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-      members:
-        - filter
-        - to_zones
-        - to_dataframe
+```{eval-rst}
+.. autoclass:: isocenter.discovery.DiscoveryResult
 
-::: isocenter.discovery.DiscoveryCandidate
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+   .. automethod:: filter
+   .. automethod:: to_zones
+   .. automethod:: to_dataframe
+```
 
-::: isocenter.discovery.ZoneDiscoverer
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-      members:
-        - group_boxes
+```{eval-rst}
+.. autoclass:: isocenter.discovery.DiscoveryCandidate
+   :members:
+```
+
+```{eval-rst}
+.. autoclass:: isocenter.discovery.ZoneDiscoverer
+   :members: group_boxes
+```
 
 ## Verification
 
-::: isocenter.verification.RedactionVerifier
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.verification.RedactionVerifier
+   :members:
+```
 
 ## Automation
 
-::: isocenter.automation.ConfigAutomator
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-      members:
-        - suggest_config_updates
+```{eval-rst}
+.. autoclass:: isocenter.automation.ConfigAutomator
+   :members: suggest_config_updates
+```
 
 ## Pixel analysis
 
-::: isocenter.pixel_analysis
-    handler: python
-    options:
-      show_root_heading: true
-      members:
-        - analyze_pixels
-        - detect_text_regions
-        - TextRegion
+```{eval-rst}
+.. automodule:: isocenter.pixel_analysis
+
+   .. autoclass:: TextRegion
+   .. autofunction:: analyze_pixels
+   .. autofunction:: detect_text_regions
+```

@@ -331,7 +331,10 @@ SCHEMA_BY_VERSION = {
         # `SCRUB` (#1130) joined the unshipped row by the same ruling.
         "phi_actions": {"KEEP", "REMOVE", "EMPTY", "REPLACE", "SHIFT",
                         "JITTER", "SCRUB"},
-        "scrub_kinds": {"names", "dates", "ids", "orgs"},
+        # `phones`, `addresses`, `sites` and `initials` (#1146) joined the
+        # unshipped row before 1.0.0, as `orgs` did.
+        "scrub_kinds": {"names", "dates", "ids", "orgs", "phones", "addresses",
+                        "sites", "initials"},
         # The shapes a `phi_tags` key takes. The private-creator key
         # (#1132) joined the unshipped 2.0 row before 1.0.0, by the same
         # ruling (Q9 on #782; Q6 (a) of 2026-10-16).

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page not found - Isocenter</title>
+  <!--
+    The root 404 of the versioned site (#866). GitHub Pages serves only
+    this file for a missing path anywhere on the site, so each version's
+    own 404.html is never served. A path whose first segment is not a
+    version or alias in versions.json is a pre-versioning URL: send it to
+    the same path under latest/, keeping query and fragment. Anything
+    else is a real miss. `latest` always counts as known, and if
+    versions.json cannot be read nothing redirects and this page shows,
+    so a miss can never become latest/latest/... Written once at the
+    cutover; nothing maintains it.
+  -->
+  <script>
+    (function () {
+      var base = "/Isocenter/";
+      var path = window.location.pathname;
+      if (path.indexOf(base) !== 0) { return; }
+      var rest = path.slice(base.length);
+      var first = rest.split("/")[0];
+      if (!first) { return; }
+      fetch(base + "versions.json").then(function (response) {
+        if (!response.ok) { throw new Error("versions.json: " + response.status); }
+        return response.json();
+      }).then(function (versions) {
+        var known = { latest: true };
+        versions.forEach(function (v) {
+          known[v.version] = true;
+          (v.aliases || []).forEach(function (a) { known[a] = true; });
+        });
+        if (!known[first]) {
+          window.location.replace(base + "latest/" + rest +
+            window.location.search + window.location.hash);
+        }
+      }).catch(function () {});
+    })();
+  </script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem; color: #1f2933; background: #fbfaf7; }
+    a { color: #0b5e63; }
+  </style>
+</head>
+<body>
+  <h1>Page not found</h1>
+  <p>There is no page at this address. The documentation for the latest release is at <a href="/Isocenter/latest/">/Isocenter/latest/</a>.</p>
+</body>
+</html>

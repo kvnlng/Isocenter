@@ -336,7 +336,8 @@ def test_set_phi_tag_scrub_without_target_names_the_keyword(tmp_path):
         assert session.configuration.phi_tags == before
     assert str(caught.value) == (
         "set_phi_tag: phi_tags['0008,103e'] is SCRUB with no target; pass "
-        "target=, a list of names, dates, ids, orgs "
+        "target=, a list of names, dates, ids, orgs, phones, addresses, "
+        "sites, initials "
         '(set_phi_tag(tag, "SCRUB", target=["dates", "ids"]))')
 
 
@@ -490,3 +491,98 @@ def test_a_held_dummy_is_never_a_finding_whatever_a_model_makes_of_it(
         again = session.audit()
         assert [f.tag for f in again.findings
                 if f.tag in ("0008,1030", "0008,103e")] == []
+
+
+# --- a name cut at the VR's length (#1146) ------------------------------------
+
+#: Invented: 64 characters, LO's maximum, cut inside the family name.
+CUT = "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA for Dalia Fenwic"
+
+
+def test_a_name_cut_at_the_vrs_length_is_read_by_the_vr():
+    """The limit is the element's VR's: Series Description is an LO (64),
+    so its cut `Fenwic` goes; Text Value is a UT, which has no limit, so
+    the same text keeps it. Kills the scan not passing the limit, and a UT
+    given one."""
+    from isocenter.entities import Instance
+    assert len(CUT) == 64
+    inst = Instance(sop_instance_uid="1.2.3.4")
+    inst.set_attr("0010,0010", "FENWICK-ORR^DALIA")
+    inst.set_attr("0008,103e", CUT)
+    inst.set_attr("0040,a160", CUT)
+    rule = {"action": "SCRUB", "target": ["names"]}
+    inspector = PhiInspector(config_tags={"0008,103e": dict(rule),
+                                          "0040,a160": dict(rule)})
+    found = {f.tag: f.remediation_proposal.new_value
+             for f in inspector._scan_instance(inst, "P")}
+    assert found["0008,103e"] == "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA"
+    assert found["0040,a160"] == "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA Fenwic"
+
+
+def test_a_private_elements_limit_is_its_recorded_vr(tmp_path):
+    """A private element has no dictionary VR: the source's LO is the one
+    recorded, and it is read."""
+    _source(tmp_path, PatientName="FENWICK-ORR^DALIA", private=CUT)
+    rules = {'0009,"ACME_DESC_01",10': {"action": "SCRUB", "target": ["names"]}}
+    with _session(tmp_path, rules) as session:
+        session.anonymize(session.audit())
+        assert (_instance(session).attributes["0009,1010"]
+                == "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA")
+
+
+def test_a_nested_private_elements_limit_is_its_recorded_vr(tmp_path):
+    """The audit scans a copy of each instance; the copy of a sequence
+    item carries its recorded VRs too. Kills `clone_sequences` dropping
+    them."""
+    item = Dataset()
+    item.private_block(0x0009, "ACME_DESC_01", create=True).add_new(0x10, "LO", CUT)
+    _source(tmp_path, PatientName="FENWICK-ORR^DALIA",
+            ReferencedImageSequence=Sequence([item]))
+    rules = {'0009,"ACME_DESC_01",10': {"action": "SCRUB", "target": ["names"]},
+             "0008,1140": {"action": "KEEP"}}
+    with _session(tmp_path, rules) as session:
+        session.anonymize(session.audit())
+        [kept] = _instance(session).sequences["0008,1140"].items
+        assert (kept.attributes["0009,1010"]
+                == "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA")
+
+
+def test_a_private_person_names_words_are_read_in_an_audit(tmp_path):
+    """A private element recorded as PN is a Person Name whose words
+    `names` removes; before #1146 the audit's copy of the instance carried
+    no recorded VR, so it was never read. Kills that line removed."""
+    path = write_ct(tmp_path / "in" / "a.dcm", "PA", 1146, name="QUILL^TAMSIN")
+    ds = pydicom.dcmread(path)
+    ds.remove_private_tags()
+    ds.private_block(0x0009, "ACME_DESC_01", create=True).add_new(0x20, "PN", "VANCE^ORLO")
+    ds.SeriesDescription = "Read by Orlo Vance"
+    ds.save_as(path, enforce_file_format=True)
+    rules = {"0008,103e": {"action": "SCRUB", "target": ["names"]},
+             '0009,"ACME_DESC_01",20': {"action": "KEEP"}}
+    with _session(tmp_path, rules) as session:
+        session.anonymize(session.audit())
+        assert _instance(session).attributes["0008,103e"] == "Read"
+
+
+# --- the new kinds through a session (#1146) ----------------------------------
+
+def test_the_new_kinds_through_a_session_with_a_row_of_counts(tmp_path):
+    """Phones, addresses, sites and initials, each named in the row by its
+    noun and never by its text. Every value is invented."""
+    from isocenter import config_manager, remediation
+    assert set(remediation._SCRUB_NOUNS) == set(config_manager.SCRUB_KINDS)
+    _source(tmp_path, ImageComments=(
+        "Ordered for 4826153907 by SS at QRMC; call (312)555-0147x12; "
+        "41 Willowbend Ct Fairhaven, OR 97999"))
+    # `phones` before `ids`: a span two kinds find counts for the first.
+    rules = {"0020,4000": {"action": "SCRUB", "target": [
+        "phones", "ids", "initials", "sites", "addresses"]}}
+    with _session(tmp_path, rules) as session:
+        session.anonymize(session.audit())
+        assert _instance(session).attributes["0020,4000"] == "Ordered; call"
+        rows = [r for r in _rows(session, "REMEDIATION_REPLACE") if "0020,4000" in r]
+    assert len(rows) == 1
+    assert rows[0].endswith("removed 1 id, 1 set of initials, 1 site, "
+                            "1 phone number, 1 address"), rows
+    for text in ("4826153907", "QRMC", "555-0147", "Willowbend"):
+        assert text not in rows[0]

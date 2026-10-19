@@ -140,11 +140,20 @@ BURNED_IN_TEXT_KINDS = ("names", "dates", "ids")
 #: The kinds a `SCRUB` rule's `target` names (#1130), in the order the
 #: refusal lists them. `text_scrub.SCRUB_KINDS` is the scrub's copy, and
 #: a test keeps the two equal. There is no `any`: `target` is required
-#: (owner ruling Q5 (b)). Compared exactly.
-SCRUB_KINDS = ("names", "dates", "ids", "orgs")
+#: (owner ruling Q5 (b)). Compared exactly. `phones`, `addresses`,
+#: `sites` and `initials` are new values of the unshipped 2.0 row
+#: (#1146), as `orgs` was.
+SCRUB_KINDS = ("names", "dates", "ids", "orgs", "phones", "addresses",
+               "sites", "initials")
 #: The VRs `SCRUB` applies to on a standard tag: text a description can
 #: carry. A Person Name is a name whole, so `REPLACE` is its answer.
 _SCRUB_VRS = frozenset({"LO", "LT", "SH", "ST", "UC", "UT"})
+#: The maximum length in characters of the text VRs that have one (PS3.5
+#: Table 6.2-1). UC and UT have none. A local table, as
+#: `_CREATOR_MAX_CHARACTERS` is, not pydicom's `MAX_VALUE_LEN`: a value
+#: exactly this long may have been cut there, so `SCRUB`'s `names` reads
+#: its last word as a name's beginning (#1146).
+_TEXT_MAX_CHARACTERS = {"LO": 64, "SH": 16, "ST": 1024, "LT": 10240}
 #: What decides "is this text?" (#1121, PR C), in the order the refusal
 #: lists them: `tesseract` (rc19's OCR, the default) or `db` (the
 #: PP-OCRv3 DB text detector run by OpenCV, the optional `textdetect`
@@ -606,14 +615,50 @@ def _creator_key_parts(key: str):
             int(match.group(3), 16))
 
 
+#: ASCII `a`-`z` to `A`-`Z` and nothing else, so no other letter is
+#: touched (`'ß'` stays `'ß'`, never `'SS'`): `pixel_geometry._cs_spelling`'s
+#: rule.
+_ASCII_UPPER = str.maketrans("abcdefghijklmnopqrstuvwxyz",
+                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_SPACE_RUN = re.compile(" +")
+
+
+def _creator_identity(creator: str) -> str:
+    """The one identity a private creator is matched by (#1147).
+
+    Surrounding spaces stripped, each run of interior spaces made one, and
+    ASCII `a`-`z` upper-cased. PS3.5 7.8.1 says a creator is an LO
+    "identification code" and has no rule for comparing two of them;
+    vendors write one creator in more than one case (pydicom's own private
+    dictionary holds `HOLOGIC` and `Hologic` with the same elements, and
+    the collection of issue 1147 both `...011710XX` and `...011710xx`).
+    Only the space is folded: an LO holds no control character but ESC,
+    and a key with a tab is refused. A creator that differs in anything else
+    (`GEMS_IDEN_1` against `GEMS_IDEN_01`, a non-ASCII letter's case) is
+    another creator.
+
+    Matching folds; a key's spelling never does (`_canonical_rule_key`).
+
+    Args:
+        creator (str): A creator, from a key or from a file.
+
+    Returns:
+        str: Its identity.
+    """
+    return _SPACE_RUN.sub(" ", creator.strip(" ")).translate(_ASCII_UPPER)
+
+
 def _canonical_rule_key(key: str) -> str:
     """The one spelling of a `phi_tags` key.
 
     A tag or mask is lowercased. A private-creator key has its group and
     offset lowercased and its creator kept as written, stripped of
-    surrounding spaces: PS3.5 does not fold a creator's case, and a
-    lowercased `GEMS_IDEN_01` would match nothing, silently. Every site
-    that spells a key goes through here (#1132).
+    surrounding spaces. The key keeps the creator's case and spacing
+    because the policy form hashes keys as held (`configuration.
+    _canonical_policy_v1`): folding here would move every creator-keyed
+    store's fingerprint. The scan folds instead, at matching
+    (`_creator_identity`, #1147). Every site that spells a key goes
+    through here (#1132).
 
     Args:
         key (str): The key as written.
@@ -884,9 +929,9 @@ def _burned_in_text_policy(policy: Any, source: str) -> Optional[Dict[str, Any]]
 
     Returns:
         Optional[Dict[str, Any]]: `{action, scope, detector,
-            min_confidence, target}` (the threshold's default is the
-            detector's), plus
-            `modalities` under `scope: modalities`; a new dict, or None.
+        min_confidence, target}` (the threshold's default is the
+        detector's), plus
+        `modalities` under `scope: modalities`; a new dict, or None.
 
     Raises:
         ValueError: `_refused_burned_in_text`'s refusal.
@@ -1151,6 +1196,27 @@ def _standard_dictionary_vr(tag: str) -> Optional[str]:
         return None
 
 
+def _text_max_characters(tag: str, recorded_vr: Optional[str] = None) -> Optional[int]:
+    """The maximum length in characters of `tag`'s text VR, or None (#1146).
+
+    A standard tag's VR is its dictionary's; a tag the dictionary does
+    not know (a private one) takes the VR the source recorded for it.
+    Characters, not bytes: a value a site cut by bytes under a multi-byte
+    character set is shorter in characters, and is not seen as cut.
+
+    Args:
+        tag (str): A `gggg,eeee` key.
+        recorded_vr (str, optional): The item's recorded VR for `tag`
+            (`DicomItem.attribute_vrs`).
+
+    Returns:
+        Optional[int]: From `_TEXT_MAX_CHARACTERS` (LO, SH, ST, LT); None
+        for UC, UT, any other VR and an unknown one.
+    """
+    vr = _standard_dictionary_vr(tag) or recorded_vr
+    return _TEXT_MAX_CHARACTERS.get(vr) if isinstance(vr, str) else None
+
+
 def _dictionary_vm(tag: str) -> Optional[str]:
     """The dictionary value multiplicity of a standard tag.
 
@@ -1246,7 +1312,7 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     Judged by pydicom's `validate_value`, with AT always refused and a
     compound VR (`US or SS`) refused only when no arm holds the value. On
     a tag whose multiplicity allows several values, a string is judged
-    one `\\`-separated value at a time; a list or tuple one element at a
+    one ``\\``-separated value at a time; a list or tuple one element at a
     time.
 
     Args:
@@ -1334,8 +1400,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
       `value:`, else the VR's dummy, else `ANONYMIZED`). Value-less
       REPLACE on UI and on Study Date is exempt;
     - a REPLACE `value:` that holds a range (`-` in a DA or TM; in a DT,
-      anywhere but the UTC offset), a `\\` on a tag of multiplicity 1, or
-      a count of `\\`-separated values the dictionary VM does not allow.
+      anywhere but the UTC offset), a ``\\`` on a tag of multiplicity 1, or
+      a count of ``\\``-separated values the dictionary VM does not allow.
 
     Args:
         tag: The rule's key, lowercased by the caller.
@@ -1551,7 +1617,9 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
             calling method).
 
     Raises:
-        ValueError: For the first rule `_refused_phi_rule` refuses.
+        ValueError: For the first rule `_refused_phi_rule` refuses, then
+            for two creator keys naming one creator with different rules
+            (`_creator_twins_refused`, #1147).
     """
     # Every door a policy comes in by calls this: the merged policy a
     # config file resolves to (`ConfigLoader.load_unified_config`, so
@@ -1565,6 +1633,95 @@ def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
         reason = _refused_phi_rule(key, rule)
         if reason is not None:
             raise ValueError(f"{source}: {reason}")
+    reason = _creator_twins_refused(tags)
+    if reason is not None:
+        raise ValueError(f"{source}: {reason}")
+
+
+def _rule_apart_from_name(rule) -> Dict[str, Any]:
+    """What a rule does, without its `name`: the action as the scan reads
+    it (upper-cased, `REPLACE` when absent or for a bare-name string),
+    `value: null` read as no `value` (`REPLACE` writes the VR's dummy
+    under either, though the policy fingerprint tells them apart), a `SCRUB`
+    `target` as a set of kinds, and every other key as written.
+
+    A target's order decides only which kind a span two kinds found is
+    counted for in the row, never what is removed; and of two twin keys
+    the first one's rule is the one applied (`privacy._creator_index`),
+    so its order is the one the rows follow.
+    """
+    if not isinstance(rule, dict):
+        return {"action": "REPLACE"}
+    done = {k: v for k, v in rule.items() if k not in ("name", "action")}
+    if done.get("value", 0) is None:
+        del done["value"]
+    target = done.get("target")
+    if (isinstance(target, (list, tuple))
+            and all(isinstance(kind, str) for kind in target)):
+        done["target"] = frozenset(target)
+    action = rule.get("action", "REPLACE")
+    done["action"] = action.upper() if isinstance(action, str) else action
+    return done
+
+
+def _creator_key_identity(key: str):
+    """`(group, creator identity, offset)`: the element a creator key names."""
+    group, creator, offset = _creator_key_parts(key)
+    return group, _creator_identity(creator), offset
+
+
+def _creator_twins(tags: Dict[str, Any], key: str) -> List[str]:
+    """The keys of `tags`, as held, that name the element creator key `key`
+    names under another spelling of its creator (#1147). A key that is
+    `key` itself in another hex case is not a twin: it is one key."""
+    identity = _creator_key_identity(key)
+    canonical = _canonical_rule_key(key)
+    return [tag for tag in tags
+            if isinstance(tag, str) and _is_creator_key(tag)
+            and _canonical_rule_key(tag) != canonical
+            and _creator_key_identity(tag) == identity]
+
+
+def _creator_twins_refused(tags: Dict[str, Any]) -> Optional[str]:
+    """Why two creator keys of `tags` that name one creator cannot both
+    stand, or None (#1147, owner ruling Q2 (a)).
+
+    Two keys whose group, offset and `_creator_identity` agree name one
+    element. With rules that act differently (`_rule_apart_from_name`),
+    which one applied would
+    be a silent precedence between, say, a KEEP and a REMOVE: #1147's
+    shape again. Rules equal apart from `name` load, and the first key in
+    the policy names the finding (`privacy._creator_index`). Keys are
+    taken in their canonical spelling first, the later of two spellings of
+    one key winning, as `PhiInspector._normalize_tag_keys` does, so a
+    hex-case twin is that method's collision WARNING, never this refusal.
+
+    Args:
+        tags (dict): The policy.
+
+    Returns:
+        Optional[str]: The refusal, naming both keys, or None.
+    """
+    canonical = {}
+    for tag, rule in tags.items():
+        if isinstance(tag, str) and _is_creator_key(tag):
+            canonical[_canonical_rule_key(tag)] = rule
+    first = {}
+    for key, rule in canonical.items():
+        identity = _creator_key_identity(key)
+        if identity not in first:
+            first[identity] = key
+            continue
+        earlier = first[identity]
+        if _rule_apart_from_name(canonical[earlier]) != _rule_apart_from_name(rule):
+            # The fold is #1147's; the text names the rule, not the issue
+            # (runtime strings carry no issue numbers, #811).
+            return (f"phi_tags keys {earlier!r} and {key!r} name the same "
+                    f"private element with rules that act differently: a "
+                    f"creator key matches its creator whatever its case and "
+                    f"runs of spaces (PS3.5 7.8.1 gives no rule for comparing "
+                    f"two creators); give both keys one rule, or keep one key")
+    return None
 
 
 def load_unified_config(path: str) -> Dict[str, Any]:

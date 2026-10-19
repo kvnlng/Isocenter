@@ -8,10 +8,10 @@ import os
 
 
 def configure_logger(log_file=None):
-    """
-    Configures the root logger for the application.
+    """Configures the root logger for the application.
 
     Sets up two handlers:
+
     1. File Handler: Captures all DEBUG+ logs.
     2. Console Handler: Captures WARNING+ logs only (to keep CLI output/tqdm clean).
 

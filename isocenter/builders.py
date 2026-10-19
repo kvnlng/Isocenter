@@ -11,14 +11,12 @@ class DicomBuilder:
     """
     Build a `Patient` graph by hand, with no files behind it.
 
-    Import it as `from isocenter import Builder`:
+    Import it as `from isocenter import Builder`::
 
-    ```python
-    patient = (Builder.start_patient("P123", "Doe^John")
-               .add_study("1.2.3", "20240101")
-               .add_series("1.2.3.1", "CT", 1)
-               .end_series().end_study().build())
-    ```
+        patient = (Builder.start_patient("P123", "Doe^John")
+                   .add_study("1.2.3", "20240101")
+                   .add_series("1.2.3.1", "CT", 1)
+                   .end_series().end_study().build())
     """
     @staticmethod
     def start_patient(patient_id, name):

@@ -4,8 +4,9 @@ the kinds a `SCRUB` rule removes from header text (#1130).
 Pure functions over one line of text, each returning the `(start, end)`
 character spans that look like its kind: `dates` (date shapes), `ids`
 (long runs of digits), `names` (spaCy `PERSON` entities, burned-in text
-only) and `orgs` (spaCy `ORG`, `FAC` and `GPE` entities, header text
-only). Nothing here compares a reading with any patient's values
+only), `orgs` (spaCy `ORG`, `FAC` and `GPE` entities, header text
+only), and `phones`, `addresses` and `sites` (regular shapes, header
+text only, #1146). Nothing here compares a reading with any patient's values
 (owner ruling of 2026-10-15: a burned-in name may be misspelled, and the
 source is not read again), and nothing here keeps or returns text: only
 spans, which never leave the `burned_in_text` worker.
@@ -22,10 +23,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 Span = Tuple[int, int]
 
 #: The kinds, in the order a refusal lists them. `config_manager` holds
-#: the schema's copies: `BURNED_IN_TEXT_KINDS`, every kind but `orgs`
-#: (owner ruling Q-B12 stands for pixels), and `SCRUB_KINDS`, all four
-#: (#1130). A test keeps each a subset of this.
-KINDS = ("names", "dates", "ids", "orgs")
+#: the schema's copies: `BURNED_IN_TEXT_KINDS`, `names`, `dates` and `ids`
+#: (owner ruling Q-B12 stands for pixels), and `SCRUB_KINDS`, every kind
+#: here and `initials`, which is a widening in `text_scrub`, not a finder
+#: (#1130, #1146). A test keeps each a subset of this.
+KINDS = ("names", "dates", "ids", "orgs", "phones", "addresses", "sites")
 
 # --- dates -------------------------------------------------------------------
 
@@ -34,7 +36,7 @@ KINDS = ("names", "dates", "ids", "orgs")
 _CONFUSABLES = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1",
                               "|": "1", "S": "5", "B": "8"})
 _DIGITISH = "0-9OoIl|SB"
-#: Three numeric fields with one separator, used twice (`\2`). The
+#: Three numeric fields with one separator, used twice (``\2``). The
 #: lookarounds keep a field from being the tail of a longer run.
 _NUMERIC_DATE = re.compile(
     rf"(?<![0-9A-Za-z])([{_DIGITISH}]{{1,4}})([/.\- ])([{_DIGITISH}]{{1,2}})"
@@ -168,13 +170,114 @@ ID_MIN_CHARACTERS = 6
 ID_MIN_DIGITS = 5
 
 
-def id_spans(line: str) -> List[Span]:
+#: Inside a protocol token only an SSN shape or this many consecutive
+#: digits is an identifier (#1146).
+ID_MIN_RUN_IN_TOKEN = 7
+_ID_IN_TOKEN = re.compile(
+    r"(?<![0-9])(?:[0-9]{3}-[0-9]{2}-[0-9]{4}|[0-9]{%d,})(?![0-9])"
+    % ID_MIN_RUN_IN_TOKEN)
+
+
+def _is_an_id(run: str) -> bool:
+    return (len(run) >= ID_MIN_CHARACTERS
+            and sum(ch.isdigit() for ch in run) >= ID_MIN_DIGITS)
+
+
+def _in_a_decimal(line: str, start: int, end: int) -> bool:
+    """The run `line[start:end]` is joined by a `.` to a digit on either
+    side: part of a decimal number (`0.781250`, `739204.5`)."""
+    return ((start >= 2 and line[start - 1] == "." and line[start - 2].isdigit())
+            or (end + 1 < len(line) and line[end] == "." and line[end + 1].isdigit()))
+
+
+def id_spans(line: str, ocr: bool = True) -> List[Span]:
     """Spans of `line` that look like an identifier: a run of at least
     `ID_MIN_CHARACTERS` characters (inner `-`/`_` counted) holding at
-    least `ID_MIN_DIGITS` digits."""
-    return [m.span() for m in _RUN.finditer(line)
-            if len(m.group(0)) >= ID_MIN_CHARACTERS
-            and sum(ch.isdigit() for ch in m.group(0)) >= ID_MIN_DIGITS]
+    least `ID_MIN_DIGITS` digits.
+
+    With `ocr` (the default, for burned-in text) that is the whole rule.
+    Without it (SCRUB's header text, #1146) two shapes are spared: a
+    run joined by `.` to a digit on either side (a decimal's part, so
+    `0.781250` keeps `781250`), and a protocol token, a run joined by
+    `_` that holds a letter (`t2_tse_tra_320_p2`), which is an
+    identifier only when it holds an SSN shape
+    (`ddd-dd-dddd`) or `ID_MIN_RUN_IN_TOKEN` consecutive digits; then the
+    whole token is the span. Burned-in `ids` keeps the first rule (owner
+    ruling Q7 (a)), so no record is read again.
+    """
+    if ocr:
+        return [m.span() for m in _RUN.finditer(line) if _is_an_id(m.group(0))]
+    found = []
+    # `^` neither joins nor protects (owner ruling R2): a Person Name's
+    # separator beside an identifier (`Doe^482615`) must not shelter it,
+    # so `P4^P114^S301^I00004` loses `I00004`, accepted.
+    for match in _RUN.finditer(line):
+        start, end = match.span()
+        run = match.group(0)
+        if _in_a_decimal(line, start, end):
+            continue
+        if ("_" in run and any(ch.isalpha() for ch in run)
+                and _ID_IN_TOKEN.search(run) is None):
+            continue
+        if _is_an_id(run):
+            found.append((start, end))
+    return found
+
+
+# --- phones, addresses, sites (header text only, #1146) -----------------------
+
+#: North American numbers with `-` or `.` between the groups, or a
+#: bracketed area code, an optional leading `1`/`+1`, and an optional
+#: extension (owner ruling Q3 (a)). No space between the groups, so
+#: `Matrix 512 256 1024` is not a phone.
+_NANP = re.compile(
+    r"(?<![\w+])(?:\+?1[-.\s])?(?:\(\d{3}\)\s?|\d{3}[-.])\d{3}[-.]\d{4}"
+    r"(?:\s?(?:x|ext\.?|extension)\s?\d{1,6})?(?!\w)", re.IGNORECASE)
+#: E.164: `+`, then 8 to 15 digits, separators allowed after the `+`.
+_E164 = re.compile(r"(?<![\w+])\+[1-9](?:[\s.-]?\d){7,14}(?!\w)")
+
+
+def phone_spans(line: str) -> List[Span]:
+    """Spans of `line` that look like a telephone number (#1146): a North
+    American number (`(312)555-0147x12`, `312-555-0183`,
+    `312.555.0129 ext 204`) or an international one with its `+`
+    (`+44 20 7946 0958`). A number triple written like a phone number
+    (`120-240-3600`) is taken too."""
+    return sorted({m.span() for m in _NANP.finditer(line)}
+                  | {m.span() for m in _E164.finditer(line)})
+
+
+#: Street suffixes, case-sensitive (`Ct` is a suffix, `CT` a modality).
+_STREET_SUFFIX = (r"(?:St|Ave|Av|Dr|Ct|Trl|Ln|Rd|Blvd|Way|Pl|Ter|Cir|Pkwy|Hwy|Sq|"
+                  r"Street|Avenue|Drive|Court|Trail|Lane|Road|Boulevard|Place|"
+                  r"Terrace|Circle|Parkway|Highway)")
+_ADDRESS = re.compile(
+    r"(?<![\w])\d{1,6}\s+(?:[A-Z][a-z]+(?:-[A-Z][a-z]+)?\s+){1,3}"
+    + _STREET_SUFFIX
+    + r"\.?,?\s+(?:[A-Z][a-z]+\s){0,2}[A-Z][a-z]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?(?!\w)")
+
+
+def address_spans(line: str) -> List[Span]:
+    """Spans of `line` that look like a full street address (#1146, owner
+    ruling Q4 (a)): a street number, one to three title-case words, a
+    street suffix, then a city, a two-letter state and a ZIP
+    (`157 Chisholm Trl Thibodaux, LA 70301`). A street line alone is not
+    taken: `4 Phase Abdomen Ct` would be one too."""
+    return [m.span() for m in _ADDRESS.finditer(line)]
+
+
+#: A site acronym: 4 to 8 capitals as a whole word directly after a
+#: lower-case `at` (owner ruling Q5 (a)). It ends where a word does,
+#: `_` included, so `at HASCC_2` is not cut to `_2`.
+_SITE = re.compile(r"(?<![^\W_])at\s+([A-Z]{4,8})(?!\w)")
+
+
+def site_spans(line: str) -> List[Span]:
+    """Spans of the acronym in `at CHAJH` (#1146): 4 to 8 capitals after a
+    lower-case `at`. `at` itself is a connecting word, which SCRUB
+    removes with the span. A 3-letter site (`at FGH`) is missed, so that
+    `at RUL` and `at MRI` are kept."""
+    return [m.span(1) for m in _SITE.finditer(line)]
 
 
 # --- names -------------------------------------------------------------------
@@ -387,7 +490,8 @@ def org_spans(line: str) -> List[Span]:
 
 
 _FINDERS = {"names": name_spans, "dates": date_spans, "ids": id_spans,
-            "orgs": org_spans}
+            "orgs": org_spans, "phones": phone_spans,
+            "addresses": address_spans, "sites": site_spans}
 
 
 def spans(line: str, kinds: Iterable[str]) -> Dict[str, List[Span]]:

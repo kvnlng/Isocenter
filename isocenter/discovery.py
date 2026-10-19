@@ -94,7 +94,7 @@ class DiscoveryResult:
 
         Returns:
             List[List[int]]: `rows` lists of `cols` counts; all zeros when
-                there are no candidates.
+            there are no candidates.
         """
         if not self.candidates:
             return [[0] * bins[1] for _ in range(bins[0])]
@@ -132,7 +132,7 @@ class DiscoveryResult:
 
         Returns:
             str: A title line, then one `|...|` line per grid row, each cell
-                drawn as ` `, `.`, `o`, `O` or `#` by increasing count.
+            drawn as a space, `.`, `o`, `O` or `#` by increasing count.
         """
         grid = self.get_density_matrix(bins)
         rows, cols = bins
@@ -163,9 +163,9 @@ class DiscoveryResult:
 
         Returns:
             List[Dict[str, Any]]: One dict per zone from `to_zones` with no
-                occurrence floor: `zone`, `occurrence`, `status`
-                (`STATIC_ALWAYS` above 0.9, `STATIC_FREQUENT` above 0.5,
-                else `TRANSIENT`) and one `example` text.
+            occurrence floor: `zone`, `occurrence`, `status`
+            (`STATIC_ALWAYS` above 0.9, `STATIC_FREQUENT` above 0.5,
+            else `TRANSIENT`) and one `example` text.
         """
         zones = self.to_zones(min_occurrence=0.0) # a relaxed clustering
         stability_report = []
@@ -201,7 +201,7 @@ class DiscoveryResult:
 
         Returns:
             List[List[DiscoveryCandidate]]: The candidates of each cluster;
-                empty when there are no candidates.
+            empty when there are no candidates.
         """
         if not self.candidates:
             return []
@@ -222,9 +222,9 @@ class DiscoveryResult:
 
         Returns:
             List[Dict[str, Any]]: One dict per zone: `zone` as
-                `[y1, y2, x1, x2]`, `type` (`LIKELY_NAME`, `PROPER_NOUN` or
-                `TEXT`), `occurrence`, mean `confidence`, and up to three
-                `examples`. Zones 5 pixels or less wide or tall are dropped.
+            `[y1, y2, x1, x2]`, `type` (`LIKELY_NAME`, `PROPER_NOUN` or
+            `TEXT`), `occurrence`, mean `confidence`, and up to three
+            `examples`. Zones 5 pixels or less wide or tall are dropped.
         """
         if not self.candidates:
             return []

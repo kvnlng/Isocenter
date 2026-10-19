@@ -7,15 +7,15 @@ page lists them as tier 2.
 
 | Method | Returns |
 | --- | --- |
-| `ingest()` | [`IngestSummary`][isocenter.io_handlers.IngestSummary] |
-| `audit()`, `scan_pixel_content()` | [`PhiReport`][isocenter.privacy.PhiReport] of [`PhiFinding`][isocenter.privacy.PhiFinding] |
-| `lock_identities()`, `lock_identities_batch()` | [`LockingResult`][isocenter.session.LockingResult], a `list` of `Instance` |
+| `ingest()` | {py:class}`~isocenter.io_handlers.IngestSummary` |
+| `audit()`, `scan_pixel_content()` | {py:class}`~isocenter.privacy.PhiReport` of {py:class}`~isocenter.privacy.PhiFinding` |
+| `lock_identities()`, `lock_identities_batch()` | {py:class}`~isocenter.session.LockingResult`, a `list` of `Instance` |
 | `recover_patient_identity()` | `Dict[str, Dict[str, Any]]`: SOP Instance UID to the values its token holds |
-| `export(format="dicom")` | [`ExportSummary`][isocenter.io_handlers.ExportSummary] |
+| `export(format="dicom")` | {py:class}`~isocenter.io_handlers.ExportSummary` |
 | `export(format="wfdb")` | `List[str]`, the paths written |
-| `discover_redaction_zones()` | [`DiscoveryResult`][isocenter.discovery.DiscoveryResult] |
+| `discover_redaction_zones()` | {py:class}`~isocenter.discovery.DiscoveryResult` |
 | `get_cohort_report()` | `pandas.DataFrame` |
-| `phi_status_summary()` | `Dict[str, Counter]` of [`PhiStatus`][isocenter.entities.PhiStatus] |
+| `phi_status_summary()` | `Dict[str, Counter]` of {py:class}`~isocenter.entities.PhiStatus` |
 | `redact()`, `reconcile_private_tags()`, `auto_remediate_config()` | `int` |
 
 Import the two exceptions from the package:
@@ -24,66 +24,62 @@ Import the two exceptions from the package:
 
 ## Summaries
 
-::: isocenter.io_handlers.IngestSummary
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.IngestSummary
+   :members:
+```
 
-::: isocenter.io_handlers.ExportSummary
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.ExportSummary
+   :members:
+```
 
 ## Findings
 
-::: isocenter.privacy.PhiReport
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
-      members:
-        - to_dataframe
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiReport
+   :members: to_dataframe
+   :class-doc-from: both
+```
 
-::: isocenter.privacy.PhiFinding
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiFinding
+   :members:
+```
 
-::: isocenter.privacy.PhiRemediation
-    handler: python
-    options:
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.privacy.PhiRemediation
+   :members:
+```
 
 ## Identity locks
 
-::: isocenter.session.LockingResult
-    handler: python
-    options:
-      show_root_full_path: false
-      members: false
+```{eval-rst}
+.. autoclass:: isocenter.session.LockingResult
+```
 
 ## Exceptions
 
-::: isocenter.services.RedactionError
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
+```{eval-rst}
+.. autoclass:: isocenter.services.RedactionError
+   :members:
+   :class-doc-from: both
+```
 
-::: isocenter.io_handlers.ExportError
-    handler: python
-    options:
-      show_root_full_path: false
-      merge_init_into_class: true
+```{eval-rst}
+.. autoclass:: isocenter.io_handlers.ExportError
+   :members:
+   :class-doc-from: both
+```
 
 ## Building a graph by hand
 
 `isocenter.Builder` is the frozen name of the class below; only
 `start_patient()` is frozen, and the chain it starts is tier 2.
 
-::: isocenter.builders.DicomBuilder
-    handler: python
-    options:
-      heading: Builder
-      members:
-        - start_patient
+## Builder
+
+```{eval-rst}
+.. autoclass:: isocenter.builders.DicomBuilder
+   :members: start_patient
+```

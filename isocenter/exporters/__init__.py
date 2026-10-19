@@ -33,10 +33,10 @@ class Exporter:
 
         Returns:
             Any: The format's own result object. `dicom` returns an
-                `ExportSummary`; `wfdb` returns a `List[str]`
-                of paths. **Whatever the shape, it must let a caller
-                detect that nothing was written**: an empty list, a zero
-                count, a raise.
+            `ExportSummary`; `wfdb` returns a `List[str]`
+            of paths. **Whatever the shape, it must let a caller
+            detect that nothing was written**: an empty list, a zero
+            count, a raise.
         """
         raise NotImplementedError
 

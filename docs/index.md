@@ -1,16 +1,11 @@
----
-title: Isocenter
-template: home.html
-hide:
-  - navigation
-  - toc
----
-
 <!-- The hero (the one-line claim, the install command, the report
-     excerpt) and the pipeline band are rendered by docs/overrides/home.html
-     above this file's content. This file carries the rest of the landing
-     page as ordinary markdown; extra.css lays the "What it refuses to do"
-     and "What it does" lists out as the ledger's clause grid. -->
+     excerpt) and the pipeline band above this file's content are drawn
+     by docs/_templates/layout.html, and docs/_static/ledger.css styles
+     the sections below as the ledger. This file carries the rest of the
+     landing page as ordinary Markdown, and starts at `##` on purpose
+     (docs/conf.py, `suppress_warnings`). The toctree at the foot is the
+     site's navigation: every page is reachable from it
+     (tests/test_the_docs_are_myst.py, rule 9). -->
 
 ## The situation
 
@@ -70,3 +65,15 @@ One benchmark has a recorded run behind it: 100 multi-frame files, about 50 GB r
 Apache-2.0 (0.9.2 and earlier: AGPL-3.0-or-later). Each release is archived on Zenodo under the concept DOI [10.5281/zenodo.22104298](https://doi.org/10.5281/zenodo.22104298), and the repository carries a `CITATION.cff`. If Isocenter's de-identification is part of how a dataset was prepared, it belongs in the methods section.
 
 Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues), in public and for free; never post patient data, or anything taken from it, there. If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes. Help beyond bug reports and questions, such as configuring a profile for your protocol, integrating Isocenter into a pipeline, or reviewing a run's report, is available as paid consulting: write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
+
+```{toctree}
+:hidden:
+:maxdepth: 2
+
+Get started <get-started/index>
+Tutorials <tutorials/index>
+Guides <guides/index>
+Upgrading from 0.9.x <migration>
+API Reference <api/index>
+About <about/index>
+```
