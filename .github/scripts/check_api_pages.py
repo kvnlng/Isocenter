@@ -23,10 +23,6 @@ import pathlib
 import re
 import sys
 
-# Tables `api/entities/` holds: one per entity class with an Attributes
-# section. A new section there changes it; so does losing one.
-ENTITY_TABLES = 9
-
 # One row read by name, beside the general check: Session's
 # `configuration` is typed `IsocenterConfiguration`.
 KNOWN_ROW = ("api/session", "isocenter.session.DicomSession", "configuration",
@@ -51,6 +47,17 @@ def _text(fragment):
 
 def _squeezed(text):
     return re.sub(r"\s+", "", text)
+
+
+def _type_as_rendered(kind):
+    """A docstring type as napoleon renders it: a role's target alone
+    (`:class:`~a.B`` reads `B`, `:class:`a.B`` reads `a.B`), and no
+    backticks."""
+    kind = re.sub(r":[\w:.-]+:`~?([^`]*)`",
+                  lambda found: found.group(1).rsplit(".", 1)[-1]
+                  if found.group(0).split("`", 1)[1].startswith("~") else found.group(1),
+                  kind)
+    return kind.replace("`", "")
 
 
 def attribute_items(docstring):
@@ -116,8 +123,8 @@ def _tables(page):
     return found
 
 
-def problems(site, docstring_of=import_docstring, entity_tables=ENTITY_TABLES,
-             known_row=KNOWN_ROW, displayed=DISPLAYED):
+def problems(site, docstring_of=import_docstring, known_row=KNOWN_ROW,
+             displayed=DISPLAYED):
     site = pathlib.Path(site)
     found = []
     for path in sorted(site.rglob("*.html")):
@@ -131,6 +138,11 @@ def problems(site, docstring_of=import_docstring, entity_tables=ENTITY_TABLES,
         page = path.read_text(encoding="utf-8")
         rel = path.parent.relative_to(site).as_posix()
         tables[rel] = _tables(page)
+        owners = {owner for owner, _, _ in tables[rel]}
+        for owner in _OWNER.findall(page):
+            if owner not in owners and attribute_items(docstring_of(owner)):
+                found.append(f"{rel}/: {owner}'s docstring has Attributes and "
+                             "the page has no table under it")
         if _CLASS_PREFIX in page:
             found.append(f"{rel}/ has a class signature with its `class` prefix")
         for owner, rows, after in tables[rel]:
@@ -156,13 +168,11 @@ def problems(site, docstring_of=import_docstring, entity_tables=ENTITY_TABLES,
             for row, (name, kind) in zip(rows, items):
                 if len(row) != 3 or row[0].strip() != name.lstrip("*"):
                     found.append(f"{where}: row {row[:1]} is not {name!r}")
-                elif _squeezed(row[1]) != _squeezed(kind):
+                # No type in the docstring: napoleon takes the annotation's,
+                # which the docstring does not say, so any is accepted.
+                elif kind and _squeezed(row[1]) != _squeezed(_type_as_rendered(kind)):
                     found.append(f"{where}: {name}'s type reads {row[1].strip()!r}, "
                                  f"not {kind!r}")
-    entities = tables.get("api/entities", [])
-    if len(entities) != entity_tables:
-        found.append(f"api/entities/ has {len(entities)} attributes tables, "
-                     f"not {entity_tables}")
     page_name, owner, name, kind = known_row
     rows = [row for table_owner, table_rows, _ in tables.get(page_name, [])
             if table_owner == owner for row in table_rows]

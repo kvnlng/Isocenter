@@ -1364,8 +1364,9 @@ holds. Version order is git's `version:refname`, so `v1.0.10` is above
   folder). A refused run is outside the group and cancels nothing.
 - **Previews.** With the `docs` extra installed,
   `sphinx-build -W --keep-going -b dirhtml -d <tmp>/doctrees docs <tmp>/site`
-  into a directory outside the checkout (`docs/developer_guide.md` has the
-  command). Never build into the checkout's root or beside a concurrent
+  into a directory outside the checkout, then
+  `python .github/scripts/check_api_pages.py <tmp>/site`
+  (`docs/developer_guide.md` has the commands). Never build into the checkout's root or beside a concurrent
   pytest run, whose root guard fails on the new entry.
 
 ### The cutover to the versioned site (one time, #866)
@@ -1451,8 +1452,10 @@ For the 1.0.0 final, and for any later release whose pick range changes
 2. **Before tagging, at the release commit:** build the site with the
    `docs` extra on Python 3.14,
    `sphinx-build -W --keep-going -b dirhtml -d <tmp>/doctrees docs <tmp>/site`,
-   exit 0, and check that every heading id the previous release published
-   is still emitted. Record both in the release-commit PR. A red build
+   exit 0; run `python .github/scripts/check_api_pages.py <tmp>/site`,
+   exit 0 (the deploy job runs the same check, and a red there is a red
+   tag); and check that every heading id the previous release published
+   is still emitted. Record all three in the release-commit PR. A red build
    after the tag fails the tag's docs run, and its repair is a docs-only
    `release/X.Y` dispatch, which leaves the previous build live until then.
 3. **After the tag pushes**, check the docs run and record in the release

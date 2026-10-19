@@ -14,7 +14,6 @@ tests/test_mutation_probe_targets.py as an import.
 """
 import importlib.util
 import pathlib
-import re
 
 import pytest
 import yaml
@@ -49,8 +48,7 @@ DOCSTRINGS = {
         count: How many, untyped.
     """,
 }
-EXPECTED = dict(entity_tables=1,
-                known_row=("api/session", "pkg.session.Sess", "configuration", "Config"),
+EXPECTED = dict(known_row=("api/session", "pkg.session.Sess", "configuration", "Config"),
                 displayed=("api/session", "pkg.session.Sess", "Session", "ingest"))
 
 _ROWS = {
@@ -209,9 +207,91 @@ def test_a_member_missing_or_misnamed_in_on_this_page_fails(tmp_path, capsys, en
     _fails(_site(tmp_path, toc=_toc(entries)), wanted, capsys)
 
 
-def test_a_table_count_other_than_expected_on_entities_fails(tmp_path, capsys):
-    two = (_class("pkg.entities.Thing", "Thing", _ROWS["pkg.entities.Thing"]) * 2)
-    _fails(_site(tmp_path, entities=two), "api/entities/ has 2 attributes tables, not 1", capsys)
+def test_a_class_whose_docstring_has_attributes_and_no_table_fails(tmp_path, capsys):
+    """The tables expected are the classes with an Attributes section, on
+    any page (review of 5e21d349, V5: a fixed count refused a tenth)."""
+    bare = ('<dl class="py class">\n<dt class="sig sig-object py" id="pkg.entities.Thing">\n'
+            '<span class="sig-name descname"><span class="pre">Thing</span></span></dt>\n'
+            "<dd><p>Text.</p>\n</dd></dl>\n")
+    _fails(_site(tmp_path, entities=bare),
+           "pkg.entities.Thing's docstring has Attributes and the page has no table", capsys)
+
+
+def test_a_class_with_no_attributes_needs_no_table(tmp_path):
+    plain = ('<dl class="py class">\n<dt class="sig sig-object py" id="pkg.entities.Plain">\n'
+             '<span class="sig-name descname"><span class="pre">Plain</span></span></dt>\n'
+             "<dd><p>Text.</p>\n</dd></dl>\n")
+    entities = _class("pkg.entities.Thing", "Thing", _ROWS["pkg.entities.Thing"]) + plain
+    assert CHECK.problems(_site(tmp_path, entities=entities),
+                          {**DOCSTRINGS, "pkg.entities.Plain": "Plain."}.get, **EXPECTED) == []
+
+
+# --- Legitimate docstring edits pass (review of 5e21d349, V1-V7) ----------------
+#
+# Each is a docstring as someone might write it beside the page napoleon
+# and the hook build from it (the rendering measured on a real build for
+# each by the review's drift.py).
+
+THING = DOCSTRINGS["pkg.entities.Thing"]
+NAME_ROW = ("name", "<em>str</em>", "Its name.")
+
+
+@pytest.mark.parametrize("docstring, rows", [
+    # V1: an attribute added, and its row.
+    (THING.replace("        count:", "        note (str): A note.\n        count:"),
+     [NAME_ROW, _ROWS["pkg.entities.Thing"][1], ("note", "<em>str</em>", "A note."),
+      _ROWS["pkg.entities.Thing"][2]]),
+    # V2: a type changed.
+    (THING.replace("name (str)", "name (Optional[str])"),
+     [("name", "<em>Optional</em><em>[</em><em>str</em><em>]</em>", "Its name."),
+      *_ROWS["pkg.entities.Thing"][1:]]),
+    # V3: a type in backticks.
+    (THING.replace("name (str)", "name (`str`)"), _ROWS["pkg.entities.Thing"]),
+    # V4: no type in the docstring; napoleon renders the annotation's.
+    (THING.replace("name (str):", "name:"), _ROWS["pkg.entities.Thing"]),
+    # V6: a type written as a role, plain and with `~`.
+    (THING.replace("name (str)", "name (:class:`str`)"), _ROWS["pkg.entities.Thing"]),
+    (THING.replace("name (str)", "name (:class:`~pkg.types.Label`)"),
+     [("name", '<a href="#x"><em>Label</em></a>', "Its name."), *_ROWS["pkg.entities.Thing"][1:]]),
+    (THING.replace("name (str)", "name (:py:class:`pkg.types.Label`)"),
+     [("name", '<a href="#x"><em>pkg.types.Label</em></a>', "Its name."),
+      *_ROWS["pkg.entities.Thing"][1:]]),
+    # V7: an item whose description starts on the next line.
+    (THING.replace("name (str): Its name.", "name (str):\n            Its name."),
+     _ROWS["pkg.entities.Thing"]),
+], ids=["V1-added", "V2-type-changed", "V3-backticks", "V4-no-type", "V6-role",
+        "V6-role-tilde", "V6-role-domain", "V7-description-below"])
+def test_a_legitimate_docstring_edit_passes(tmp_path, docstring, rows):
+    site = _site(tmp_path, entities=_class("pkg.entities.Thing", "Thing", rows))
+    assert CHECK.problems(site, {**DOCSTRINGS, "pkg.entities.Thing": docstring}.get,
+                          **EXPECTED) == []
+
+
+def test_v5_attributes_on_another_class_pass(tmp_path):
+    other = "Other.\n\n    Attributes:\n        status (Status): Its status.\n"
+    entities = (_class("pkg.entities.Thing", "Thing", _ROWS["pkg.entities.Thing"])
+                + _class("pkg.entities.Other", "Other", [("status", "<em>Status</em>", "Its status.")]))
+    assert CHECK.problems(_site(tmp_path, entities=entities),
+                          {**DOCSTRINGS, "pkg.entities.Other": other}.get, **EXPECTED) == []
+
+
+@pytest.mark.parametrize("docstring, rows, wanted", [
+    # C12 under a role and under backticks: the cell is still read.
+    (THING.replace("name (str)", "name (:class:`str`)"),
+     [("name", "", "Its name."), *_ROWS["pkg.entities.Thing"][1:]], "name's type reads ''"),
+    (THING.replace("name (str)", "name (`str`)"),
+     [("name", "<em>int</em>", "Its name."), *_ROWS["pkg.entities.Thing"][1:]],
+     "name's type reads 'int'"),
+    # C7 beside a docstring that reaches it: an item the hook could not
+    # split is dropped and the table built anyway.
+    (THING.replace("        count:", "        note (str):\n        count:"),
+     _ROWS["pkg.entities.Thing"], "has 3 rows; its Attributes section has 4"),
+], ids=["C12-role", "C12-backticks-wrong-type", "C7-reaching-docstring"])
+def test_a_loss_beside_an_edited_docstring_still_fails(tmp_path, capsys, docstring, rows, wanted):
+    site = _site(tmp_path, entities=_class("pkg.entities.Thing", "Thing", rows))
+    docstrings = {**DOCSTRINGS, "pkg.entities.Thing": docstring}
+    found = CHECK.problems(site, docstrings.get, **EXPECTED)
+    assert any(wanted in problem for problem in found), found
 
 
 def test_a_docstring_it_cannot_read_fails(tmp_path, capsys):
@@ -243,18 +323,25 @@ def test_the_attribute_items_read_from_a_docstring(docstring, items):
 
 def test_the_expected_figures_name_real_rows():
     """The defaults the deploy runs with: the known row is in its class's
-    docstring with that type, the displayed class's member is real, and
-    api/entities.md documents ENTITY_TABLES classes with an Attributes
-    section."""
+    docstring with that type, and the displayed class's member is real."""
     page, owner, name, kind = CHECK.KNOWN_ROW
     assert (name, kind) in CHECK.attribute_items(CHECK.import_docstring(owner))
     page, owner, shown, member = CHECK.DISPLAYED
     assert CHECK.import_docstring(f"{owner}.{member}")
-    targets = re.findall(r"^\.\.\s+autoclass::\s+(\S+)\s*$",
-                         (REPO / "docs" / "api" / "entities.md").read_text(encoding="utf-8"),
-                         re.MULTILINE)
-    with_section = [t for t in targets if CHECK.attribute_items(CHECK.import_docstring(t))]
-    assert len(with_section) == CHECK.ENTITY_TABLES, with_section
+
+
+@pytest.mark.parametrize("path, command", [
+    ("RELEASING.md", "python .github/scripts/check_api_pages.py <tmp>/site"),
+    ("docs/developer_guide.md", "python .github/scripts/check_api_pages.py /tmp/isocenter-docs"),
+])
+def test_the_check_runs_before_a_tag_and_beside_a_local_build(path, command):
+    """A red here after the tag is a red tag's docs run (review of
+    5e21d349): the pre-tag build step and the developer guide's build
+    command run it too, on the tree they built."""
+    text = (REPO / path).read_text(encoding="utf-8")
+    assert command in text
+    built = command.split()[-1]
+    assert f"docs {built}" in text, f"{path} runs the check on a tree it did not build"
 
 
 def test_the_deploy_runs_the_check_between_the_build_and_the_push():

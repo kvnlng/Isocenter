@@ -89,9 +89,10 @@ The site is built with Sphinx and pydata-sphinx-theme, from MyST Markdown pages 
 ```bash
 pip install -e ".[docs]"
 sphinx-build -W --keep-going -b dirhtml -d /tmp/isocenter-doctrees docs /tmp/isocenter-docs
+python .github/scripts/check_api_pages.py /tmp/isocenter-docs
 ```
 
-`-W` is what the deploy uses: a warning fails the build. Never build into the checkout's root or beside a running `pytest`, which fails on any new entry in the root. Open `/tmp/isocenter-docs/index.html` to read the result; the version switcher reads the live site's list, so it shows the published versions, not this build.
+`-W` is what the deploy uses: a warning fails the build. The second command is the deploy's check of the API pages: each class's attributes table matches its docstring, `Session` is named as such, and "On this page" lists the members; it prints each problem and exits 1. Never build into the checkout's root or beside a running `pytest`, which fails on any new entry in the root. Open `/tmp/isocenter-docs/index.html` to read the result; the version switcher reads the live site's list, so it shows the published versions, not this build.
 
 ## 4. Release Process
 
