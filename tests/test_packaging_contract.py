@@ -2381,39 +2381,37 @@ DOCS_WORKFLOW = REPO / ".github" / "workflows" / "docs.yml"
 
 
 def test_the_docs_deploy_builds_strict_from_the_docs_extra():
-    """`docs.yml` builds `--strict` before mike deploys, from the docs extra, and caps every step.
+    """`docs.yml` builds with `sphinx-build -W` before it deploys, from the docs extra, and caps every step.
 
     Assertions about the only workflow in the repository that publishes
-    somewhere a reader can see: `mike deploy --push` writes a version
-    folder of the live documentation site (#866; `mkdocs gh-deploy`
-    before it).
+    somewhere a reader can see: `.github/scripts/docs_deploy.sh` writes a
+    version folder of the live documentation site (#866, which wrote it
+    with mike; `mkdocs gh-deploy` before that).
 
-    **Strict.** Without `--strict` a mkdocs or griffe warning goes into
-    a log nobody reads and the site deploys anyway (#635). Measured by
-    mutation on 0.9.8: a broken relative link under `docs/` is red under
-    `--strict` and **green on all 38 documentation tests the PR gate
-    runs**, so the flag closes a class nothing else covers -- the gap
-    `tests/test_doc_anchors.py`'s module docstring already writes down.
-    It is not a superset of those tests and does not retire them: a
-    second line at the base indent under a `Returns:`, which griffe
-    renders as several untyped "returned value N" rows, draws no warning
-    at all and is caught only by
-    `tests/test_api_docstrings_render_cleanly.py` (#565).
+    **Strict.** Without `-W` a Sphinx warning goes into a log nobody
+    reads and the site deploys anyway (#635, which added `--strict` to
+    the MkDocs build for the same reason). A warning here is a broken
+    cross-reference, a page missing from every toctree, or a docstring
+    napoleon cannot read. It is not a superset of the documentation
+    tests and does not retire them: a second line at the base indent
+    under a `Returns:` renders as a second paragraph, draws no warning,
+    and is caught only by `tests/test_api_docstrings_render_cleanly.py`
+    (#565). `-d` must put the pickled build state outside the site, or
+    `.doctrees/` is published into every folder.
 
-    mike has no strict mode: `mike/mkdocs_utils.py::build` runs `mkdocs
-    build --clean` and the `mike deploy` CLI passes no flag through
-    (mike 2.2.0). So the strict build is its own step, **before** the
-    mike step in the same job: a warning fails the run before anything
-    is pushed, and mike's own build is the same tree built again. No
-    step may still run `gh-deploy`: it publishes a root site, and its
-    commit holds only that build, so it deletes every version folder,
-    `versions.json` and the old-URL stubs (#866's hazard).
+    **The build is the deploy.** mike rebuilt the tree it pushed, so the
+    strict build was a separate check of a second, identical build. Now
+    the deploy pushes the very tree the build step wrote, so the build
+    must come first in the same job, and nothing may run mike, mkdocs or
+    `gh-deploy` (which publishes a root site whose commit holds only that
+    build, deleting every version folder, `versions.json` and the
+    old-URL stubs: #866's hazard).
 
-    **mike never overrides the remote.** `--ignore-remote-status` pushes
-    a diverged local `gh-pages`, and `--force` is the other way to throw
-    away what another deploy wrote. mike's own push is a plain `git push`
-    without force (`git_utils.push_branch`), which is the backstop for a
-    writer outside the workflow, such as a hand-run `mike alias`.
+    **Never over the remote.** No `git push` in the workflow or the
+    script carries `--force`, `-f` or a `+` refspec. The script's own
+    push is a plain push of one new commit, which is the backstop against
+    a `gh-pages` another writer moved. Only push lines are read: the
+    recheck's `git fetch --force --tags` updates local tags, not the site.
 
     **The ref filter** was pinned by nothing before this test, and its
     comment records the two unreviewed deploys from a feature branch it
@@ -2426,20 +2424,20 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     to the live site is not a thing to notice in review. Which ref may
     write which folder is the guard's, and the next tests'.
 
-    **The package list has one home.** The workflow hand-copied five
-    distributions, naming `pymdown-extensions` (absent from `setup.py`'s
-    `docs` extra) and omitting `mkdocs` (present there). The two lists
-    resolved to the identical eleven packages at the identical versions
+    **The package list has one home.** The workflow once hand-copied five
+    distributions, naming one `setup.py`'s `docs` extra did not and
+    omitting one it did. The two lists resolved to the identical packages
     when measured, which is what a second source of truth looks like
-    right up to the edit that moves one of them. `mike`, whose console
-    script the deploy step runs, is in that extra too.
+    right up to the edit that moves one of them. `sphinx`, whose
+    `sphinx-build` the build step runs, is in that extra; `mike` no
+    longer is, because nothing runs it.
 
-    **The caps** are the inequality `tests.yml` carries -- job cap above the sum of the step caps, every step
-    capped -- so whatever hangs, the timeout that fires belongs to a
-    step and names it. `docs.yml` had it backwards: a job cap of 10 over
-    step caps of 3 + 3 + 5 = 11, with three steps uncapped entirely, so
-    a long pip step was killed by the job cap, which says only "the docs
-    job hung".
+    **The caps** are the inequality `tests.yml` carries -- job cap above
+    the sum of the step caps, every step capped -- so whatever hangs, the
+    timeout that fires belongs to a step and names it. `docs.yml` had it
+    backwards before #635: a job cap of 10 over step caps of
+    3 + 3 + 5 = 11, with three steps uncapped entirely, so a long pip
+    step was killed by the job cap, which says only "the docs job hung".
 
     **PyYAML parses the bare `on` key as the boolean `True`** (YAML 1.1
     treats `on`/`off`/`yes`/`no` as booleans), so the triggers live at
@@ -2447,9 +2445,9 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     string, and `assert "on" in workflow` would pass vacuously. Do not
     "fix" the lookup.
 
-    Deliberately *not* here: any invocation of mkdocs. The build needs
+    Deliberately *not* here: any invocation of Sphinx. The build needs
     the `docs` extra, which the `tests` environment does not have, and a
-    test that skips when mkdocs is absent reads as a pass --
+    test that skips when Sphinx is absent reads as a pass --
     `tests/test_doc_anchors.py`'s fourth deferral makes that argument.
     """
     import yaml
@@ -2462,43 +2460,82 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     job = workflow["jobs"]["deploy"]
     steps = job["steps"]
 
-    # 1. Strict, then mike. Found by walking every job's steps for the
-    #    commands, so one moved to another step or job is still found.
+    # 1. No other tool, and no push over the remote. Found by walking
+    #    every job's steps, so one moved to another step or job is found.
     every_run = [step.get("run") or ""
                  for each in workflow["jobs"].values()
                  for step in each["steps"]]
-    gh_deploy = [run for run in every_run if "gh-deploy" in run]
-    assert not gh_deploy, (
-        f"a step still runs `mkdocs gh-deploy` ({gh_deploy!r}); it "
-        "publishes a root site whose commit holds only that build, which "
-        "deletes every version folder, versions.json and the old-URL "
-        "stubs (#866)")
+    for tool in ("gh-deploy", "mike", "mkdocs"):
+        running = [run for run in every_run
+                   if re.search(rf"(?<![\w-]){re.escape(tool)}(?![\w-])", run)]
+        assert not running, (
+            f"a step still runs {tool} ({running!r}); the site is built "
+            "by sphinx-build and deployed by docs_deploy.sh, and "
+            "gh-deploy deletes every version folder (#866)")
+    script = (REPO / DOCS_DEPLOY_SCRIPT).read_text(encoding="utf-8")
+    pushes = [line.strip()
+              for text in [*every_run, script]
+              for line in text.splitlines()
+              if re.search(r"\bgit\b.*\bpush\b", line)
+              and not line.lstrip().startswith("#")]
+    assert pushes, (
+        f"{DOCS_DEPLOY_SCRIPT} pushes nothing, so the site is never "
+        "deployed; or its push moved where this test does not read")
+    for line in pushes:
+        assert not re.search(r"(^|\s)(--force\S*|-f|--mirror)(\s|$)|\s\+\S",
+                             line), (
+            f"a push forces the remote ({line!r}); a gh-pages another "
+            "deploy moved must fail the run, never be pushed over (#866)")
+
+    # 2. Strict, then deploy, in the one job. The build writes SITE and
+    #    the deploy reads it; neither may be elsewhere.
     runs = [step.get("run") or "" for step in steps]
     deploying = [index for index, run in enumerate(runs)
-                 if "mike deploy" in run]
+                 if str(DOCS_DEPLOY_SCRIPT) in run]
     assert len(deploying) == 1, (
-        f"{len(deploying)} steps of the deploy job run `mike deploy`; "
+        f"{len(deploying)} steps of the deploy job run {DOCS_DEPLOY_SCRIPT}; "
         "exactly one must, or which one publishes the site is ambiguous")
-    elsewhere = sum("mike deploy" in run for run in every_run) - 1
+    elsewhere = sum(str(DOCS_DEPLOY_SCRIPT) in run for run in every_run) - 1
     assert not elsewhere, (
-        "`mike deploy` also runs outside the deploy job, outside its "
-        "concurrency group and without its strict build first")
-    strict = [index for index, run in enumerate(runs)
-              if "mkdocs build" in run and "--strict" in run]
-    assert len(strict) == 1, (
-        f"{len(strict)} steps run `mkdocs build --strict`; mike has no "
-        "strict mode, so without that step a mkdocs or griffe warning "
-        "publishes the site anyway and lands in a log nobody reads (#635)")
-    assert strict[0] < deploying[0], (
-        "the strict build runs after the mike deploy, so a warning fails "
-        "the run only once the site is already pushed")
-    mike_run = runs[deploying[0]]
-    for flag in ("--ignore-remote-status", "--force"):
-        assert flag not in mike_run, (
-            f"the mike deploy passes {flag}; a diverged or newer gh-pages "
-            "must fail the run, never be pushed over (#866)")
+        f"{DOCS_DEPLOY_SCRIPT} also runs outside the deploy job, outside "
+        "its concurrency group and without the strict build first")
+    building = [index for index, run in enumerate(runs)
+                if "sphinx-build" in run]
+    assert len(building) == 1, (
+        f"{len(building)} steps run sphinx-build; exactly one builds the "
+        "tree the deploy pushes")
+    build = runs[building[0]].split()
+    for flag in ("-W", "--keep-going"):
+        assert flag in build, (
+            f"the build does not pass {flag}; without -W a Sphinx warning "
+            "publishes the site anyway and lands in a log nobody reads "
+            "(#635)")
+    assert "-b" in build and build[build.index("-b") + 1] == "dirhtml", (
+        "the build is not `-b dirhtml`; every published URL ends in a "
+        "slash (ruling D0), and the html builder writes page.html instead")
+    assert build[-2:] == ["docs", '"$SITE"'], (
+        f"the build reads {build[-2]!r} and writes {build[-1]!r}; it must "
+        "write \"$SITE\", the job's one name for the tree the deploy pushes")
+    assert "-d" in build and "SITE" not in build[build.index("-d") + 1], (
+        "the build keeps its doctrees inside SITE (or the default, "
+        "SITE/.doctrees), which publishes Sphinx's pickles into every folder")
+    assert building[0] < deploying[0], (
+        "the build runs after the deploy, so a warning fails the run only "
+        "once the site is already pushed")
+    assert (job.get("env") or {}).get("SITE"), (
+        "the deploy job declares no SITE, so the build and the deploy name "
+        "the tree separately")
+    for index in (building[0], deploying[0]):
+        assert "SITE" not in (steps[index].get("env") or {}), (
+            "a step sets its own SITE, so the build and the deploy can "
+            "name different trees")
+    assert (steps[building[0]].get("env") or {}).get("DOCS_FOLDER") == \
+        "${{ needs.guard.outputs.folder }}", (
+            "the build's DOCS_FOLDER is not the guard's folder; docs/conf.py "
+            "gives it to the version switcher, so every folder would claim "
+            "to be dev and carry the old-version banner")
 
-    # 2. The ref filter: release tags only, never a branch. `main` is the
+    # 3. The ref filter: release tags only, never a branch. `main` is the
     #    development branch, and the site follows the latest published
     #    release, not what has merged since.
     triggers = workflow[True]
@@ -2513,14 +2550,14 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "whose docs did not change since the last tag, leaving the "
         "previous release's API reference live")
 
-    # 3. The trigger set.
+    # 4. The trigger set.
     assert set(triggers) == {"push", "workflow_dispatch"}, (
         f"docs.yml triggers on {sorted(str(key) for key in triggers)}; it "
         "must be push (release tags) and workflow_dispatch and nothing "
         "else -- a `pull_request` trigger on a workflow that deploys to "
         "the live site publishes every pull request")
 
-    # 4. One home for the package list.
+    # 5. One home for the package list.
     installing = [step for step in steps
                   if "pip install" in (step.get("run") or "")]
     assert len(installing) == 1, (
@@ -2530,25 +2567,25 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     assert ".[docs]" in install, (
         f"the install step runs {install!r} rather than installing the "
         "`docs` extra; a hand-copied package list is a second source of "
-        "truth for what the docs build needs, and it is what #635 filed "
-        "-- the old list named pymdown-extensions, which setup.py does "
-        "not, and omitted mkdocs, which it does")
+        "truth for what the docs build needs, and it is what #635 filed")
     declared = _setup_keyword("extras_require")["docs"]
-    restated = sorted(
-        name for name in (spec.split(">=")[0].split("==")[0].split("[")[0]
-                          for spec in declared)
-        if name in install)
+    names = {spec.split(">=")[0].split("==")[0].split("<")[0].split("[")[0]
+             for spec in declared}
+    restated = sorted(name for name in names if name in install)
     assert not restated, (
         f"the install step names {restated} itself as well as the `docs` "
         "extra; the extra in setup.py is the one home for that list "
         "(#635)")
-    assert "mike" in {spec.split(">=")[0].split("==")[0].split("[")[0]
-                      for spec in declared}, (
-        "the deploy step runs `mike`, and the `docs` extra does not "
-        "declare it; the command would come from nowhere the one list "
+    assert "sphinx" in names, (
+        "the build step runs `sphinx-build`, and the `docs` extra does not "
+        "declare sphinx; the command would come from nowhere the one list "
         "names")
+    assert not names & {"mike", "mkdocs", "mkdocs-material"}, (
+        f"the `docs` extra still installs {sorted(names & {'mike', 'mkdocs', 'mkdocs-material'})}, "
+        "which nothing runs; `pip install isocenter[docs]` would pull a "
+        "second documentation toolchain")
 
-    # 5. The cap inequality, both halves.
+    # 6. The cap inequality, both halves.
     uncapped = [step.get("name") or step.get("uses") or step.get("run")
                 for step in steps if "timeout-minutes" not in step]
     assert not uncapped, (
@@ -2566,6 +2603,63 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "unreachable and a hang there dies as 'cancelled' with no failing "
         "step in the log -- the shape of #243/#250, and the state docs.yml "
         "was in when #635 was written")
+
+
+def test_the_deploy_checks_a_heading_id_only_the_slug_hook_makes():
+    """The deploy job fails if the site lost the heading ids MkDocs published.
+
+    `docs/_ext/slugs.py`'s `pm_slug` gives every heading the id
+    Python-Markdown gave it, so the deep links into the MkDocs site keep
+    working. Sphinx also gives each section an id of its own, so if a
+    myst-parser release stopped calling `myst_heading_slug_func`, the
+    build would pass `-W` and every published deep link would break. The
+    check step greps the built page for one id that only the hook makes.
+
+    This test pins the two ends of that check: the step runs between the
+    build and the recheck (so a failure stops the push), and the id it
+    looks for is the hook's id of a heading that is still in the page.
+    Without the second half, rewording the heading would make the check
+    fail every deploy, or, after someone fixes that by deleting it,
+    check nothing.
+    """
+    import yaml
+
+    sys.path.insert(0, str(REPO / "docs" / "_ext"))
+    try:
+        from slugs import pm_slug
+    finally:
+        sys.path.remove(str(REPO / "docs" / "_ext"))
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["deploy"]["steps"]
+    runs = [step.get("run") or "" for step in steps]
+    checks = [index for index, run in enumerate(runs) if 'id="' in run]
+    assert len(checks) == 1, (
+        f"{len(checks)} deploy steps look for a heading id in the built "
+        "site; one must, or a myst-parser that stops calling the slug hook "
+        "breaks every deep link with a green build")
+    check = runs[checks[0]]
+    building = next(i for i, run in enumerate(runs) if "sphinx-build" in run)
+    names = [step.get("name") for step in steps]
+    assert building < checks[0] < names.index(DOCS_RECHECK_STEP), (
+        "the heading-id check is not between the build and the deploy, so "
+        "it checks nothing or checks after the push")
+    found = re.search(r'id="([^"]+)"\' "\$SITE/([^"]+)/index\.html"', check)
+    assert found, f"the check does not read one page of $SITE: {check!r}"
+    wanted, page = found.groups()
+    source = REPO / "docs" / f"{page}.md"
+    headings = [line.lstrip("#").strip()
+                for line in source.read_text(encoding="utf-8").splitlines()
+                if re.match(r"#{1,6} ", line)]
+    slugged = {pm_slug(text): text for text in headings}
+    assert wanted in slugged, (
+        f"the check looks for id={wanted!r} in {page}/, and no heading of "
+        f"docs/{page}.md slugs to it; it would fail every deploy")
+    plain = re.sub(r"[^\w-]+", "-", slugged[wanted].lower()).strip("-")
+    assert wanted != plain, (
+        f"{wanted!r} is also the id Sphinx gives {slugged[wanted]!r} by "
+        "itself, so its presence does not show the hook ran; pick a "
+        "heading whose two ids differ (one with a `.` in it)")
 
 
 def _step_named(workflow_path, job, name):
@@ -2608,9 +2702,10 @@ def _run_step_script(step, cwd, env):
 
 
 DOCS_GUARD_STEP = "Decide which docs folder this ref may write"
-DOCS_DEPLOY_STEP = "Deploy with mike"
+DOCS_DEPLOY_STEP = "Deploy onto gh-pages"
 DOCS_RECHECK_STEP = "Check the guard's decision still holds"
 DOCS_DECIDE_SCRIPT = pathlib.PurePosixPath(".github/scripts/docs_decide.sh")
+DOCS_DEPLOY_SCRIPT = pathlib.PurePosixPath(".github/scripts/docs_deploy.sh")
 
 
 def _with_decide_script(repo):
@@ -2668,7 +2763,7 @@ def _read_outputs(path):
 def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
     """Each ref writes one folder of the versioned site, or nothing (#866).
 
-    The site is versioned with mike: one folder per minor line (`1.0/`,
+    The site is versioned: one folder per minor line (`1.0/`,
     `1.1/`), a `latest` alias copied from the highest final release, and
     a hidden `dev/` for `main`. The guard job decides, for the ref a run
     was started from, which folder it may write, under what title, and
@@ -2871,25 +2966,23 @@ def test_the_docs_guard_maps_each_ref_to_the_folder_it_may_write(tmp_path):
             sha=run_git("rev-parse", "HEAD"))
 
 
-def test_the_docs_deploy_passes_the_guards_decision_to_mike(tmp_path):
-    """The deploy step turns the guard's four outputs into one `mike deploy`.
+def test_the_docs_deploy_passes_the_guards_decision_to_the_script():
+    """The deploy step hands the guard's four outputs and SITE to the script.
 
-    Run here with a stub `mike` on PATH that records its arguments, and a
-    real `origin` holding a `gh-pages` branch for the step's fetch. mike
-    itself is not run (the `docs` extra is not in the tests environment;
-    see the strict test's last paragraph). What this pins is the
-    assembly, which is where a silently wrong deploy would come from:
-    `latest` given without `--update-aliases` makes mike refuse to move
-    an alias another folder holds, and `dev` deployed without its hidden
-    property shows `main` in the selector (ruling Q3).
+    Through `env:`, never interpolated into the script text (the
+    injection shape `_run_step_script` refuses). The guard job must
+    declare each output, or the deploy job reads an empty string: an
+    empty FOLDER is refused by the script, but an empty ALIAS would
+    silently never move `latest`, and an empty HIDDEN would show `dev`
+    in the version switcher (ruling Q3).
     """
-    import os
-    import stat
-
     import yaml
 
     workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
     deploy = _step_named(DOCS_WORKFLOW, "deploy", DOCS_DEPLOY_STEP)
+    assert deploy.get("run", "").split() == ["bash", str(DOCS_DEPLOY_SCRIPT)], (
+        f"the deploy step runs {deploy.get('run')!r}, not the deploy script "
+        "by its path with no arguments (an argument would be `delete`)")
     env = deploy.get("env") or {}
     for name in DOCS_OUTPUTS:
         assert env.get(name.upper()) == \
@@ -2906,60 +2999,413 @@ def test_the_docs_deploy_passes_the_guards_decision_to_mike(tmp_path):
                 f"the guard job does not declare its `{name}` output, so "
                 "the deploy job reads an empty string")
 
-    origin = tmp_path / "origin"
-    origin.mkdir()
-    run_origin, git_env = _scratch_git(origin)
-    run_origin("init", "-q", "-b", "gh-pages")
-    run_origin("commit", "-q", "--allow-empty", "-m", "live site")
-    work = tmp_path / "work"
-    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True,
-                   capture_output=True,
-                   env={"PATH": os.environ["PATH"], **git_env})
 
+GH_PAGES_ROOT = REPO / "tests" / "fixtures" / "gh_pages_root"
+MIKE_VERSIONS_WITH_HIDDEN_DEV = (
+    REPO / "tests" / "fixtures" / "mike_2_2_0_versions_with_hidden_dev.json")
+SITE_URL = "https://kvnlng.github.io/Isocenter/"
+
+
+class _Pages:
+    """A scratch `origin` whose `gh-pages` starts as the live branch's root.
+
+    `origin` is bare, as GitHub's is, so the script's push is a real push
+    and every assertion reads what Pages would serve: the `gh-pages` ref
+    of `origin` after the run, never a working copy. `work` is the
+    checkout the workflow runs in, with `origin` as its remote and no
+    `gh-pages` of its own (as on the runner).
+
+    The root files are literal copies of the live branch's
+    (`tests/fixtures/gh_pages_root/`: the root redirect, the 404 page
+    that reads `versions.json`, `.nojekyll`, one pre-versioning stub and
+    `versions.json` as mike last wrote it), so "the script never touches
+    them" is checked against the bytes it would really meet.
+    """
+
+    def __init__(self, tmp_path, *, nojekyll=True, versions=None):
+        import os
+
+        self.tmp = tmp_path
+        seed = tmp_path / "seed"
+        shutil.copytree(GH_PAGES_ROOT, seed)
+        if not nojekyll:
+            (seed / ".nojekyll").unlink()
+        if versions is not None:
+            (seed / "versions.json").write_text(versions, encoding="utf-8")
+        for folder in ("1.0", "latest"):
+            (seed / folder).mkdir()
+            (seed / folder / "index.html").write_text(
+                "material build\n", encoding="utf-8")
+            (seed / folder / "stale.html").write_text(
+                "only in the old build\n", encoding="utf-8")
+        run_seed, self.git_env = _scratch_git(seed)
+        run_seed("init", "-q", "-b", "gh-pages")
+        run_seed("add", "-A")
+        run_seed("commit", "-q", "-m", "the live site")
+        self.origin = tmp_path / "origin.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(seed),
+                        str(self.origin)], check=True, capture_output=True,
+                       env={"PATH": os.environ["PATH"], **self.git_env})
+        self.work = tmp_path / "work"
+        self.work.mkdir()
+        self.run_work, _ = _scratch_git(self.work)
+        self.run_work("init", "-q", "-b", "main")
+        self.run_work("commit", "-q", "--allow-empty", "-m", "the source")
+        self.run_work("remote", "add", "origin", str(self.origin))
+        self.sites = 0
+
+    def origin_git(self, *args):
+        import os
+
+        return subprocess.run(
+            ["git", f"--git-dir={self.origin}", *args], check=True,
+            capture_output=True, env={"PATH": os.environ["PATH"],
+                                      **self.git_env}).stdout
+
+    def tip(self):
+        return self.origin_git("rev-parse", "gh-pages").decode().strip()
+
+    def site(self):
+        """A fresh fake build: two pages, with text no other build has."""
+        self.sites += 1
+        site = self.tmp / f"site{self.sites}"
+        (site / "api" / "stability").mkdir(parents=True)
+        (site / "index.html").write_text(f"build {self.sites}\n",
+                                         encoding="utf-8")
+        (site / "api" / "stability" / "index.html").write_text(
+            f"build {self.sites} stability\n", encoding="utf-8")
+        return site
+
+    def run(self, *args, site=None, folder="", title="", alias="",
+            hidden="false", path_prefix=None):
+        import os
+
+        env = {**self.git_env, "PYTHON": sys.executable,
+               "FOLDER": folder, "TITLE": title, "ALIAS": alias,
+               "HIDDEN": hidden, "SITE": str(site or "")}
+        path = os.environ["PATH"]
+        if path_prefix:
+            path = f"{path_prefix}{os.pathsep}{path}"
+        return subprocess.run(
+            [shutil.which("bash"), str(REPO / DOCS_DEPLOY_SCRIPT), *args],
+            cwd=str(self.work), capture_output=True, text=True,
+            env={**env, "PATH": path}, check=False)
+
+    def deploy(self, folder, title, alias="", hidden="false"):
+        site = self.site()
+        result = self.run(site=site, folder=folder, title=title, alias=alias,
+                          hidden=hidden)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return site
+
+    def files(self, folder):
+        """Every file under `folder/` on origin's gh-pages: path -> bytes."""
+        listing = self.origin_git("ls-tree", "-r", "--name-only",
+                                  f"gh-pages:{folder}").decode().split("\n")
+        return {name: self.origin_git("show", f"gh-pages:{folder}/{name}")
+                for name in listing if name}
+
+    def entry_mode(self, name):
+        line = self.origin_git("ls-tree", "gh-pages", name).decode()
+        return line.split()[0] if line else None
+
+    def json(self, name):
+        return json.loads(self.origin_git("show", f"gh-pages:{name}"))
+
+    def raw(self, name):
+        return self.origin_git("show", f"gh-pages:{name}")
+
+    def changed_since(self, commit):
+        return set(self.origin_git(
+            "diff", "--name-only", commit, "gh-pages").decode().split())
+
+
+def _site_files(site):
+    return {str(path.relative_to(site).as_posix()): path.read_bytes()
+            for path in site.rglob("*") if path.is_file()}
+
+
+def _switcher(*entries):
+    """`switcher.json` as the script must write it, from (title, version, latest)."""
+    out = []
+    for title, version, latest in entries:
+        item = {"name": title + (" (latest)" if latest else ""),
+                "version": version,
+                "url": SITE_URL + ("latest/" if latest else f"{version}/")}
+        if latest:
+            item["preferred"] = True
+        out.append(item)
+    return out
+
+
+def test_a_final_deploy_replaces_its_folder_and_latest_and_nothing_else(tmp_path):
+    """S1: `1.0`, `1.0.0`, `latest` over the live branch.
+
+    `1.0/` and `latest/` become the build exactly, with no file of the old
+    build left (a copy over the old folder would keep `stale.html`, a page
+    a reader could still reach); `latest/` is a directory, never a
+    symlink (#866, Q7: its URLs must survive the next minor);
+    `versions.json` is mike's file for the one entry; `switcher.json`
+    names it as the preferred version at `latest/`; and nothing else on
+    the branch changes, so the root redirect, the 404 page, `.nojekyll`
+    and the stubs are as they were made at the cutover.
+    """
+    pages = _Pages(tmp_path)
+    before = pages.tip()
+    site = pages.deploy("1.0", "1.0.0", alias="latest")
+
+    expected = _site_files(site)
+    assert pages.files("1.0") == expected
+    assert pages.files("latest") == expected
+    assert pages.entry_mode("latest") == "040000", (
+        "latest is not a directory on gh-pages; a symlink alias breaks "
+        "its URLs at the next minor (#866, Q7)")
+    assert pages.raw("versions.json") == (
+        b'[\n  {\n    "version": "1.0",\n    "title": "1.0.0",\n'
+        b'    "aliases": [\n      "latest"\n    ]\n  }\n]\n')
+    assert pages.json("switcher.json") == _switcher(("1.0.0", "1.0", True))
+    changed = pages.changed_since(before)
+    outside = sorted(name for name in changed
+                     if name not in ("versions.json", "switcher.json")
+                     and not name.startswith(("1.0/", "latest/")))
+    assert not outside, f"the deploy changed files it never writes: {outside}"
+    assert pages.origin_git("rev-parse", "gh-pages~1").decode().strip() == \
+        before, "the deploy is not one commit on the branch it fetched"
+    message = pages.origin_git("log", "-1", "--format=%s", "gh-pages")
+    assert message.decode().startswith("Deployed ") and b" to 1.0 " in message
+
+
+def test_a_deploy_with_no_alias_still_refreshes_the_aliases_its_folder_holds(tmp_path):
+    """S2: a candidate of the line `latest` copies refreshes `latest/` too.
+
+    mike's rule, which RELEASING.md relies on: a docs-only dispatch of
+    `release/1.0`, or the next 1.0 candidate, carries no alias (the guard
+    gives `latest` only to the highest final), yet `latest/` is a copy of
+    `1.0/` and must follow it.
+    """
+    pages = _Pages(tmp_path)
+    pages.deploy("1.0", "1.0.0", alias="latest")
+    site = pages.deploy("1.0", "1.0.0rc22")
+    assert pages.files("latest") == _site_files(site)
+    assert pages.json("versions.json") == [
+        {"version": "1.0", "title": "1.0.0rc22", "aliases": ["latest"]}]
+
+
+def test_a_new_line_candidate_leaves_latest_where_it_is(tmp_path):
+    """S3: `1.1`, `1.1.0rc1`, no alias: listed first, `latest/` untouched."""
+    pages = _Pages(tmp_path)
+    final = pages.deploy("1.0", "1.0.0", alias="latest")
+    pages.deploy("1.1", "1.1.0rc1")
+    assert pages.files("latest") == _site_files(final)
+    assert [entry["version"] for entry in pages.json("versions.json")] == \
+        ["1.1", "1.0"]
+    assert pages.json("switcher.json") == _switcher(
+        ("1.1.0rc1", "1.1", False), ("1.0.0", "1.0", True))
+
+
+def test_a_new_highest_final_takes_latest_from_the_older_line(tmp_path):
+    """S4: `1.1`, `1.1.0`, `latest`: the alias moves, and only it."""
+    pages = _Pages(tmp_path)
+    old = pages.deploy("1.0", "1.0.0", alias="latest")
+    new = pages.deploy("1.1", "1.1.0", alias="latest")
+    assert pages.files("latest") == _site_files(new)
+    assert pages.files("1.0") == _site_files(old)
+    assert pages.json("versions.json") == [
+        {"version": "1.1", "title": "1.1.0", "aliases": ["latest"]},
+        {"version": "1.0", "title": "1.0.0", "aliases": []}]
+    assert pages.json("switcher.json") == _switcher(
+        ("1.1.0", "1.1", True), ("1.0.0", "1.0", False))
+
+
+def test_dev_is_hidden_and_absent_from_the_switcher(tmp_path):
+    """S5: `dev` carries `hidden` in versions.json and is not offered.
+
+    `main` is unreleased; the switcher offers released lines only
+    (ruling Q3), and `latest/` is not touched by a `dev` deploy.
+    """
+    pages = _Pages(tmp_path)
+    final = pages.deploy("1.0", "1.0.0", alias="latest")
+    pages.deploy("dev", "dev", hidden="true")
+    assert pages.json("versions.json")[0] == {
+        "version": "dev", "title": "dev", "aliases": [],
+        "properties": {"hidden": True}}
+    assert pages.json("switcher.json") == _switcher(("1.0.0", "1.0", True))
+    assert pages.files("latest") == _site_files(final)
+
+
+def test_a_gh_pages_that_moved_since_the_fetch_fails_the_deploy(tmp_path):
+    """S6: another writer's commit lands between the fetch and the push.
+
+    A `git` on PATH that, at the push, first commits to origin's
+    gh-pages the way a concurrent deploy would, then runs the real
+    command. The push must be refused as a non-fast-forward: the run
+    fails and origin holds the other writer's commit, not ours.
+    """
+    pages = _Pages(tmp_path)
+    real_git = shutil.which("git")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    record = tmp_path / "mike-argv"
-    stub = bin_dir / "mike"
-    stub.write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done '
-                    f'> "{record}"\n', encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    wrapper = bin_dir / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do\n'
+        '  if [ "$arg" = push ]; then\n'
+        f'    tree=$("{real_git}" --git-dir="{pages.origin}" rev-parse gh-pages^{{tree}})\n'
+        f'    other=$("{real_git}" --git-dir="{pages.origin}" commit-tree "$tree" -p gh-pages -m "another deploy")\n'
+        f'    "{real_git}" --git-dir="{pages.origin}" update-ref refs/heads/gh-pages "$other"\n'
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        f'exec "{real_git}" "$@"\n', encoding="utf-8")
+    wrapper.chmod(0o755)
+    result = pages.run(site=pages.site(), folder="1.0", title="1.0.0",
+                       alias="latest", path_prefix=bin_dir)
+    assert result.returncode != 0, (
+        "the deploy succeeded over a gh-pages another writer moved; it "
+        "pushed over that deploy (#866)\n" + result.stdout + result.stderr)
+    message = pages.origin_git("log", "-1", "--format=%s", "gh-pages")
+    assert message.decode().strip() == "another deploy", (
+        "origin's gh-pages is not the other writer's commit")
 
-    def deploys(folder, title, alias, hidden):
-        if record.exists():
-            record.unlink()
-        result = _run_step_script(deploy, work, {
-            **git_env, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "FOLDER": folder, "TITLE": title, "ALIAS": alias,
-            "HIDDEN": hidden})
-        assert result.returncode == 0, result.stdout + result.stderr
-        return record.read_text(encoding="utf-8").splitlines()
 
-    assert deploys("1.0", "1.0.1", "latest", "false") == [
-        "deploy", "--push", "--title", "1.0.1", "--update-aliases",
-        "1.0", "latest"]
-    assert deploys("1.0", "1.0.1", "", "false") == [
-        "deploy", "--push", "--title", "1.0.1", "1.0"]
-    assert deploys("1.1", "1.1.0rc1", "", "false") == [
-        "deploy", "--push", "--title", "1.1.0rc1", "1.1"]
-    assert deploys("dev", "dev", "", "true") == [
-        "deploy", "--push", "--title", "dev", "--prop-set", "hidden=true",
-        "dev"]
+def test_a_gh_pages_without_nojekyll_is_refused_before_anything_is_written(tmp_path):
+    """S7: without `.nojekyll` Pages runs Jekyll, which drops `_static/`.
+
+    Every Sphinx page would then render unstyled and without its
+    scripts, so the deploy stops before it writes, and origin is as it
+    was.
+    """
+    pages = _Pages(tmp_path, nojekyll=False)
+    before = pages.tip()
+    result = pages.run(site=pages.site(), folder="1.0", title="1.0.0",
+                       alias="latest")
+    assert result.returncode != 0
+    assert ".nojekyll" in result.stderr
+    assert pages.tip() == before
+
+
+def test_deleting_dev_removes_it_and_a_folder_holding_latest_is_refused(tmp_path):
+    """S8: `docs_deploy.sh delete dev`, and the refusal to delete `latest`'s folder.
+
+    Removing an unwanted `dev/` is an operation of RELEASING.md's. It
+    takes the folder and its entry and rewrites the switcher; a folder an
+    alias copies is refused, because deleting it would leave `latest`
+    pointing at nothing the switcher or the 404 page could name.
+    """
+    pages = _Pages(tmp_path)
+    pages.deploy("1.0", "1.0.0", alias="latest")
+    pages.deploy("dev", "dev", hidden="true")
+    with_dev = pages.tip()
+
+    result = pages.run("delete", "1.0")
+    assert result.returncode != 0
+    assert "latest" in result.stderr
+    assert pages.tip() == with_dev
+
+    result = pages.run("delete", "dev")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pages.entry_mode("dev") is None
+    assert pages.json("versions.json") == [
+        {"version": "1.0", "title": "1.0.0", "aliases": ["latest"]}]
+    assert pages.json("switcher.json") == _switcher(("1.0.0", "1.0", True))
+    changed = pages.changed_since(with_dev) - {"versions.json",
+                                                "switcher.json"}
+    assert changed and all(name.startswith("dev/") for name in changed), (
+        f"deleting dev changed {sorted(changed)}")
+
+    result = pages.run("delete", "dev")
+    assert result.returncode != 0, "deleting a folder that is not there passed"
+
+
+def test_the_script_writes_versions_json_as_mike_does(tmp_path):
+    """S9: the file round-trips byte for byte with mike 2.2.0's.
+
+    The root `404.html` reads `versions.json` to tell a version folder
+    from a pre-versioning URL, and a mike-era tag that is still its
+    line's head can write it again. So it stays mike's file: same key
+    order, `properties` only when set, `dev` (a version not starting with
+    a digit) first, then newest first, two-space indent, final newline.
+
+    Both samples are literal: the live branch's file (redeploying its own
+    state must reproduce it), and
+    `tests/fixtures/mike_2_2_0_versions_with_hidden_dev.json`, which mike
+    2.2.0 wrote from that file with `Versions.add('dev', 'dev', [])`,
+    `set_property('hidden', True)`, `Versions.add('1.1', '1.1.0rc1', [])`
+    and `dumps() + '\\n'` (what `mike/commands.py` commits). mike is not
+    in the tests environment, so it is not run here.
+    """
+    live = (GH_PAGES_ROOT / "versions.json").read_bytes()
+    pages = _Pages(tmp_path)
+    pages.deploy("1.0", "1.0.0rc21", alias="latest")
+    assert pages.raw("versions.json") == live
+
+    pages.deploy("dev", "dev", hidden="true")
+    pages.deploy("1.1", "1.1.0rc1")
+    assert pages.raw("versions.json") == \
+        MIKE_VERSIONS_WITH_HIDDEN_DEV.read_bytes()
+
+
+@pytest.mark.parametrize("folder", ["", ".", "..", "../1.0", "1.0/x", "api",
+                                    "latest", "1"])
+def test_the_deploy_refuses_a_folder_the_guard_never_names(tmp_path, folder):
+    """Only `X.Y` or `dev`: anything else could name the root or a stub.
+
+    The script removes `<FOLDER>/` before it copies. An empty or dotted
+    name would remove the whole site, `api` a pre-versioning stub, and
+    `latest` the alias by a route that skips `versions.json`.
+    """
+    pages = _Pages(tmp_path)
+    before = pages.tip()
+    result = pages.run(site=pages.site(), folder=folder, title="1.0.0")
+    assert result.returncode != 0
+    assert pages.tip() == before
+    result = pages.run("delete", folder)
+    assert result.returncode != 0
+    assert pages.tip() == before
+
+
+def test_the_deploy_refuses_a_site_holding_sphinx_build_state(tmp_path):
+    """A SITE holding `.doctrees/` would publish Sphinx's pickles."""
+    pages = _Pages(tmp_path)
+    before = pages.tip()
+    site = pages.site()
+    (site / ".doctrees").mkdir()
+    result = pages.run(site=site, folder="1.0", title="1.0.0")
+    assert result.returncode != 0
+    assert pages.tip() == before
+
+
+def test_the_deploy_refuses_a_local_gh_pages_that_has_diverged(tmp_path):
+    """A hand run with unpushed local `gh-pages` commits is stopped.
+
+    Those commits are someone's work on the site; deploying from the
+    fetched tip would leave them stranded without a word.
+    """
+    pages = _Pages(tmp_path)
+    before = pages.tip()
+    pages.run_work("fetch", "-q", "origin", "gh-pages")
+    pages.run_work("branch", "gh-pages", "FETCH_HEAD")
+    pages.run_work("commit", "-q", "--allow-empty", "-m", "on main")
+    pages.run_work("update-ref", "refs/heads/gh-pages", "HEAD")
+    result = pages.run(site=pages.site(), folder="1.0", title="1.0.0")
+    assert result.returncode != 0
+    assert "diverged" in result.stderr
+    assert pages.tip() == before
 
 
 def test_the_docs_deploy_refuses_a_guard_decision_the_tags_have_since_overtaken(tmp_path):
-    """The deploy job decides again, just before mike, and stops on a change.
+    """The deploy job decides again, just before the deploy, and stops on a change.
 
     The guard's outputs can be old by the time the deploy uses them
     (review of #871, finding 1). "Re-run failed jobs" reuses the outputs
     of the guard that already succeeded: a `v1.0.1` deploy that failed and
     is re-run after `v1.1.0` shipped would still carry `alias=latest`, and
-    `mike deploy --update-aliases 1.0 latest` would move `latest` back to
-    the older line. Two tags pushed together queue their deploys in the
+    the deploy would move `latest` back to the older line. Two tags pushed together queue their deploys in the
     order their guards *finished*, with the same result. And a re-run
     after `v1.0.2` would put the superseded 1.0.1 back into `1.0/`.
 
     So the deploy job runs the guard's own script again against the tags
-    as they are now, immediately before the mike step, and fails on any
+    as they are now, immediately before the deploy step, and fails on any
     difference from the guard's outputs. Executed here against real tags,
     with the outputs of an earlier decision.
     """
@@ -2977,7 +3423,7 @@ def test_the_docs_deploy_refuses_a_guard_decision_the_tags_have_since_overtaken(
         "back onto an older line")
     recheck = _step_named(DOCS_WORKFLOW, "deploy", DOCS_RECHECK_STEP)
     assert names.index(DOCS_RECHECK_STEP) == names.index(DOCS_DEPLOY_STEP) - 1, (
-        "the recheck is not the step immediately before the mike deploy; "
+        "the recheck is not the step immediately before the deploy; "
         "every minute between them is a minute a newer tag can land in")
     assert "if" not in recheck, "the recheck is conditional"
     assert str(DOCS_DECIDE_SCRIPT) in recheck["run"], (
@@ -3059,7 +3505,7 @@ def test_a_refused_docs_run_cannot_cancel_a_deploy():
     all of it. With a versioned site, runs write different folders, and
     cancelling a `1.0/` deploy because a `dev/` deploy started would lose
     1.0's update silently. With `false` the deploys serialise, so two
-    mike commits never race inside the workflow. GitHub still keeps at
+    deploy commits never race inside the workflow. GitHub still keeps at
     most one run pending per group and cancels the older pending one, so
     losing a deploy takes three in flight and shows as a cancelled run;
     it is re-dispatched from its ref (RELEASING.md, "Documentation site").

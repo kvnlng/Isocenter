@@ -82,6 +82,17 @@ python -m tests.benchmarks.run_stress_test --input <dicom-dir> --output <out-dir
 
 [Performance](performance.md) records the one benchmark run with its machine and date.
 
+### Documentation
+
+The site is built with Sphinx and pydata-sphinx-theme, from MyST Markdown pages under `docs/` and the package's docstrings. Install the `docs` extra and build into a directory outside the checkout:
+
+```bash
+pip install -e ".[docs]"
+sphinx-build -W --keep-going -b dirhtml -d /tmp/isocenter-doctrees docs /tmp/isocenter-docs
+```
+
+`-W` is what the deploy uses: a warning fails the build. Never build into the checkout's root or beside a running `pytest`, which fails on any new entry in the root. Open `/tmp/isocenter-docs/index.html` to read the result; the version switcher reads the live site's list, so it shows the published versions, not this build.
+
 ## 4. Release Process
 
 The procedure -- how changes reach `main`, how a release branch is cut,
