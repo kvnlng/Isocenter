@@ -85,7 +85,15 @@ html[data-theme="light"] {
 .bd-article a:not(.headerlink) { text-decoration: none; border-bottom: 1px solid var(--ledger-accent-rule); }
 .bd-article a:not(.headerlink):hover { color: var(--ledger-accent-dark); border-bottom-color: var(--ledger-accent); }
 .bd-article code.literal { background: rgba(31, 29, 25, 0.06); color: var(--ledger-ink); border: 0; border-radius: 2px; padding: 0 0.3em; }
+/* Long inline code breaks inside its own box rather than running past the
+ * column on a phone: Sphinx's span.pre is `white-space: nowrap`. */
+.bd-article code.literal, .bd-article code.literal span.pre { white-space: normal; overflow-wrap: break-word; }
+.bd-article table.ledger-attributes code.literal span.pre { white-space: nowrap; }
 .bd-article hr { border-color: var(--ledger-rule); }
+/* The Attributes table conf.py's _present_objects builds from napoleon's fields. */
+.bd-article p.rubric { font-weight: 600; margin-top: 1.2rem; }
+.bd-article table.ledger-attributes { width: 100%; }
+.bd-article table.ledger-attributes td:first-child, .bd-article table.ledger-attributes td:nth-child(2) { white-space: nowrap; }
 .bd-article table.table { border: 1px solid var(--ledger-rule); font-size: 0.9rem; }
 .bd-article table.table th { background: var(--ledger-band); color: var(--ledger-ink); }
 
@@ -115,6 +123,10 @@ html[data-theme="light"] .bd-article .highlight .hll { background: rgba(46, 107,
 .bd-sidebar-primary .bd-links .current > a { font-weight: 600; box-shadow: inset 2px 0 0 var(--ledger-accent); }
 .bd-sidebar-secondary { border-left: 1px solid var(--ledger-rule); }
 .bd-sidebar-secondary .onthispage { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ledger-muted); }
+/* "On this page" names an API page's members (conf.py's toc settings); Sphinx
+ * writes each as code, which the MkDocs site's table of contents did not. */
+.bd-sidebar-secondary code.literal { background: none; border: 0; padding: 0; font-family: inherit; font-size: inherit; font-weight: 400; color: inherit; }
+.bd-sidebar-secondary .toc-entry > .nav-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bd-sidebar-secondary .nav-link.active { color: var(--ledger-accent); box-shadow: inset 2px 0 0 var(--ledger-accent); }
 
 /* Footer. */
