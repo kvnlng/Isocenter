@@ -174,11 +174,9 @@ setup(
             # docs/_ext/slugs.py gives every heading Python-Markdown's id,
             # so no anchor the MkDocs site published changes (and
             # tests/test_doc_anchors.py reads ids with the same function).
-            "markdown>=3.4",
-            # docs.yml still deploys with mike until the deploy step is
-            # rewritten (docs/sphinx C3), which removes this line in the
-            # same commit that takes mike out of the workflow.
-            "mike>=2.2,<3"
+            "markdown>=3.4"
+            # No deploy tool: .github/scripts/docs_deploy.sh writes the
+            # versioned site with git alone (it replaced mike).
         ],
         # Optional: ZoneDiscoverer imports spacy lazily and falls back to
         # regex when it is unavailable.
@@ -244,7 +242,7 @@ setup(
             "setuptools>=70.1",
             # tests/test_doc_anchors.py renders the docs and checks that
             # every `#fragment` link lands on an anchor a heading really
-            # produces -- `mkdocs build --strict` validates file
+            # produces -- the MkDocs build's `--strict` validated file
             # references but not fragments, which is why five links in
             # docs/configuration.md were dead for months (#152). The
             # renderer has to be the real one: a stdlib slugifier written

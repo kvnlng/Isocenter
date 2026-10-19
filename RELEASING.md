@@ -1262,26 +1262,34 @@ The problem is public now, and the rest is the ordinary procedure.
 
 ## Documentation site
 
-The site is versioned with [mike](https://github.com/jimporter/mike) (#866).
-Everything lives on the `gh-pages` branch, which GitHub Pages serves under
-the `github-pages` environment (its deployment-branch policy admits only
-`gh-pages`):
+The site is built with [Sphinx](https://www.sphinx-doc.org/) (`dirhtml`)
+and pydata-sphinx-theme, and deployed onto the `gh-pages` branch by
+`.github/scripts/docs_deploy.sh`. The folder layout and `versions.json` are
+the ones mike made (#866), and the script keeps both. Everything lives on
+the `gh-pages` branch, which GitHub Pages serves under the `github-pages`
+environment (its deployment-branch policy admits only `gh-pages`):
 
 | Folder | Holds | Written by |
 |---|---|---|
-| `X.Y/` (`1.0/`, `1.1/`, …) | The newest release of line X.Y: its highest final `vX.Y.Z`, or its highest pre-release while it has no final. Titled with that version | A tag push, or a dispatch from `release/X.Y` |
-| `latest/` | A copy of the folder of the highest final release (a copy, not a symlink or redirect, so its URLs stay put at the next minor) | Moved only by the tag of the highest final release |
-| `dev/` | `main`, hidden from the version selector | A dispatch from `main` |
+| `X.Y/` (`1.0/`, `1.1/`, …) | The newest release of line X.Y: its highest final `vX.Y.Z`, or its highest pre-release while it has no final. Titled with that version | `docs_deploy.sh`, from a tag push or a dispatch from `release/X.Y` |
+| `latest/` | A copy of the folder of the highest final release (a copy, not a symlink or redirect, so its URLs stay put at the next minor) | `docs_deploy.sh`; moved only by the tag of the highest final release |
+| `dev/` | `main`, hidden from the version switcher | `docs_deploy.sh`, from a dispatch from `main` |
+| `versions.json` | Every folder, its title, its aliases and whether it is hidden, in mike's format. The root `404.html` reads it | `docs_deploy.sh`, every deploy |
+| `switcher.json` | pydata's version list, derived from `versions.json`: every folder that is not hidden, the one holding `latest` marked preferred and linked at `latest/` | `docs_deploy.sh`, every deploy; never by hand |
 | root `index.html` | A redirect to `latest/` | By hand, once (the cutover below) |
-| root page stubs and `404.html` | Redirects from the pre-versioning URLs to the same page under `latest/` | By hand, once; frozen, and never touched by mike |
+| root page stubs, `404.html` and `.nojekyll` | Redirects from the pre-versioning URLs to the same page under `latest/`; `.nojekyll` stops Jekyll dropping Sphinx's `_static/` | By hand, once; frozen, and never touched by the script |
 
 Lines below 1.0 are not published. The root redirects to `latest/`, so the
 default site is always the latest release, never unreleased `main`; every
-folder but `latest/` carries a banner linking to it.
+folder but the one `latest` copies (and `latest/` itself) carries pydata's
+banner linking to it.
 
 `docs.yml` runs on a pushed `v*` tag and on manual dispatch. Its `guard`
 job decides which folder the ref may write, and the `deploy` job runs only
-after it passes:
+after it passes. The deploy job builds the site with `sphinx-build -W`,
+checks that a heading id only the slug hook makes is present, decides
+again, and hands the built tree to `docs_deploy.sh`, which pushes that tree
+and nothing rebuilt:
 
 | Ref | Writes | Moves `latest` |
 |---|---|---|
@@ -1306,67 +1314,64 @@ holds. Version order is git's `version:refname`, so `v1.0.10` is above
   patch.
 - **`dev`:** `gh workflow run docs.yml --ref main`. Nothing deploys `main`
   on push.
-- **To redeploy line X.Y** (after a failed or cancelled run), dispatch from
-  `release/X.Y` if it is docs-only since its newest tag, or from that tag if
-  the tag was cut after #866.
+- **To redeploy line X.Y** (after a failed or cancelled run, or to correct
+  its content), dispatch from `release/X.Y` if it is docs-only since its
+  newest tag, or from that tag if the tag was cut after the move to Sphinx.
+  A problem in a live folder is fixed forward this way: there is no
+  rollback of the site.
+- **A wrong `latest`** is put right by dispatching the tag of the highest
+  final release, whose deploy moves it.
+- **An unwanted `dev/`** is removed with
+  `bash .github/scripts/docs_deploy.sh delete dev`, from a checkout with
+  `origin` reachable and no unpushed local `gh-pages`. It removes the folder
+  and its `versions.json` entry and rewrites `switcher.json`, in one commit
+  pushed without force. It removes only `dev/` or a folder `versions.json`
+  marks hidden: a released line's folder is refused (it is fixed by
+  deploying it again, never removed), and so is a folder that holds
+  `latest`.
 - **Never "Re-run" a failed docs run; dispatch it again from its ref.** A
   re-run reuses the old run's guard decision, which a newer tag may have
   overtaken (a `latest` that belongs to a newer line, a patch that is no
   longer its line's newest). The deploy job decides again from the tags just
-  before `mike deploy` and fails on any difference, so a re-run of a stale
-  run fails rather than deploying, but only a fresh dispatch deploys the
-  right thing. The same check stops a tag's deploy that queued behind a
-  newer tag's; dispatch that one again too, if its folder still needs it.
+  before it deploys and fails on any difference, so a re-run of a stale run
+  fails rather than deploying, but only a fresh dispatch deploys the right
+  thing. The same check stops a tag's deploy that queued behind a newer
+  tag's; dispatch that one again too, if its folder still needs it.
 - **Never dispatch `docs.yml` from a tag cut before #866** (`v1.0.0rc6` and
   every earlier tag). A dispatch runs the workflow file *at that ref*,
   which is the old `mkdocs gh-deploy`. While such a tag is the highest `v*`
   tag, its old guard admits it, and gh-deploy commits a tree holding only its
   root site, deleting every version folder, `versions.json` and the stubs.
   Once a later tag exists every old tag fails its own old guard, but do not
-  rely on that. If it happens, `git revert` that commit on `gh-pages` and
-  push; neither tool force-pushes, so the history is intact.
+  rely on that.
+- **Never dispatch `docs.yml` from a tag cut before the move to Sphinx**
+  (`v1.0.0rc21` and every earlier tag). It runs MkDocs and mike, and puts a
+  Material build into its folder (and into `latest/`, which mike refreshes
+  as an alias) without updating `switcher.json`. Its own guard refuses it
+  once a later tag on its line exists, which is true of every such tag from
+  the first tag cut after the move on. A redeploy of 1.0 never needs one:
+  it is a dispatch of `release/1.0` or of the newest tag.
+- **The deploy never forces.** `docs_deploy.sh` builds one commit on the
+  `gh-pages` it fetched and pushes it plainly; if anything moved the branch
+  in between, the push is refused and the run fails. It refuses a
+  `gh-pages` without `.nojekyll` at its root, and a local `gh-pages` that
+  has diverged from `origin`'s.
 - **Concurrency.** Deploys queue in one group and never cancel one in
   progress: each writes its own folder, and a cancelled `1.0/` deploy would
   lose 1.0's update silently. GitHub keeps one run pending per group, so a
   third deploy in flight cancels the pending one; that shows as a cancelled
   run, and is re-dispatched from its ref (a deploy is idempotent per
   folder). A refused run is outside the group and cancels nothing.
-- **Previews.** `mkdocs serve` previews one tree (it needs the `docs`
-  extra). `mike serve` shows the version selector against your local
-  `gh-pages` branch. Both write into the checkout's root (`site/`, and
-  mike's temporary `mike-mkdocs*.yml`), so never run them inside a test or
-  beside a concurrent pytest run.
-
-### Rollback
-
-Everything is ordinary history on `gh-pages`, and neither mike nor the
-workflow rewrites it. mike pushes without force and refuses a diverged
-local `gh-pages`; never pass `--ignore-remote-status` or `--force`. Run the
-hand commands in a clean checkout of the line's branch with the `docs`
-extra and `origin/gh-pages` fetched, so that `mkdocs.yml`'s
-`alias_type: copy` applies (a tree without it makes a symlink alias).
-
-- **Bad content in a folder:** re-dispatch that folder's ref, after
-  reverting the bad change on `release/X.Y` if that is where it came from.
-  By hand,
-  `mike deploy --push --title X.Y.Z X.Y` works only from a checkout that
-  carries #866's `mkdocs.yml`: a checkout of `release/X.Y` at the good
-  commit, or a tag cut after #866. From an older tree, such as
-  `v1.0.0rc6`, the build has no version selector and mike falls back to
-  its default alias type, so `latest` becomes a git symlink (ruled out,
-  Q7). **Until a tag cut after #866 exists, the rollback for `1.0/` is a
-  re-dispatch of `release/1.0`**; the tag-based form is valid for 1.0 from
-  the first tag cut after #866 (the next 1.0 candidate or `v1.0.0`) on.
-- **Wrong `latest`:** `mike alias --push --update-aliases X.Y latest`.
-- **Unwanted `dev`:** `mike delete --push dev`.
-- **Abandon versioning** (before or after 1.0.0): revert the #866 change on
-  `main` and on `release/1.0`; on `gh-pages`, restore the tree of
-  `dd5c7409` (the last root site) as a new commit (`git checkout dd5c7409
-  -- .`, `git rm` what that tree lacks, commit, push without force); the
-  next tag then deploys a root site through the old workflow. Only the
-  `latest/` links published since the cutover break.
+- **Previews.** With the `docs` extra installed,
+  `sphinx-build -W --keep-going -b dirhtml -d <tmp>/doctrees docs <tmp>/site`
+  into a directory outside the checkout (`docs/developer_guide.md` has the
+  command). Never build into the checkout's root or beside a concurrent
+  pytest run, whose root guard fails on the new entry.
 
 ### The cutover to the versioned site (one time, #866)
+
+Done 2026-09-30; its mike commands describe the tooling of that time
+(record on #866).
 
 None of the tags up to `v1.0.0rc6` carries the versioned `docs.yml`, so the
 first versioned build comes from `release/1.0` (owner ruling Q1: now, by
@@ -1404,6 +1409,62 @@ links are dead from the merge of #866 until step 4, so keep that short.
 After the cutover, the next candidate and then `v1.0.0` deploy into `1.0/`
 from their tags, and `latest/` follows (mike refreshes every alias of the
 folder it deploys).
+
+### The builder change at 1.0.0 (one time)
+
+Nothing chooses the builder at run time. A run, from a tag push or a
+dispatch, executes `docs.yml` and `docs_decide.sh` as they are *at that
+ref*:
+
+| Ref | Its `docs.yml` builds with |
+|---|---|
+| `v1.0.0rc6` and earlier | `mkdocs gh-deploy` (before #866) |
+| `v1.0.0rc7` to `v1.0.0rc21` | `mkdocs build --strict`, then mike |
+| every tag cut after the move to Sphinx, and every `release/1.0` or `main` dispatch after it is picked | `sphinx-build -W`, then `docs_deploy.sh` |
+
+`docs_decide.sh` did not change and no builder switch was added to it: a
+rule in the new guard could never govern an old tag, which runs its own.
+
+The window in which a mike-era tag can still deploy is from the pick to the
+next 1.0 tag, while `v1.0.0rc21` is still 1.0's head: a dispatch of that tag
+then rebuilds Material into `1.0/` and `latest/` legitimately. Nothing Sphinx
+is live in that window except `dev/` (the `release/1.0` dispatch refuses,
+because the docstring reflow changed `isocenter/` since rc21), so the window
+loses nothing. From the next 1.0 tag on, every mike-era tag is refused by
+its own guard.
+
+The first 1.0 tag cut after the pick is the first Sphinx deploy of `1.0/`.
+If it is a candidate, it carries no alias but still refreshes `latest/`,
+because `1.0` holds `latest` (owner ruling S1): the default site goes Sphinx
+at that candidate, which rehearses the change on the real folders before
+the final. `v1.0.0` then replaces `1.0/` and `latest/`, titles the entry
+`1.0.0` with `latest`, and writes `switcher.json` with one preferred entry,
+`1.0.0 (latest)`. The rc-era Material builds of `1.0/` remain in `gh-pages`
+history (`fadeb086` and earlier); nothing restores them, and a problem in
+the Sphinx site is fixed forward.
+
+For the 1.0.0 final, and for any later release whose pick range changes
+`docs/conf.py` or the `docs` extra:
+
+1. **Choosing the commit** ("Cutting a release", step 1): the move to
+   Sphinx and the site's design must both be on `main` at or before it.
+2. **Before tagging, at the release commit:** build the site with the
+   `docs` extra on Python 3.14,
+   `sphinx-build -W --keep-going -b dirhtml -d <tmp>/doctrees docs <tmp>/site`,
+   exit 0, and check that every heading id the previous release published
+   is still emitted. Record both in the release-commit PR. A red build
+   after the tag fails the tag's docs run, and its repair is a docs-only
+   `release/X.Y` dispatch, which leaves the previous build live until then.
+3. **After the tag pushes**, check the docs run and record in the release
+   issue: `curl -sI` on `/Isocenter/`, `latest/`, `1.0/`, `dev/`, one
+   pre-versioning stub and a bogus path; three deep anchors
+   (`/Isocenter/configuration/#privacy-profile`,
+   `/Isocenter/latest/analytics/#how-the-grade-is-decided`,
+   `/Isocenter/latest/api/stability/#frozen-at-10`); the switcher shows
+   `1.0.0 (latest)` and not `dev`; no banner on `latest/` or `1.0/`; the
+   banner on `dev/`.
+4. `publish.yml`, the record-back (step 8) and the shard-timings refresh
+   are unchanged.
 
 ## What cannot be undone
 

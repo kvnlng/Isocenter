@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Which folder of the versioned documentation site may this ref write
 # (#866)? Run by docs.yml twice: by the `guard` job, whose outputs the
-# deploy job reads, and again by the deploy job just before `mike deploy`,
+# deploy job reads, and again by the deploy job just before it deploys,
 # which fails the run if the answer has changed since (a "Re-run failed
 # jobs" of an old run, or two tags whose deploys queued out of order). One
 # file, so the two cannot disagree about the rule.
@@ -20,7 +20,7 @@
 #
 # The release-branch rule compares against $GITHUB_SHA, the tip that was
 # dispatched, never HEAD. `isocenter/` is the discriminator because
-# mkdocstrings renders the API reference from it: a branch whose
+# autodoc renders the API reference from it: a branch whose
 # `isocenter/` equals its line head's describes exactly what `pip install
 # isocenter==<title>` installs (#866, Q6).
 #
