@@ -28,10 +28,14 @@ the version ships, say in the CHANGELOG why it is not a behaviour change.
 - `basic@2026c` with private tags kept and the opt-in rules of #1130,
   #1131 and #1132 (`OPT_IN_CONFIG`), over two more files: a REMOVE keyed
   by private creator over a file holding that creator's block beside
-  another creator's at the same element offset, `SCRUB` with `[names,
+  another creator's at the same element offset, and over a file spelling
+  that creator in another case and spacing (#1147), `SCRUB` with `[names,
   dates, ids]` on a Study Description holding an id, a date and the
-  patient's own name, and a kept Content Sequence whose TEXT item is
-  scrubbed. No target names `orgs`, which needs a model 3.14t cannot
+  patient's own name, and on one cut at LO's 64 characters inside that
+  name, and a kept Content Sequence whose TEXT items are scrubbed with
+  every kind that needs no model: one keeps its double spaces, a protocol
+  token and a decimal, and one holds a phone, an address, a site and
+  initials (#1146). No target names `orgs`, which needs a model 3.14t cannot
   install, so the digest stays the same on every interpreter.
 
 The files are CT_small and MR_small (bundled with pydicom) and five
@@ -182,7 +186,8 @@ OPT_IN_CONFIG = (
     "  '0009,\"B3 DIGEST\",27': {action: REMOVE}\n"
     "  0008,1030: {action: SCRUB, target: [names, dates, ids]}\n"
     "  0040,a730: {action: KEEP}\n"
-    "  0040,a160: {action: SCRUB, target: [names, dates, ids]}\n")
+    "  0040,a160: {action: SCRUB, target: [names, dates, ids, phones, addresses,"
+    " sites, initials]}\n")
 
 
 def _opt_in_inputs(directory):
@@ -190,7 +195,8 @@ def _opt_in_inputs(directory):
     block before `B3 DIGEST`'s, both holding element offset 0x27 (one
     removed by creator, one kept), and a Study Description to scrub; and
     a Comprehensive SR whose Content Sequence holds a TEXT item to scrub
-    beside a PNAME, a DATE and a UIDREF that the nested rows reach."""
+    beside a PNAME, a DATE and a UIDREF that the nested rows reach, and
+    whose own block names `B3 DIGEST` in another case and spacing."""
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
     ds.remove_private_tags()
     ds.SOPInstanceUID = "1.2.826.0.1.3680043.8.498.782.91"
@@ -221,6 +227,12 @@ def _opt_in_inputs(directory):
     sr.PatientID, sr.PatientName = ds.PatientID, ds.PatientName
     sr.Modality = "SR"
     sr.ValueType = "CONTAINER"
+    # `B3 DIGEST` spelt in lower case with two spaces: the key matches it
+    # (#1147), so a change to the creator fold moves the digest.
+    sr.private_block(0x0009, "b3  digest", create=True).add_new(0x27, "LO", "removed")
+    # 64 characters, LO's maximum, cut inside the patient's family name
+    # (#1146): its last word goes as a name.
+    sr.StudyDescription = "t1_mprage_sag_iso_1mm_p2_ND_RR_MOCO_SUMMARY_TRA2 for Tamsin Quil"
 
     def item(value_type, meaning, **values):
         one = Dataset()
@@ -238,6 +250,12 @@ def _opt_in_inputs(directory):
         item("PNAME", "Observer", PersonName="Observer^One"),
         item("DATE", "Date", Date="20040119"),
         item("UIDREF", "Source", UID="1.2.826.0.1.3680043.8.498.782.96"),
+        # #1146: double spaces, a protocol token and a decimal kept; and
+        # each regular kind removed.
+        item("TEXT", "Comment", TextValue="flair_sag_3d_p2  0.488281  for 4826153907"),
+        item("TEXT", "Comment", TextValue=(
+            "Ordered for 4826153907 by SS at QRMC; call (312)555-0147x12; "
+            "41 Willowbend Ct Fairhaven, OR 97999")),
     ])
     sr.save_as(os.path.join(directory, "sr.dcm"))
 

@@ -827,6 +827,10 @@ def clone_sequences(item: 'DicomItem', into: 'DicomItem') -> dict:
             # raises it, and the arm shifts it a second time.
             if nested._shifted_dates:
                 nested_clone._shifted_dates = dict(nested._shifted_dates)
+            # The private tags' recorded VRs travel too: the scan reads
+            # them for a private Person Name and a private text element's
+            # length limit (#1146).
+            nested_clone.attribute_vrs = dict(nested.attribute_vrs)
             nested_clone.sequences = clone_sequences(nested, nested_clone)
             nested_clone._parent = into
             clone.items.append(nested_clone)
