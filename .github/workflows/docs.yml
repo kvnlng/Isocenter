@@ -182,6 +182,20 @@ jobs:
           echo "::error::api/stability/ has no id=\"frozen-at-10\"; the heading-id hook (docs/_ext/slugs.py) did not run, so every deep link the MkDocs site published is broken"
           exit 1
         fi
+    # docs/conf.py's `_present_objects` rewrites the API pages at
+    # doctree-read: napoleon's attribute lists become tables, a class
+    # signature loses its `class` prefix, DicomSession shows as Session,
+    # and "On this page" lists members by name. A mistake there loses a
+    # row or a type with a green `-W` build, and the tests environment has
+    # no docutils to run the hook, so the built pages are checked here,
+    # against the docstrings they were built from, before anything is
+    # pushed. tests/test_the_api_pages_check.py runs the script on fixture
+    # pages and holds this step between the build and the deploy.
+    - name: Check the API pages kept their attributes and names
+      timeout-minutes: 1
+      env:
+        SITE: ${{ runner.temp }}/site
+      run: python .github/scripts/check_api_pages.py "$SITE"
     # The guard decided minutes ago, and possibly much longer: "Re-run
     # failed jobs" reuses an old run's guard outputs, and two tag pushes'
     # deploys enter the queue in the order their guards *finished*. Either
