@@ -7,7 +7,7 @@ no text: it returns where text is, with a score, and nothing else. So
 nothing it found can be quoted, logged, stored or hashed; only boxes
 leave this module.
 
-**OpenCV is the optional `textdetect` extra** (owner ruling Q-C1 (a)).
+**OpenCV is the optional** `textdetect` **extra** (owner ruling Q-C1 (a)).
 It publishes no free-threaded wheel, so on 3.14t the import fails,
 `HAS_DETECTOR` is False, and `detector: db` raises
 `TextDetectorUnavailableError`. Every function here except
@@ -259,7 +259,7 @@ def _detect_boxes(image: np.ndarray, input_size: Tuple[int, int],
 
     Returns:
         list: `(quad, score)` per region at or above `min_score`, the quad
-            a `(4, 2)` array of `(x, y)` in `image`'s coordinates.
+        a `(4, 2)` array of `(x, y)` in `image`'s coordinates.
     """
     model = _model()
     model.setPolygonThreshold(float(min_score))

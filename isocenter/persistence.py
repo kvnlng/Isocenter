@@ -104,8 +104,8 @@ def _phi_status_from_stored(value) -> PhiStatus:
 
     Returns:
         PhiStatus: The status; UNSCANNED for NULL and for any value not
-            recognised, so an unrecognised claim never presents as an
-            assurance.
+        recognised, so an unrecognised claim never presents as an
+        assurance.
     """
     try:
         return PhiStatus(value)
@@ -121,7 +121,7 @@ def _stale_status_from_stored(value) -> Optional[PhiStatus]:
 
     Returns:
         Optional[PhiStatus]: The stale status, or None for NULL (not
-            stale), UNSCANNED, or a value not recognised.
+        stale), UNSCANNED, or a value not recognised.
     """
     try:
         status = PhiStatus(value)
@@ -143,7 +143,7 @@ def _status_columns(entity):
 
     Returns:
         tuple: `(phi_status, phi_policy, phi_policy_base,
-            phi_status_edited)`.
+        phi_status_edited)`.
     """
     # One read of the record, in `_phi_status_record`'s order (the recorded
     # revision first, the current one last), so a save racing an audit
@@ -323,7 +323,7 @@ _SQLITE_BUSY_TIMEOUT_S = 120.0
 
 #: How long a sidecar writer, a redact()/ingest() pass, or `compact()`
 #: waits for the sidecar gate or the pass-lock before raising.
-#: Its place in the timeout family, with what each bound protects:
+#: Its place in the timeout family, with what each bound protects::
 #:
 #:     _SQLITE_BUSY_TIMEOUT_S = 120  <  this = 180
 #:         <  _WORKER_FAULTHANDLER_TIMEOUT_S = 240  <  faulthandler_timeout = 300
@@ -568,7 +568,7 @@ def _as_stored_date(value) -> Optional[str]:
 
     Returns:
         Optional[str]: ISO text for a date, `str(value)` otherwise, None
-            for None.
+        for None.
     """
     # Python 3.12 deprecated sqlite3's default date adapter, so dates are
     # converted here rather than left for sqlite3 to guess at.
@@ -645,7 +645,7 @@ def _unstorable_type(value, vertical: bool = False) -> Optional[str]:
 
     Returns:
         Optional[str]: `type(...).__name__` of the offending value, or
-            None when the store holds all of it.
+        None when the store holds all of it.
     """
     # The same reading the writers make, in the same order: the numpy
     # twin first (`_python_value`), then the type. Never the value.
@@ -736,7 +736,7 @@ def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
 
     Returns:
         Optional[str]: None for None (stored as SQL NULL); the decimal
-            integer for an `AT` value; `str(atom)` otherwise.
+        integer for an `AT` value; `str(atom)` otherwise.
 
     Raises:
         TypeError: `atom` is not None, a `str`, an `int`, a `float` or a
@@ -786,7 +786,7 @@ def _vertical_atom_value(vr: str, text: Optional[str]) -> Any:
 
     Returns:
         None for NULL; an `int` or `float` for the VRs in
-            `_VERTICAL_VR_PARSERS` when the text parses; the text otherwise.
+        `_VERTICAL_VR_PARSERS` when the text parses; the text otherwise.
     """
     if text is None:
         # Behaviour-equivalent to falling through, and written anyway.
@@ -818,7 +818,7 @@ def _is_private_tag(key) -> bool:
 
     Returns:
         bool: True for a private tag; False for anything else, including
-            a key that is not a tag.
+        a key that is not a tag.
     """
     # The one statement of the storage split: `_split_core_and_private`
     # routes by it and `_serialize_item` picks the root `__vrs__` by it, so
@@ -846,7 +846,7 @@ def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
     Returns:
         Tuple of (core attributes keyed by "gggg,eeee", private attributes
-            keyed by a ("gggg", "eeee") tuple).
+        keyed by a ("gggg", "eeee") tuple).
     """
     core, private = {}, {}
 
@@ -1334,7 +1334,7 @@ class SqliteStore:
 
         Returns:
             str: The message every channel carries, naming the lock file
-                and `_SIDECAR_GATE_TIMEOUT_S`.
+            and `_SIDECAR_GATE_TIMEOUT_S`.
         """
         return (f"Sidecar gate {self._gate_path()} not acquired within "
                 f"_SIDECAR_GATE_TIMEOUT_S={_SIDECAR_GATE_TIMEOUT_S:g} s; a "
@@ -2045,7 +2045,7 @@ class SqliteStore:
 
         Returns:
             List[tuple]: `(timestamp, action_type, details)` per row; empty
-                if the query fails.
+            if the query fails.
         """
         self.flush_audit_queue()
         try:
@@ -2174,7 +2174,7 @@ class SqliteStore:
 
         Returns:
             List[tuple]: `(sop_instance_uid, file_path, details)` per
-                instance; empty if the query fails.
+            instance; empty if the query fails.
         """
         unsafe = []
         try:
@@ -2216,8 +2216,8 @@ class SqliteStore:
 
         Returns:
             List[tuple]: (sop_instance_uid, file_path, details), the
-                same shape as `check_unsafe_attributes` so `generate_report`
-                files both through one channel.
+            same shape as `check_unsafe_attributes` so `generate_report`
+            files both through one channel.
         """
         flagged = []
         try:
@@ -2334,7 +2334,7 @@ class SqliteStore:
 
         Returns:
             List[Patient]: Every stored patient, with its subtree; empty for
-                a file store whose database file does not exist.
+            a file store whose database file does not exist.
         """
         patients = []
         if self.db_path != ":memory:" and not os.path.exists(self.db_path):
@@ -2796,7 +2796,7 @@ class SqliteStore:
 
         Returns:
             int: How many statuses carry no policy (UNSCANNED and stale
-                ones aside).
+            ones aside).
         """
         # Nothing is reinterpreted against the policy in force, which a
         # load cannot know (`Session(db)` hydrates before any
@@ -3054,7 +3054,7 @@ class SqliteStore:
         - **Refused** the same way when instances carry a replaced SOP
           Instance UID (`_replaced_uid_evidence`): a new secret would
           replace them a second time.
-        - **Generated, with a `WARNING` row**, when keyed `ANON_`
+        - **Generated**, with a `WARNING` row, when keyed `ANON_`
           pseudonyms are present but nothing was shifted: an export from
           another project ingested into a fresh store. The split is
           across stores, not inside this one.
@@ -3198,8 +3198,8 @@ class SqliteStore:
 
         Returns:
             Tuple[bool, bytes]: Whether this call inserted, and the secret
-                the store holds afterwards -- the winner when another session
-                inserted first.
+            the store holds afterwards -- the winner when another session
+            inserted first.
         """
         # Never `REPLACE`: a replaced secret is a second offset for every
         # patient already shifted under the first.
@@ -3561,7 +3561,7 @@ class SqliteStore:
 
         Returns:
             Dict[Tuple[str, str], Any]: (group, element) -> value; empty if
-                the instance has no rows.
+            the instance has no rows.
         """
         return self.load_vertical_attributes_bulk([instance_uid]).get(instance_uid, {})
 
@@ -3581,9 +3581,9 @@ class SqliteStore:
 
         Returns:
             Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not
-                tags: a value with multiplicity 3 is three rows), and
-                per-instance `{sop_instance_uid: [tags]}` so the caller can heal
-                the live graph and write the audit trail.
+            tags: a value with multiplicity 3 is three rows), and
+            per-instance `{sop_instance_uid: [tags]}` so the caller can heal
+            the live graph and write the audit trail.
         """
         dropped: Dict[str, List[str]] = {}
         rows_deleted = 0
@@ -3657,8 +3657,8 @@ class SqliteStore:
 
         Returns:
             Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID ->
-                {(group, element): value}. Instances with no vertical rows are
-                absent rather than present-and-empty.
+            {(group, element): value}. Instances with no vertical rows are
+            absent rather than present-and-empty.
 
         Raises:
             sqlite3.Error: The read failed. Not swallowed: an empty result
@@ -3948,7 +3948,7 @@ class SqliteStore:
 
         Returns:
             Dict[str, Tuple[int, int]]: instance_uid -> (offset, length), for
-                rows that have both.
+            rows that have both.
         """
         with self._get_connection() as conn:
             rows = conn.execute("""
@@ -3968,7 +3968,7 @@ class SqliteStore:
 
         Returns:
             Dict[Tuple[str, str], Tuple[int, int]]: `(uid, kind)` ->
-                `(offset, length)`, for rows that have both.
+            `(offset, length)`, for rows that have both.
         """
         with self._get_connection() as conn:
             rows = conn.execute("""
@@ -4130,7 +4130,7 @@ class SqliteStore:
 
         Returns:
             tuple: `(patients, studies, series)` counts over the whole
-                list, each owner counted where the walk meets it.
+            list, each owner counted where the walk meets it.
         """
         counts = [0, 0, 0]
         for patient in patients:
@@ -4332,7 +4332,7 @@ class SqliteStore:
 
         Returns:
             List[Tuple[Instance, int]]: The instances written, each with
-                the revision to mark persisted; empty if the patient has no row.
+            the revision to mark persisted; empty if the patient has no row.
         """
         # A scoped `WHERE parent_id_fk = ?` delete is only correct once
         # the row it might delete has had the chance to be claimed by its
@@ -4395,7 +4395,7 @@ class SqliteStore:
 
         Returns:
             Optional[int]: The row's primary key, or None if no row exists
-                after the write.
+            after the write.
         """
         # "Or missing": a write that goes around the tracked-field path can
         # leave a clean patient under an ID with no row; without this the
@@ -4646,9 +4646,9 @@ class SqliteStore:
 
         Returns:
             List[Tuple[Instance, int]]: The (instance, revision) pairs
-                written, for the caller to mark persisted once the transaction
-                has committed. The revision was captured *before* the write, so
-                an edit arriving mid-save is not mistaken for the stored state.
+            written, for the caller to mark persisted once the transaction
+            has committed. The revision was captured *before* the write, so
+            an edit arriving mid-save is not mistaken for the stored state.
         """
         # Selected by object identity, never by SOP Instance UID. A UID can
         # change in place between the prepass and here (redaction does
@@ -4711,7 +4711,7 @@ class SqliteStore:
 
         Returns:
             Tuple of (instance rows, instance_blobs rows, (uid, private
-                attributes, private VRs) triples for the vertical table).
+            attributes, private VRs) triples for the vertical table).
         """
         # No I/O of any kind, and there must not be: this runs inside
         # `save_all`'s open transaction. The captured revision is the one
@@ -4859,7 +4859,7 @@ class SqliteStore:
 
         Returns:
             Dict[Instance, Tuple[int, _StoredFrame]]: instance ->
-                (revision captured before the write, the frame written).
+            (revision captured before the write, the frame written).
         """
         # Runs ahead of `save_all`'s connection so the transaction does row
         # upserts and nothing else -- no compression, no sidecar append, no
@@ -5138,7 +5138,7 @@ class SqliteStore:
 
         Returns:
             int: The count of rows in the `instances` table; 0 on a
-                database error, which is logged.
+            database error, which is logged.
         """
         try:
             with self._get_connection() as conn:
@@ -5163,7 +5163,7 @@ class SqliteStore:
         - **Iteration is not one snapshot.** Each page is its own query, so
           writes that land between pages are visible and rows deleted between
           pages are not returned.
-        - **Order is by `instances.id`.**
+        - **Order is by** `instances.id`.
 
         Args:
             patient_ids (Iterable[str], optional): Restrict the rows to
@@ -5184,12 +5184,12 @@ class SqliteStore:
 
         Returns:
             Iterator[dict]: One dict per instance, keyed `patient_id`,
-                `patient_name`, `study_instance_uid`, `study_date`,
-                `series_instance_uid`, `modality`, `series_number`,
-                `manufacturer`, `model_name`, `device_serial_number`,
-                `sop_instance_uid`, `sop_class_uid`, `instance_number`,
-                `file_path`, `pixel_offset`, `pixel_length`, `compress_alg` and
-                `attributes_json`, with the values as stored.
+            `patient_name`, `study_instance_uid`, `study_date`,
+            `series_instance_uid`, `modality`, `series_number`,
+            `manufacturer`, `model_name`, `device_serial_number`,
+            `sop_instance_uid`, `sop_class_uid`, `instance_number`,
+            `file_path`, `pixel_offset`, `pixel_length`, `compress_alg` and
+            `attributes_json`, with the values as stored.
 
         Raises:
             ValueError: If `page_size` is not a whole number >= 1, at the call,
@@ -5527,7 +5527,7 @@ class SqliteStore:
 
         Returns:
             List[PhiFinding]: The stored findings; empty for a file store
-                whose database file does not exist.
+            whose database file does not exist.
         """
         findings = []
         if self.db_path != ":memory:" and not os.path.exists(self.db_path):
@@ -5583,8 +5583,8 @@ class SqliteStore:
 
         Returns:
             Dict[str, Tuple[int, int]]: SOP Instance UID -> new
-                `(offset, length)`, for top-level pixel blobs only; empty when
-                nothing is live (the file is then left as it is).
+            `(offset, length)`, for top-level pixel blobs only; empty when
+            nothing is live (the file is then left as it is).
 
         Raises:
             sqlite3.Error: Propagated from `_read_blob_index()` when the
@@ -5667,7 +5667,7 @@ class SqliteStore:
 
         Returns:
             Tuple of (live rows ordered by offset, orphan `instance_blobs.id`
-                values as single-element tuples ready for `executemany`).
+            values as single-element tuples ready for `executemany`).
 
         Raises:
             sqlite3.Error: The read failed; logged, then re-raised.
@@ -5732,7 +5732,7 @@ class SqliteStore:
 
         Returns:
             Tuple of (updates, uid_map, bytes written), where `updates` is
-                (new_offset, new_length, instance_blobs.id) per row.
+            (new_offset, new_length, instance_blobs.id) per row.
         """
         updates = []
         uid_map = {}
@@ -5874,8 +5874,8 @@ def _tag_number_strings(obj):
 
     Returns:
         The same shape in new containers, each DS or IS atom replaced by
-            `{"__type__": "DS"|"IS", "data": <its text>}`; other values as
-            given.
+        `{"__type__": "DS"|"IS", "data": <its text>}`; other values as
+        given.
     """
     # New containers, never an edit of `obj`'s: `_serialize_item` hands
     # this a shallow copy whose lists are the graph's own.
@@ -5924,8 +5924,8 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
         Returns:
             dict | list | bool | int | float | str: `{"__type__": "bytes",
-                "data": <base64>}` for `bytes`, a list for a `MultiValue`,
-                the Python twin of a numpy scalar or 0-d array.
+            "data": <base64>}` for `bytes`, a list for a `MultiValue`,
+            the Python twin of a numpy scalar or 0-d array.
 
         Raises:
             TypeError: For any other type (from `json.JSONEncoder.default`).
@@ -5967,7 +5967,7 @@ def isocenter_json_object_hook(d):
 
     Returns:
         bytes | DSfloat | IS | dict: The value for a tagged dict; `d`
-            unchanged otherwise.
+        unchanged otherwise.
     """
     # Built under `IGNORE`, so a reload neither refuses nor re-warns about
     # text ingest accepted. The two `attributes_json` readers that pass no

@@ -85,7 +85,7 @@ _DUMMY_TEXTS = frozenset(value.upper() for value in VR_DUMMY.values()
 def name_tokens(person_names: Iterable) -> Tuple[str, ...]:
     """The words a `names` target removes, from Person Name values.
 
-    Each value is split into its values (`\\`) and component groups (`=`);
+    Each value is split into its values (``\\``) and component groups (`=`);
     of each group's `^`-separated components the family, given and middle
     names are kept and the prefix and suffix dropped, so `Dr` or `Jr`
     never becomes a word to remove. Each component is split on

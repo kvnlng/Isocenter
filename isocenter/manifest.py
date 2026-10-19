@@ -80,9 +80,9 @@ class Manifest:
 
         Returns:
             dict: `generated_at`, `project_name`, `total_files` and
-                `items` (each a dict of its `ManifestItem` fields).
-                `total_files` is computed from `items`, not read from the
-                field of the same name.
+            `items` (each a dict of its `ManifestItem` fields).
+            `total_files` is computed from `items`, not read from the
+            field of the same name.
         """
         return {
             "generated_at": self.generated_at,
@@ -206,7 +206,7 @@ def get_manifest_renderer(format: str):
 
     Returns:
         JSONManifestRenderer | HTMLManifestRenderer: A new renderer for the
-            format.
+        format.
 
     Raises:
         ValueError: For any other spelling, `None` and case variants

@@ -83,52 +83,61 @@ The grade describes a run. Whether the result meets a protocol or a regulation i
 
 The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. The promise covers the conditions, not the direction a grade can move: a 1.x fix that stops writing a wrong row can move a run from `REVIEW_REQUIRED` to `PASS`, and the CHANGELOG entry for that fix says so. The wording of the report and of each Grade Basis line is not part of that promise ([API stability](api/stability.md)).
 
-!!! note "A `WARNING` row needs a person; a correction is not reported"
+:::{admonition} A `WARNING` row needs a person; a correction is not reported
+:class: note
 
-    What you will **not** find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation, BitsStored, Rows or Columns rewritten to match the pixels actually written, or Encapsulated Document Length `(0042,0015)` rewritten to the length of the document written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at `INFO` and are neither recorded in the audit log nor graded. The default console handler shows `WARNING` and above, so they do not appear on screen either. Four more lines go out on that same `INFO` channel, with no row, and are not corrections of that kind. When a colour image or icon held no Planar Configuration in its source, the export says it wrote the 0 ingest inferred ([#1134](https://github.com/kvnlng/Isocenter/issues/1134)). When one declared a value other than 0 under a compressed syntax whose stream fixes the layout, the export says it read and wrote 0 ([#1137](https://github.com/kvnlng/Isocenter/issues/1137)). When a file carries no Encapsulated Document `(0042,0011)` -- a rule removed it, or it was dropped at ingest with its own `DATA_LOSS` row -- its Encapsulated Document Length is not written, and the line says so. And when the export writes a private value that this library's own `ingest()` would drop (over 65534 bytes, under a binary VR or `UN`), the line names the element: the file is written as asked, but re-ingesting it here will lose that value with a `DATA_LOSS` row. To see these lines, attach a handler at `INFO` to the `isocenter` logger. A `WARNING` row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself -- statuses recorded under another policy, or a `patient_ids` that named a patient the session does not hold, or a `subset` that named a UID it does not hold.
+What you will **not** find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation, BitsStored, Rows or Columns rewritten to match the pixels actually written, or Encapsulated Document Length `(0042,0015)` rewritten to the length of the document written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at `INFO` and are neither recorded in the audit log nor graded. The default console handler shows `WARNING` and above, so they do not appear on screen either. Four more lines go out on that same `INFO` channel, with no row, and are not corrections of that kind. When a colour image or icon held no Planar Configuration in its source, the export says it wrote the 0 ingest inferred ([#1134](https://github.com/kvnlng/Isocenter/issues/1134)). When one declared a value other than 0 under a compressed syntax whose stream fixes the layout, the export says it read and wrote 0 ([#1137](https://github.com/kvnlng/Isocenter/issues/1137)). When a file carries no Encapsulated Document `(0042,0011)` -- a rule removed it, or it was dropped at ingest with its own `DATA_LOSS` row -- its Encapsulated Document Length is not written, and the line says so. And when the export writes a private value that this library's own `ingest()` would drop (over 65534 bytes, under a binary VR or `UN`), the line names the element: the file is written as asked, but re-ingesting it here will lose that value with a `DATA_LOSS` row. To see these lines, attach a handler at `INFO` to the `isocenter` logger. A `WARNING` row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself -- statuses recorded under another policy, or a `patient_ids` that named a patient the session does not hold, or a `subset` that named a UID it does not hold.
 
-    Five grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: **an empty audit trail** (a clean ingest followed by `audit()` alone writes no row, and grades `REVIEW_REQUIRED` because nothing the run did is attested), **a verb with no evidence** (`anonymize()` or `redact()` did work and none of the rows it writes reached the audit log), **findings nobody acted on** (entities the last PHI scan left `IDENTIFIED`; condition 7 under [How the grade is decided](#how-the-grade-is-decided)), **entities edited after their scan** (condition 8), and **entities never scanned in a store that holds a recorded status** (condition 9).
+Five grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: **an empty audit trail** (a clean ingest followed by `audit()` alone writes no row, and grades `REVIEW_REQUIRED` because nothing the run did is attested), **a verb with no evidence** (`anonymize()` or `redact()` did work and none of the rows it writes reached the audit log), **findings nobody acted on** (entities the last PHI scan left `IDENTIFIED`; condition 7 under [How the grade is decided](#how-the-grade-is-decided)), **entities edited after their scan** (condition 8), and **entities never scanned in a store that holds a recorded status** (condition 9).
+:::
 
-!!! warning "Which losses move the Validation Status"
+:::{admonition} Which losses move the Validation Status
+:class: warning
 
-    A dropped **private** (odd-group) element grades the session
-    `REVIEW_REQUIRED`. It may be a vendor block `remove_private_tags: false`
-    was set specifically to keep ([The 65534-byte limit](configuration.md#the-65534-byte-limit)), and nobody outside the vendor can size
-    or identify what went missing.
+A dropped **private** (odd-group) element grades the session
+`REVIEW_REQUIRED`. It may be a vendor block `remove_private_tags: false`
+was set specifically to keep ([The 65534-byte limit](configuration.md#the-65534-byte-limit)), and nobody outside the vendor can size
+or identify what went missing.
 
-    A dropped **standard** element -- a large Overlay Data plane
-    `(60xx,3000)`, say -- does not. Those come off ordinary images by the thousand,
-    so a grade that moved on them would read `REVIEW_REQUIRED` for most
-    cohorts and stop carrying information.
+A dropped **standard** element -- a large Overlay Data plane
+`(60xx,3000)`, say -- does not. Those come off ordinary images by the thousand,
+so a grade that moved on them would read `REVIEW_REQUIRED` for most
+cohorts and stop carrying information.
 
-    Read the Data Loss section on its own terms either way: its **Scope**
-    column says which rows were graded -- `PRIVATE` and `SIGNAL` rows are,
-    `STANDARD` rows are not -- and `unrecorded` means a row written by an
-    older release, before the scope was recorded. `SIGNAL` is the
-    standard-group loss that grades: acquired content that was in the
-    source and is not in the export -- a discarded waveform multiplex group
-    (see [Waveforms](waveforms.md)), or a nested icon image dropped because
-    pixel data is redacted.
+Read the Data Loss section on its own terms either way: its **Scope**
+column says which rows were graded -- `PRIVATE` and `SIGNAL` rows are,
+`STANDARD` rows are not -- and `unrecorded` means a row written by an
+older release, before the scope was recorded. `SIGNAL` is the
+standard-group loss that grades: acquired content that was in the
+source and is not in the export -- a discarded waveform multiplex group
+(see [Waveforms](waveforms.md)), or a nested icon image dropped because
+pixel data is redacted.
+:::
 
-!!! warning "Generate the report after `export()`"
+:::{admonition} Generate the report after `export()`
+:class: warning
 
-    `generate_report()` grades the audit log as it stands when you call
-    it. Losses recorded at ingest are already in it; losses recorded on
-    the way *out* -- an element that could not be encoded, a waveform
-    with no samples -- are written during `export()`. Call
-    `generate_report()` **after** `export()`, or those losses cannot
-    reach the Validation Status no matter what group they are in.
+`generate_report()` grades the audit log as it stands when you call
+it. Losses recorded at ingest are already in it; losses recorded on
+the way *out* -- an element that could not be encoded, a waveform
+with no samples -- are written during `export()`. Call
+`generate_report()` **after** `export()`, or those losses cannot
+reach the Validation Status no matter what group they are in.
 
-    A report generated before any export says so itself: when the
-    audit trail holds no `EXPORT` row, the Executive Summary carries a
-    boundary note under the grade and a warning is logged. The note
-    states the boundary without moving the grade. (An audit-only session
-    grades `REVIEW_REQUIRED` anyway, for a different reason: `audit()`
-    writes no audit row, and an empty trail attests nothing -- see
-    section 5's Grade Basis.)
+A report generated before any export says so itself: when the
+audit trail holds no `EXPORT` row, the Executive Summary carries a
+boundary note under the grade and a warning is logged. The note
+states the boundary without moving the grade. (An audit-only session
+grades `REVIEW_REQUIRED` anyway, for a different reason: `audit()`
+writes no audit row, and an empty trail attests nothing -- see
+section 5's Grade Basis.)
+:::
 
-!!! tip "Format"
-    The report is Markdown. `generate_report(output_path, format="markdown")` is the default and the only accepted spelling; any other `format` raises `ValueError` naming it, and no file is written.
+:::{admonition} Format
+:class: tip
+
+The report is Markdown. `generate_report(output_path, format="markdown")` is the default and the only accepted spelling; any other `format` raises `ValueError` naming it, and no file is written.
+:::
 
 ## Manifests
 

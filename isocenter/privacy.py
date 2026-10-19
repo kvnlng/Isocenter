@@ -1,5 +1,5 @@
 """PHI detection: `PhiInspector` scans the object graph under a policy and
-returns `PhiFinding`s, each with a `PhiRemediation` proposal, in a
+returns `PhiFinding` objects, each with a `PhiRemediation` proposal, in a
 `PhiReport`.
 
 Also the keyed derivations under the project secret that the scan

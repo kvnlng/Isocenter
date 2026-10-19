@@ -446,7 +446,7 @@ class WaveformChannel:
 
         Returns:
             float: The gain; 1.0 when the effective sensitivity is zero or
-                absent, since WFDB reads a zero gain as *uncalibrated*.
+            absent, since WFDB reads a zero gain as *uncalibrated*.
         """
         effective = self.sensitivity * self.correction_factor
         if not effective:
@@ -473,8 +473,8 @@ class WaveformChannel:
 
         Returns:
             WaveformChannel: Label, coded source, units (default `"mV"`),
-                sensitivity and correction (default 1.0) and baseline
-                (default 0.0) as the item carries them.
+            sensitivity and correction (default 1.0) and baseline
+            (default 0.0) as the item carries them.
         """
         attrs = item.attributes
         seqs = item.sequences
@@ -509,9 +509,9 @@ class WaveformChannel:
 
         Returns:
             Optional[str]: The name (`I`, `aVR`, `V1` ...), or None when
-                there is no coded source or the lead table does not name
-                it. A `2:3` in scheme MDC is `III` when the item's Code
-                Meaning says Lead III and `V1` otherwise.
+            there is no coded source or the lead table does not name
+            it. A `2:3` in scheme MDC is `III` when the item's Code
+            Meaning says Lead III and `V1` otherwise.
         """
         if not self.source_code:
             return None
@@ -577,7 +577,7 @@ class WaveformChannel:
 
         Returns:
             str: The coded lead's name, the coded source, the stripped lead
-                name, `ch<index>`, or `"signal"`.
+            name, `ch<index>`, or `"signal"`.
         """
         # The label check lives here rather than in the privacy profile: the
         # PHI scan is tag-gated, so a profile entry protects only a session
@@ -614,8 +614,8 @@ class Waveform:
 
         Returns:
             Waveform: Geometry and channels as the item declares them;
-                `bits_allocated` defaults to 16 and `sample_interpretation`
-                to `"SS"`. `samples` is None.
+            `bits_allocated` defaults to 16 and `sample_interpretation`
+            to `"SS"`. `samples` is None.
         """
         attrs = item.attributes
         seqs = item.sequences

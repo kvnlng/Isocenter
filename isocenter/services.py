@@ -1,7 +1,7 @@
-"""
-Services for Isocenter.
+"""Services for Isocenter.
 
 This module contains the core service logic for:
+
 - MachinePixelIndex: Fast retrieval of instances by device serial number
   (`""` for every series with none).
 - RedactionService: Handling the application of redaction rules to pixel data.
@@ -109,7 +109,7 @@ class RedactionError(RuntimeError):
     report that grades REVIEW_REQUIRED.
 
     A `RuntimeError` subclass, so `except RuntimeError` catches it; its
-    own class tells it from the export path's bare `RuntimeError`s, which
+    own class tells it from the export path's bare `RuntimeError` exceptions, which
     mean nothing was written, where this means something unsafe is still
     in the graph.
 
@@ -193,7 +193,7 @@ def _redaction_config_hash(serials, rois, ocr=None) -> str:
     `"*"` on one image, #908) are a `"serials"` list instead, which no
     one-serial input can equal.
 
-    **The `burned_in_text` boxes (#1108)** are a third input, `ocr`,
+    **The** `burned_in_text` **boxes (#1108)** are a third input, `ocr`,
     present only when the pass found text to blank: `{"policy", "boxes"}`
     beside the zones, the boxes sorted. With no boxes the key is exactly
     the zone-only one, so a store redacted by zones before the policy was
@@ -1002,9 +1002,9 @@ class RedactionService:
 
         Returns:
             List[dict]: A list of task dictionaries ready for
-                `execute_redaction_task`, each carrying its instance's
-                pre-redaction and new SOP Instance UIDs; empty when the
-                rule has no serial, no zones, no targets or no valid ROI.
+            `execute_redaction_task`, each carrying its instance's
+            pre-redaction and new SOP Instance UIDs; empty when the
+            rule has no serial, no zones, no targets or no valid ROI.
 
         Raises:
             RuntimeError: When a rule has targets and there is no project
@@ -1124,9 +1124,9 @@ class RedactionService:
 
         Returns:
             List[dict]: One task per instance, in first-seen order. A folded
-                task carries every rule's zones in rule order and every
-                rule's `pass_keys`, and no `machine_sn`: it is no one
-                rule's.
+            task carries every rule's zones in rule order and every
+            rule's `pass_keys`, and no `machine_sn`: it is no one
+            rule's.
         """
         grouped = {}
         for task in tasks:
@@ -1168,12 +1168,12 @@ class RedactionService:
 
         Returns:
             RedactionOutcome: `ok=True` with a mutation dict when zones were
-                applied, `ok=True` with `mutation=None` for a legitimate
-                skip (already redacted under this configuration, no pixel
-                data, or **no configured zone landed inside the image**),
-                and `ok=False` with an `error` string on any exception
-                (a zone that could not be applied, a failed pixel load, a
-                failed persist).
+            applied, `ok=True` with `mutation=None` for a legitimate
+            skip (already redacted under this configuration, no pixel
+            data, or **no configured zone landed inside the image**),
+            and `ok=False` with an `error` string on any exception
+            (a zone that could not be applied, a failed pixel load, a
+            failed persist).
 
         The mutation dict exists only when a zone landed. On success the
         instance carries the redaction flags, the new SOP Instance UID and
@@ -1857,10 +1857,10 @@ class RedactionService:
         array is copied and handed to `set_pixel_data`, so the array the
         instance holds may be a different object.
 
-        **The caller must call `inst.mark_modified()` when this returns
+        **The caller must call** `inst.mark_modified()` **when this returns
         True.** A read-only array's copy goes through `set_pixel_data`,
         which marks the instance modified; a writeable array is redacted
-        in place and leaves `has_unsaved_changes` False:
+        in place and leaves `has_unsaved_changes` False::
 
             writeable=False  returned=True  dirty=True   zone_zeroed=True
             writeable=True   returned=True  dirty=False  zone_zeroed=True

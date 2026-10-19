@@ -142,15 +142,24 @@ _FENCE = re.compile(r"^```([^\n`]*)\n(.*?)^```[ \t]*$", re.DOTALL | re.MULTILINE
 _ANY_FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)", re.MULTILINE)
 # Raw HTML code, which Markdown renders as code and `_FENCE` never sees.
 _PRE = re.compile(r"<pre\b", re.IGNORECASE)
-# A pymdownx.snippets include: mkdocs inlines the named file's text.
+# A pymdownx.snippets include. MkDocs inlined the named file's text; the
+# Sphinx site does not read it at all, and tests/test_the_docs_are_myst.py
+# refuses it on every page. Kept here so a run page says why.
 _SNIPPET = re.compile(r"^[ \t]*-+8<-+", re.MULTILINE)
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+# The section's landing page (docs/sphinx C2, D4): one sentence and a
+# toctree, no code. Excluded by name (owner ruling S3), so any other page
+# under docs/tutorials/ with no header is still red.
+_LANDING_PAGE = "index.md"
 
 
 def tutorial_pages(root=None):
     """Every page this runner runs: the tutorials, plus marked pages."""
     root = root or REPO
-    pages = sorted((root / TUTORIALS).glob("*.md"))
+    pages = sorted(path for path in (root / TUTORIALS).glob("*.md")
+                   if path.name != _LANDING_PAGE)
     docs = root / "docs"
     if docs.is_dir():
         for path in sorted(docs.rglob("*.md")):
@@ -256,7 +265,7 @@ def _shape_failures(text, where):
     - A fence inside an HTML comment: it would run and be checked, but
       the reader never sees it, which makes it a hidden assertion. The
       one-line `tutorial:` markers are comments with no fence in them.
-    - A `--8<--` snippet include: mkdocs inlines a file's text as page
+    - A `--8<--` snippet include: MkDocs inlined a file's text as page
       content, code included, that the runner never read.
     - A `doctest:` directive: `+SKIP` is a skip dressed as a pass, and
       the others change what "matches" means page by page.
@@ -706,6 +715,57 @@ def test_a_workdir_that_is_not_the_cwd_is_red(tmp_path):
     failures = run_page(page, elsewhere, root=tmp_path)
     assert len(failures) == 1 and "is not the working" in failures[0], (
         failures)
+
+
+def test_the_tutorials_landing_page_is_not_a_run_page(tmp_path):
+    """S3: `docs/tutorials/index.md` is the section's landing page."""
+    _page(tmp_path, "# Tutorials\n\n```{toctree}\n:maxdepth: 1\n\nt\n```\n",
+          name="index.md")
+    tutorial = _page(tmp_path, _OK_HEADER + "```python\n>>> 1\n1\n```\n")
+    assert tutorial_pages(tmp_path) == [tutorial]
+    assert (REPO / TUTORIALS / "index.md").is_file()
+    assert REPO / TUTORIALS / "index.md" not in _PAGES
+
+
+def landing_page_code(path):
+    """The fences on a landing page other than its `{toctree}`.
+
+    The runner never reads `index.md` (S3), so code there would be shown
+    to readers and run by nothing: a landing page holds none.
+    """
+    return [info for info, _ in _FENCE.findall(path.read_text(encoding="utf-8"))
+            if info.strip().split(" ")[0] != "{toctree}"]
+
+
+def test_the_tutorials_landing_page_holds_no_code(tmp_path):
+    assert landing_page_code(REPO / TUTORIALS / _LANDING_PAGE) == []
+    page = _page(tmp_path, "# Tutorials\n\n```python\nraise SystemExit\n```\n\n"
+                 "```{toctree}\n:maxdepth: 1\n\nt\n```\n", name="index.md")
+    assert landing_page_code(page) == ["python"]
+
+
+def test_any_other_page_under_tutorials_with_no_header_is_still_red(tmp_path):
+    """The exclusion is by name: `index.md` alone, not unheaded pages."""
+    notes = _page(tmp_path, "# Notes\n\n```python\n>>> 1\n1\n```\n",
+                  name="notes.md")
+    assert tutorial_pages(tmp_path) == [notes]
+    failures = run_page(notes, tmp_path, root=tmp_path)
+    assert len(failures) == 1 and "found 0" in failures[0], failures
+
+
+def test_a_python_fence_in_a_colon_fence_admonition_runs(tmp_path):
+    """A MyST admonition's body is unindented, so its fence is column 0
+    and is run like any other (an indented fence is still refused:
+    `test_code_the_runner_would_not_run_is_red`'s `admonition` case)."""
+    page = _page(tmp_path, _OK_HEADER + (
+        ":::{admonition} Keep it\n:class: tip\n\n"
+        "```python\nran_inside = True\n```\n:::\n\n"
+        "```python\n>>> ran_inside\nTrue\n```\n"))
+    assert run_page(page, tmp_path, root=tmp_path) == []
+    boom = _page(tmp_path, _OK_HEADER + _CHECKED + (
+        "\n:::{note}\n```python\n" + _BOOM + "\n```\n:::\n"), name="b.md")
+    failures = run_page(boom, tmp_path, root=tmp_path)
+    assert any("SystemError: THIS RAN" in f for f in failures), failures
 
 
 def test_a_marked_page_outside_tutorials_is_run(tmp_path):

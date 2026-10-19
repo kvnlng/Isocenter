@@ -499,7 +499,7 @@ min-public-methods = 2
 overgeneral-exceptions = ["builtins.BaseException", "builtins.Exception"]
 
 [tool.pylint.parameter_documentation]
-# Google style, which mkdocstrings renders in the API reference.
+# Google style, which napoleon renders in the API reference.
 default-docstring-type = "google"
 # A docstring that documents none of its parameters, raises, returns or
 # yields is reported, not accepted.

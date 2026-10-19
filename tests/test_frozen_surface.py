@@ -1027,18 +1027,66 @@ def test_the_frozen_shapes_have_these_fields(tmp_path):
         "self", "failures", "attempted", "folder"]
 
 
+_SESSION_CLASS = "isocenter.session.DicomSession"
+_EVAL_RST = re.compile(r"^(?P<fence>`{3,}|:{3,})\{eval-rst\}[^\n]*\n(?P<body>.*?)^(?P=fence)[ \t]*$",
+                       re.MULTILINE | re.DOTALL)
+
+
+def _session_members(page):
+    """`(names from :members:, names of nested directives)`, in page order,
+    for the `.. autoclass::` of `DicomSession` inside an `{eval-rst}` fence.
+
+    Two spellings render a member: a `:members: a, b` option, which
+    autodoc sorts into source order (`autodoc_member_order = "bysource"`,
+    and Sphinx 9 has no "as listed"), and one nested `.. automethod:: a`
+    per member, which keeps the page's order.
+    """
+    listed, nested = [], []
+    for block in _EVAL_RST.finditer(page):
+        lines = block.group("body").splitlines()
+        for at, line in enumerate(lines):
+            if line.strip() != f".. autoclass:: {_SESSION_CLASS}":
+                continue
+            for inner in lines[at + 1:]:
+                if inner and not inner.startswith((" ", "\t")):
+                    break
+                option = re.match(r"^\s+:members:\s*(.*)$", inner)
+                if option:
+                    listed += [n.strip() for n in option.group(1).split(",") if n.strip()]
+                method = re.match(r"^\s+\.\.\s+automethod::\s+(\w+)\s*$", inner)
+                if method:
+                    nested.append(method.group(1))
+    return listed, nested
+
+
+# The order api/session.md promises: "ingest → examine → config → audit
+# → anonymize → redact → verify → export → report, with `compact`,
+# `release_memory` and `close` last".
+SESSION_PAGE_ORDER = [
+    "ingest", "save", "examine", "create_config", "load_config",
+    "preview_config", "audit", "auto_remediate_config", "anonymize",
+    "enable_reversible_anonymization", "lock_identities",
+    "lock_identities_batch", "recover_patient_identity", "redact",
+    "redact_by_machine", "scan_pixel_content", "discover_redaction_zones",
+    "reconcile_private_tags", "export", "export_dataframe",
+    "get_cohort_report", "phi_status_summary", "generate_report",
+    "generate_manifest", "save_analysis", "compact", "release_memory",
+    "close"]
+
+
 def test_the_api_reference_renders_every_frozen_session_method():
-    """T-F3: `docs/api/session.md`'s `members:` block is a superset of the freeze.
+    """T-F3: the methods `docs/api/session.md` renders are a superset of the freeze.
 
     **Red on 0.9.3**: the page listed 16 of the 28, omitting `anonymize`,
     `lock_identities`, `enable_reversible_anonymization`,
     `recover_patient_identity`, `generate_report`, `export_dataframe` and
     six more -- half the pipeline the README teaches. Killing mutation: a
-    method removed from `members:`.
+    method removed from the page's directives. Both spellings count
+    (`_session_members`).
     """
     page = (REPO / "docs" / "api" / "session.md").read_text(encoding="utf-8")
-    block = page.split("members:", 1)[1]
-    rendered = set(re.findall(r"^\s+-\s+(\w+)\s*$", block, re.M))
+    listed, nested = _session_members(page)
+    rendered = set(listed) | set(nested)
 
     missing = set(FROZEN_SESSION_METHODS) - rendered
     assert not missing, (
@@ -1046,12 +1094,50 @@ def test_the_api_reference_renders_every_frozen_session_method():
         f"{sorted(missing)}")
 
 
-def test_the_stability_page_names_every_tier_one_session_method():
-    """T-F4: the page users read names each frozen method, and mkdocs renders it.
+def test_the_session_page_renders_its_methods_in_pipeline_order():
+    """The Session page lists its methods in the order its prose promises.
 
-    One direction only -- the page may name more. `mkdocs.yml`'s nav must
-    list it, because `tests/test_doc_anchors.py` renders nav pages and an
-    unlisted page is unchecked.
+    Each is a nested `.. automethod::`, because a `:members:` list is
+    sorted into source order by autodoc (docs/sphinx C2, measured: `close`
+    first). So no `:members:` on that directive, and the nested names in
+    `SESSION_PAGE_ORDER`'s order.
+    """
+    page = (REPO / "docs" / "api" / "session.md").read_text(encoding="utf-8")
+    listed, nested = _session_members(page)
+    assert not listed, (
+        f"api/session.md renders {listed} through `:members:`, which "
+        "autodoc sorts into source order; use one nested `.. automethod::` "
+        "per method")
+    assert nested == SESSION_PAGE_ORDER, nested
+    assert set(SESSION_PAGE_ORDER) >= set(FROZEN_SESSION_METHODS)
+    assert ("ingest → examine → config → audit → anonymize → redact → "
+            "verify → export → report") in " ".join(page.split())
+
+
+@pytest.mark.parametrize("body, listed, nested", [
+    ("```{eval-rst}\n.. autoclass:: isocenter.session.DicomSession\n"
+     "   :members: ingest, save\n   :class-doc-from: both\n```\n",
+     ["ingest", "save"], []),
+    ("````{eval-rst}\n.. autoclass:: isocenter.session.DicomSession\n\n"
+     "   .. automethod:: save\n   .. automethod:: ingest\n````\n",
+     [], ["save", "ingest"]),
+    (":::{eval-rst}\n.. autoclass:: isocenter.session.DicomSession\n"
+     "   .. automethod:: close\n:::\n", [], ["close"]),
+    # Another class's members and a directive outside a fence are not Session's.
+    ("```{eval-rst}\n.. autoclass:: pkg.mod.Other\n"
+     "   :members: start_patient\n.. automethod:: x\n```\n"
+     ".. autoclass:: isocenter.session.DicomSession\n   :members: ingest\n",
+     [], []),
+])
+def test_the_session_member_reader(body, listed, nested):
+    assert _session_members(body) == (listed, nested)
+
+
+def test_the_stability_page_names_every_tier_one_session_method():
+    """T-F4: the page users read names each frozen method, and the site links it.
+
+    One direction only -- the page may name more. The API landing page's
+    toctree must list it, or the page is built but linked from nowhere.
     """
     page = (REPO / "docs" / "api" / "stability.md").read_text(encoding="utf-8")
     unnamed = [name for name in FROZEN_SESSION_METHODS if f"`{name}`" not in page]
@@ -1155,8 +1241,10 @@ def test_the_stability_page_names_every_tier_one_session_method():
             f"{word} {block.count(f'`{word}`')} times, backticked; it must "
             f"name it exactly once")
 
-    nav = (REPO / "mkdocs.yml").read_text(encoding="utf-8")
-    assert "api/stability.md" in nav, "docs/api/stability.md is not in mkdocs.yml's nav"
+    landing = (REPO / "docs" / "api" / "index.md").read_text(encoding="utf-8")
+    toctree = re.search(r"^```\{toctree\}\n(.*?)^```$", landing, re.S | re.M)
+    assert toctree and re.search(r"^(?:.*<)?stability>?$", toctree.group(1), re.M), (
+        "docs/api/stability.md is not in docs/api/index.md's toctree")
 
 
 def test_a_duplicate_signature_row_is_not_silently_collapsed():
