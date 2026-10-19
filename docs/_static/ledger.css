@@ -88,12 +88,25 @@ html[data-theme="light"] {
 /* Long inline code breaks inside its own box rather than running past the
  * column on a phone: Sphinx's span.pre is `white-space: nowrap`. */
 .bd-article code.literal, .bd-article code.literal span.pre { white-space: normal; overflow-wrap: break-word; }
-.bd-article table.ledger-attributes code.literal span.pre { white-space: nowrap; }
 .bd-article hr { border-color: var(--ledger-rule); }
 /* The Attributes table conf.py's _present_objects builds from napoleon's fields. */
 .bd-article p.rubric { font-weight: 600; margin-top: 1.2rem; }
 .bd-article table.ledger-attributes { width: 100%; }
-.bd-article table.ledger-attributes td:first-child, .bd-article table.ledger-attributes td:nth-child(2) { white-space: nowrap; }
+/* Name and Type stay on one line where there is room. On a phone each row
+ * stacks, name and type over the description, so the description has the
+ * column's width rather than what two unbreakable names leave of it. */
+@media (max-width: 47.99em) {
+  .bd-article table.ledger-attributes thead { display: none; }
+  .bd-article table.ledger-attributes, .bd-article table.ledger-attributes tbody,
+  .bd-article table.ledger-attributes tr, .bd-article table.ledger-attributes td { display: block; width: 100%; }
+  .bd-article table.ledger-attributes td:first-child, .bd-article table.ledger-attributes td:nth-child(2) { display: inline-block; width: auto; border: 0; padding-bottom: 0; }
+  .bd-article table.ledger-attributes td:nth-child(3) { border: 0; }
+  .bd-article table.ledger-attributes tr { border-top: 1px solid var(--ledger-rule); }
+}
+@media (min-width: 48em) {
+  .bd-article table.ledger-attributes td:first-child, .bd-article table.ledger-attributes td:nth-child(2),
+  .bd-article table.ledger-attributes td:first-child span.pre, .bd-article table.ledger-attributes td:nth-child(2) span.pre { white-space: nowrap; }
+}
 .bd-article table.table { border: 1px solid var(--ledger-rule); font-size: 0.9rem; }
 .bd-article table.table th { background: var(--ledger-band); color: var(--ledger-ink); }
 
