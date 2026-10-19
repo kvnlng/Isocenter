@@ -33,7 +33,7 @@ REMEDIATION_ACTION_TYPES = frozenset({
 #: one behaviour across two rows of the report's section 2. The reason
 #: lives in the row's `details`.
 #:
-#: **Deliberately not in `REMEDIATION_ACTION_TYPES`.** That frozenset is
+#: **Deliberately not in** `REMEDIATION_ACTION_TYPES`. That frozenset is
 #: the ANONYMIZE evidence set `generate_report` checks; if a decline
 #: counted as evidence, a run in which every remediation declined would
 #: satisfy the check that exists to catch a run whose remediation rows
@@ -1658,7 +1658,7 @@ class RemediationService:
     #: exported instance from the entity, with the tag each is the value
     #: of (`io_handlers.export_stamp_attributes`). That helper also read
     #: `birth_date`, `sex` and `accession_number` through `getattr` until
-    #: #869 removed those arms: no slots dataclass has such a field, so
+    #: issue #869 removed those arms: no slots dataclass has such a field, so
     #: none ever fired. A field added later stamps there, where T11 sees it.
     #:
     #: Keyed on the field, not on `PhiFinding.tag`: a hand-built finding

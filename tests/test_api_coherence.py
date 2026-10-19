@@ -797,7 +797,7 @@ def test_get_flattened_instances_is_published_store_api():
     """`SqliteStore.get_flattened_instances` has the shape the docs publish (#142).
 
     Reachable as `session.store_backend.get_flattened_instances(...)`,
-    rendered on the docs site by an unfiltered `::: isocenter.persistence`,
+    rendered on the docs site by `docs/api/persistence.md`'s autodoc directive,
     and named by the 0.9.1 CHANGELOG as the migration path for callers
     of the deleted `export_to_parquet`. #142 weighed deleting it and
     kept it. #26 ruled it *documented but internal* (#379): the facade is

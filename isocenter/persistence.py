@@ -323,7 +323,7 @@ _SQLITE_BUSY_TIMEOUT_S = 120.0
 
 #: How long a sidecar writer, a redact()/ingest() pass, or `compact()`
 #: waits for the sidecar gate or the pass-lock before raising.
-#: Its place in the timeout family, with what each bound protects:
+#: Its place in the timeout family, with what each bound protects::
 #:
 #:     _SQLITE_BUSY_TIMEOUT_S = 120  <  this = 180
 #:         <  _WORKER_FAULTHANDLER_TIMEOUT_S = 240  <  faulthandler_timeout = 300

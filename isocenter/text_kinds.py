@@ -34,7 +34,7 @@ KINDS = ("names", "dates", "ids", "orgs")
 _CONFUSABLES = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1",
                               "|": "1", "S": "5", "B": "8"})
 _DIGITISH = "0-9OoIl|SB"
-#: Three numeric fields with one separator, used twice (`\2`). The
+#: Three numeric fields with one separator, used twice (``\2``). The
 #: lookarounds keep a field from being the tail of a longer run.
 _NUMERIC_DATE = re.compile(
     rf"(?<![0-9A-Za-z])([{_DIGITISH}]{{1,4}})([/.\- ])([{_DIGITISH}]{{1,2}})"

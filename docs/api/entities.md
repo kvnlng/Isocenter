@@ -64,123 +64,90 @@ the value the field already holds changes nothing. `series.series_instance_uid`,
 `study.study_instance_uid` and `patient.patient_id` need no such step:
 the export stamps each file's copy from the owner.
 
-::: isocenter.entities
-    handler: python
-    options:
-      show_root_heading: false
-      show_root_toc_entry: false
-      heading_level: 3
-      members:
-        - NO_PATIENT_ID_PREFIX
-        - is_synthetic_patient_id
+```{eval-rst}
+.. automodule:: isocenter.entities
+   :members: NO_PATIENT_ID_PREFIX, is_synthetic_patient_id
+```
 
 `NO_PATIENT_ID_PREFIX` is the start of the key a subject whose files
 carry no Patient ID is held under. The key never reaches an exported
 file.
 
-::: isocenter.entities.Patient
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.Patient
+   :members:
+```
 
-::: isocenter.entities.Study
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.Study
+   :members:
+```
 
-::: isocenter.entities.Series
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.Series
+   :members:
+```
 
-::: isocenter.entities.Instance
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.Instance
+   :members:
+```
 
-::: isocenter.entities.DicomItem
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.DicomItem
+   :members:
+```
 
-::: isocenter.entities.Equipment
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
-      filters: ["!^_", "!^record_", "!_vouches_for$", "!^mark_", "!^identity_token_is_this_stores$", "!^clear_sequence_items$"]
+```{eval-rst}
+.. autoclass:: isocenter.entities.Equipment
+   :members:
+```
 
 ## Documented but internal (tier 2)
 
 Safe to call, and may change in a 1.x release with a CHANGELOG entry that
 names the old spelling and the new one.
 
-::: isocenter.entities.TrackedEntity
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.entities.TrackedEntity
+   :members:
+```
 
-::: isocenter.entities.PhiStatus
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.entities.PhiStatus
+   :members:
+```
 
-::: isocenter.entities.ScanPolicy
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.entities.ScanPolicy
+   :members:
+```
 
-::: isocenter.entities.DicomSequence
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autoclass:: isocenter.entities.DicomSequence
+   :members:
+```
 
-::: isocenter.entities.clone_sequences
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autofunction:: isocenter.entities.clone_sequences
+```
 
-::: isocenter.entities.exported_patient_id
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autofunction:: isocenter.entities.exported_patient_id
+```
 
-::: isocenter.entities.iter_item_tree
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autofunction:: isocenter.entities.iter_item_tree
+```
 
-::: isocenter.entities.normalize_study_date
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autofunction:: isocenter.entities.normalize_study_date
+```
 
-::: isocenter.entities.resolve_item_path
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autofunction:: isocenter.entities.resolve_item_path
+```
 
-::: isocenter.entities.SOURCE_SOP_UID_ATTR
-    handler: python
-    options:
-      heading_level: 3
-      show_root_full_path: false
+```{eval-rst}
+.. autodata:: isocenter.entities.SOURCE_SOP_UID_ATTR
+```

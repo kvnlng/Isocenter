@@ -198,7 +198,7 @@ Every table has an integer `id` primary key; the natural keys are `UNIQUE` colum
 
 `persistence.py` holds the `CREATE TABLE` statements and the `ALTER TABLE` steps that add a column to a store created without it. Nothing is back-filled: a column added later is NULL in older rows, and the loader reads NULL as "not recorded".
 
-```mermaid
+```{mermaid}
 erDiagram
     PATIENTS ||--|{ STUDIES : contains
     STUDIES ||--|{ SERIES : contains
