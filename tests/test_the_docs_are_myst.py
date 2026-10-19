@@ -39,8 +39,11 @@ those under a directory `docs/conf.py`'s `exclude_patterns` names.
    a docstring renders as italic `<cite>`); the slug function and the
    `doctree-read` hook that keep every published heading id, and
    `myst_heading_anchors`, without which MyST records no slug to keep;
-   `html_copy_source = False`; and the light-only theme (D7): no
-   `theme-switcher`, `default_mode` light.
+   `html_copy_source = False`; the light-only theme (D7): no
+   `theme-switcher`, `default_mode` light; and the design (#350):
+   `ledger.css` named and served, and `_templates/layout.html` drawing
+   the hero on the home page alone. A lost name builds cleanly as stock
+   pydata, which no warning reports.
 9. Every page is reachable from the root toctree, and every toctree
    entry names a page that exists. A page in no toctree is built but
    linked from nowhere, and Sphinx says so only as a warning.
@@ -53,6 +56,7 @@ the package either (fixtures say `pkg.x`), because
 import ast
 import pathlib
 import re
+import shutil
 
 import markdown
 import pytest
@@ -282,6 +286,27 @@ def conf_offenders(path=CONF):
     if (values.get("html_context") or {}).get("default_mode") != "light":
         found.append("conf.py: html_context's default_mode is not "
                      "'light' (D7, rule 8)")
+    # The design (#350, docs/sphinx C4): the stylesheet is named, and the
+    # template that draws the home page's hero exists and draws it only
+    # on the home page. A dropped name builds cleanly as stock pydata.
+    if "ledger.css" not in (values.get("html_css_files") or []):
+        found.append("conf.py: html_css_files does not name ledger.css, so "
+                     "the site builds as stock pydata (rule 8)")
+    static = path.parent / "_static" / "ledger.css"
+    if "_static" not in (values.get("html_static_path") or []) \
+            or not static.is_file():
+        found.append("conf.py: ledger.css is not served from html_static_path "
+                     "(rule 8)")
+    if "_templates" not in (values.get("templates_path") or []):
+        found.append("conf.py: templates_path does not name _templates, so "
+                     "the home page has no hero (rule 8)")
+    layout = path.parent / "_templates" / "layout.html"
+    text = layout.read_text(encoding="utf-8") if layout.is_file() else ""
+    if not re.search(r'\{%-?\s*if pagename == "index"\s*%\}\s*<div class="ledger-home">\s*'
+                     r'<section class="ledger-hero">', text) \
+            or '<section class="ledger-pipeline">' not in text:
+        found.append("docs/_templates/layout.html does not draw the hero on "
+                     "the home page alone (rule 8)")
     return found
 
 
@@ -397,12 +422,18 @@ def test_a_repeated_heading_is_red_and_code_or_underscores_are_not(tmp_path):
 def test_conf_rules(tmp_path):
     good = CONF.read_text(encoding="utf-8")
     assert conf_offenders(CONF) == []
+    # The design's two files sit beside conf.py; the copy gets them too.
+    for name in ("_static", "_templates"):
+        shutil.copytree(CONF.parent / name, tmp_path / name)
     cases = {
         'default_role = "literal"': 'default_role = None',
         'myst_heading_slug_func = "slugs.pm_slug"': 'myst_heading_slug_func = None',
         "html_copy_source = False": "html_copy_source = True",
         '"default_mode": "light"': '"default_mode": "auto"',
         "myst_heading_anchors = 6\n": "",
+        '    "ledger.css",\n': "",
+        'templates_path = ["_templates"]': "templates_path = []",
+        'html_static_path = ["_static"]': "html_static_path = []",
     }
     for old, new in cases.items():
         assert good.count(old) == 1, old
@@ -418,6 +449,12 @@ def test_conf_rules(tmp_path):
     path.write_text(good.replace('"navbar_end":', '"navbar_start":'),
                     encoding="utf-8")
     assert any("sets no navbar_end" in f for f in conf_offenders(path))
+    path.write_text(good, encoding="utf-8")
+    layout = tmp_path / "_templates" / "layout.html"
+    layout.write_text(layout.read_text(encoding="utf-8").replace(
+        '{%- if pagename == "index" %}', "{%- if true %}"), encoding="utf-8")
+    assert any("hero on the home page alone" in f
+               for f in conf_offenders(path)), conf_offenders(path)
 
 
 def test_an_unreachable_page_and_a_dead_entry_are_red(tmp_path):

@@ -1,0 +1,176 @@
+/* Isocenter docs site: the "clinical ledger" system (#350), on
+ * pydata-sphinx-theme.
+ *
+ * Warm off-white ground, one muted teal accent, Newsreader on headings,
+ * Source Sans 3 body, JetBrains Mono code (all three loaded from Google
+ * Fonts by docs/conf.py's html_css_files). The design canvas this
+ * implements is the "Isocenter Docs Site" artifact; the values below are
+ * lifted from it, and were the MkDocs site's docs/stylesheets/extra.css.
+ *
+ * The fourteen --ledger-* tokens are the system; pydata's --pst-* variables
+ * are mapped onto them, then the few places pydata draws with something
+ * other than a variable (the header's shadow, the admonition's coloured
+ * title bar, code blocks) are restyled against its .bd-* classes. The site
+ * is light only (D7), so the mapping is scoped to the light theme, the only
+ * one conf.py lets a reader choose.
+ */
+
+html[data-theme="light"] {
+  --ledger-ground: #f6f3ec;
+  --ledger-paper: #fbfaf6;
+  --ledger-band: #efebe1;
+  --ledger-ink: #1f1d19;
+  --ledger-body: #3d3a33;
+  --ledger-muted: #6b665c;
+  --ledger-rule: #d9d3c5;
+  --ledger-accent: #2e6b66;
+  --ledger-accent-dark: #1f4d49;
+  --ledger-accent-rule: #b9cfcc;
+  --ledger-review: #8a4b1c;
+  --ledger-review-bg: #f3e6d6;
+  --ledger-review-rule: #e2c9a8;
+  --ledger-serif: "Newsreader", Georgia, "Times New Roman", serif;
+
+  /* pydata's own variables, remapped. */
+  --pst-color-background: var(--ledger-ground);
+  --pst-color-on-background: var(--ledger-paper);
+  --pst-color-surface: var(--ledger-band);
+  --pst-color-on-surface: var(--ledger-ink);
+  --pst-color-text-base: var(--ledger-ink);
+  --pst-color-text-muted: var(--ledger-muted);
+  --pst-color-heading: var(--ledger-ink);
+  --pst-color-border: var(--ledger-rule);
+  --pst-color-shadow: transparent;
+  --pst-color-primary: var(--ledger-accent);
+  --pst-color-primary-text: var(--ledger-paper);
+  --pst-color-secondary: var(--ledger-accent-dark);
+  --pst-color-accent: var(--ledger-accent);
+  --pst-color-link: var(--ledger-accent);
+  --pst-color-link-hover: var(--ledger-accent-dark);
+  --pst-color-inline-code: var(--ledger-ink);
+  --pst-color-inline-code-links: var(--ledger-accent);
+  --pst-color-target: rgba(46, 107, 102, 0.08);
+  --pst-color-info: var(--ledger-accent);
+  --pst-color-info-bg: var(--ledger-paper);
+  --pst-color-warning: var(--ledger-review);
+  --pst-color-warning-bg: var(--ledger-review-bg);
+  --pst-color-attention: var(--ledger-review);
+  --pst-color-attention-bg: var(--ledger-review-bg);
+  --pst-color-table-heading-bg: var(--ledger-band);
+  --pst-color-table-outer-border: var(--ledger-rule);
+  --pst-color-table-inner-border: var(--ledger-rule);
+  --pst-color-table-row-zebra-high-bg: var(--ledger-paper);
+  --pst-color-table-row-zebra-low-bg: var(--ledger-ground);
+  --pst-color-table-row-hover-bg: rgba(46, 107, 102, 0.06);
+  --pst-font-family-base: "Source Sans 3", -apple-system, "Segoe UI", Arial, sans-serif;
+  --pst-font-family-heading: var(--ledger-serif);
+  --pst-font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --pst-font-weight-heading: 500;
+}
+
+/* Header: paper on the ground colour, ruled rather than shadowed. */
+.bd-header { background: var(--ledger-ground) !important; border-bottom: 1px solid var(--ledger-rule); box-shadow: none !important; }
+.bd-header .navbar-brand { font-family: var(--ledger-serif); font-weight: 500; font-size: 1.15rem; letter-spacing: -0.01em; color: var(--ledger-ink); }
+.bd-header .navbar-nav .nav-link { color: var(--ledger-ink); font-weight: 600; font-size: 0.9rem; }
+.bd-header .navbar-nav .nav-item.current > .nav-link,
+.bd-header .navbar-nav .nav-link:hover { color: var(--ledger-accent); border-bottom-color: var(--ledger-accent); }
+.bd-header .search-button-field { background: var(--ledger-paper); border: 1px solid var(--ledger-rule); border-radius: 3px; box-shadow: none; }
+
+/* Type. */
+.bd-article { line-height: 1.6; text-wrap: pretty; }
+.bd-article h1, .bd-article h2, .bd-article h3, .bd-article h4 { font-family: var(--ledger-serif); font-weight: 500; color: var(--ledger-ink); letter-spacing: -0.01em; }
+.bd-article h1 { font-size: 2.2rem; line-height: 1.12; margin-bottom: 1rem; }
+.bd-article h2 { font-size: 1.5rem; margin-top: 2.2rem; }
+.bd-article h3 { font-size: 1.1rem; }
+.bd-article a:not(.headerlink) { text-decoration: none; border-bottom: 1px solid var(--ledger-accent-rule); }
+.bd-article a:not(.headerlink):hover { color: var(--ledger-accent-dark); border-bottom-color: var(--ledger-accent); }
+.bd-article code.literal { background: rgba(31, 29, 25, 0.06); color: var(--ledger-ink); border: 0; border-radius: 2px; padding: 0 0.3em; }
+.bd-article hr { border-color: var(--ledger-rule); }
+.bd-article table.table { border: 1px solid var(--ledger-rule); font-size: 0.9rem; }
+.bd-article table.table th { background: var(--ledger-band); color: var(--ledger-ink); }
+
+/* Code blocks: the dark ground, in the canvas's muted palette. */
+html[data-theme="light"] .bd-article div.highlight, html[data-theme="light"] .bd-article div.highlight pre { background: var(--ledger-ink); color: #efebe1; border: 0; border-radius: 4px; }
+.bd-article div.highlight pre { padding: 0.9rem 1rem; }
+html[data-theme="light"] .bd-article .highlight .c, html[data-theme="light"] .bd-article .highlight .c1, html[data-theme="light"] .bd-article .highlight .cm, html[data-theme="light"] .bd-article .highlight .cs, html[data-theme="light"] .bd-article .highlight .gp { color: #9aa39b; font-style: normal; }
+html[data-theme="light"] .bd-article .highlight .s, html[data-theme="light"] .bd-article .highlight .s1, html[data-theme="light"] .bd-article .highlight .s2, html[data-theme="light"] .bd-article .highlight .sa, html[data-theme="light"] .bd-article .highlight .sd, html[data-theme="light"] .bd-article .highlight .si, html[data-theme="light"] .bd-article .highlight .se { color: #b9cfcc; }
+html[data-theme="light"] .bd-article .highlight .k, html[data-theme="light"] .bd-article .highlight .kn, html[data-theme="light"] .bd-article .highlight .kc, html[data-theme="light"] .bd-article .highlight .kd, html[data-theme="light"] .bd-article .highlight .kr, html[data-theme="light"] .bd-article .highlight .ow { color: #9aa39b; font-weight: normal; }
+html[data-theme="light"] .bd-article .highlight .n, html[data-theme="light"] .bd-article .highlight .nn, html[data-theme="light"] .bd-article .highlight .nf, html[data-theme="light"] .bd-article .highlight .nc, html[data-theme="light"] .bd-article .highlight .nb, html[data-theme="light"] .bd-article .highlight .bp, html[data-theme="light"] .bd-article .highlight .nv, html[data-theme="light"] .bd-article .highlight .na, html[data-theme="light"] .bd-article .highlight .go, html[data-theme="light"] .bd-article .highlight .w { color: #efebe1; }
+html[data-theme="light"] .bd-article .highlight .m, html[data-theme="light"] .bd-article .highlight .mi, html[data-theme="light"] .bd-article .highlight .mf, html[data-theme="light"] .bd-article .highlight .mh, html[data-theme="light"] .bd-article .highlight .kt, html[data-theme="light"] .bd-article .highlight .no, html[data-theme="light"] .bd-article .highlight .nd, html[data-theme="light"] .bd-article .highlight .ne { color: #d8c9ad; }
+html[data-theme="light"] .bd-article .highlight .o, html[data-theme="light"] .bd-article .highlight .p { color: #c9c3b6; }
+html[data-theme="light"] .bd-article .highlight .hll { background: rgba(46, 107, 102, 0.35); }
+.bd-article div.highlight button.copybtn { background: transparent; border-color: #6b665c; color: #c9c3b6; }
+
+/* Admonitions: the left-rule card from the canvas, not pydata's coloured box. */
+.bd-article .admonition, .bd-article div.admonition { border: 0; border-left: 2px solid var(--ledger-accent); border-radius: 0 4px 4px 0; box-shadow: none; background: var(--ledger-paper); font-size: 0.95rem; }
+.bd-article .admonition > .admonition-title { background: transparent; color: var(--ledger-accent); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.75rem; padding-left: 0.8rem; }
+.bd-article .admonition > .admonition-title::before, .bd-article .admonition > .admonition-title::after { display: none; }
+.bd-article .admonition.warning, .bd-article .admonition.caution, .bd-article .admonition.danger { border-left-color: var(--ledger-review); }
+.bd-article .admonition.warning > .admonition-title, .bd-article .admonition.caution > .admonition-title, .bd-article .admonition.danger > .admonition-title { color: var(--ledger-review); }
+
+/* Sidebars. */
+.bd-sidebar-primary { background: var(--ledger-ground); border-right: 1px solid var(--ledger-rule); }
+.bd-sidebar-primary .caption-text, .bd-sidebar-primary p.caption { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ledger-muted); }
+.bd-sidebar-primary .bd-links a:hover, .bd-sidebar-primary .bd-links .current > a { color: var(--ledger-accent); }
+.bd-sidebar-primary .bd-links .current > a { font-weight: 600; box-shadow: inset 2px 0 0 var(--ledger-accent); }
+.bd-sidebar-secondary { border-left: 1px solid var(--ledger-rule); }
+.bd-sidebar-secondary .onthispage { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ledger-muted); }
+.bd-sidebar-secondary .nav-link.active { color: var(--ledger-accent); box-shadow: inset 2px 0 0 var(--ledger-accent); }
+
+/* Footer. */
+.bd-footer, .bd-footer-content { background: var(--ledger-ground); border-top: 1px solid var(--ledger-rule); color: var(--ledger-muted); }
+.prev-next-area a p.prev-next-title { color: var(--ledger-accent); }
+
+/* ---- Home page (docs/_templates/layout.html, pagename "index") ------ */
+.ledger-hero { background: var(--ledger-ground); border-bottom: 1px solid var(--ledger-rule); }
+.ledger-hero__inner { max-width: 74rem; margin: 0 auto; padding: 4rem 1rem 3rem; display: grid; grid-template-columns: 7fr 5fr; gap: 2rem; align-items: start; }
+.ledger-eyebrow { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ledger-accent); }
+.ledger-hero__copy { display: flex; flex-direction: column; gap: 1.2rem; }
+.ledger-hero__copy h1 { font-family: var(--ledger-serif); font-weight: 500; font-size: 2.9rem; line-height: 1.08; letter-spacing: -0.01em; margin: 0; color: var(--ledger-ink); }
+.ledger-hero__lede { font-size: 1.25rem; line-height: 1.5; color: var(--ledger-body); max-width: 28rem; margin: 0; }
+.ledger-hero__actions { display: flex; flex-direction: row; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.ledger-install { display: inline-flex; align-items: center; gap: 0.6rem; background: var(--ledger-ink); color: var(--ledger-ground); padding: 0.6rem 0.9rem; border-radius: 3px; font-family: var(--pst-font-family-monospace); font-size: 0.9rem; }
+.ledger-install span { color: #a9b7b4; }
+.ledger-install code { background: transparent; color: var(--ledger-ground); padding: 0; }
+.ledger-hero__actions a { font-weight: 600; color: var(--ledger-accent); border-bottom: 1px solid var(--ledger-accent-rule); padding: 0.6rem 0; font-size: 1rem; text-decoration: none; }
+.ledger-hero__note { font-size: 0.9rem; color: var(--ledger-muted); max-width: 28rem; margin: 0; }
+.ledger-hero__note code { background: transparent; color: var(--ledger-body); padding: 0; font-size: 0.95em; }
+
+.ledger-report { background: var(--ledger-paper); border: 1px solid var(--ledger-rule); border-radius: 4px; box-shadow: 0 1px 0 #e8e3d7; font-size: 0.92rem; }
+.ledger-report__head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; padding: 0.7rem 1.1rem; border-bottom: 1px solid var(--ledger-rule); }
+.ledger-report__head strong { white-space: nowrap; font-family: var(--ledger-serif); font-weight: 500; font-size: 1.1rem; }
+.ledger-report__head code { background: transparent; color: var(--ledger-muted); font-size: 0.8rem; padding: 0; }
+.ledger-report__rows { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.9rem 1.1rem; }
+.ledger-report__row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted var(--ledger-rule); padding-bottom: 0.4rem; color: var(--ledger-muted); }
+.ledger-report__row:last-child { border-bottom: 0; padding-bottom: 0; }
+.ledger-report__row code { background: transparent; color: var(--ledger-ink); padding: 0; font-size: 0.86rem; }
+.ledger-report__grade { font-family: var(--pst-font-family-monospace); font-size: 0.8rem; color: var(--ledger-review); background: var(--ledger-review-bg); border: 1px solid var(--ledger-review-rule); padding: 0.15rem 0.5rem; border-radius: 2px; }
+.ledger-report__foot { padding: 0.7rem 1.1rem; border-top: 1px solid var(--ledger-rule); font-size: 0.84rem; color: var(--ledger-muted); line-height: 1.45; }
+
+.ledger-pipeline { background: var(--ledger-band); border-bottom: 1px solid var(--ledger-rule); }
+.ledger-pipeline__inner { max-width: 74rem; margin: 0 auto; padding: 2.2rem 1rem 2rem; display: flex; flex-direction: column; gap: 1rem; }
+.ledger-pipeline__head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.ledger-pipeline__head h2 { font-family: var(--ledger-serif); font-weight: 500; font-size: 1.8rem; margin: 0; }
+.ledger-pipeline__head span { font-size: 0.9rem; color: var(--ledger-muted); }
+.ledger-pipeline svg { width: 100%; height: auto; display: block; }
+
+/* The Markdown body of index.md, styled as the ledger sections. It starts
+ * at `##`, which Sphinx renders as each section's h1. */
+.ledger-home .bd-article-container { max-width: 74rem; margin: 0 auto; }
+.ledger-home .bd-article section > h1 { font-size: 1.8rem; margin-top: 2.6rem; }
+.ledger-home .bd-article section > h1 + ul { list-style: none; margin: 1.4rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.6rem 2.4rem; }
+.ledger-home .bd-article section > h1 + ul > li { margin: 0; border-top: 1px solid var(--ledger-rule); padding-top: 0.8rem; color: var(--ledger-body); }
+.ledger-home .bd-article section > h1 + ul > li > p:first-child > strong:first-child { display: block; font-family: var(--ledger-serif); font-weight: 500; font-size: 1.35rem; color: var(--ledger-ink); margin-bottom: 0.3rem; }
+/* The slug hook keeps this section's MkDocs id, which these rules select on. */
+.ledger-home #what-it-refuses-to-do > ul { counter-reset: clause; }
+.ledger-home #what-it-refuses-to-do > ul > li { border-top: 2px solid var(--ledger-ink); counter-increment: clause; }
+.ledger-home #what-it-refuses-to-do > ul > li::before { content: "§ " counter(clause); display: block; font-family: var(--ledger-serif); font-size: 0.86rem; color: var(--ledger-muted); margin-bottom: 0.3rem; }
+.ledger-home #what-it-refuses-to-do > ul > li > p:first-child > strong:first-child { font-size: 1.55rem; }
+.ledger-home .bd-article div.highlight { max-width: 24rem; }
+.ledger-home #license-and-citation > h1 { margin-top: 3rem; }
+
+@media screen and (max-width: 60em) {
+  .ledger-hero__inner { grid-template-columns: minmax(0, 1fr); padding-top: 2.5rem; }
+  .ledger-hero__copy h1 { font-size: 2.1rem; }
+  .ledger-home .bd-article section > h1 + ul { grid-template-columns: minmax(0, 1fr); }
+}

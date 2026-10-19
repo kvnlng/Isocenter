@@ -45,11 +45,11 @@ extensions = [
 ]
 
 source_suffix = {".md": "markdown"}
-exclude_patterns = ["superpowers/**", "overrides/**", "_build/**", "_ext/**"]
+exclude_patterns = ["superpowers/**", "_build/**", "_ext/**"]
 
-# index.md starts at `##`: the home page's hero is a template's (C4), not
-# a heading. Chosen over a visually hidden H1, which stock pydata has no
-# class for until C4's stylesheet; the page's title is its first section.
+# index.md starts at `##`: the home page's hero, with its H1, is
+# docs/_templates/layout.html's, not a heading of the page; the page's
+# title is its first section.
 suppress_warnings = ["myst.header"]
 
 # --- MyST ------------------------------------------------------------------
@@ -179,6 +179,24 @@ html_title = "Isocenter"
 html_copy_source = False
 html_show_sourcelink = False
 
+# The "clinical ledger" design (#350): docs/_static/ledger.css maps its
+# tokens onto pydata's variables, and docs/_templates/layout.html draws the
+# home page's hero and pipeline. The three faces come from Google Fonts.
+templates_path = ["_templates"]
+html_static_path = ["_static"]
+html_css_files = [
+    "https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;"
+    "6..72,500&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:"
+    "wght@400;500&display=swap",
+    "ledger.css",
+]
+# The home page is the hero and the ledger sections, full width: no
+# section navigation and no "on this page".
+html_sidebars = {"index": []}
+# Code blocks are dark on the light page, as the design draws them;
+# ledger.css sets the palette over this style's.
+pygments_light_style = "github-dark"
+
 # The version switcher reads one list for every folder. The deploy step
 # sets DOCS_FOLDER to the folder it writes (`1.0`, `dev`); a local build
 # is `dev`.
@@ -193,6 +211,18 @@ html_theme_options = {
     },
     "check_switcher": False,
     "show_version_warning_banner": True,
+    "secondary_sidebar_items": {
+        "**": ["page-toc", "edit-this-page", "sourcelink"],
+        "index": [],
+    },
+    "icon_links": [
+        {
+            "name": "Email support@isocenter.net",
+            "url": "mailto:support@isocenter.net",
+            "icon": "fa-solid fa-paper-plane",
+            "type": "fontawesome",
+        },
+    ],
 }
 html_context = {
     "github_user": "kvnlng",
