@@ -106,10 +106,6 @@ jobs:
     # `tests/test_packaging_contract.py::test_the_docs_deploy_builds_strict_from_the_docs_extra`
     # holds both halves.
     timeout-minutes: 32
-    # Outside the checkout, so nothing the build writes can be mistaken
-    # for a tracked file. The build and the deploy read the one value.
-    env:
-      SITE: ${{ runner.temp }}/site
 
     steps:
     # `fetch-depth: 0` also fetches `origin/gh-pages`, which the deploy
@@ -147,7 +143,11 @@ jobs:
     - run: pip install -e ".[docs]"
       timeout-minutes: 5
     # The tree this builds is the tree the deploy step pushes; nothing
-    # builds it again. `-W` makes every Sphinx warning (a broken
+    # builds it again. SITE, outside the checkout so nothing the build
+    # writes can be mistaken for a tracked file, is set on each of the
+    # three steps that read it, identically: `runner` is not available in
+    # a job-level `env:` (GitHub refuses the whole workflow), only in a
+    # step's. tests/test_packaging_contract.py holds the three equal. `-W` makes every Sphinx warning (a broken
     # cross-reference, a docstring napoleon cannot read, a missing page)
     # fail the run before anything is pushed, and `--keep-going` lists all
     # of them in one run rather than the first. `-d` keeps the pickled
@@ -164,6 +164,7 @@ jobs:
       timeout-minutes: 8
       env:
         DOCS_FOLDER: ${{ needs.guard.outputs.folder }}
+        SITE: ${{ runner.temp }}/site
       run: sphinx-build -W --keep-going -b dirhtml -d "$RUNNER_TEMP/doctrees" docs "$SITE"
     # Every heading id the MkDocs site published is kept by the slug hook
     # in docs/_ext/slugs.py, which myst-parser reaches through
@@ -174,6 +175,8 @@ jobs:
     # tests/test_packaging_contract.py checks the heading is still there.
     - name: Check the published heading ids survived
       timeout-minutes: 1
+      env:
+        SITE: ${{ runner.temp }}/site
       run: |
         if ! grep -q 'id="frozen-at-10"' "$SITE/api/stability/index.html"; then
           echo "::error::api/stability/ has no id=\"frozen-at-10\"; the heading-id hook (docs/_ext/slugs.py) did not run, so every deep link the MkDocs site published is broken"
@@ -224,4 +227,5 @@ jobs:
         TITLE: ${{ needs.guard.outputs.title }}
         ALIAS: ${{ needs.guard.outputs.alias }}
         HIDDEN: ${{ needs.guard.outputs.hidden }}
+        SITE: ${{ runner.temp }}/site
       run: bash .github/scripts/docs_deploy.sh

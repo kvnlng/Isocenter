@@ -2522,13 +2522,17 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     assert building[0] < deploying[0], (
         "the build runs after the deploy, so a warning fails the run only "
         "once the site is already pushed")
-    assert (job.get("env") or {}).get("SITE"), (
-        "the deploy job declares no SITE, so the build and the deploy name "
-        "the tree separately")
-    for index in (building[0], deploying[0]):
-        assert "SITE" not in (steps[index].get("env") or {}), (
-            "a step sets its own SITE, so the build and the deploy can "
-            "name different trees")
+    readers = [index for index, step in enumerate(steps)
+               if "SITE" in (step.get("run") or "")
+               or str(DOCS_DEPLOY_SCRIPT) in (step.get("run") or "")]
+    sites = {steps[index].get("name"): (steps[index].get("env") or {}).get("SITE")
+             for index in readers}
+    assert building[0] in readers and deploying[0] in readers and \
+        len(set(sites.values())) == 1 and None not in sites.values(), (
+            f"the steps that read SITE set it as {sites}; each must set it, "
+            "to one value, or the deploy pushes a tree the build did not "
+            "write (it is per step because `runner` is not available in a "
+            "job-level `env:`)")
     assert (steps[building[0]].get("env") or {}).get("DOCS_FOLDER") == \
         "${{ needs.guard.outputs.folder }}", (
             "the build's DOCS_FOLDER is not the guard's folder; docs/conf.py "
@@ -2605,7 +2609,7 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "was in when #635 was written")
 
 
-def test_the_deploy_checks_a_heading_id_only_the_slug_hook_makes():
+def test_the_deploy_checks_a_heading_id_only_the_slug_hook_makes(tmp_path):
     """The deploy job fails if the site lost the heading ids MkDocs published.
 
     `docs/_ext/slugs.py`'s `pm_slug` gives every heading the id
@@ -2660,6 +2664,26 @@ def test_the_deploy_checks_a_heading_id_only_the_slug_hook_makes():
         f"{wanted!r} is also the id Sphinx gives {slugged[wanted]!r} by "
         "itself, so its presence does not show the hook ran; pick a "
         "heading whose two ids differ (one with a `.` in it)")
+
+    # The step must fail the job when the id is absent, and only then.
+    step = steps[checks[0]]
+    page_dir = tmp_path / "site" / page
+    page_dir.mkdir(parents=True)
+    page_file = page_dir / "index.html"
+    page_file.write_text(
+        f'<section id="{plain}"><h2>{slugged[wanted]}</h2></section>\n',
+        encoding="utf-8")
+    result = _run_step_script(step, tmp_path, {"SITE": str(tmp_path / "site")})
+    assert result.returncode != 0, (
+        "the heading-id check passed a page holding only Sphinx's own id; "
+        "a build whose slug hook did not run would deploy")
+    page_file.write_text(
+        f'<section id="{wanted}"><span id="{plain}"></span>'
+        f'<h2>{slugged[wanted]}</h2></section>\n', encoding="utf-8")
+    result = _run_step_script(step, tmp_path, {"SITE": str(tmp_path / "site")})
+    assert result.returncode == 0, (
+        "the heading-id check failed a page holding the hook's id:\n"
+        + result.stdout + result.stderr)
 
 
 def _step_named(workflow_path, job, name):
@@ -3074,6 +3098,9 @@ class _Pages:
                                          encoding="utf-8")
         (site / "api" / "stability" / "index.html").write_text(
             f"build {self.sites} stability\n", encoding="utf-8")
+        # Sphinx writes one beside every build; it is not a page.
+        (site / ".buildinfo").write_text("# Sphinx build info\n",
+                                         encoding="utf-8")
         return site
 
     def run(self, *args, site=None, folder="", title="", alias="",
@@ -3121,8 +3148,10 @@ class _Pages:
 
 
 def _site_files(site):
+    """What a deploy of `site` must publish: every file but `.buildinfo`."""
     return {str(path.relative_to(site).as_posix()): path.read_bytes()
-            for path in site.rglob("*") if path.is_file()}
+            for path in site.rglob("*")
+            if path.is_file() and path.name != ".buildinfo"}
 
 
 def _switcher(*entries):
@@ -3285,12 +3314,17 @@ def test_a_gh_pages_without_nojekyll_is_refused_before_anything_is_written(tmp_p
 
 
 def test_deleting_dev_removes_it_and_a_folder_holding_latest_is_refused(tmp_path):
-    """S8: `docs_deploy.sh delete dev`, and the refusal to delete `latest`'s folder.
+    """S8: `docs_deploy.sh delete dev`, and the refusals around it.
 
     Removing an unwanted `dev/` is an operation of RELEASING.md's. It
     takes the folder and its entry and rewrites the switcher; a folder an
     alias copies is refused, because deleting it would leave `latest`
-    pointing at nothing the switcher or the 404 page could name.
+    pointing at nothing the switcher or the 404 page could name. A
+    released line's folder is refused too, alias or not: it is fixed by
+    deploying it again, never removed (owner ruling S6, fix forward).
+    A hidden folder may go. Each refusal is checked by its own text, so
+    a run that failed for another reason (git's own error at a missing
+    path, say) cannot pass for it.
     """
     pages = _Pages(tmp_path)
     pages.deploy("1.0", "1.0.0", alias="latest")
@@ -3299,22 +3333,41 @@ def test_deleting_dev_removes_it_and_a_folder_holding_latest_is_refused(tmp_path
 
     result = pages.run("delete", "1.0")
     assert result.returncode != 0
-    assert "latest" in result.stderr
+    assert "1.0 holds latest" in result.stderr, result.stderr
     assert pages.tip() == with_dev
+
+    pages.deploy("1.1", "1.1.0rc1")
+    pages.deploy("1.2", "1.2.0rc1", hidden="true")
+    with_dev = pages.tip()
+    result = pages.run("delete", "1.1")
+    assert result.returncode != 0
+    assert "1.1 is a released line's documentation" in result.stderr, (
+        result.stderr)
+    assert pages.tip() == with_dev
+    result = pages.run("delete", "1.2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pages.entry_mode("1.2") is None
+    with_dev = pages.tip()
 
     result = pages.run("delete", "dev")
     assert result.returncode == 0, result.stdout + result.stderr
     assert pages.entry_mode("dev") is None
     assert pages.json("versions.json") == [
+        {"version": "1.1", "title": "1.1.0rc1", "aliases": []},
         {"version": "1.0", "title": "1.0.0", "aliases": ["latest"]}]
-    assert pages.json("switcher.json") == _switcher(("1.0.0", "1.0", True))
+    assert pages.json("switcher.json") == _switcher(
+        ("1.1.0rc1", "1.1", False), ("1.0.0", "1.0", True))
     changed = pages.changed_since(with_dev) - {"versions.json",
                                                 "switcher.json"}
     assert changed and all(name.startswith("dev/") for name in changed), (
         f"deleting dev changed {sorted(changed)}")
 
+    after = pages.tip()
     result = pages.run("delete", "dev")
     assert result.returncode != 0, "deleting a folder that is not there passed"
+    assert "versions.json has no dev; there is nothing to delete" in \
+        result.stderr, result.stderr
+    assert pages.tip() == after
 
 
 def test_the_script_writes_versions_json_as_mike_does(tmp_path):
@@ -3391,6 +3444,97 @@ def test_the_deploy_refuses_a_local_gh_pages_that_has_diverged(tmp_path):
     assert result.returncode != 0
     assert "diverged" in result.stderr
     assert pages.tip() == before
+
+
+@pytest.mark.parametrize("entry", [
+    {"version": "api", "title": "api", "aliases": []},
+    {"version": "..", "title": "x", "aliases": []},
+    {"version": "1.0", "title": "1.0.0", "aliases": ["api"]},
+    {"version": "1.0", "title": "1.0.0", "aliases": [""]},
+], ids=["stub-name", "dotted", "alias-a-stub", "alias-empty"])
+def test_a_versions_json_naming_a_folder_the_site_never_has_is_refused(
+        tmp_path, entry):
+    """Names read back from `versions.json` are checked like FOLDER.
+
+    The script removes and rewrites the folder of every alias the
+    deployed folder holds, by the name `versions.json` gives it. A file
+    edited by hand to name `api` would turn a deploy into the overwrite
+    of a pre-versioning stub, and an empty or dotted name into the
+    removal of the whole site. Refused before anything is written, by
+    the script's own sentence.
+    """
+    pages = _Pages(tmp_path, versions=json.dumps([entry], indent=2) + "\n")
+    before = pages.tip()
+    result = pages.run(site=pages.site(), folder="1.0", title="1.0.0")
+    assert result.returncode != 0
+    assert "versions.json" in result.stderr and (
+        "which is not X.Y or dev" in result.stderr
+        or "only latest is written by this site" in result.stderr), (
+            result.stderr)
+    assert pages.tip() == before
+
+
+def test_the_deploy_commits_only_the_paths_it_writes(tmp_path):
+    """A file that appears anywhere else in the tree is not committed.
+
+    `git add` names the deployed folder, its aliases' folders,
+    `versions.json` and `switcher.json`, and nothing else, so a stray
+    write cannot reach the site. Here a `git` on PATH drops a file at
+    the root of the deploy's worktree just before the script stages:
+    the stray file must not be on origin's `gh-pages` afterwards, and
+    the root files must be as they were.
+    """
+    pages = _Pages(tmp_path)
+    before = pages.tip()
+    real_git = shutil.which("git")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = -C ] && [ "$3" = add ]; then\n'
+        '  echo stray > "$2/stray.html"\n'
+        '  echo stray > "$2/404.html"\n'
+        "fi\n"
+        f'exec "{real_git}" "$@"\n', encoding="utf-8")
+    wrapper.chmod(0o755)
+    result = pages.run(site=pages.site(), folder="1.0", title="1.0.0",
+                       alias="latest", path_prefix=bin_dir)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pages.tip() != before, "the deploy pushed nothing"
+    assert pages.entry_mode("stray.html") is None, (
+        "a file outside the deployed folders was committed")
+    assert pages.raw("404.html") == (GH_PAGES_ROOT / "404.html").read_bytes()
+
+
+def test_no_workflow_or_job_env_names_a_context_github_refuses_there():
+    """No workflow- or job-level `env:` reads `runner`, `env`, `steps` or `job`.
+
+    Those contexts are available in a step's `env:`, not at workflow or
+    job level, and GitHub rejects the whole workflow file when one is
+    used there: nothing in it runs, and the run page shows only a parse
+    error. docs.yml once set `SITE: ${{ runner.temp }}/site` on its
+    deploy job, which made the documentation workflow invalid (review
+    of docs/sphinx C3, confirmed with actionlint). Every workflow is
+    read, since the rule is GitHub's and not docs.yml's.
+    """
+    import yaml
+
+    forbidden = re.compile(r"\$\{\{[^}]*\b(runner|env|steps|job)\.")
+    found = []
+    for path in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        places = [("workflow", workflow.get("env") or {})]
+        places += [(f"jobs.{name}", job.get("env") or {})
+                   for name, job in (workflow.get("jobs") or {}).items()]
+        for where, env in places:
+            for key, value in env.items():
+                if forbidden.search(str(value)):
+                    found.append(f"{path.name} {where}.env.{key}: {value}")
+    assert not found, (
+        "a workflow- or job-level env reads a context GitHub allows only in "
+        f"a step, which invalidates the whole workflow: {found}")
+
 
 
 def test_the_docs_deploy_refuses_a_guard_decision_the_tags_have_since_overtaken(tmp_path):

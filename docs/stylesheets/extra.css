@@ -1,10 +1,14 @@
 /* Isocenter docs site: the "clinical ledger" system (#350).
  *
  * Warm off-white ground, one muted teal accent, Newsreader on headings,
- * Source Sans 3 body (loaded by mkdocs.yml's theme.font), JetBrains Mono
- * code (same). Newsreader is loaded here because Material's font setting
- * only covers text and code. The design canvas this implements is the
- * "Isocenter Docs Site" artifact; the values below are lifted from it.
+ * Source Sans 3 body (loaded by the MkDocs site's `theme.font`), JetBrains
+ * Mono code (same). Newsreader is loaded here because Material's font
+ * setting only covers text and code. The design canvas this implements is
+ * the "Isocenter Docs Site" artifact; the values below are lifted from it.
+ *
+ * This is the MkDocs/Material site's stylesheet. The Sphinx build does not
+ * load it (docs/conf.py names no stylesheet); it stays as the reference the
+ * design's port to pydata-sphinx-theme works from (docs/sphinx C4).
  */
 @import url("https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap");
 
@@ -91,7 +95,7 @@
 .md-typeset a:hover { color: var(--ledger-accent-dark); border-bottom-color: var(--ledger-accent); }
 .md-typeset code { background: rgba(31, 29, 25, 0.06); color: var(--ledger-ink); border-radius: 2px; padding: 0 0.3em; }
 .md-typeset pre > code { background: var(--ledger-ink); color: #efebe1; border-radius: 4px; }
-/* Inline highlighted code -- mkdocstrings signatures (`code.highlight
+/* Inline highlighted code -- the MkDocs site's mkdocstrings signatures (`code.highlight
  * language-python`) and pymdownx.inlinehilite -- carries Pygments spans
  * whose colours above are chosen for the dark block background. Give it
  * the same dark ground, or the spans paint light-on-light and vanish. */

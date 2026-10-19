@@ -1325,7 +1325,10 @@ holds. Version order is git's `version:refname`, so `v1.0.10` is above
   `bash .github/scripts/docs_deploy.sh delete dev`, from a checkout with
   `origin` reachable and no unpushed local `gh-pages`. It removes the folder
   and its `versions.json` entry and rewrites `switcher.json`, in one commit
-  pushed without force. It refuses a folder that holds `latest`.
+  pushed without force. It removes only `dev/` or a folder `versions.json`
+  marks hidden: a released line's folder is refused (it is fixed by
+  deploying it again, never removed), and so is a folder that holds
+  `latest`.
 - **Never "Re-run" a failed docs run; dispatch it again from its ref.** A
   re-run reuses the old run's guard decision, which a newer tag may have
   overtaken (a `latest` that belongs to a newer line, a patch that is no

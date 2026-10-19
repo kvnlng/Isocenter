@@ -3,7 +3,8 @@
 # (#866 made the layout; this script replaced mike at the move to Sphinx).
 #
 #   docs_deploy.sh                  deploy $SITE into $FOLDER
-#   docs_deploy.sh delete <folder>  remove a folder that holds no alias
+#   docs_deploy.sh delete <folder>  remove `dev/` (or another hidden folder);
+#                                   never a released line's, never one holding an alias
 #
 # Deploy reads FOLDER, TITLE, ALIAS and HIDDEN (the guard's outputs, from
 # docs_decide.sh) and SITE (the built `dirhtml` tree). It replaces
@@ -141,6 +142,10 @@ if mode == "delete":
         refuse(f"{folder} holds {', '.join(entry['aliases'])}; deleting it "
                "would take that address down too. Move the alias first, "
                "by deploying the folder it belongs on")
+    if folder != "dev" and not (entry.get("properties") or {}).get("hidden"):
+        refuse(f"{folder} is a released line's documentation; delete removes "
+               "only dev or a hidden folder. A released folder is fixed by "
+               "deploying it again (RELEASING.md, \"Documentation site\")")
     del by_version[folder]
     replace = []
 else:
@@ -208,6 +213,8 @@ while IFS= read -r name; do
   rm -rf "${tree:?}/${name:?}"
   mkdir -p "$tree/$name"
   cp -R "$SITE/." "$tree/$name/"
+  # Sphinx's incremental-build record (a config hash), not a page.
+  rm -f "$tree/$name/.buildinfo"
   if [ "$name" != "$FOLDER" ]; then
     paths+=("$name")
   fi
