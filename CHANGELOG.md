@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc22] - 2026-10-19
+
 ### Breaking
 
 - **A private-creator key matches its creator in any case and spacing, and two keys for one creator with different rules are refused (#1147).** A creator key (#1132) compared the creator exactly, so a file spelling it another way was silently missed: the element kept its value, no row said so, and the grade was PASS. Vendors write one creator more than one way. On the MIDI-B sets with 1.0.0rc21, the UCSF creator is `UCSF BIRP PRIVATE CREATOR 011710XX` in 2,126 Validation and 3,516 Test files and `UCSF BIRP PRIVATE CREATOR 011710xx` in 990 and 1,364. The configuration's rule, written first with one spelling and then the other, left the value of its free-text element in every file of the other spelling each time: 1,101 and then 3,771 failed Validation removal checks, with nothing in the audit or the report. pydicom 3.0.2's own private dictionary holds four creators in two cases each, and the elements the two spellings share have the same definitions: `HOLOGIC`/`Hologic` (8 shared), `MITRA PRESENTATION 1.0`/`Mitra Presentation 1.0` (6), `SPI RELEASE 1`/`SPI Release 1` (8) and `MITRA OBJECT DOCUMENT 1.0`/`Mitra Object Document 1.0` (1, with another name).
