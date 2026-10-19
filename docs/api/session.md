@@ -9,8 +9,10 @@ order, ingest → examine → config → audit → anonymize → redact → veri
 export → report, with `compact`, `release_memory` and `close` last. What
 the methods return and raise is on [Results and errors](results.md).
 
-<!-- tests/test_frozen_surface.py asserts the `:members:` line below
-     renders every method stability.md freezes. `configuration` is not a
+<!-- tests/test_frozen_surface.py asserts the nested `.. automethod::`
+     lines below render every method stability.md freezes, in the
+     pipeline order this page promises (a `:members:` list would be
+     sorted into source order). `configuration` is not a
      member here: the class docstring's Attributes table describes it with
      the other three attributes. -->
 

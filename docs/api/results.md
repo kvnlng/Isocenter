@@ -7,15 +7,15 @@ page lists them as tier 2.
 
 | Method | Returns |
 | --- | --- |
-| `ingest()` | [`IngestSummary`][isocenter.io_handlers.IngestSummary] |
-| `audit()`, `scan_pixel_content()` | [`PhiReport`][isocenter.privacy.PhiReport] of [`PhiFinding`][isocenter.privacy.PhiFinding] |
-| `lock_identities()`, `lock_identities_batch()` | [`LockingResult`][isocenter.session.LockingResult], a `list` of `Instance` |
+| `ingest()` | {py:class}`~isocenter.io_handlers.IngestSummary` |
+| `audit()`, `scan_pixel_content()` | {py:class}`~isocenter.privacy.PhiReport` of {py:class}`~isocenter.privacy.PhiFinding` |
+| `lock_identities()`, `lock_identities_batch()` | {py:class}`~isocenter.session.LockingResult`, a `list` of `Instance` |
 | `recover_patient_identity()` | `Dict[str, Dict[str, Any]]`: SOP Instance UID to the values its token holds |
-| `export(format="dicom")` | [`ExportSummary`][isocenter.io_handlers.ExportSummary] |
+| `export(format="dicom")` | {py:class}`~isocenter.io_handlers.ExportSummary` |
 | `export(format="wfdb")` | `List[str]`, the paths written |
-| `discover_redaction_zones()` | [`DiscoveryResult`][isocenter.discovery.DiscoveryResult] |
+| `discover_redaction_zones()` | {py:class}`~isocenter.discovery.DiscoveryResult` |
 | `get_cohort_report()` | `pandas.DataFrame` |
-| `phi_status_summary()` | `Dict[str, Counter]` of [`PhiStatus`][isocenter.entities.PhiStatus] |
+| `phi_status_summary()` | `Dict[str, Counter]` of {py:class}`~isocenter.entities.PhiStatus` |
 | `redact()`, `reconcile_private_tags()`, `auto_remediate_config()` | `int` |
 
 Import the two exceptions from the package:

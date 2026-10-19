@@ -727,6 +727,23 @@ def test_the_tutorials_landing_page_is_not_a_run_page(tmp_path):
     assert REPO / TUTORIALS / "index.md" not in _PAGES
 
 
+def landing_page_code(path):
+    """The fences on a landing page other than its `{toctree}`.
+
+    The runner never reads `index.md` (S3), so code there would be shown
+    to readers and run by nothing: a landing page holds none.
+    """
+    return [info for info, _ in _FENCE.findall(path.read_text(encoding="utf-8"))
+            if info.strip().split(" ")[0] != "{toctree}"]
+
+
+def test_the_tutorials_landing_page_holds_no_code(tmp_path):
+    assert landing_page_code(REPO / TUTORIALS / _LANDING_PAGE) == []
+    page = _page(tmp_path, "# Tutorials\n\n```python\nraise SystemExit\n```\n\n"
+                 "```{toctree}\n:maxdepth: 1\n\nt\n```\n", name="index.md")
+    assert landing_page_code(page) == ["python"]
+
+
 def test_any_other_page_under_tutorials_with_no_header_is_still_red(tmp_path):
     """The exclusion is by name: `index.md` alone, not unheaded pages."""
     notes = _page(tmp_path, "# Notes\n\n```python\n>>> 1\n1\n```\n",

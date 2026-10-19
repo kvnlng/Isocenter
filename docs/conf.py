@@ -8,6 +8,8 @@ read this file as text and never import it, because the `tests`
 environment has no Sphinx; keep the settings they read as plain literal
 assignments.
 """
+import dataclasses
+import inspect
 import os
 import pathlib
 import re
@@ -64,6 +66,8 @@ myst_enable_extensions = ["colon_fence", "attrs_inline", "attrs_block"]
 # site and for tests/test_doc_anchors.py, which grades every `#fragment`
 # link against Python-Markdown's ids. Named by import path, because a
 # function object in conf.py does not pickle into Sphinx's environment.
+# MyST records a section's slug only for headings at or above this level,
+# so without it `_slug_first` has nothing to put first.
 myst_heading_anchors = 6
 myst_heading_slug_func = "slugs.pm_slug"
 
@@ -113,6 +117,56 @@ def _skip_entity_member(app, what, name, obj, skip, options):
     return None
 
 
+class _FactoryDefault:
+    """A `field(default_factory=...)` default, spelled as the call."""
+
+    def __init__(self, factory):
+        name = getattr(factory, "__name__", "")
+        self.text = f"{name}()" if name.isidentifier() else "..."
+
+    def __repr__(self):
+        return self.text
+
+
+def _dataclass_parameters(cls):
+    """The parameters a dataclass's page signature shows.
+
+    A `default_factory` default is spelled as its call (`list()`) instead
+    of Python's `<factory>`, and a private field (`Instance._pixel_loader`)
+    is left out. `<factory>` is not Python, so Sphinx's signature parser
+    falls back to splitting the text on commas, and an annotation holding
+    a comma inside nested brackets (`List[Tuple[str, str]]`) is cut in two
+    on the page with no warning (review of docs/sphinx C2: four classes,
+    `autodoc_preserve_defaults` does not help).
+    """
+    factories = {f.name: f.default_factory for f in dataclasses.fields(cls)
+                 if f.default_factory is not dataclasses.MISSING}
+    return [param.replace(default=_FactoryDefault(factories[param.name]))
+            if param.name in factories else param
+            for param in inspect.signature(cls).parameters.values()
+            if not param.name.startswith("_")]
+
+
+def _dataclass_signature(app, what, name, obj, options, signature,
+                         return_annotation):
+    """`autodoc-process-signature`: every dataclass, through
+    `_dataclass_parameters`, formatted as autodoc formats any signature.
+
+    Chosen over `autodoc_typehints = "description"` or `"none"`, which
+    change every signature on the site to fix four, and over a
+    hand-written signature per directive, which the next dataclass with a
+    factory default would not have.
+    """
+    if what != "class" or signature is None or not dataclasses.is_dataclass(obj):
+        return None
+    from sphinx.util.inspect import stringify_signature
+
+    shown = inspect.Signature(_dataclass_parameters(obj))
+    return (stringify_signature(shown, show_return_annotation=False,
+                                unqualified_typehints=True),
+            return_annotation)
+
+
 # --- copy button -----------------------------------------------------------
 
 copybutton_prompt_text = r">>> |\.\.\. "
@@ -158,7 +212,11 @@ def _slug_first(app, doctree):
     """
     from docutils import nodes
 
-    for section in doctree.findall(nodes.section):
+    _put_slugs_first(doctree.findall(nodes.section))
+
+
+def _put_slugs_first(sections):
+    for section in sections:
         slug = section.get("slug")
         if not slug:
             continue
@@ -167,6 +225,9 @@ def _slug_first(app, doctree):
         section["ids"].insert(0, slug)
 
 
+# The hooks are pinned by tests/test_the_docs_conf.py, which loads this
+# file without Sphinx.
 def setup(app):
     app.connect("autodoc-skip-member", _skip_entity_member)
+    app.connect("autodoc-process-signature", _dataclass_signature)
     app.connect("doctree-read", _slug_first)

@@ -21,7 +21,11 @@ those under a directory `docs/conf.py`'s `exclude_patterns` names.
    shows the directives as text with no warning. Autodoc lives inside
    ```` ```{eval-rst} ````.
 5. No `--8<--` snippet include.
-6. No MkDocs front-matter key (`template`, `hide`).
+6. No MkDocs front-matter key (`template`, `hide`), and no
+   reference-style link `[text][target]` outside code: mkdocstrings'
+   autoref spelling, which MyST shows as text, brackets and all
+   (api/results.md held seven until the C2 review). Use a role,
+   ``{py:class}`~module.Name` ``.
 7. A heading's id is the same on both renderers. MyST's slug reads a
    heading's plain text and code only, and Python-Markdown's reads all
    of it, so no emphasis or link inside a heading. And no heading text
@@ -33,7 +37,8 @@ those under a directory `docs/conf.py`'s `exclude_patterns` names.
    its text, never imported (the `tests` environment has no Sphinx):
    `default_role = "literal"` (without it every single-backtick span in
    a docstring renders as italic `<cite>`); the slug function and the
-   `doctree-read` hook that keep every published heading id;
+   `doctree-read` hook that keep every published heading id, and
+   `myst_heading_anchors`, without which MyST records no slug to keep;
    `html_copy_source = False`; and the light-only theme (D7): no
    `theme-switcher`, `default_mode` light.
 9. Every page is reachable from the root toctree, and every toctree
@@ -57,6 +62,8 @@ DOCS = REPO / "docs"
 CONF = DOCS / "conf.py"
 
 _FENCE = re.compile(r"^(?P<fence>`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")
+_REFERENCE_LINK = re.compile(r"\[[^\]\n]+\]\[[^\]\n]*\]")
 _TOCTREE = re.compile(r"^(?P<fence>`{3,}|:{3,})\{toctree\}[^\n]*\n(?P<body>.*?)^(?P=fence)[ \t]*$",
                       re.MULTILINE | re.DOTALL)
 _ENTRY = re.compile(r"^(?:(?P<title>.*?)\s*<(?P<target>[^<>]+)>|(?P<bare>\S+))$")
@@ -159,6 +166,15 @@ def syntax_offenders(path, docs=DOCS):
         for regex, message in RULES.values():
             if regex.search(line):
                 found.append(f"{rel}:{number}: {message}")
+    for number, line in _lines_outside_code(text):
+        if _FENCE.match(line.strip()):
+            continue
+        # A code span is blanked to letters, not removed: `[`X`][t]` is
+        # still a link with text.
+        if _REFERENCE_LINK.search(_CODE_SPAN.sub(lambda m: "x" * len(m.group()), line)):
+            found.append(f"{rel}:{number}: a reference-style link "
+                         "`[text][target]`, which MyST shows as text; use a "
+                         "role such as {py:class} (rule 6)")
     if text.startswith("---\n"):
         front = text.split("---\n", 2)[1]
         for key in ("template", "hide"):
@@ -241,6 +257,7 @@ def conf_offenders(path=CONF):
     found = []
     expect = {"default_role": "literal",
               "myst_heading_slug_func": "slugs.pm_slug",
+              "myst_heading_anchors": 6,
               "html_copy_source": False}
     for name, value in expect.items():
         if values.get(name, object()) != value:
@@ -338,6 +355,21 @@ def test_myst_shapes_and_code_are_clean(tmp_path):
     assert syntax_offenders(docs / "index.md", docs) == []
 
 
+@pytest.mark.parametrize("line, red", [
+    ("See [`Session`][pkg.session.DicomSession].", True),
+    ("| `ingest()` | [`IngestSummary`][pkg.io.IngestSummary] |", True),
+    ("A [plain][] reference.", True),
+    ("A [link](other.md) and `x[1][2]` in code.", False),
+    ("{py:class}`~pkg.io.IngestSummary` is a role.", False),
+])
+def test_a_reference_style_link_is_red(tmp_path, line, red):
+    docs = _site(tmp_path, {"index.md": f"# Home\n\n{line}\n\n"
+                            "```python\n>>> fields['a'][0]\n```\n"})
+    found = syntax_offenders(docs / "index.md", docs)
+    assert (found != []) is red, found
+    assert all(f.startswith("index.md:3: ") and "rule 6" in f for f in found), found
+
+
 def test_mkdocs_front_matter_is_red(tmp_path):
     docs = _site(tmp_path, {"index.md": (
         "---\ntitle: Home\ntemplate: home.html\nhide:\n  - toc\n---\n\n# Home\n")})
@@ -370,6 +402,7 @@ def test_conf_rules(tmp_path):
         'myst_heading_slug_func = "slugs.pm_slug"': 'myst_heading_slug_func = None',
         "html_copy_source = False": "html_copy_source = True",
         '"default_mode": "light"': '"default_mode": "auto"',
+        "myst_heading_anchors = 6\n": "",
     }
     for old, new in cases.items():
         assert good.count(old) == 1, old

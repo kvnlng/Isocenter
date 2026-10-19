@@ -15,7 +15,9 @@ anchors the links ask for against the ids the renderer emits. Those are
 the site's ids too: `docs/_ext/slugs.py` hands MyST Python-Markdown's
 own `slugify`, and a `doctree-read` hook makes that slug each section's
 first HTML id, so every heading id the MkDocs site published is kept
-(docs/sphinx C2). One slug function, two readers -- the #152 lesson. A
+(docs/sphinx C2). One slug function, two readers -- the #152 lesson:
+the render here imports `pm_slug` from that file, so a change to it moves
+both the site's ids and the ids links are graded against. A
 link to docutils' spelling of a heading (`#frozen-at-1-0` for "Frozen
 at 1.0") is red here, because the site's own id is `frozen-at-10`.
 `tests/test_the_docs_are_myst.py` refuses the two heading shapes where
@@ -75,6 +77,7 @@ the network is not a gate.
 import ast
 import functools
 import html.parser
+import importlib.util
 import os
 import pathlib
 import urllib.parse
@@ -171,9 +174,23 @@ def _renderer(configured=None):
         "comparing links against slugs the site never emits; teach it the "
         "new setting rather than deleting this assertion.")
 
-    return markdown.Markdown(
-        extensions=sorted(configured),
-        extension_configs={"toc": configured.get("toc", {})})
+    # The site's own slug function, not a copy of it: `toc` calls
+    # `slugify(text, separator)`, and `pm_slug` is the one MyST is given.
+    toc = {**configured.get("toc", {}),
+           "slugify": lambda text, separator: _site_slug()(text)}
+    return markdown.Markdown(extensions=sorted(configured),
+                             extension_configs={"toc": toc})
+
+
+@functools.lru_cache(maxsize=None)
+def _site_slug(root=ROOT):
+    """`pm_slug` from `docs/_ext/slugs.py`, loaded by path: the function
+    `docs/conf.py` names as `myst_heading_slug_func`."""
+    path = root / "docs" / "_ext" / "slugs.py"
+    spec = importlib.util.spec_from_file_location("_isocenter_docs_slugs", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.pm_slug
 
 
 class _Page(html.parser.HTMLParser):

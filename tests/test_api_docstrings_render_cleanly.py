@@ -106,6 +106,8 @@ import time
 import tokenize
 import unicodedata
 
+import pytest
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
 API_PAGES = REPO / "docs" / "api"
@@ -148,7 +150,17 @@ _SECTION = re.compile(
     r"|Notes?|Other Parameters|Parameters|Params|Receives?|Returns?"
     r"|Raises?|References|See Also|Tip|Todo|Warnings?|Warns|Yields?)"
     r":\s*$", re.IGNORECASE)
-_LIST_ITEM = re.compile(r"^(?:[-*+]|\d+[.)]|#\.)\s")
+# A bullet, or any enumerator docutils reads: arabic, a single letter,
+# roman, or `#`, as `1.`, `1)` or `(1)` (C2 review: `(a)`, `a.` and `i.`
+# were read as prose).
+_ENUMERATOR = r"(?:\d+|[A-Za-z]|[ivxlcdmIVXLCDM]+|#)"
+_LIST_ITEM = re.compile(
+    rf"^(?:[-*+]|{_ENUMERATOR}[.)]|\({_ENUMERATOR}\))\s")
+# A reST field (`:param a:`) and an option-list entry (`-v, --verbose`):
+# each may be followed by a deeper line, its body.
+_FIELD = re.compile(r"^:[^:\s][^:]*:(?:\s|$)")
+_OPTION = r"--?[A-Za-z0-9][\w-]*(?:[ =]<?[\w-]+>?)?"
+_OPTION_ITEM = re.compile(rf"^{_OPTION}(?:,\s+{_OPTION})*(?:\s{{2,}}\S.*)?$")
 
 # What the half before an item's colon may look like when it is a type:
 # `bool`, `pd.DataFrame`, `Optional[dict]`, `Dict[str, Any]`,
@@ -671,7 +683,9 @@ def _colon_offenders(lines, code):
                                          "line above the list (R8)"))
         elif (_indent(following) > _indent(line)
               and index not in in_section
-              and not _LIST_ITEM.match(stripped)):
+              and not _LIST_ITEM.match(stripped)
+              and not _FIELD.match(stripped)
+              and not _OPTION_ITEM.match(stripped)):
             under = "a line ending ':'" if introduces else "a line of text"
             offenders.append((index + 1, "a line indented deeper, directly "
                                          f"under {under}, is an "
@@ -1459,6 +1473,24 @@ def test_the_reader_sees_every_fence_form_and_nested_names(tmp_path):
         "pkg.mod.A._private"]
 
 
+@pytest.mark.parametrize("body", [
+    ":param a: the a,\n    continued.\n:returns: x.\n",
+    "(a) first item, which is\n    wrapped.\n(b) second.\n",
+    "a. first item, which\n   is wrapped.\nb. second.\n",
+    "i. first, which\n   wraps.\nii. second.\n",
+    "#. first, which\n   wraps.\n#. second.\n",
+    "3) third, which\n   wraps.\n",
+    "-v, --verbose\n    Talk more.\n",
+    "--output=FILE  Where to write,\n               continued.\n",
+], ids=["field", "paren-letter", "letter", "roman", "auto", "arabic-paren",
+        "option", "option-with-arg"])
+def test_a_deeper_body_under_a_field_an_enumerator_or_an_option_is_clean(body):
+    """R8's second arm leaves reST's own indented bodies alone (the C2
+    review found it red on all of these, which docutils renders cleanly)."""
+    lines = ["Summary.", ""] + body.splitlines()
+    assert _colon_offenders(lines, set()) == [], body
+
+
 def test_a_deeper_line_directly_under_any_line_of_text_is_red():
     """R8's second arm, widened in C2 (the r2 finding of the C1 review):
     a prose line not ending in `:` is no exemption."""
@@ -1498,6 +1530,9 @@ def test_a_doc_comment_is_graded_as_a_docstring_is():
                 "X = 1\n") == []
     assert _doc_comments("#: one\n#: two\nX = 1\n\n#: three\nY = 2\n") == [
         (1, ["one", "two"]), (5, ["three"])]
+    # A trailing `#:` documents its own line, never the block above it.
+    assert _doc_comments("#: one\nX = 1  #: two\n#: three\nY = 2\n") == [
+        (1, ["one"]), (2, ["two"]), (3, ["three"])]
 
 
 def test_the_package_sweep_reads_every_file(tmp_path):
