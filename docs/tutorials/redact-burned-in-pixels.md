@@ -10,25 +10,27 @@ machine. This tutorial writes one zone for the machine that made
 pydicom's bundled `MR_small.dcm`, redacts, exports, and reads the
 exported pixels back to show which ones changed.
 
-!!! tip "Run it yourself"
+:::{admonition} Run it yourself
+:class: tip
 
-    Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked.
+Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.
 
-    - **Start in a new, empty folder.** Each tutorial creates its own
-      `tutorial.db` and export folders, and running one in another
-      tutorial's folder changes what it prints. The first block below
-      copies the input file from pydicom into `input/`.
-    - Paste the blocks into a Python prompt or a notebook. In a `.py`
-      script, put them under `if __name__ == "__main__":`
-      ([why](../quickstart.md#1-initialize-a-session)).
-    - In a block with `>>>`, type what follows each `>>>`; the lines
-      under it are what Python prints. A `...` inside a printed value
-      stands for a part that differs on every run, such as a pseudonym or
-      a UID.
-    - The session also prints progress bars, status lines and `WARNING`
-      lines as it works. They are not shown here.
-      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+- **Start in a new, empty folder.** Each tutorial creates its own
+  `tutorial.db` and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input file from pydicom into `input/`.
+- Paste the blocks into a Python prompt or a notebook. In a `.py`
+  script, put them under `if __name__ == "__main__":`
+  ([why](../quickstart.md#1-initialize-a-session)).
+- In a block with `>>>`, type what follows each `>>>`; the lines
+  under it are what Python prints. A `...` inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.
+- The session also prints progress bars, status lines and `WARNING`
+  lines as it works. They are not shown here.
+  `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+:::
 
 ```python
 import shutil
@@ -200,15 +202,17 @@ store and the export agree. Only `redact()` writes Burned In Annotation
 `NO`: an export that applies a zone by itself zeroes the same pixels and
 leaves that attribute as the source had it.
 
-!!! note "Finding the zones for a new machine"
+:::{admonition} Finding the zones for a new machine
+:class: note
 
-    This page wrote its zone by hand. For a machine you have not seen,
-    `session.discover_redaction_zones(serial_number)` reads a sample of
-    that machine's images with OCR and returns the text it found, with
-    `to_zones()` to group it into zones for a rule. It needs the `ocr`
-    extra and the `tesseract` program, so this page does not run it.
-    [Zone Discovery](../ocr.md#setting-up-new-machines-zone-discovery)
-    shows how.
+This page wrote its zone by hand. For a machine you have not seen,
+`session.discover_redaction_zones(serial_number)` reads a sample of
+that machine's images with OCR and returns the text it found, with
+`to_zones()` to group it into zones for a rule. It needs the `ocr`
+extra and the `tesseract` program, so this page does not run it.
+[Zone Discovery](../ocr.md#setting-up-new-machines-zone-discovery)
+shows how.
+:::
 
 ## What a rule matches
 

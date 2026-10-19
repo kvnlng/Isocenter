@@ -14,7 +14,7 @@ The `Session` object is your single entry point. It manages:
 
 Isocenter presents DICOM as a hierarchy, so you do not iterate over tags by hand.
 
-```mermaid
+```{mermaid}
 graph LR
     Patient --> Study
     Study --> Series

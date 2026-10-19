@@ -452,65 +452,69 @@ private attribute and the entry reads `removed before export` (grading
 `PASS`); under `false` they are retained byte-for-byte, the entry reads
 `retained for export`, and the session grades `REVIEW_REQUIRED`.
 
-!!! warning "Private binary values over 65534 bytes cannot be retained"
+:::{admonition} Private binary values over 65534 bytes cannot be retained
+:class: warning
 
-    A binary value larger than 65534 bytes never enters the object graph,
-    so `remove_private_tags: false` has nothing left to keep. Setting
-    `false` does not fail: the exported file simply does not have it.
+A binary value larger than 65534 bytes never enters the object graph,
+so `remove_private_tags: false` has nothing left to keep. Setting
+`false` does not fail: the exported file simply does not have it.
 
-    **The loss is announced, not silent.** Each dropped element is logged
-    as a warning and written to the audit log as a `DATA_LOSS` entry
-    naming the tag *and its VR*. It reaches you in two places: the
-    session log, and section 3.1 (*Data Loss*, under *Data Loss & Unscanned
-    Content*) of the compliance report written by
-    `session.generate_report(path)`. A dropped *private* element grades the run
-    `REVIEW_REQUIRED`. Read that section before concluding a vendor block
-    came through a run intact.
+**The loss is announced, not silent.** Each dropped element is logged
+as a warning and written to the audit log as a `DATA_LOSS` entry
+naming the tag *and its VR*. It reaches you in two places: the
+session log, and section 3.1 (*Data Loss*, under *Data Loss & Unscanned
+Content*) of the compliance report written by
+`session.generate_report(path)`. A dropped *private* element grades the run
+`REVIEW_REQUIRED`. Read that section before concluding a vendor block
+came through a run intact.
 
-    This is how 1.x works, not a gap to be closed. If you need
-    those bytes, keep your source files -- Isocenter never modifies them,
-    so the vendor block is still there to go back to.
+This is how 1.x works, not a gap to be closed. If you need
+those bytes, keep your source files -- Isocenter never modifies them,
+so the vendor block is still there to go back to.
+:::
 
-!!! note "Standard binary elements follow the same size rule, except the pixel lookup tables"
+:::{admonition} Standard binary elements follow the same size rule, except the pixel lookup tables
+:class: note
 
-    Overlay Data `(60xx,3000)` is `OW`. At or below 65534 bytes it is
-    carried into the export, and above it it is dropped and reported.
-    `PixelData` and `WaveformData` are the only binary elements stored in
-    the pixel sidecar, and the size rule does not apply to them.
+Overlay Data `(60xx,3000)` is `OW`. At or below 65534 bytes it is
+carried into the export, and above it it is dropped and reported.
+`PixelData` and `WaveformData` are the only binary elements stored in
+the pixel sidecar, and the size rule does not apply to them.
 
-    The tables that say how an image's pixels display are kept up to
-    393216 bytes instead: LUT Data `(0028,3006)` (in the Modality and VOI
-    LUT sequences), the retired Gray LUT Data `(0028,1200)`, the Red, Green
-    and Blue Palette Color LUT Data `(0028,1201)`–`(0028,1203)`, and their
-    segmented twins `(0028,1221)`–`(0028,1223)`. A LUT Descriptor declares
-    at most 65536 entries, so a full 16-bit table is 131072 bytes and is
-    always kept; 393216 bytes (65536 entries of three 16-bit words) is the
-    cap for segmented data, whose encoding the standard does not bound.
-    Dropping one of these left an image that cannot be displayed as its
-    source was -- a colour image with one palette of three, or a VOI LUT
-    with no data -- so they are not held to the vendor-blob limit. Above
-    393216 bytes they are dropped and reported, the row naming that limit.
+The tables that say how an image's pixels display are kept up to
+393216 bytes instead: LUT Data `(0028,3006)` (in the Modality and VOI
+LUT sequences), the retired Gray LUT Data `(0028,1200)`, the Red, Green
+and Blue Palette Color LUT Data `(0028,1201)`–`(0028,1203)`, and their
+segmented twins `(0028,1221)`–`(0028,1223)`. A LUT Descriptor declares
+at most 65536 entries, so a full 16-bit table is 131072 bytes and is
+always kept; 393216 bytes (65536 entries of three 16-bit words) is the
+cap for segmented data, whose encoding the standard does not bound.
+Dropping one of these left an image that cannot be displayed as its
+source was -- a colour image with one palette of three, or a VOI LUT
+with no data -- so they are not held to the vendor-blob limit. Above
+393216 bytes they are dropped and reported, the row naming that limit.
 
-    Under `basic@2026c` and the floor the whole overlay group is removed,
-    so the size rule matters only where a policy keeps it (`"60xx,xxxx":
-    {action: KEEP}`, or `privacy_profile: none`). There, an overlay's
-    *descriptors* (`OverlayRows`, `OverlayColumns`, `OverlayBitPosition`
-    and friends) are `US`, so they survive, and an export from which a
-    large overlay plane was dropped declares a plane it does not carry.
-    The descriptors are not stripped by the size rule. An overlay
-    declared in the unused high bits of `PixelData` (Overlay Bits
-    Allocated above 1, no Overlay Data, `OverlayBitPosition` at or above
-    BitsStored) does not survive ingest: the decode reads BitsStored bits
-    and clears the rest, so neither the store nor any export holds them,
-    whatever the policy. Ingest writes one `DATA_LOSS` row for such an
-    instance, scoped `STANDARD`, naming the group and its bit; under a
-    policy that keeps `60xx`, the exported descriptors point at bits that
-    are no longer there. A compressed stream wider than BitsStored is read
-    at its own width, so its high bits are kept as sample values, and its
-    own `WARNING` row says so.
+Under `basic@2026c` and the floor the whole overlay group is removed,
+so the size rule matters only where a policy keeps it (`"60xx,xxxx":
+{action: KEEP}`, or `privacy_profile: none`). There, an overlay's
+*descriptors* (`OverlayRows`, `OverlayColumns`, `OverlayBitPosition`
+and friends) are `US`, so they survive, and an export from which a
+large overlay plane was dropped declares a plane it does not carry.
+The descriptors are not stripped by the size rule. An overlay
+declared in the unused high bits of `PixelData` (Overlay Bits
+Allocated above 1, no Overlay Data, `OverlayBitPosition` at or above
+BitsStored) does not survive ingest: the decode reads BitsStored bits
+and clears the rest, so neither the store nor any export holds them,
+whatever the policy. Ingest writes one `DATA_LOSS` row for such an
+instance, scoped `STANDARD`, naming the group and its bit; under a
+policy that keeps `60xx`, the exported descriptors point at bits that
+are no longer there. A compressed stream wider than BitsStored is read
+at its own width, so its high bits are kept as sample values, and its
+own `WARNING` row says so.
 
-    A dropped *standard* element is listed in the report's Data Loss
-    section but does not change the grade.
+A dropped *standard* element is listed in the report's Data Loss
+section but does not change the grade.
+:::
 
 ### PHI Tags
 

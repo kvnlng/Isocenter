@@ -7,17 +7,14 @@ in the rows are frozen, and these methods that return them may change in
 a 1.x release. What each `action_type` means is on
 [Analytics & Reporting](../analytics.md).
 
-::: isocenter.persistence.SqliteStore
-    handler: python
-    options:
-      show_root_heading: true
-      show_root_full_path: false
-      show_source: false
-      members:
-        - get_audit_summary
-        - get_audit_errors
-        - get_audit_losses
-        - get_audit_declines
-        - get_audit_scan_gaps
-        - get_audit_drops
-        - get_flattened_instances
+```{eval-rst}
+.. autoclass:: isocenter.persistence.SqliteStore
+
+   .. automethod:: get_audit_summary
+   .. automethod:: get_audit_errors
+   .. automethod:: get_audit_losses
+   .. automethod:: get_audit_declines
+   .. automethod:: get_audit_scan_gaps
+   .. automethod:: get_audit_drops
+   .. automethod:: get_flattened_instances
+```

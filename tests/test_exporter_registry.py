@@ -121,15 +121,21 @@ def test_the_stability_page_names_the_registry_provisional_in_tier_two():
 
 
 def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
-    """A page outside the nav is not built into the site, and
-    `test_doc_anchors` does not read it."""
-    nav = (_REPO / "mkdocs.yml").read_text(encoding="utf-8")
-    assert re.search(r"^\s+- '[^']+': api/exporters\.md$", nav, re.MULTILINE), nav
+    """A page in no toctree is built but linked from nowhere."""
+    landing = (_REPO / "docs/api/index.md").read_text(encoding="utf-8")
+    toctree = re.search(r"^```\{toctree\}\n(.*?)^```$", landing, re.S | re.M)
+    assert toctree and re.search(r"^(?:.*<)?exporters>?$", toctree.group(1),
+                                 re.MULTILINE), landing
     page = (_REPO / "docs/api/exporters.md").read_text(encoding="utf-8")
-    assert '!!! warning "Provisional"' in page
-    assert re.search(r"^::: isocenter\.exporters$", page, re.MULTILINE)
+    assert ":::{admonition} Provisional\n:class: warning\n" in page
+    assert re.search(r"^\.\. automodule:: isocenter\.exporters$", page,
+                     re.MULTILINE)
+    members = re.search(r"^\.\. automodule:: isocenter\.exporters\n"
+                        r"   :members: (.+)$", page, re.MULTILINE)
+    assert members, "the automodule has no `:members:` line directly below it"
+    rendered = [name.strip() for name in members.group(1).split(",")]
     for name in _REGISTRY_NAMES:
-        assert f"- {name}\n" in page, name
+        assert name in rendered, name
     assert "#783" in page
     assert "REVIEW_REQUIRED" in page
     # The two pixel gates a plugin misses (review of #786).

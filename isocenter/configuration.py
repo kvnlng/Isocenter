@@ -110,13 +110,13 @@ def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
     """The v1 canonical form of a tag policy. Never change it (see above).
 
     Args:
-        phi_tags (dict): The tag policy. Rule `name`s and a string rule's
+        phi_tags (dict): The tag policy. Rule `name` fields and a string rule's
             text are left out.
         remove_private_tags (bool): The private-tag switch.
 
     Returns:
         bytes: Sorted, compact ASCII JSON of the rules, the switch and
-            `config_manager.CONFIG_VERSION`.
+        `config_manager.CONFIG_VERSION`.
     """
     rules = {}
     for tag, rule in (phi_tags or {}).items():
@@ -149,7 +149,7 @@ def _scan_policy_for(phi_tags, remove_private_tags, base: str) -> ScanPolicy:
 
     Returns:
         ScanPolicy: `"v1:"` plus the sha256 hex of the v1 canonical form,
-            with `base`.
+        with `base`.
     """
     return ScanPolicy("v1:" + hashlib.sha256(
         _canonical_policy_v1(phi_tags, remove_private_tags)).hexdigest(), base)
@@ -188,8 +188,8 @@ def _deid_method_label(base: str) -> str:
     `external profile` for anything else, which is a path.
 
     Exact matches only, so no string that merely looks like one of them
-    (a pinned name in another case, a relative path beginning `floor
-    over `) is written verbatim.
+    (a pinned name in another case, a relative path beginning
+    `floor over` and a space) is written verbatim.
 
     Args:
         base: A recorded `ScanPolicy.base`.
@@ -219,7 +219,7 @@ def _deid_method_value(policy: ScanPolicy, version: str) -> str:
 
     Returns:
         str: The value, untruncated: `isocenter/<version>; <label>;
-            <scheme>:<first 8 hex of the digest>`.
+        <scheme>:<first 8 hex of the digest>`.
     """
     # `isocenter/<version>` is the exact spelling the output fingerprint's
     # N2 substitution normalises (`scripts/output_fingerprint.py`), so a
@@ -306,8 +306,8 @@ class IsocenterConfiguration:
 
         Returns:
             str: The pinned profile name or external path, `floor over
-                basic@2026c`, or `none`: the identifier the report prints
-                and the store's policy record carries.
+            basic@2026c`, or `none`: the identifier the report prints
+            and the store's policy record carries.
         """
         if self.privacy_profile:
             return self.privacy_profile
@@ -318,8 +318,8 @@ class IsocenterConfiguration:
 
         Returns:
             ScanPolicy: The fingerprint of `phi_tags` and
-                `remove_private_tags` as they stand, labelled
-                `_policy_base`.
+            `remove_private_tags` as they stand, labelled
+            `_policy_base`.
         """
         # Computed on every call, never cached: `phi_tags` and
         # `remove_private_tags` can be assigned directly.
@@ -436,7 +436,7 @@ class IsocenterConfiguration:
 
         Returns:
             Dict[str, Any]: Every rule, keys lowercased, that differs whole
-                from `base`'s rule for its tag, or that `base` lacks.
+            from `base`'s rule for its tag, or that `base` lacks.
 
         Raises:
             ValueError: When `phi_tags` lacks a rule `base` supplies,

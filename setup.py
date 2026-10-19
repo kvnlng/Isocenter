@@ -151,22 +151,32 @@ setup(
             "pytesseract>=0.3.10"
         ],
         "docs": [
-            "mkdocs>=1.5.0",
-            "mkdocs-material>=9.0.0",
-            "mkdocstrings[python]>=0.20.0",
-            "mkdocs-awesome-pages-plugin>=2.8.0",
-            # The versioned site (#866): `docs.yml` runs `mike deploy
-            # --push --update-aliases --title ... --prop-set ...`, and
-            # mkdocs.yml's `mike` plugin block sets `alias_type: copy`.
-            # >=2.2 because 2.2.0 is the release whose source was read for
-            # the design; nothing older was checked. <3 because a major
-            # may rename those flags or keys, and because the design leans
-            # on a fact of 2.2.0's entry points: `[mike.themes]` registers
-            # no `material` theme, so mike injects no selector of its own
-            # beside Material's (`extra.version.provider: mike`). A major
-            # that registers one shows two selectors. Read the release
-            # notes for both before lifting this cap.
-            "mike>=2.2,<3"
+            # The site is built with Sphinx, `dirhtml`, and
+            # pydata-sphinx-theme (docs/conf.py). <10: myst-parser 5.1
+            # and pydata-sphinx-theme 0.23 both cap Sphinx below 10, and
+            # 9.1 is the release the site was built and measured on.
+            "sphinx>=9.1,<10",
+            # Pre-1.0: theme options, template names and CSS variables
+            # move between minors, and docs/conf.py names several.
+            "pydata-sphinx-theme>=0.23,<0.24",
+            # The pages are MyST Markdown. <6: a major may change the
+            # directive syntax or `myst_heading_slug_func`, which the
+            # anchor-keeping hook in docs/_ext/slugs.py relies on.
+            "myst-parser>=5.1,<6",
+            # `tab-set`/`tab-item` (docs/ocr.md). Pre-1.0, so capped at
+            # the minor.
+            "sphinx-design>=0.7,<0.8",
+            # The two ```{mermaid} diagrams.
+            "sphinxcontrib-mermaid>=2.1",
+            # The copy button on code blocks, with the `>>> ` prompt
+            # stripped (docs/conf.py).
+            "sphinx-copybutton>=0.5.2",
+            # docs/_ext/slugs.py gives every heading Python-Markdown's id,
+            # so no anchor the MkDocs site published changes (and
+            # tests/test_doc_anchors.py reads ids with the same function).
+            "markdown>=3.4"
+            # No deploy tool: .github/scripts/docs_deploy.sh writes the
+            # versioned site with git alone (it replaced mike).
         ],
         # Optional: ZoneDiscoverer imports spacy lazily and falls back to
         # regex when it is unavailable.
@@ -232,15 +242,16 @@ setup(
             "setuptools>=70.1",
             # tests/test_doc_anchors.py renders the docs and checks that
             # every `#fragment` link lands on an anchor a heading really
-            # produces -- `mkdocs build --strict` validates file
+            # produces -- the MkDocs build's `--strict` validated file
             # references but not fragments, which is why five links in
             # docs/configuration.md were dead for months (#152). The
             # renderer has to be the real one: a stdlib slugifier written
             # during that review disagreed with Python-Markdown's on
             # underscores, so it would have graded links against slugs
-            # the site never emits. Installed transitively by the `docs`
-            # extra via mkdocs; declared here because the test runs in
-            # the `tests` environment, which does not include it.
+            # the site never emits. The `docs` extra declares it too,
+            # because the site's slug hook uses the same function;
+            # declared here because the test runs in the `tests`
+            # environment, which does not include that extra.
             "markdown>=3.4"
         ],
         # Contributor tooling, deliberately kept out of `tests` and out of

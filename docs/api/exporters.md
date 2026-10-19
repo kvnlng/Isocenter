@@ -1,12 +1,15 @@
 # Exporter registry
 
-!!! warning "Provisional"
-    The exporter registry (`Exporter`, `register()`, `get_exporter()`,
-    `available_formats()`) is **provisional until 1.1**. It is documented
-    but internal (see [API stability](stability.md#the-exporter-registry-provisional-until-11)):
-    1.1 may replace these four names rather than extend them, with a
-    CHANGELOG entry naming both spellings. A plugin written against 1.0
-    should pin `isocenter>=1.0,<1.1`.
+:::{admonition} Provisional
+:class: warning
+
+The exporter registry (`Exporter`, `register()`, `get_exporter()`,
+`available_formats()`) is **provisional until 1.1**. It is documented
+but internal (see [API stability](stability.md#the-exporter-registry-provisional-until-11)):
+1.1 may replace these four names rather than extend them, with a
+CHANGELOG entry naming both spellings. A plugin written against 1.0
+should pin `isocenter>=1.0,<1.1`.
+:::
 
 `session.export(folder, format=...)` looks `format` up in this registry
 and calls the exporter it finds. The two built-in formats, `dicom` and
@@ -142,11 +145,7 @@ behind it.
 
 ## Reference
 
-::: isocenter.exporters
-    handler: python
-    options:
-      members:
-        - Exporter
-        - register
-        - get_exporter
-        - available_formats
+```{eval-rst}
+.. automodule:: isocenter.exporters
+   :members: Exporter, register, get_exporter, available_formats
+```

@@ -53,7 +53,8 @@ def test_the_store_is_wal_and_the_quickstart_says_keep_it_local():
         "the store's journal mode moved off WAL; revisit the local-disk "
         "advice in docs/quickstart.md and the pages it names (#839)")
     with open(os.path.join(_DOCS, "quickstart.md"), encoding="utf-8") as fh:
-        assert '!!! warning "Keep the store on local disk"' in fh.read()
+        assert (":::{admonition} Keep the store on local disk\n"
+                ":class: warning\n") in fh.read()
 
 
 def test_a_store_on_a_network_filesystem_draws_one_warning(monkeypatch, caplog):
@@ -196,9 +197,12 @@ def test_no_mount_holds_a_relative_path():
 def test_the_quickstart_names_what_may_be_on_network_storage():
     with open(os.path.join(_DOCS, "quickstart.md"), encoding="utf-8") as fh:
         text = fh.read()
-    block = re.search(r'!!! warning "Keep the store on local disk"\n((?:    .*\n|\n)+)',
-                      text)
-    assert block, "the admonition has no indented body"
+    block = re.search(r"^:::\{admonition\} Keep the store on local disk\n"
+                      r":class: warning\n(.*?)^:::$", text, re.S | re.M)
+    assert block, "the admonition has no body closed by `:::`"
+    assert ":::" not in block.group(1), (
+        "the admonition is not closed before the next directive opens, so "
+        "MyST renders the two as one")
     body = " ".join(block.group(1).split())
     assert "WAL" in body and "flock" in body
     assert "export()" in body and "ingest()" in body

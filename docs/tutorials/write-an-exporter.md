@@ -9,34 +9,38 @@ useful one, a CSV listing each exported Patient ID, runs it over
 pydicom's bundled `CT_small.dcm`, and reads what the report says about
 it.
 
-!!! warning "Provisional until 1.1"
+:::{admonition} Provisional until 1.1
+:class: warning
 
-    The exporter registry (`Exporter`, `register()`, `get_exporter()`,
-    `available_formats()`) is documented but internal, and 1.1 may
-    replace it rather than extend it. Pin `isocenter>=1.0,<1.1` in a
-    plugin written against 1.0. The terms are on
-    [Exporter registry](../api/exporters.md) and
-    [API stability](../api/stability.md#the-exporter-registry-provisional-until-11).
+The exporter registry (`Exporter`, `register()`, `get_exporter()`,
+`available_formats()`) is documented but internal, and 1.1 may
+replace it rather than extend it. Pin `isocenter>=1.0,<1.1` in a
+plugin written against 1.0. The terms are on
+[Exporter registry](../api/exporters.md) and
+[API stability](../api/stability.md#the-exporter-registry-provisional-until-11).
+:::
 
-!!! tip "Run it yourself"
+:::{admonition} Run it yourself
+:class: tip
 
-    Every Python block on this page runs, in order, as part of
-    Isocenter's test suite, and every output shown is checked.
+Every Python block on this page runs, in order, as part of
+Isocenter's test suite, and every output shown is checked.
 
-    - **Start in a new, empty folder.** Each tutorial creates its own
-      `tutorial.db` and export folders, and running one in another
-      tutorial's folder changes what it prints. The first block below
-      copies the input file from pydicom into `input/`.
-    - Paste the blocks into a Python prompt or a notebook. In a `.py`
-      script, put them under `if __name__ == "__main__":`
-      ([why](../quickstart.md#1-initialize-a-session)).
-    - In a block with `>>>`, type what follows each `>>>`; the lines
-      under it are what Python prints. A `...` inside a printed value
-      stands for a part that differs on every run, such as a pseudonym or
-      a UID.
-    - The session also prints progress bars, status lines and `WARNING`
-      lines as it works. They are not shown here.
-      `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+- **Start in a new, empty folder.** Each tutorial creates its own
+  `tutorial.db` and export folders, and running one in another
+  tutorial's folder changes what it prints. The first block below
+  copies the input file from pydicom into `input/`.
+- Paste the blocks into a Python prompt or a notebook. In a `.py`
+  script, put them under `if __name__ == "__main__":`
+  ([why](../quickstart.md#1-initialize-a-session)).
+- In a block with `>>>`, type what follows each `>>>`; the lines
+  under it are what Python prints. A `...` inside a printed value
+  stands for a part that differs on every run, such as a pseudonym or
+  a UID.
+- The session also prints progress bars, status lines and `WARNING`
+  lines as it works. They are not shown here.
+  `ISOCENTER_SHOW_PROGRESS=0` turns the bars off.
+:::
 
 ```python
 import shutil

@@ -185,7 +185,7 @@ RLELossless = UID("1.2.840.10008.1.2.5")
 #: is a JPEG 2000 codestream with another block coder: the same SOC and
 #: SIZ, so the same signedness, precision and colour transform. openjpeg's
 #: `jpeg2k_decode` reads it exactly -- mono 8/16, signed 16, RGB 8/16 with
-#: and without the reversible colour transform. **Not `htj2k_decode`**:
+#: and without the reversible colour transform. **Not** `htj2k_decode`:
 #: openjph returns an RGB stream written without the transform planar,
 #: `(3, rows, cols)`, the same samples in another image. Do not "use the
 #: matching codec".
@@ -1098,7 +1098,7 @@ def _jpegls_precision(codestream) -> Optional[int]:
     """The sample precision P a JPEG-LS frame header declares, or None.
 
     Walks the marker segments from SOI to the SOF55 (`FF F7`) header, by
-    each segment's own length. **It does not search for `FF F7`.** A COM
+    each segment's own length. **It does not search for** `FF F7`. A COM
     or APPn payload is opaque bytes and can legally hold that pair, and a
     search would then read a precision out of a comment.
 
