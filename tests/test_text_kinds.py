@@ -110,6 +110,158 @@ def test_inner_separators_belong_to_the_run_and_outer_ones_do_not():
     assert _texts(line, text_kinds.id_spans) == ["12-3456"]
 
 
+# --- ids in header text (#1146) -----------------------------------------------
+# `id_spans(line, ocr=False)` is SCRUB's arm; the default is the pixels'.
+# Strings are invented, or quoted from #1146 (`t2_tse_tra_320_p2`,
+# `ep2d_diff_b50_400_800_tra_p3`, `P4^P114^S301^I00004`, `0.781250`,
+# `310-50-9582`).
+
+def _header_ids(line):
+    return text_kinds.id_spans(line, ocr=False)
+
+
+@pytest.mark.parametrize("line", [
+    "t2_tse_tra_320_p2", "ep2d_diff_b50_400_800_tra_p3", "ACC_2024_0001"])
+def test_header_ids_spare_protocol_tokens(line):
+    """A run joined by `_` and holding a letter is a protocol token, not
+    an id. Kills the letter condition dropped (`310-50-9582`, with no
+    `_`, is still an id below)."""
+    assert _header_ids(line) == []
+    assert _header_ids("310-50-9582") == [(0, 11)]
+    # Digits joined by `_` with no letter are not a token: the old rule.
+    assert _header_ids("4826_153907") == [(0, 11)]
+
+
+@pytest.mark.parametrize("line, taken", [
+    ("Doe^482615", "482615"),                       # quoted in the ruling
+    ("P4^P114^S301^I00004", "I00004"),              # quoted: accepted
+    ("Kidney^K12^Phase2^S00417", "S00417"),
+    ("t2_tse^4826153", "4826153")])
+def test_a_caret_neither_joins_nor_protects_an_id(line, taken):
+    """Owner ruling R2: only `_` makes a protocol token. A Person Name's
+    `^` beside an identifier must not shelter it, so `P4^P114^S301^I00004`
+    loses `I00004`, accepted. Kills `^` joining a run again (the whole
+    token would be spared, or taken whole) and `^` read as a token's
+    joiner in the letter test."""
+    assert _texts(line, _header_ids) == [taken]
+
+
+@pytest.mark.parametrize("line, taken", [
+    ("SUBJ_4826153907", "SUBJ_4826153907"),
+    ("dwi_512-77-0314", "dwi_512-77-0314"),
+    ("run_1234567_b", "run_1234567_b"),
+    ("run_739204_b", None)])
+def test_header_ids_take_an_ssn_or_seven_digits_inside_a_token(line, taken):
+    """Kills the 7-digit exception dropped, and the threshold moved to 6
+    (`run_739204_b`) or 8 (`run_1234567_b`). The whole token goes."""
+    assert _texts(line, _header_ids) == ([taken] if taken else [])
+
+
+@pytest.mark.parametrize("line, spans", [
+    ("0.781250", []), ("739204.5", []), ("v2.739204", []),
+    ("PROCESSED\\0.781250 \\0.781250", []),
+    ("AB.739204", [(3, 9)]), ("ID 1234567.", [(3, 10)])])
+def test_header_ids_spare_a_decimal_on_either_side(line, spans):
+    """A run joined by `.` to a digit is part of a number. A letter before
+    the dot (`AB.`) or a full stop at the end is not. Kills the digit
+    before the dot dropped, and the trailing side dropped (`739204.5`)."""
+    assert _header_ids(line) == spans
+
+
+def test_the_pixel_arm_is_unchanged():
+    """Burned-in `ids` keeps rc21's rule (owner ruling Q7 (a)), so no
+    record is read again. Kills the header rule applied to pixels."""
+    assert text_kinds.id_spans("t2_tse_tra_320_p2") == [(0, 17)]
+    assert text_kinds.id_spans("0.781250") == [(2, 8)]
+    assert text_kinds.id_spans("P4^P114^S301^I00004") == [(13, 19)]
+    assert text_kinds.id_spans("ACC_2024_0001") == [(0, 13)]
+    assert (inspect.signature(text_kinds.id_spans).parameters["ocr"].default
+            is True)
+    assert text_kinds.spans("0.781250", ["ids"]) == {"ids": [(2, 8)]}
+
+
+# --- phones, addresses, sites (#1146, owner rulings Q3-Q5 (a)) -----------------
+# Invented, in fictional ranges, or quoted from #1146.
+
+@pytest.mark.parametrize("line, taken", [
+    ("Questions call (312)555-0147x12", "(312)555-0147x12"),
+    ("Contact 312-555-0183 for results", "312-555-0183"),
+    ("Tel +1 312 555 0164", "+1 312 555 0164"),
+    ("Ph 312.555.0129 ext 204", "312.555.0129 ext 204"),
+    ("Callback +44 20 7946 0958", "+44 20 7946 0958"),
+    ("Reader line (312) 555-0172", "(312) 555-0172"),
+    ("call (606)066-5106x76", "(606)066-5106x76"),   # quoted, #1146
+])
+def test_a_phone_number_is_a_phone(line, taken):
+    assert _texts(line, text_kinds.phone_spans) == [taken]
+
+
+@pytest.mark.parametrize("line", [
+    "Matrix 512 256 1024", "FOV 350 350 1500", "Series 101 102 1003",
+    "Dose 1 312 555 0164", "Ratio 3-4", "W:1500 L:400"])
+def test_spaces_do_not_separate_a_phone_without_a_plus(line):
+    """Owner ruling Q3 (a): no space separators but after `+`. Kills a
+    space admitted between the groups."""
+    assert text_kinds.phone_spans(line) == []
+
+
+@pytest.mark.parametrize("line", [
+    "Slices 120-240-3600", "Recon 512.512.0001", "kernel (512) 256-1024"])
+def test_a_phone_shaped_number_triple_is_taken(line):
+    """The cost the docs state: a triple written like a phone number."""
+    assert text_kinds.phone_spans(line) != []
+
+
+@pytest.mark.parametrize("line, taken", [
+    ("Terry Lara : 157 Chisholm Trl Thibodaux, LA 70301",
+     "157 Chisholm Trl Thibodaux, LA 70301"),             # quoted, #1146
+    ("Pt : 41 Willowbend Ct Fairhaven, OR 97999", "41 Willowbend Ct Fairhaven, OR 97999"),
+    ("12 Quarry Ln Maplecrest, VT 05999-1234", "12 Quarry Ln Maplecrest, VT 05999-1234"),
+    ("Sent to 880 Orchard Ave Brindle, KS 66999", "880 Orchard Ave Brindle, KS 66999"),
+])
+def test_a_full_address_is_an_address(line, taken):
+    assert _texts(line, text_kinds.address_spans) == [taken]
+
+
+@pytest.mark.parametrize("line", [
+    "Home 41 Willowbend Ct", "Lives at 7 Larkspur Dr",          # a street alone
+    "4 Phase Abdomen Ct", "2 View Chest Dr", "12 Lead Ecg St",
+    "3 PHASE CT LIVER", "2 Contrast Phase Ct, MR 27",
+    "41 Willowbend CT Fairhaven, OR 97999",                    # suffix case
+])
+def test_what_is_not_an_address(line):
+    """Owner ruling Q4 (a): the full form only, the suffix case-sensitive.
+    Kills the city, state and ZIP made optional, and the suffix read in
+    any case."""
+    assert text_kinds.address_spans(line) == []
+
+
+@pytest.mark.parametrize("line, taken", [
+    ("PET-CT STUDY at CHAJH", "CHAJH"), ("Performed at HWACMC", "HWACMC"),
+    ("t2_tse_tra_320_p2 at HASCC", "HASCC"),                    # quoted
+    ("CT ABDOMEN at QRMC", "QRMC"), ("Outside read at BVCHKLMN", "BVCHKLMN"),
+    ("Perfusion at REST", "REST"),        # the documented cost of the rule
+])
+def test_capitals_after_at_are_a_site(line, taken):
+    assert _texts(line, text_kinds.site_spans) == [taken]
+
+
+@pytest.mark.parametrize("line", [
+    "Scan at ER", "Nodule at RUL", "Lesion at LLL", "Imaging at MRI",
+    "Colo_supine  1.0  B30f at FGH",          # quoted: 3 letters, missed
+    "PERFUSION AT REST", "SCAN AT DELAY", "Scanned at NVRHKLMNO",
+    "Stenosis at ICA origin", "Seen at Mercy", "Seen at QRMCs",
+    "seat QRMC", "t2_tse_tra_320_p2 at HASCC_2", "Seen at QRMC2",
+])
+def test_what_is_not_a_site(line):
+    """Owner ruling Q5 (a): lower-case `at`, then 4 to 8 capitals as a
+    whole word. Kills 2 or 3 capitals admitted (`RUL`, `FGH`), `AT`
+    read in any case, the upper bound dropped (9 letters), `at`
+    matched inside a word (`seat`), and the word's end read without
+    `_` or a digit (`HASCC_2` would lose `HASCC` and keep `_2`)."""
+    assert text_kinds.site_spans(line) == []
+
+
 # --- names, with a stub model ---------------------------------------------
 
 class _Ent(SimpleNamespace):
