@@ -1,2439 +1,1092 @@
 
+<!DOCTYPE html>
 
-<!doctype html>
-<html lang="en" class="no-js">
+
+<html lang="en" data-content_root="../" data-theme="light">
+
   <head>
-    
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width,initial-scale=1">
-      
-        <meta name="description" content="De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.">
-      
-      
-      
-        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/1.0/developer_guide/">
-      
-      
-        <link rel="prev" href="../performance/">
-      
-      
-      
-        
-      
-      
-      <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
-    
-    
-      
-        <title>Contributing - Isocenter</title>
-      
-    
-    
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
-      
-        
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
-      
-      
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Contributing &#8212; Isocenter</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "light";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" type="text/css" href="../_static/ledger.css?v=b7d448bb" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=18bd87630a240e9c25be"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
+
+    <script src="../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=ccdb6887"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.12.1/dist/mermaid.esm.min.mjs";
 
 
-    
-    
-      
-    
-    
-      
-        
-        
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
-        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"JetBrains Mono"}</style>
-      
-    
-    
-      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
-    
-      <link rel="stylesheet" href="../stylesheets/extra.css">
-    
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
-    
-      
 
+
+
+const initStyles = () => {
+    const defaultStyle = document.createElement('style');
+    defaultStyle.textContent = "pre.mermaid {\n    /* Same as .mermaid-container > pre */\n    display: block;\n    width: 100%;\n}\n\npre.mermaid > svg {\n    /* Same as .mermaid-container > pre > svg */\n    height: 500px;\n    width: 100%;\n    max-width: 100% !important;\n}";
+    document.head.appendChild(defaultStyle);
+
+    const fullscreenStyle = document.createElement('style');
+    fullscreenStyle.textContent = ".mermaid-container {\n    position: relative;\n    display: flex;\n    flex-direction: row;\n    width: 100%;\n}\n\n.mermaid-container > pre {\n    display: block;\n    width: 100%;\n}\n\n.mermaid-container > pre > svg {\n    height: 500px;\n    width: 100%;\n    max-width: 100% !important;\n}\n\n.mermaid-fullscreen-btn {\n    position: absolute;\n    width: 28px;\n    height: 28px;\n    background: rgba(255, 255, 255, 0.95);\n    border: 1px solid rgba(0, 0, 0, 0.3);\n    border-radius: 4px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);\n    font-size: 14px;\n    line-height: 1;\n    padding: 0;\n    color: #333;\n}\n\n.mermaid-fullscreen-btn:hover {\n    opacity: 100% !important;\n    background: rgba(255, 255, 255, 1);\n    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);\n    transform: scale(1.1);\n}\n\n.mermaid-fullscreen-btn.dark-theme {\n    background: rgba(50, 50, 50, 0.95);\n    border: 1px solid rgba(255, 255, 255, 0.3);\n    color: #e0e0e0;\n}\n\n.mermaid-fullscreen-btn.dark-theme:hover {\n    background: rgba(60, 60, 60, 1);\n    box-shadow: 0 3px 10px rgba(255, 255, 255, 0.2);\n}\n\n.mermaid-fullscreen-modal {\n    display: none;\n    position: fixed !important;\n    top: 0 !important;\n    left: 0 !important;\n    width: 95vw;\n    height: 100vh;\n    background: rgba(255, 255, 255, 0.98);\n    z-index: 9999;\n    padding: 20px;\n    overflow: auto;\n}\n\n.mermaid-fullscreen-modal.dark-theme {\n    background: rgba(0, 0, 0, 0.98);\n}\n\n.mermaid-fullscreen-modal.active {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n}\n\n.mermaid-container-fullscreen {\n    position: relative;\n    width: 95vw;\n    height: 90vh;\n    max-width: 95vw;\n    max-height: 90vh;\n    background: white;\n    border-radius: 8px;\n    padding: 20px;\n    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);\n    overflow: auto;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n}\n\n.mermaid-container-fullscreen.dark-theme {\n    background: #1a1a1a;\n    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);\n}\n\n.mermaid-container-fullscreen pre.mermaid {\n    width: 100%;\n    height: 100%;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n}\n\n.mermaid-container-fullscreen .mermaid svg {\n    height: 100% !important;\n    width: 100% !important;\n    cursor: grab;\n}\n\n.mermaid-fullscreen-close {\n    position: fixed !important;\n    top: 20px !important;\n    right: 20px !important;\n    width: 40px;\n    height: 40px;\n    background: rgba(255, 255, 255, 0.95);\n    border: 1px solid rgba(0, 0, 0, 0.2);\n    border-radius: 50%;\n    cursor: pointer;\n    z-index: 10000;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);\n    transition: all 0.2s;\n    font-size: 24px;\n    line-height: 1;\n    color: #333;\n}\n\n.mermaid-fullscreen-close:hover {\n    background: white;\n    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);\n    transform: scale(1.1);\n}\n\n.mermaid-fullscreen-close.dark-theme {\n    background: rgba(50, 50, 50, 0.95);\n    border: 1px solid rgba(255, 255, 255, 0.2);\n    color: #e0e0e0;\n}\n\n.mermaid-fullscreen-close.dark-theme:hover {\n    background: rgba(60, 60, 60, 1);\n    box-shadow: 0 6px 16px rgba(255, 255, 255, 0.2);\n}\n\n.mermaid-fullscreen-modal .mermaid-fullscreen-btn {\n    display: none !important;\n}";
+    document.head.appendChild(fullscreenStyle);
+}
+
+// Detect if page has dark background
+const isDarkTheme = () => {
+    // We use a set of heuristics:
+    // 1. Check for common dark mode classes or attributes
+    // 2. Check computed background color brightness
+    if (document.documentElement.classList.contains('dark') ||
+        document.documentElement.getAttribute('data-theme') === 'dark' ||
+        document.body.classList.contains('dark') ||
+        document.body.getAttribute('data-theme') === 'dark') {
+        // console.log("Dark theme detected via class/attribute");
+        return true;
+    }
+    if (document.documentElement.classList.contains('light') ||
+        document.documentElement.getAttribute('data-theme') === 'light' ||
+        document.body.classList.contains('light') ||
+        document.body.getAttribute('data-theme') === 'light') {
+        // console.log("Light theme detected via class/attribute");
+        return false;
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        // console.log("Dark theme detected via prefers-color-scheme");
+        return true;
+    }
+    const bgColor = window.getComputedStyle(document.body).backgroundColor;
+    const match = bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
+    if (match) {
+        const r = parseInt(match[1]);
+        const g = parseInt(match[2]);
+        const b = parseInt(match[3]);
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        // console.log("Background color brightness:", brightness);
+        return brightness < 128;
+    }
+    // console.log("No dark or light theme detected, defaulting to light theme");
+    return false;
+};
+
+let darkTheme = isDarkTheme();
+let modal = null;
+let modalContent = null;
+let previousScrollOffset = [window.scrollX, window.scrollY];
+let _lazyObserver = null;
+let _renderQueue = Promise.resolve();
+let closeModal = () => {};
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal?.classList.contains('active')) {
+        closeModal();
+    }
+});
+
+// Apply d3 zoom to each SVG. Idempotent: an SVG already wrapped is skipped,
+// so this is safe to call both for the initial batch and for diagrams that
+// render lazily once they become visible.
+const addZoomToSvgs = (svgs) => {
+    svgs.each(function() {
+        if (this.getAttribute('data-zoom-applied') === 'true') return;
+        var svg = d3.select(this);
+        svg.html("<g class='wrapper'>" + svg.html() + "</g>");
+        var inner = svg.select("g");
+        var zoom = d3.zoom().on("zoom", function(event) {
+            inner.attr("transform", event.transform);
+        });
+        svg.call(zoom);
+        this.setAttribute('data-zoom-applied', 'true');
+    });
+};
+
+const runMermaid = async (rerun) => {
+    console.log("Running mermaid diagrams, rerun =", rerun);
+    // clear all existing mermaid charts
+    let all_mermaids = document.querySelectorAll(".mermaid");
+
+    if (rerun) {
+        // Disconnect any previous lazy rendering observer
+        if (_lazyObserver) {
+            _lazyObserver.disconnect();
+            _lazyObserver = null;
+        }
+
+        all_mermaids.forEach((el) => {
+            el.removeAttribute('data-mermaid-deferred');
+            el.removeAttribute('data-mermaid-render-failed');
+            if(!el.hasAttribute("data-original-code")) {
+                // store original code
+                // console.log(`Storing original code for first run: `, el.innerHTML);
+                el.setAttribute('data-original-code', el.innerHTML);
+            }
+            if(el.getAttribute("data-processed") === "true") {
+                // remove and restore original
+                el.removeAttribute("data-processed");
+                // console.log(`Restoring original code for re-run: `, el.getAttribute('data-original-code'));
+                el.innerHTML = el.getAttribute('data-original-code');
+            } else {
+                // store original code
+                // console.log(`Storing original code for re-run: `, el.innerHTML);
+                el.setAttribute('data-original-code', el.innerHTML);
+            }
+        });
+
+        // Separate visible and hidden elements. Mermaid's layout engine measures
+        // text dimensions via the DOM, which fails for elements hidden by a parent
+        // (e.g., Reveal.js non-active slides, sphinx-design unopened tabs),
+        // producing broken SVGs. Render visible elements now, defer hidden ones.
+        const visible = [];
+        const hidden = [];
+        all_mermaids.forEach((el) => {
+            // offsetParent is null for display:none ancestors.
+            // getClientRects().length > 0 catches position:fixed elements
+            // (which also have null offsetParent but are still visible).
+            if (el.offsetParent !== null || el.getClientRects().length > 0) {
+                visible.push(el);
+            } else {
+                hidden.push(el);
+                el.setAttribute('data-mermaid-deferred', 'true');
+            }
+        });
+
+        if (visible.length > 0) {
+            try {
+                await mermaid.run({ nodes: visible });
+            } catch (e) {
+                console.error("Mermaid rendering failed:", e);
+            }
+        }
+
+        // Lazily render hidden elements when they become visible.
+        // Uses a promise chain (_renderQueue) to serialize rendering,
+        // since IntersectionObserver may report multiple entries at once
+        // and mermaid.run() is not safe to call concurrently.
+        if (hidden.length > 0) {
+            if (typeof IntersectionObserver === 'undefined') {
+                console.warn("IntersectionObserver not available; hidden mermaid diagrams will not render.");
+            } else {
+                _renderQueue = Promise.resolve();
+                _lazyObserver = new IntersectionObserver((entries) => {
+                    for (const entry of entries) {
+                        if (entry.isIntersecting && entry.target.getAttribute("data-processed") !== "true") {
+                            _lazyObserver.unobserve(entry.target);
+                            const el = entry.target;
+                            _renderQueue = _renderQueue.then(async () => {
+                                try {
+                                    await mermaid.run({ nodes: [el] });
+                                    el.removeAttribute('data-mermaid-deferred');
+                                    // Apply zoom to the now-rendered diagram, matching
+                                    // the decoration visible diagrams receive.
+                                    if (false) {
+                                        addZoomToSvgs(d3.selectAll("").select(function() {
+                                            return this.querySelector("svg");
+                                        }));
+                                    }
+                                } catch (e) {
+                                    console.error("Mermaid deferred rendering failed:", e);
+                                    el.removeAttribute('data-mermaid-deferred');
+                                    el.setAttribute('data-mermaid-render-failed', 'true');
+                                }
+                            });
+                        }
+                    }
+                });
+                hidden.forEach((el) => _lazyObserver.observe(el));
+            }
+        }
+    }
+
+    all_mermaids = document.querySelectorAll(".mermaid");
+    // Exclude deferred (hidden) and render-failed elements from completion checks
+    const mermaids_active = document.querySelectorAll(".mermaid:not([data-mermaid-deferred]):not([data-mermaid-render-failed])");
+    const mermaids_processed = document.querySelectorAll(".mermaid:not([data-mermaid-deferred]):not([data-mermaid-render-failed])[data-processed='true']");
+
+    if (false) {
+        const mermaids_to_add_zoom = 0 === -1 ? mermaids_active.length : 0;
+        if(mermaids_to_add_zoom > 0) {
+            var svgs = d3.selectAll("").select(function() {
+                return this.querySelector("svg");
+            });
+            // Wait until every active (visible) diagram has rendered. Deferred
+            // diagrams are excluded, so a fixed d3_node_count that counts a
+            // hidden diagram no longer loops forever waiting for its SVG.
+            if(mermaids_active.length !== mermaids_processed.length) {
+                setTimeout(() => runMermaid(false), 200);
+                return;
+            }
+            addZoomToSvgs(svgs);
+        }
+    } else if(mermaids_active.length !== mermaids_processed.length) {
+        // Wait for mermaid to process all diagrams
+        setTimeout(() => runMermaid(false), 200);
+        return;
+    }
+
+    // Stop here if not adding fullscreen capability
+    if (!true) return;
+
+    if (modal !== null ) {
+        // Destroy existing modal
+        modal.remove();
+        modal = null;
+        modalContent = null;
+    }
+
+    modal = document.createElement('div');
+    modal.className = 'mermaid-fullscreen-modal' + (darkTheme ? ' dark-theme' : '');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Fullscreen diagram viewer');
+    modal.innerHTML = `
+        <button class="mermaid-fullscreen-close${darkTheme ? ' dark-theme' : ''}" aria-label="Close fullscreen">✕</button>
+        <div class="mermaid-container-fullscreen${darkTheme ? ' dark-theme' : ''}"></div>
+    `;
+    document.body.appendChild(modal);
+
+    modalContent = modal.querySelector('.mermaid-container-fullscreen');
+    const closeBtn = modal.querySelector('.mermaid-fullscreen-close');
+
+    closeModal = () => {
+        modal.classList.remove('active');
+        modalContent.innerHTML = '';
+        document.body.style.overflow = ''
+        window.scrollTo({left: previousScrollOffset[0], top: previousScrollOffset[1], behavior: 'instant'});
+    };
+
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    document.querySelectorAll('.mermaid').forEach((mermaidDiv) => {
+        if (mermaidDiv.parentNode.classList.contains('mermaid-container') ||
+            mermaidDiv.closest('.mermaid-fullscreen-modal')) {
+            // Already processed, adjust button class if needed
+            const existingBtn = mermaidDiv.parentNode.querySelector('.mermaid-fullscreen-btn');
+            if (existingBtn) {
+                existingBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
+            }
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.className = 'mermaid-container';
+        mermaidDiv.parentNode.insertBefore(container, mermaidDiv);
+        container.appendChild(mermaidDiv);
+
+        const fullscreenBtn = document.createElement('button');
+        fullscreenBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
+        fullscreenBtn.setAttribute('aria-label', 'View diagram in fullscreen');
+        fullscreenBtn.textContent = "\u26f6";
+        fullscreenBtn.style.opacity = "50%";
+
+        // Calculate dynamic position based on diagram's margin and padding
+        const diagramStyle = window.getComputedStyle(mermaidDiv);
+        const marginTop = parseFloat(diagramStyle.marginTop) || 0;
+        const marginRight = parseFloat(diagramStyle.marginRight) || 0;
+        const paddingTop = parseFloat(diagramStyle.paddingTop) || 0;
+        const paddingRight = parseFloat(diagramStyle.paddingRight) || 0;
+        fullscreenBtn.style.top = `${marginTop + paddingTop + 4}px`;
+        fullscreenBtn.style.right = `${marginRight + paddingRight + 4}px`;
+
+        fullscreenBtn.addEventListener('click', () => {
+            previousScrollOffset = [window.scrollX, window.scrollY];
+            const clone = mermaidDiv.cloneNode(true);
+            modalContent.innerHTML = '';
+            modalContent.appendChild(clone);
+
+            const svg = clone.querySelector('svg');
+            if (svg) {
+                svg.removeAttribute('width');
+                svg.removeAttribute('height');
+                svg.style.width = '100%';
+                svg.style.height = 'auto';
+                svg.style.maxWidth = '100%';
+                svg.style.display = 'block';
+
+                if (false) {
+                    setTimeout(() => {
+                        const g = svg.querySelector('g');
+                        if (g) {
+                            var svgD3 = d3.select(svg);
+                            svgD3.html("<g class='wrapper'>" + svgD3.html() + "</g>");
+                            var inner = svgD3.select("g");
+                            var zoom = d3.zoom().on("zoom", function(event) {
+                                inner.attr("transform", event.transform);
+                            });
+                            svgD3.call(zoom);
+                        }
+                    }, 100);
+                }
+            }
+
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        });
+        container.appendChild(fullscreenBtn);
+    });
+};
+
+
+
+const load = async () => {
+    initStyles();
+
+
+    await runMermaid(true);
+
+    const reRunIfThemeChanges = async () => {
+        const newDarkTheme = isDarkTheme();
+        if (newDarkTheme !== darkTheme) {
+            darkTheme = newDarkTheme;
+            console.log("Theme change detected, re-running mermaid with", darkTheme ? "dark" : "default", "theme");
+            await mermaid.initialize(
+                {...{"startOnLoad": false},
+                ...{ darkMode: darkTheme, theme: darkTheme ? "dark" : "default" },
+                }
+            );
+            await runMermaid(true);
+        }
+    };
+
+    // Update theme classes when theme changes
+    const themeObserver = new MutationObserver(reRunIfThemeChanges);
+    themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-theme']
+    });
+    themeObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-theme']
+    });
+};
+
+
+
+
+
+console.log("Initializing mermaid with", darkTheme ? "dark" : "default", "theme");
+mermaid.initialize(
+    {...{"startOnLoad": false},
+    ...{ darkMode: darkTheme, theme: darkTheme ? "dark" : "default" },
+    }
+);
+
+window.addEventListener("load", load);
+window.runMermaid = runMermaid;</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'developer_guide';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.23.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://kvnlng.github.io/Isocenter/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '1.0';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            true;
+        </script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="../genindex/" />
+    <link rel="search" title="Search" href="../search/" />
+    <link rel="prev" title="Performance" href="../performance/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="1.0.0rc22" />
+  
     
-    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
   </head>
+  <body data-default-mode="light">
   
   
-    
-    
-    
-    
-    
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
-  
-    
-    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
-    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer"></label>
-    <div data-md-component="skip">
-      
-        
-        <a href="#contributing" class="md-skip">
-          Skip to content
-        </a>
-      
-    </div>
-    <div data-md-component="announce">
-      
-    </div>
-    
-      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
-        
-          <aside class="md-banner md-banner--warning">
-            <div class="md-banner__inner md-grid md-typeset">
-              
-  This is the documentation for a version other than the latest release.
-  <a href="../.."><strong>Go to the latest release.</strong></a>
-
-            </div>
-            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
-          </aside>
-        
-      </div>
-    
-    
-      
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
 
   
-
-<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="Isocenter" class="md-header__button md-logo" aria-label="Isocenter" data-md-component="logo">
-      
+  <div id="pst-scroll-pixel-helper"></div>
   
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search/"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
 
-    </a>
-    <label class="md-header__button md-icon" for="__drawer">
-      
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
-    </label>
-    <div class="md-header__title" data-md-component="header-title">
-      <div class="md-header__ellipsis">
-        <div class="md-header__topic">
-          <span class="md-ellipsis">
-            Isocenter
-          </span>
-        </div>
-        <div class="md-header__topic" data-md-component="header-topic">
-          <span class="md-ellipsis">
-            
-              Contributing
-            
-          </span>
-        </div>
-      </div>
-    </div>
-    
-      
-    
-    
-    
-    
-      
-      
-        <label class="md-header__button md-icon" for="__search">
-          
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
-        </label>
-        <div class="md-search" data-md-component="search" role="dialog">
-  <label class="md-search__overlay" for="__search"></label>
-  <div class="md-search__inner" role="search">
-    <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
-      <label class="md-search__icon md-icon" for="__search">
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-      </label>
-      <nav class="md-search__options" aria-label="Search">
-        
-        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
-          
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </nav>
-      
-    </form>
-    <div class="md-search__output">
-      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
-        <div class="md-search-result" data-md-component="search-result">
-          <div class="md-search-result__meta">
-            Initializing search
-          </div>
-          <ol class="md-search-result__list" role="presentation"></ol>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
 </div>
-      
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button type="button" class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
     
+      <div class="navbar-item">
+
+  
     
-      <div class="md-header__source">
-        <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
-  <div class="md-source__icon md-icon">
+  
+
+<a class="navbar-brand logo" href="../">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">Isocenter</p>
+  
+</a></div>
     
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
-  <div class="md-source__repository">
-    kvnlng/Isocenter
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
+    Get started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
+    Tutorials
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../guides/">
+    Guides
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../migration/">
+    Upgrading from 0.9.x
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="../about/">
+    About
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
   </div>
-</a>
-      </div>
-    
-  </nav>
-  
-    
+</div></div>
       
-<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
-  <div class="md-grid">
-    <ul class="md-tabs__list">
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
-        
-  
-  
-    
-  
-  Home
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../installation/" class="md-tabs__link">
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
           
-  
-  
-  Get started
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
           
-  
-  
-  Tutorials
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../configuration/" class="md-tabs__link">
           
-  
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../migration/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Upgrading from 0.9.x
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../api/stability/" class="md-tabs__link">
           
-  
-  
-  API Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-  
-  
-    
-    
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../for-institutions/" class="md-tabs__link">
           
-  
-  
-  About
-
-        </a>
-      </li>
-    
-  
-
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
       
-    </ul>
+    </div>
+    
   </div>
-</nav>
-    
   
-</header>
-    
-    <div class="md-container" data-md-component="container">
-      
-      
-        
-      
-      <main class="md-main" data-md-component="main">
-        <div class="md-main__inner md-grid">
-          
-            
-              
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
-                <div class="md-sidebar__scrollwrap">
-                  <div class="md-sidebar__inner">
-                    
-
-
   
+    <div class="navbar-persistent--mobile">
 
-
-<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
-  <label class="md-nav__title" for="__drawer">
-    <a href=".." title="Isocenter" class="md-nav__button md-logo" aria-label="Isocenter" data-md-component="logo">
-      
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
-
-    </a>
-    Isocenter
-  </label>
-  
-    <div class="md-nav__source">
-      <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
-  <div class="md-source__icon md-icon">
-    
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
-  </div>
-  <div class="md-source__repository">
-    kvnlng/Isocenter
-  </div>
-</a>
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
     </div>
   
-  <ul class="md-nav__list" data-md-scrollfix>
-    
-      
-      
+
   
+    <button type="button" class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
   
-  
-  
-    <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
+</div>
+
+    </header>
   
 
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
       
       
-  
-  
-  
-  
-    
-    
-    
-    
       
-      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
         
-      
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
     
     
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
+      <div class="sidebar-header-items__center">
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
     
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
     Get started
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Get started
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Installation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quick Start
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
     Tutorials
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Tutorials
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    De-identify a cohort and read the grade
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Select part of a cohort
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reversible anonymization: keep a way back
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/redact-burned-in-pixels/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Redact burned-in text for one machine
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/write-an-exporter/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Write your own export format
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Prepare your own ECGs for a PhysioNet Challenge
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../guides/">
     Guides
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Guides
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../analytics/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Analytics & Reporting
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../export-output/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    What the export writes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ocr/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Burned-in text (OCR)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../waveforms/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Waveforms & WFDB
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../codecs/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Codec support
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ctp-import/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Import CTP rules
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../environment/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Environment Variables
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../migration/">
     Upgrading from 0.9.x
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
     API Reference
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    API Reference
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/stability/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API stability
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/results/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Results and errors
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/configuration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/entities/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Entities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/exporters/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exporter registry
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/ocr/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    OCR API
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/persistence/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Audit trail
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="../about/">
     About
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_7">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    About
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../for-institutions/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    For institutions
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architecture
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../performance/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Performance
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
+  </ul>
+</nav></div>
           
-  
-  
-  <span class="md-ellipsis">
+        
+      </div>
     
-  
-    Contributing
-  
-
     
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
     
-  
-    Contributing
-  
-
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
+        
+      </div>
     
-  </span>
+  </div>
   
-  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button type="button" id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar">
+  <svg class="pst-icon" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
 
-      </a>
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../for-institutions/">For institutions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../architecture/">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../performance/">Performance</a></li>
+<li class="toctree-l1 current active"><a aria-current="page" class="current reference internal" href="#">Contributing</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md">Changelog</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
       
+      <main id="main-content" class="bd-main" role="main">
+        
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-environment-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Environment Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-code-quality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Code Quality
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. Code Quality">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#pylint" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pylint
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#formatting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Formatting
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Testing
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Testing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-release-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Release Process
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Release Process">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#archiving-and-dois" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Archiving and DOIs
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#storage-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storage schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Storage schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#why-the-split" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why the split
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests-behind-the-documented-defaults" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tests behind the documented defaults
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#measuring-coverage-in-worker-processes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Measuring coverage in worker processes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dependency-and-codec-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dependency and codec notes
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Dependency and codec notes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#dependencies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dependencies
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pylibjpeg-libjpeg-on-the-free-threaded-build" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        pylibjpeg-libjpeg on the free-threaded build
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#decode-limits-the-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decode limits: the evidence
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dicomexporterwrite_tree-and-sessionexport" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        DicomExporter.write_tree() and session.export()
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#configuration-and-storage-internals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration and storage internals
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mechanisms-behind-the-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mechanisms behind the API
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
-    </li>
-  
-
+          <div class="bd-content">
+            <div class="bd-article-container">
               
-            
-              
-                
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
   
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Changelog
-  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
 
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
     
-  </span>
-  
-  
-
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
       </a>
     </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
     
+    <li class="breadcrumb-item"><a href="../about/" class="nav-link">About</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Contributing</span></li>
   </ul>
 </nav>
-                  </div>
-                </div>
-              </div>
-            
-            
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
               
-              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
-                <div class="md-sidebar__scrollwrap">
-                  <div class="md-sidebar__inner">
-                    
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-environment-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Environment Setup
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-code-quality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Code Quality
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. Code Quality">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#pylint" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pylint
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#formatting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Formatting
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Testing
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Testing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-release-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Release Process
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Release Process">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#archiving-and-dois" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Archiving and DOIs
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#storage-schema" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Storage schema
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Storage schema">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#why-the-split" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why the split
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#tables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tables
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests-behind-the-documented-defaults" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tests behind the documented defaults
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#measuring-coverage-in-worker-processes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Measuring coverage in worker processes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dependency-and-codec-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dependency and codec notes
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Dependency and codec notes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#dependencies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dependencies
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#pylibjpeg-libjpeg-on-the-free-threaded-build" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        pylibjpeg-libjpeg on the free-threaded build
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#decode-limits-the-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decode limits: the evidence
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dicomexporterwrite_tree-and-sessionexport" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        DicomExporter.write_tree() and session.export()
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#configuration-and-storage-internals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configuration and storage internals
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mechanisms-behind-the-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mechanisms behind the API
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-                  </div>
-                </div>
-              </div>
-            
-          
-          
-            <div class="md-content" data-md-component="content">
+              
               
                 
-
-
-
-  
-
-
-  <nav class="md-path" aria-label="Navigation" >
-    <ol class="md-path__list">
-      
-        
-  
-  
-    <li class="md-path__item">
-      <a href=".." class="md-path__link">
-        
-  <span class="md-ellipsis">
-    Home
-  </span>
-
-      </a>
-    </li>
-  
-
-      
-      
-        
-  
-  
-    
-    
-      <li class="md-path__item">
-        <a href="../for-institutions/" class="md-path__link">
-          
-  <span class="md-ellipsis">
-    About
-  </span>
-
-        </a>
-      </li>
-    
-  
-
-      
-    </ol>
-  </nav>
-
-              
-              <article class="md-content__inner md-typeset">
-                
+<div id="searchbox"></div>
+                <article class="bd-article">
                   
-
-
-  
-  
-
-
-<h1 id="contributing">Contributing</h1>
+  <section id="contributing">
+<h1>Contributing<a class="headerlink" href="#contributing" title="Link to this heading">#</a></h1>
 <p>This page is for people changing Isocenter itself: setting up a development environment, the code-quality rules, running the tests, the release process, and the internals a contributor needs that a user does not.</p>
-<p>Work is planned in <a href="https://github.com/kvnlng/Isocenter/issues">GitHub Issues</a> and <a href="https://github.com/kvnlng/Isocenter/milestones">milestones</a>. Good places to start are the <a href="https://github.com/kvnlng/Isocenter/labels/good%20first%20issue"><code>good first issue</code></a> and <a href="https://github.com/kvnlng/Isocenter/labels/help%20wanted"><code>help wanted</code></a> labels.</p>
-<h2 id="1-environment-setup">1. Environment Setup</h2>
-<p>Isocenter requires Python 3.12+. The floor is not arbitrary: <code>entities.py</code>
-and <code>privacy.py</code> use <code>@dataclass(slots=True)</code> (3.10+), and the declared
+<p>Work is planned in <a class="reference external" href="https://github.com/kvnlng/Isocenter/issues">GitHub Issues</a> and <a class="reference external" href="https://github.com/kvnlng/Isocenter/milestones">milestones</a>. Good places to start are the <a class="reference external" href="https://github.com/kvnlng/Isocenter/labels/good%20first%20issue"><code class="docutils literal notranslate"><span class="pre">good</span> <span class="pre">first</span> <span class="pre">issue</span></code></a> and <a class="reference external" href="https://github.com/kvnlng/Isocenter/labels/help%20wanted"><code class="docutils literal notranslate"><span class="pre">help</span> <span class="pre">wanted</span></code></a> labels.</p>
+<section id="1-environment-setup">
+<span id="environment-setup"></span><h2>1. Environment Setup<a class="headerlink" href="#1-environment-setup" title="Link to this heading">#</a></h2>
+<p>Isocenter requires Python 3.12+. The floor is not arbitrary: <code class="docutils literal notranslate"><span class="pre">entities.py</span></code>
+and <code class="docutils literal notranslate"><span class="pre">privacy.py</span></code> use <code class="docutils literal notranslate"><span class="pre">&#64;dataclass(slots=True)</span></code> (3.10+), and the declared
 dependency set resolves only on 3.12 and later.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Clone the repository</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/kvnlng/Isocenter.git
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>Isocenter
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Install the library, the test suite's dependencies, pylint and coverage</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[dev]"</span>
-</code></pre></div>
-<p>The <code>dev</code> extra is contributor tooling only -- it pulls in <code>tests</code> plus
-<code>pylint</code> and <code>coverage</code>. Somebody installing Isocenter to <em>use</em> it gets none of it;
-<code>pip install isocenter</code> never installs a linter or a test runner.</p>
-<h2 id="2-code-quality">2. Code Quality</h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Clone the repository</span>
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/kvnlng/Isocenter.git
+<span class="nb">cd</span><span class="w"> </span>Isocenter
+
+<span class="c1"># Install the library, the test suite's dependencies, pylint and coverage</span>
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[dev]"</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">dev</span></code> extra is contributor tooling only – it pulls in <code class="docutils literal notranslate"><span class="pre">tests</span></code> plus
+<code class="docutils literal notranslate"><span class="pre">pylint</span></code> and <code class="docutils literal notranslate"><span class="pre">coverage</span></code>. Somebody installing Isocenter to <em>use</em> it gets none of it;
+<code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">isocenter</span></code> never installs a linter or a test runner.</p>
+</section>
+<section id="2-code-quality">
+<span id="code-quality"></span><h2>2. Code Quality<a class="headerlink" href="#2-code-quality" title="Link to this heading">#</a></h2>
 <p>These rules keep the code reliable and maintainable.</p>
-<h3 id="pylint">Pylint</h3>
-<p>We use <code>pylint</code> to lint our codebase. The configuration is strict (<code>pylintrc.toml</code>) and we aim to keep the score above 8.5/10 for the main package.</p>
+<section id="pylint">
+<h3>Pylint<a class="headerlink" href="#pylint" title="Link to this heading">#</a></h3>
+<p>We use <code class="docutils literal notranslate"><span class="pre">pylint</span></code> to lint our codebase. The configuration is strict (<code class="docutils literal notranslate"><span class="pre">pylintrc.toml</span></code>) and we aim to keep the score above 8.5/10 for the main package.</p>
 <p><strong>Run Pylint:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Lint the main package</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>pylint<span class="w"> </span>isocenter
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Lint tests (slightly more lenient)</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>pylint<span class="w"> </span>tests
-</code></pre></div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Lint the main package</span>
+pylint<span class="w"> </span>isocenter
+
+<span class="c1"># Lint tests (slightly more lenient)</span>
+pylint<span class="w"> </span>tests
+</pre></div>
+</div>
 <p><strong>Common Rules:</strong></p>
-<ul>
-<li><strong>Imports</strong>: All imports must be at the top-level (except for strictly necessary circular dependency breaking or rare optional heavy dependencies).</li>
-<li><strong>Docstrings</strong>: All public modules, classes, and methods must have docstrings, in Google style. A docstring documents the code: a summary, <code>Args:</code> (one entry per parameter), <code>Returns:</code>/<code>Yields:</code>, <code>Raises:</code> (one entry per exception the function raises) and what a caller needs to know to use it. It is rendered in the API reference. Change history belongs in <code>CHANGELOG.md</code>, and reasoning for someone editing the body belongs in a <code>#</code> comment at the line it explains. <code>pylint.extensions.docparams</code> is enabled in <code>pylintrc.toml</code> and reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with <code>_</code>. Private names (<code>_x</code>), dunders and <code>__init__</code> are not checked and need no docstring, so constructor parameters, whether documented on the class or on <code>__init__</code>, are not checked either; nor are module docstrings. Keep those complete by hand.</li>
-<li><strong>Encodings</strong>: All <code>open()</code> calls must specify <code>encoding='utf-8'</code> to prevent cross-platform issues.</li>
+<ul class="simple">
+<li><p><strong>Imports</strong>: All imports must be at the top-level (except for strictly necessary circular dependency breaking or rare optional heavy dependencies).</p></li>
+<li><p><strong>Docstrings</strong>: All public modules, classes, and methods must have docstrings, in Google style. A docstring documents the code: a summary, <code class="docutils literal notranslate"><span class="pre">Args:</span></code> (one entry per parameter), <code class="docutils literal notranslate"><span class="pre">Returns:</span></code>/<code class="docutils literal notranslate"><span class="pre">Yields:</span></code>, <code class="docutils literal notranslate"><span class="pre">Raises:</span></code> (one entry per exception the function raises) and what a caller needs to know to use it. It is rendered in the API reference. Change history belongs in <code class="docutils literal notranslate"><span class="pre">CHANGELOG.md</span></code>, and reasoning for someone editing the body belongs in a <code class="docutils literal notranslate"><span class="pre">#</span></code> comment at the line it explains. <code class="docutils literal notranslate"><span class="pre">pylint.extensions.docparams</span></code> is enabled in <code class="docutils literal notranslate"><span class="pre">pylintrc.toml</span></code> and reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with <code class="docutils literal notranslate"><span class="pre">_</span></code>. Private names (<code class="docutils literal notranslate"><span class="pre">_x</span></code>), dunders and <code class="docutils literal notranslate"><span class="pre">__init__</span></code> are not checked and need no docstring, so constructor parameters, whether documented on the class or on <code class="docutils literal notranslate"><span class="pre">__init__</span></code>, are not checked either; nor are module docstrings. Keep those complete by hand.</p></li>
+<li><p><strong>Encodings</strong>: All <code class="docutils literal notranslate"><span class="pre">open()</span></code> calls must specify <code class="docutils literal notranslate"><span class="pre">encoding='utf-8'</span></code> to prevent cross-platform issues.</p></li>
 </ul>
-<h3 id="formatting">Formatting</h3>
-<p>(Optional) We recommend using <code>black</code> for formatting, though it is not enforced.</p>
-<h2 id="3-testing">3. Testing</h2>
-<p>We use <code>pytest</code> for our test suite.</p>
+</section>
+<section id="formatting">
+<h3>Formatting<a class="headerlink" href="#formatting" title="Link to this heading">#</a></h3>
+<p>(Optional) We recommend using <code class="docutils literal notranslate"><span class="pre">black</span></code> for formatting, though it is not enforced.</p>
+</section>
+</section>
+<section id="3-testing">
+<span id="testing"></span><h2>3. Testing<a class="headerlink" href="#3-testing" title="Link to this heading">#</a></h2>
+<p>We use <code class="docutils literal notranslate"><span class="pre">pytest</span></code> for our test suite.</p>
 <p><strong>Run the tests that exercise what your branch changed:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pytest<span class="w"> </span>-v<span class="w"> </span>--changed
-</code></pre></div>
-<p>It prints which selection it used. The whole suite (<code>pytest</code>) runs when a release is cut; <code>RELEASING.md</code> says when each is required.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pytest<span class="w"> </span>-v<span class="w"> </span>--changed
+</pre></div>
+</div>
+<p>It prints which selection it used. The whole suite (<code class="docutils literal notranslate"><span class="pre">pytest</span></code>) runs when a release is cut; <code class="docutils literal notranslate"><span class="pre">RELEASING.md</span></code> says when each is required.</p>
 <p><strong>Run specific tests:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pytest<span class="w"> </span>tests/test_session.py
-</code></pre></div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pytest<span class="w"> </span>tests/test_session.py
+</pre></div>
+</div>
 <p>Every test runs in its own temporary directory, so a test that writes relative paths does not touch the checkout.</p>
-<h3 id="benchmarks">Benchmarks</h3>
-<p>We have a dedicated benchmark suite in <code>tests/benchmarks/</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Run the stress test; --input and --output are required</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_stress_test<span class="w"> </span>--input<span class="w"> </span>&lt;dicom-dir&gt;<span class="w"> </span>--output<span class="w"> </span>&lt;out-dir&gt;
-</code></pre></div>
-<p><a href="../performance/">Performance</a> records the one benchmark run with its machine and date.</p>
-<h2 id="4-release-process">4. Release Process</h2>
-<p>The procedure -- how changes reach <code>main</code>, how a release branch is cut,
-tagged and published, how patch releases work -- lives in
-<a href="https://github.com/kvnlng/Isocenter/blob/main/RELEASING.md"><code>RELEASING.md</code></a>
-in the repository root, next to the code it releases. In short: <code>main</code> is
-the development branch; each minor line is cut to a frozen <code>release/X.Y</code>
-branch; a version is the tag <code>vX.Y.Z</code> on it; and nothing publishes itself.</p>
-<p>Publishing is a manual run of <code>.github/workflows/publish.yml</code> against the
-tag. It uploads to PyPI by Trusted Publishing -- GitHub authenticates over
+<section id="benchmarks">
+<h3>Benchmarks<a class="headerlink" href="#benchmarks" title="Link to this heading">#</a></h3>
+<p>We have a dedicated benchmark suite in <code class="docutils literal notranslate"><span class="pre">tests/benchmarks/</span></code>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run the stress test; --input and --output are required</span>
+python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_stress_test<span class="w"> </span>--input<span class="w"> </span>&lt;dicom-dir&gt;<span class="w"> </span>--output<span class="w"> </span>&lt;out-dir&gt;
+</pre></div>
+</div>
+<p><a class="reference internal" href="../performance/"><span class="std std-doc">Performance</span></a> records the one benchmark run with its machine and date.</p>
+</section>
+<section id="documentation">
+<h3>Documentation<a class="headerlink" href="#documentation" title="Link to this heading">#</a></h3>
+<p>The site is built with Sphinx and pydata-sphinx-theme, from MyST Markdown pages under <code class="docutils literal notranslate"><span class="pre">docs/</span></code> and the package’s docstrings. Install the <code class="docutils literal notranslate"><span class="pre">docs</span></code> extra and build into a directory outside the checkout:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[docs]"</span>
+sphinx-build<span class="w"> </span>-W<span class="w"> </span>--keep-going<span class="w"> </span>-b<span class="w"> </span>dirhtml<span class="w"> </span>-d<span class="w"> </span>/tmp/isocenter-doctrees<span class="w"> </span>docs<span class="w"> </span>/tmp/isocenter-docs
+python<span class="w"> </span>.github/scripts/check_api_pages.py<span class="w"> </span>/tmp/isocenter-docs
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">-W</span></code> is what the deploy uses: a warning fails the build. The second command is the deploy’s check of the API pages: each class’s attributes table matches its docstring, <code class="docutils literal notranslate"><span class="pre">Session</span></code> is named as such, and “On this page” lists the members; it prints each problem and exits 1. Never build into the checkout’s root or beside a running <code class="docutils literal notranslate"><span class="pre">pytest</span></code>, which fails on any new entry in the root. Open <code class="docutils literal notranslate"><span class="pre">/tmp/isocenter-docs/index.html</span></code> to read the result; the version switcher reads the live site’s list, so it shows the published versions, not this build.</p>
+</section>
+</section>
+<section id="4-release-process">
+<span id="release-process"></span><h2>4. Release Process<a class="headerlink" href="#4-release-process" title="Link to this heading">#</a></h2>
+<p>The procedure – how changes reach <code class="docutils literal notranslate"><span class="pre">main</span></code>, how a release branch is cut,
+tagged and published, how patch releases work – lives in
+<a class="reference external" href="https://github.com/kvnlng/Isocenter/blob/main/RELEASING.md"><code class="docutils literal notranslate"><span class="pre">RELEASING.md</span></code></a>
+in the repository root, next to the code it releases. In short: <code class="docutils literal notranslate"><span class="pre">main</span></code> is
+the development branch; each minor line is cut to a frozen <code class="docutils literal notranslate"><span class="pre">release/X.Y</span></code>
+branch; a version is the tag <code class="docutils literal notranslate"><span class="pre">vX.Y.Z</span></code> on it; and nothing publishes itself.</p>
+<p>Publishing is a manual run of <code class="docutils literal notranslate"><span class="pre">.github/workflows/publish.yml</span></code> against the
+tag. It uploads to PyPI by Trusted Publishing – GitHub authenticates over
 OIDC and PyPI matches the request against a publisher pinned to this
-repository, the workflow's <em>filename</em>, and its environment name. There is
-no API token in repository secrets, in CI, or on anyone's machine.
-Renaming <code>publish.yml</code> or its environments breaks publishing until PyPI's
+repository, the workflow’s <em>filename</em>, and its environment name. There is
+no API token in repository secrets, in CI, or on anyone’s machine.
+Renaming <code class="docutils literal notranslate"><span class="pre">publish.yml</span></code> or its environments breaks publishing until PyPI’s
 publisher configuration is updated to match.</p>
 <p>Before anything is uploaded, the build job checks the run. The target must
-be exactly <code>pypi</code> or <code>testpypi</code>. The built wheel must match
-<code>isocenter/_version.py</code>, the one place the version is declared. A run to
-<code>pypi</code> must be dispatched from a <code>v*</code> tag that matches both; a TestPyPI
+be exactly <code class="docutils literal notranslate"><span class="pre">pypi</span></code> or <code class="docutils literal notranslate"><span class="pre">testpypi</span></code>. The built wheel must match
+<code class="docutils literal notranslate"><span class="pre">isocenter/_version.py</span></code>, the one place the version is declared. A run to
+<code class="docutils literal notranslate"><span class="pre">pypi</span></code> must be dispatched from a <code class="docutils literal notranslate"><span class="pre">v*</span></code> tag that matches both; a TestPyPI
 rehearsal may run from the release branch, and a tag, if it runs from one,
 must match too. It then installs the
 built wheel into a clean environment <em>outside the source tree</em> and asserts
-it carries its own <code>resources/*.json</code>. That gate exists because those
-resources once shipped in no distribution at all and nothing failed --
-every loader guards on <code>os.path.exists</code> and degrades to a default, so a
+it carries its own <code class="docutils literal notranslate"><span class="pre">resources/*.json</span></code>. That gate exists because those
+resources once shipped in no distribution at all and nothing failed –
+every loader guards on <code class="docutils literal notranslate"><span class="pre">os.path.exists</span></code> and degrades to a default, so a
 published release audited against an empty PHI policy and reported clean.</p>
-<p><strong>If <code>test-supported</code> (3.13, 3.14) is red, that is a decision, not a
+<p><strong>If <code class="docutils literal notranslate"><span class="pre">test-supported</span></code> (3.13, 3.14) is red, that is a decision, not a
 formality.</strong> It only reports; it cannot block the upload. Either fix it,
-or delete that classifier from <code>setup.py</code> before releasing -- <code>setup.py</code>
+or delete that classifier from <code class="docutils literal notranslate"><span class="pre">setup.py</span></code> before releasing – <code class="docutils literal notranslate"><span class="pre">setup.py</span></code>
 says outright that a classifier CI does not back is the same unbacked
-promise the old <code>python_requires="&gt;=3.9"</code> was. A red job here is <em>more</em>
-likely to be a flake than a real break (v0.9.1's publish had 3.13 fail and
-pass on rerun), which is exactly what makes it dangerous: "just rerun it"
+promise the old <code class="docutils literal notranslate"><span class="pre">python_requires=&quot;&gt;=3.9&quot;</span></code> was. A red job here is <em>more</em>
+likely to be a flake than a real break (v0.9.1’s publish had 3.13 fail and
+pass on rerun), which is exactly what makes it dangerous: “just rerun it”
 is the reading that ships a real break. Rerun to learn whether it is
-deterministic, not to make it go away. That is why <code>RELEASING.md</code> rehearses
+deterministic, not to make it go away. That is why <code class="docutils literal notranslate"><span class="pre">RELEASING.md</span></code> rehearses
 on TestPyPI, from the release branch, before tagging.</p>
-<h3 id="archiving-and-dois">Archiving and DOIs</h3>
+<section id="archiving-and-dois">
+<h3>Archiving and DOIs<a class="headerlink" href="#archiving-and-dois" title="Link to this heading">#</a></h3>
 <p>Once the Zenodo GitHub integration is enabled for this repository, each
 published GitHub Release is archived and issued a version DOI, under a
-concept DOI that always resolves to the latest. <code>.zenodo.json</code> supplies
-the deposit metadata and <code>CITATION.cff</code> is what GitHub's "Cite this
-repository" button reads.</p>
+concept DOI that always resolves to the latest. <code class="docutils literal notranslate"><span class="pre">.zenodo.json</span></code> supplies
+the deposit metadata and <code class="docutils literal notranslate"><span class="pre">CITATION.cff</span></code> is what GitHub’s “Cite this
+repository” button reads.</p>
 <p>Zenodo only archives releases created <em>after</em> the integration is
-switched on; it does not backfill -- its own guide says "once connected,
+switched on; it does not backfill – its own guide says “once connected,
 new releases from the repository will be automatically ingested and
-archived". So enabling it does nothing to the releases already published:
+archived”. So enabling it does nothing to the releases already published:
 the first deposit comes from the next release, or from deleting and
 re-creating an existing GitHub Release. Creating a GitHub Release uploads
-nothing: publishing is a separate manual run (<code>RELEASING.md</code>), so the
+nothing: publishing is a separate manual run (<code class="docutils literal notranslate"><span class="pre">RELEASING.md</span></code>), so the
 Release can be made, or re-made for Zenodo, without touching PyPI.</p>
 <p>The integration is enabled and the first deposit exists, from v0.8.1.
-The <strong>concept</strong> DOI is <code>10.5281/zenodo.22104298</code> -- that is what
-<code>CITATION.cff</code> and the README badge carry, and it always resolves to the
+The <strong>concept</strong> DOI is <code class="docutils literal notranslate"><span class="pre">10.5281/zenodo.22104298</span></code> – that is what
+<code class="docutils literal notranslate"><span class="pre">CITATION.cff</span></code> and the README badge carry, and it always resolves to the
 latest version. Zenodo also mints a per-version DOI for each release, one
 digit away; do not substitute it, or the citation stops following the
-work. <code>tests/test_version_contract.py</code> pins both the value and the
+work. <code class="docutils literal notranslate"><span class="pre">tests/test_version_contract.py</span></code> pins both the value and the
 agreement between the two files.</p>
-<p><code>.zenodo.json</code> supplies the metadata the record is minted from. Two
+<p><code class="docutils literal notranslate"><span class="pre">.zenodo.json</span></code> supplies the metadata the record is minted from. Two
 things about it are easy to get wrong and are pinned by
-<code>tests/test_version_contract.py</code>:</p>
-<ul>
-<li><strong><code>license</code> is a Zenodo vocabulary id, not an SPDX id</strong>, and those are
-  lowercase. <code>apache-2.0</code> resolves at
-  <code>zenodo.org/api/vocabularies/licenses/</code>; the SPDX spelling
-  <code>Apache-2.0</code> returns 404, and would have gone into the record as a
-  licence Zenodo could not match. (The same held for <code>agpl-3.0-or-later</code>
-  before #348 changed the licence.)</li>
-<li><strong>No <code>version</code> field.</strong> The GitHub integration fills it in from the
-  release tag. Pinning it here would add a third place for the number to
-  drift.</li>
+<code class="docutils literal notranslate"><span class="pre">tests/test_version_contract.py</span></code>:</p>
+<ul class="simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">license</span></code> is a Zenodo vocabulary id, not an SPDX id</strong>, and those are
+lowercase. <code class="docutils literal notranslate"><span class="pre">apache-2.0</span></code> resolves at
+<code class="docutils literal notranslate"><span class="pre">zenodo.org/api/vocabularies/licenses/</span></code>; the SPDX spelling
+<code class="docutils literal notranslate"><span class="pre">Apache-2.0</span></code> returns 404, and would have gone into the record as a
+licence Zenodo could not match. (The same held for <code class="docutils literal notranslate"><span class="pre">agpl-3.0-or-later</span></code>
+before #348 changed the licence.)</p></li>
+<li><p><strong>No <code class="docutils literal notranslate"><span class="pre">version</span></code> field.</strong> The GitHub integration fills it in from the
+release tag. Pinning it here would add a third place for the number to
+drift.</p></li>
 </ul>
 <p>Record metadata can be corrected on Zenodo after publication; the DOI
 itself cannot be reissued.</p>
-<h2 id="storage-schema">Storage schema</h2>
-<p>The session store is <code>&lt;name&gt;.db</code> (SQLite) plus <code>&lt;name&gt;_pixels.bin</code>, an append-only sidecar. The layout below is internal: it is not part of the frozen API, and a release may change it. <a href="../architecture/#4-storage">Architecture</a> has the user's view.</p>
-<h3 id="why-the-split">Why the split</h3>
+</section>
+</section>
+<section id="storage-schema">
+<h2>Storage schema<a class="headerlink" href="#storage-schema" title="Link to this heading">#</a></h2>
+<p>The session store is <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;.db</span></code> (SQLite) plus <code class="docutils literal notranslate"><span class="pre">&lt;name&gt;_pixels.bin</span></code>, an append-only sidecar. The layout below is internal: it is not part of the frozen API, and a release may change it. <a class="reference internal" href="../architecture/#storage"><span class="std std-ref">Architecture</span></a> has the user’s view.</p>
+<section id="why-the-split">
+<h3>Why the split<a class="headerlink" href="#why-the-split" title="Link to this heading">#</a></h3>
 <p>DICOM metadata comes in two shapes. Standard tags are well-defined and present on most instances; private tags are vendor-specific, sparse and numerous. One table with a column per tag is impossible, and a single entity-attribute-value table is too slow to load in bulk. So values are split by group parity and type when they are saved:</p>
-<table>
+<div class="pst-scrollable-table-container"><table class="table">
 <thead>
-<tr>
-<th style="text-align: left;">Where</th>
-<th style="text-align: left;">Table / file</th>
-<th style="text-align: left;">What</th>
-<th style="text-align: left;">Why</th>
+<tr class="row-odd"><th class="head text-left"><p>Where</p></th>
+<th class="head text-left"><p>Table / file</p></th>
+<th class="head text-left"><p>What</p></th>
+<th class="head text-left"><p>Why</p></th>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td style="text-align: left;">Core attributes</td>
-<td style="text-align: left;"><code>instances.attributes_json</code></td>
-<td style="text-align: left;">Every standard (even-group) tag, and every binary value that is kept, private ones included</td>
-<td style="text-align: left;">One JSON document per instance, read back whole: no SQL reads inside it and no joins, so 10,000 instances load without 10,000 joins.</td>
+<tr class="row-even"><td class="text-left"><p>Core attributes</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instances.attributes_json</span></code></p></td>
+<td class="text-left"><p>Every standard (even-group) tag, and every binary value that is kept, private ones included</p></td>
+<td class="text-left"><p>One JSON document per instance, read back whole: no SQL reads inside it and no joins, so 10,000 instances load without 10,000 joins.</p></td>
 </tr>
-<tr>
-<td style="text-align: left;">Private attributes</td>
-<td style="text-align: left;"><code>instance_attributes</code></td>
-<td style="text-align: left;">Private (odd-group) tags that are not binary</td>
-<td style="text-align: left;">Sparse, vendor-specific; keeps the core document small.</td>
+<tr class="row-odd"><td class="text-left"><p>Private attributes</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instance_attributes</span></code></p></td>
+<td class="text-left"><p>Private (odd-group) tags that are not binary</p></td>
+<td class="text-left"><p>Sparse, vendor-specific; keeps the core document small.</p></td>
 </tr>
-<tr>
-<td style="text-align: left;">Pixel and waveform data</td>
-<td style="text-align: left;"><code>&lt;name&gt;_pixels.bin</code>, located by <code>instances.pixel_offset</code>/<code>pixel_length</code> and <code>instance_blobs</code></td>
-<td style="text-align: left;">Raw frame bytes</td>
-<td style="text-align: left;">Keeps gigabytes out of the database.</td>
+<tr class="row-even"><td class="text-left"><p>Pixel and waveform data</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">&lt;name&gt;_pixels.bin</span></code>, located by <code class="docutils literal notranslate"><span class="pre">instances.pixel_offset</span></code>/<code class="docutils literal notranslate"><span class="pre">pixel_length</span></code> and <code class="docutils literal notranslate"><span class="pre">instance_blobs</span></code></p></td>
+<td class="text-left"><p>Raw frame bytes</p></td>
+<td class="text-left"><p>Keeps gigabytes out of the database.</p></td>
 </tr>
 </tbody>
 </table>
-<p>The real split for private values is whether a value serializes to text: a kept binary value is base64-encoded into <code>attributes_json</code> even when it is private, and its VR is recorded in the document's root <code>__vrs__</code>. DS and IS values are stored as tagged text (<code>{"__type__": "DS", "data": ...}</code>) because <code>json</code> writes a float or int subclass as a bare number. There is no fourth tier for large binary values: only Pixel Data and Waveform Data go to the sidecar, and any other binary value over 65534 bytes is dropped at ingest with a <code>DATA_LOSS</code> row, because an unbounded value would stay resident for the life of the session. The pixel lookup tables (<code>io_handlers.LUT_DATA_TAGS</code>: LUT Data, Gray LUT Data and the six palette data elements) are kept up to 393216 bytes instead (<code>LUT_RETENTION_MAX_BYTES</code>). A full 16-bit table is 131072 bytes, so three palettes are 384 KiB raw or about 512 KiB as base64; three segmented palettes at the cap are 1.125 MiB raw, about 1.5 MiB as base64. <a href="../configuration/#private-tags">Private Tags</a> gives the reasoning users see.</p>
-<h3 id="tables">Tables</h3>
-<p>Every table has an integer <code>id</code> primary key; the natural keys are <code>UNIQUE</code> columns.</p>
-<table>
+</div>
+<p>The real split for private values is whether a value serializes to text: a kept binary value is base64-encoded into <code class="docutils literal notranslate"><span class="pre">attributes_json</span></code> even when it is private, and its VR is recorded in the document’s root <code class="docutils literal notranslate"><span class="pre">__vrs__</span></code>. DS and IS values are stored as tagged text (<code class="docutils literal notranslate"><span class="pre">{&quot;__type__&quot;:</span> <span class="pre">&quot;DS&quot;,</span> <span class="pre">&quot;data&quot;:</span> <span class="pre">...}</span></code>) because <code class="docutils literal notranslate"><span class="pre">json</span></code> writes a float or int subclass as a bare number. There is no fourth tier for large binary values: only Pixel Data and Waveform Data go to the sidecar, and any other binary value over 65534 bytes is dropped at ingest with a <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row, because an unbounded value would stay resident for the life of the session. The pixel lookup tables (<code class="docutils literal notranslate"><span class="pre">io_handlers.LUT_DATA_TAGS</span></code>: LUT Data, Gray LUT Data and the six palette data elements) are kept up to 393216 bytes instead (<code class="docutils literal notranslate"><span class="pre">LUT_RETENTION_MAX_BYTES</span></code>). A full 16-bit table is 131072 bytes, so three palettes are 384 KiB raw or about 512 KiB as base64; three segmented palettes at the cap are 1.125 MiB raw, about 1.5 MiB as base64. <a class="reference internal" href="../configuration/#private-tags"><span class="std std-ref">Private Tags</span></a> gives the reasoning users see.</p>
+</section>
+<section id="tables">
+<h3>Tables<a class="headerlink" href="#tables" title="Link to this heading">#</a></h3>
+<p>Every table has an integer <code class="docutils literal notranslate"><span class="pre">id</span></code> primary key; the natural keys are <code class="docutils literal notranslate"><span class="pre">UNIQUE</span></code> columns.</p>
+<div class="pst-scrollable-table-container"><table class="table">
 <thead>
-<tr>
-<th style="text-align: left;">Table</th>
-<th style="text-align: left;">Holds</th>
-<th style="text-align: left;">Key columns</th>
+<tr class="row-odd"><th class="head text-left"><p>Table</p></th>
+<th class="head text-left"><p>Holds</p></th>
+<th class="head text-left"><p>Key columns</p></th>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td style="text-align: left;"><code>patients</code></td>
-<td style="text-align: left;">One row per patient</td>
-<td style="text-align: left;"><code>patient_id</code> (UNIQUE), <code>patient_name</code>, <code>phi_status</code>, <code>phi_policy</code>, <code>phi_policy_base</code>, <code>phi_status_edited</code>, <code>jitter_scheme</code></td>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">patients</span></code></p></td>
+<td class="text-left"><p>One row per patient</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">patient_id</span></code> (UNIQUE), <code class="docutils literal notranslate"><span class="pre">patient_name</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_status</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_policy</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_policy_base</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_status_edited</span></code>, <code class="docutils literal notranslate"><span class="pre">jitter_scheme</span></code></p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>project_secret</code></td>
-<td style="text-align: left;">The one per-project secret (<code>id = 1</code>) that keys pseudonyms, date offsets and replacement UIDs</td>
-<td style="text-align: left;"><code>secret_hex</code>, <code>origin</code>, <code>created_at</code></td>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">project_secret</span></code></p></td>
+<td class="text-left"><p>The one per-project secret (<code class="docutils literal notranslate"><span class="pre">id</span> <span class="pre">=</span> <span class="pre">1</span></code>) that keys pseudonyms, date offsets and replacement UIDs</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">secret_hex</span></code>, <code class="docutils literal notranslate"><span class="pre">origin</span></code>, <code class="docutils literal notranslate"><span class="pre">created_at</span></code></p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>studies</code></td>
-<td style="text-align: left;">One row per study</td>
-<td style="text-align: left;"><code>study_instance_uid</code> (UNIQUE), <code>patient_id_fk</code>, <code>study_date</code>, <code>date_shifted</code>, <code>shifted_study_date</code>, the four PHI-status columns</td>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">studies</span></code></p></td>
+<td class="text-left"><p>One row per study</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">study_instance_uid</span></code> (UNIQUE), <code class="docutils literal notranslate"><span class="pre">patient_id_fk</span></code>, <code class="docutils literal notranslate"><span class="pre">study_date</span></code>, <code class="docutils literal notranslate"><span class="pre">date_shifted</span></code>, <code class="docutils literal notranslate"><span class="pre">shifted_study_date</span></code>, the four PHI-status columns</p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>series</code></td>
-<td style="text-align: left;">One row per series</td>
-<td style="text-align: left;"><code>series_instance_uid</code> (UNIQUE), <code>study_id_fk</code>, <code>modality</code>, <code>series_number</code>, <code>manufacturer</code>, <code>model_name</code>, <code>device_serial_number</code></td>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">series</span></code></p></td>
+<td class="text-left"><p>One row per series</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">series_instance_uid</span></code> (UNIQUE), <code class="docutils literal notranslate"><span class="pre">study_id_fk</span></code>, <code class="docutils literal notranslate"><span class="pre">modality</span></code>, <code class="docutils literal notranslate"><span class="pre">series_number</span></code>, <code class="docutils literal notranslate"><span class="pre">manufacturer</span></code>, <code class="docutils literal notranslate"><span class="pre">model_name</span></code>, <code class="docutils literal notranslate"><span class="pre">device_serial_number</span></code></p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>instances</code></td>
-<td style="text-align: left;">One row per instance (one file)</td>
-<td style="text-align: left;"><code>sop_instance_uid</code> (UNIQUE), <code>series_id_fk</code>, <code>sop_class_uid</code>, <code>instance_number</code>, <code>file_path</code>, <code>source_path</code>, <code>pixel_offset</code>, <code>pixel_length</code>, <code>pixel_hash</code>, <code>compress_alg</code>, <code>attributes_json</code>, <code>shift_provenance</code>, the four PHI-status columns</td>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instances</span></code></p></td>
+<td class="text-left"><p>One row per instance (one file)</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">sop_instance_uid</span></code> (UNIQUE), <code class="docutils literal notranslate"><span class="pre">series_id_fk</span></code>, <code class="docutils literal notranslate"><span class="pre">sop_class_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">instance_number</span></code>, <code class="docutils literal notranslate"><span class="pre">file_path</span></code>, <code class="docutils literal notranslate"><span class="pre">source_path</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_offset</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_length</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_hash</span></code>, <code class="docutils literal notranslate"><span class="pre">compress_alg</span></code>, <code class="docutils literal notranslate"><span class="pre">attributes_json</span></code>, <code class="docutils literal notranslate"><span class="pre">shift_provenance</span></code>, the four PHI-status columns</p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>instance_attributes</code></td>
-<td style="text-align: left;">Private, non-binary values</td>
-<td style="text-align: left;"><code>instance_uid</code>, <code>group_id</code>, <code>element_id</code>, <code>atom_index</code>, <code>value_rep</code>, <code>value_text</code>, <code>value_count</code>; UNIQUE on the first four</td>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instance_attributes</span></code></p></td>
+<td class="text-left"><p>Private, non-binary values</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instance_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">group_id</span></code>, <code class="docutils literal notranslate"><span class="pre">element_id</span></code>, <code class="docutils literal notranslate"><span class="pre">atom_index</span></code>, <code class="docutils literal notranslate"><span class="pre">value_rep</span></code>, <code class="docutils literal notranslate"><span class="pre">value_text</span></code>, <code class="docutils literal notranslate"><span class="pre">value_count</span></code>; UNIQUE on the first four</p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>instance_blobs</code></td>
-<td style="text-align: left;">Sidecar references other than the instance's own Pixel Data: waveform samples, and pixel data inside a sequence item such as an icon image</td>
-<td style="text-align: left;"><code>instance_uid</code>, <code>kind</code> (<code>waveform</code>, or <code>pixels:&lt;path&gt;</code> such as <code>pixels:0088,0200/0/7fe0,0010</code>), <code>offset</code>, <code>length</code>, <code>hash</code>, <code>compress_alg</code>; UNIQUE on <code>(instance_uid, kind)</code></td>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instance_blobs</span></code></p></td>
+<td class="text-left"><p>Sidecar references other than the instance’s own Pixel Data: waveform samples, and pixel data inside a sequence item such as an icon image</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">instance_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">kind</span></code> (<code class="docutils literal notranslate"><span class="pre">waveform</span></code>, or <code class="docutils literal notranslate"><span class="pre">pixels:&lt;path&gt;</span></code> such as <code class="docutils literal notranslate"><span class="pre">pixels:0088,0200/0/7fe0,0010</span></code>), <code class="docutils literal notranslate"><span class="pre">offset</span></code>, <code class="docutils literal notranslate"><span class="pre">length</span></code>, <code class="docutils literal notranslate"><span class="pre">hash</span></code>, <code class="docutils literal notranslate"><span class="pre">compress_alg</span></code>; UNIQUE on <code class="docutils literal notranslate"><span class="pre">(instance_uid,</span> <span class="pre">kind)</span></code></p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>audit_log</code></td>
-<td style="text-align: left;">Every action the pipeline records, read by the compliance report</td>
-<td style="text-align: left;"><code>timestamp</code>, <code>action_type</code>, <code>entity_uid</code>, <code>details</code>, <code>loss_scope</code> (DATA_LOSS rows), <code>element_tag</code> (SCAN_GAP rows)</td>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">audit_log</span></code></p></td>
+<td class="text-left"><p>Every action the pipeline records, read by the compliance report</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">timestamp</span></code>, <code class="docutils literal notranslate"><span class="pre">action_type</span></code>, <code class="docutils literal notranslate"><span class="pre">entity_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">details</span></code>, <code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> (DATA_LOSS rows), <code class="docutils literal notranslate"><span class="pre">element_tag</span></code> (SCAN_GAP rows)</p></td>
 </tr>
-<tr>
-<td style="text-align: left;"><code>phi_findings</code></td>
-<td style="text-align: left;">Findings saved by <code>save_analysis()</code></td>
-<td style="text-align: left;"><code>entity_uid</code>, <code>entity_type</code>, <code>field_name</code>, <code>value</code>, <code>reason</code>, <code>patient_id</code>, <code>remediation_action</code>, <code>remediation_value</code>, <code>details_json</code></td>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">phi_findings</span></code></p></td>
+<td class="text-left"><p>Findings saved by <code class="docutils literal notranslate"><span class="pre">save_analysis()</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">entity_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">entity_type</span></code>, <code class="docutils literal notranslate"><span class="pre">field_name</span></code>, <code class="docutils literal notranslate"><span class="pre">value</span></code>, <code class="docutils literal notranslate"><span class="pre">reason</span></code>, <code class="docutils literal notranslate"><span class="pre">patient_id</span></code>, <code class="docutils literal notranslate"><span class="pre">remediation_action</span></code>, <code class="docutils literal notranslate"><span class="pre">remediation_value</span></code>, <code class="docutils literal notranslate"><span class="pre">details_json</span></code></p></td>
 </tr>
 </tbody>
 </table>
-<p><code>persistence.py</code> holds the <code>CREATE TABLE</code> statements and the <code>ALTER TABLE</code> steps that add a column to a store created without it. Nothing is back-filled: a column added later is NULL in older rows, and the loader reads NULL as "not recorded".</p>
-<pre class="mermaid"><code>erDiagram
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">persistence.py</span></code> holds the <code class="docutils literal notranslate"><span class="pre">CREATE</span> <span class="pre">TABLE</span></code> statements and the <code class="docutils literal notranslate"><span class="pre">ALTER</span> <span class="pre">TABLE</span></code> steps that add a column to a store created without it. Nothing is back-filled: a column added later is NULL in older rows, and the loader reads NULL as “not recorded”.</p>
+<pre  class="mermaid">
+        erDiagram
     PATIENTS ||--|{ STUDIES : contains
     STUDIES ||--|{ SERIES : contains
     SERIES ||--|{ INSTANCES : contains
-    INSTANCES ||--o{ INSTANCE_ATTRIBUTES : "private tags"
-    INSTANCES ||--o{ INSTANCE_BLOBS : "waveform, nested pixels"
-    INSTANCES ||--o| SIDECAR : "primary frame"
-    INSTANCE_BLOBS ||--|| SIDECAR : "offset, length"
+    INSTANCES ||--o{ INSTANCE_ATTRIBUTES : &quot;private tags&quot;
+    INSTANCES ||--o{ INSTANCE_BLOBS : &quot;waveform, nested pixels&quot;
+    INSTANCES ||--o| SIDECAR : &quot;primary frame&quot;
+    INSTANCE_BLOBS ||--|| SIDECAR : &quot;offset, length&quot;
 
     PATIENTS {
         int id PK
@@ -2477,187 +1130,250 @@ itself cannot be reissued.</p>
     }
     SIDECAR {
         bytes frames
-    }</code></pre>
-<p><code>audit_log</code>, <code>phi_findings</code> and <code>project_secret</code> stand alone: they refer to entities by UID in their text columns, not by foreign key.</p>
-<h2 id="tests-behind-the-documented-defaults">Tests behind the documented defaults</h2>
-<p>Several numbers in <a href="../environment/">Environment Variables</a> are pinned by tests, so the page and the code cannot drift apart silently:</p>
-<ul>
-<li><code>tests/test_documented_env_vars.py</code> fails when the package reads an <code>ISOCENTER_*</code> variable that has no row in the table: a table row whose first cell is the variable's name in bold code.</li>
-<li><code>tests/test_parallel_contract.py</code> holds the default worker count (one per CPU), the order the threads-or-processes levers resolve in, and the rule that only the literal <code>1</code> switches a flag on.</li>
-<li><code>tests/test_redaction_worker_count.py</code> holds <code>redact()</code>'s own default (half the CPUs, capped at eight) at fixed CPU counts, so the cap is exercised on any machine.</li>
-<li><code>tests/test_shared_executor_lifecycle.py</code> holds the <code>WARNING</code>s <code>ingest()</code> logs when <code>ISOCENTER_FORCE_THREADS</code> or <code>ISOCENTER_MAX_TASKS_PER_CHILD</code> is set.</li>
+    }
+    </pre><p><code class="docutils literal notranslate"><span class="pre">audit_log</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_findings</span></code> and <code class="docutils literal notranslate"><span class="pre">project_secret</span></code> stand alone: they refer to entities by UID in their text columns, not by foreign key.</p>
+</section>
+</section>
+<section id="tests-behind-the-documented-defaults">
+<h2>Tests behind the documented defaults<a class="headerlink" href="#tests-behind-the-documented-defaults" title="Link to this heading">#</a></h2>
+<p>Several numbers in <a class="reference internal" href="../environment/"><span class="std std-doc">Environment Variables</span></a> are pinned by tests, so the page and the code cannot drift apart silently:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tests/test_documented_env_vars.py</span></code> fails when the package reads an <code class="docutils literal notranslate"><span class="pre">ISOCENTER_*</span></code> variable that has no row in the table: a table row whose first cell is the variable’s name in bold code.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tests/test_parallel_contract.py</span></code> holds the default worker count (one per CPU), the order the threads-or-processes levers resolve in, and the rule that only the literal <code class="docutils literal notranslate"><span class="pre">1</span></code> switches a flag on.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tests/test_redaction_worker_count.py</span></code> holds <code class="docutils literal notranslate"><span class="pre">redact()</span></code>’s own default (half the CPUs, capped at eight) at fixed CPU counts, so the cap is exercised on any machine.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tests/test_shared_executor_lifecycle.py</span></code> holds the <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>s <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> logs when <code class="docutils literal notranslate"><span class="pre">ISOCENTER_FORCE_THREADS</span></code> or <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_TASKS_PER_CHILD</span></code> is set.</p></li>
 </ul>
 <p>Change the page and the test together.</p>
-<h2 id="measuring-coverage-in-worker-processes">Measuring coverage in worker processes</h2>
-<p><code>ingest()</code> and <code>export()</code> always run in worker processes, so a debugger or a plain <code>coverage run</code> in the calling process does not see them. <code>.coveragerc</code> measures the spawned workers too; its comments say why each setting is there:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>coverage<span class="w"> </span>run<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>coverage<span class="w"> </span>combine<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>coverage<span class="w"> </span>report
-</code></pre></div>
+</section>
+<section id="measuring-coverage-in-worker-processes">
+<h2>Measuring coverage in worker processes<a class="headerlink" href="#measuring-coverage-in-worker-processes" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">ingest()</span></code> and <code class="docutils literal notranslate"><span class="pre">export()</span></code> always run in worker processes, so a debugger or a plain <code class="docutils literal notranslate"><span class="pre">coverage</span> <span class="pre">run</span></code> in the calling process does not see them. <code class="docutils literal notranslate"><span class="pre">.coveragerc</span></code> measures the spawned workers too; its comments say why each setting is there:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>coverage<span class="w"> </span>run<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>coverage<span class="w"> </span>combine<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>coverage<span class="w"> </span>report
+</pre></div>
+</div>
 <p>Coverage is not run in CI and has no threshold.</p>
-<p><code>ISOCENTER_WORKER_FAULTHANDLER=1</code> makes every worker process dump its threads' tracebacks to stderr if it is still alive after 240 s. The test workflow (<code>.github/workflows/tests.yml</code>) sets it, so a stall inside a pool child shows up as a stack trace rather than a silent hang.</p>
-<h2 id="dependency-and-codec-notes">Dependency and codec notes</h2>
-<h3 id="dependencies">Dependencies</h3>
-<p>Dependencies are declared in one place, <code>setup.py</code>. There is deliberately no <code>requirements.txt</code>: two lists drift apart, and only <code>install_requires</code> is consulted when you <code>pip install</code>. <code>.[tests]</code> is enough to run the suite; <code>.[dev]</code> adds pylint and coverage.</p>
-<h3 id="pylibjpeg-libjpeg-on-the-free-threaded-build"><code>pylibjpeg-libjpeg</code> on the free-threaded build</h3>
-<p>Measured with <code>pylibjpeg-libjpeg</code> 2.4.0, which has no free-threaded wheel. On CPython 3.14t, <code>pip install</code> builds it from the sdist, and the build either fails or produces a wheel with no extension module in it, depending on the compiler pip picks. The second was measured here: the install reported success and <code>import libjpeg</code> then failed with <code>ModuleNotFoundError: No module named '_libjpeg'</code>. Built from the sdist by hand it imports, with <code>RuntimeWarning: The global interpreter lock (GIL) has been enabled to load module '_libjpeg', which has not declared that it can run safely without the GIL</code>, so a 3.14t process that imports it runs with the GIL back on unless <code>PYTHON_GIL=0</code> is set. <a href="../codecs/">Codec support</a> carries the user-facing summary.</p>
-<h3 id="decode-limits-the-evidence">Decode limits: the evidence</h3>
-<p><a href="../codecs/#decode-limits">Codec support</a> states each limit. The measurements behind the precision limits:</p>
-<ul>
-<li>A precision-12 JPEG Lossless stream under BitsStored 16 reads <code>0..4970</code> through <code>imagecodecs</code> (lj92) and <code>0..4095</code> through pydicom with <code>pylibjpeg-libjpeg</code>, which saturates.</li>
-<li>A JPEG 2000 codestream written by <code>imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K", bitspersample=12)</code> over unsigned samples up to 4970 declares precision 12 and holds 4970: with the SIZ segment's precision byte (<code>Ssiz</code>) changed from 0x0b to 0x0f, 16 bits, <code>imagecodecs.jpeg2k_decode</code> returns the input plus 30720, the difference between the two precisions' level shifts (32768 − 2048): 35690 where the input holds 4970, and the input exactly once 30720 is subtracted. As written it reads <code>0..4095</code> through Pillow and through <code>imagecodecs</code>, the two decoders that install with Isocenter, both openjpeg, and <code>ingest()</code> of a <code>.90</code> file holding it stores <code>0..4095</code> and writes no row. Measured on imagecodecs 2026.8.16 and 2026.10.10 (openjpeg 2.5.4). Through pydicom's <code>pylibjpeg-openjpeg</code> plugin (2.6.0, also openjpeg) it reads <code>0..4095</code> as well. GDCM was not tried, and neither was any JPEG 2000 decoder that is not openjpeg (#1057).</li>
-<li>No JPEG-LS stream was found that decodes beyond its declared precision (#684). For a 16-bit array holding 4970, <code>imagecodecs.jpegls_encode</code> declares precision 16; with <code>bitspersample=12</code> (2026.10.10; 2026.8.16 refuses the keyword) it declares 12 and decodes to the array masked to 12 bits, 3570 at most. DCMTK's <code>dcmcjpls</code> 3.7.0 over the same samples in a native file (BitsAllocated 16, BitsStored 12) writes the same two streams: <code>+pr</code> precision 16, decoding to the input, and <code>+pc</code> precision 12, byte for byte the <code>bitspersample=12</code> stream. Both encoders write an LSE segment stating MAXVAL 65535 into a precision-16 stream; <code>imagecodecs</code> writes none into an 8-bit one. With the SOF55 precision byte of that array's precision-16 stream (8 by 8, <code>0..4970</code>) rewritten to any value from 2 to 15, <code>imagecodecs.jpegls_decode</code> (CharLS 2.4.4) raises <code>JpeglsError</code>: <code>Invalid JPEG-LS stream: JPEG-LS preset parameters segment contains invalid values</code> while an LSE states a MAXVAL above 2^P − 1 (4096 at precision 12 is refused and 4095 is not), and, for this array, a refusal of the scan (<code>the encoded bit stream contains a general structural problem</code>, or <code>the decoding process is ready but the source buffer still contains encoded data</code>) once the LSE is taken out or states 2^P − 1. The scan's refusal depends on the samples, not on the width: a 16-bit stream of one row of 64 samples, each 4970, rewritten to precision 12 is refused with its LSE as written or stating 4096, and with the LSE out or stating 4095 it decodes, to <code>31..4031</code> with no cell equal to the source (<code>455..1896</code> at precision 11); one pixel of 65535 with the LSE out decodes to 4095, 2047 and 255 at precisions 12, 11 and 8. <code>_decode_pixels</code> on the fallback returns the row's array, the check returns None, and <code>ingest()</code> of a <code>.80</code> file holding it (BitsAllocated 16, BitsStored 12) stores <code>31..4031</code> and writes no row (found by the review of #1099). Over 400 arrays (8-bit and 16-bit, one and three samples per pixel), each encoded lossless and near-lossless and rewritten to every lower precision in five ways, none of 28,000 rewritten 16-bit streams decoded (a near-lossless stream rewritten to precision 2 is refused for its NEAR value instead); of the 2,400 rewritten 8-bit streams of each way, 781 decoded with no LSE and 781 with an LSE stating 2^P − 1, each to samples inside the rewritten precision, and none with an LSE stating more. One 8-bit stream of samples up to 245, rewritten to precision 7, decodes to <code>0..127</code> with 1 cell of 64 equal to the source; <code>_decode_pixels</code> returns that array, the check returns None, and <code>ingest()</code> of a <code>.80</code> file holding it stores <code>0..127</code> and writes no row. Identical on imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t. <code>tests/test_a_stream_narrower_than_its_own_samples_is_said.py</code> holds the <code>+pc</code> stream as bytes, runs the rewrites of the 8 by 8 array, and holds the two streams that decode.</li>
-<li>pydicom's JPEG-LS plugins on the same rewritten streams, 3.12.14 only (<code>pylibjpeg</code> 2.1.0 with <code>pylibjpeg-libjpeg</code> 2.4.0, and <code>pyjpegls</code> 1.5.1; pydicom 3.0.2 registers <code>pylibjpeg</code>, <code>pyjpegls</code> and <code>gdcm</code> for JPEG-LS and takes <code>pylibjpeg</code> first). 29 streams: the 8 by 8 array's and the row's at precisions 12 and 11, the pixel's at 12, 11 and 8, each with the LSE as written, out, stating 2^P − 1 and stating 2^P, and the 8-bit stream at precision 7. <code>libjpeg.decode</code> decodes all 29, none beyond its precision: the 8 by 8 array's at precision 12 reads <code>0..4095</code> with the LSE as written, equal to the source clamped to 4095 in all 64 cells, and <code>0..4029</code> with the LSE out; CharLS refuses both. <code>jpeg_ls.decode</code> (CharLS) refuses and decodes as <code>imagecodecs</code> does, in the same words and to the same ranges, except that it refuses the one-pixel streams <code>imagecodecs</code> decodes. With the plugins importable, <code>_decode_pixels</code> returns a decode for each of the 29, with <code>libjpeg.decode</code>'s range, and the check returns None; <code>ingest()</code> of four <code>.80</code> files (the 8 by 8 array's at precision 12 with the LSE as written and out, the row's with the LSE out, the 8-bit stream at 7) stores <code>0..4095</code>, <code>0..4029</code>, <code>31..4031</code> and <code>0..127</code> and writes no row. GDCM was not tried, and neither was any other JPEG-LS decoder; the plugins were not tried on 3.14t, where <code>pylibjpeg-libjpeg</code> has no wheel.</li>
-<li>The signed arm is measured unreachable for JPEG Baseline and Extended (<code>.50</code>/<code>.51</code>), whose decode is not sign-extended at all.</li>
-<li><code>693_J2KR.dcm</code> from pydicom's test data (a signed JPEG 2000 codestream) reads <code>int16 [-2000, 2492]</code> identically through Pillow and through <code>imagecodecs</code>, and writes no row.</li>
-<li>An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision; measured at BitsStored 12, 13 and 16, it reads <code>int16 [-1996, 1470]</code> on both routes, with no row.</li>
-<li>12-bit JPEG Extended decodes through <code>imagecodecs.jpeg_decode</code> value for value as DCMTK decodes pydicom's <code>JPEG-lossy.dcm</code>.</li>
+<p><code class="docutils literal notranslate"><span class="pre">ISOCENTER_WORKER_FAULTHANDLER=1</span></code> makes every worker process dump its threads’ tracebacks to stderr if it is still alive after 240 s. The test workflow (<code class="docutils literal notranslate"><span class="pre">.github/workflows/tests.yml</span></code>) sets it, so a stall inside a pool child shows up as a stack trace rather than a silent hang.</p>
+</section>
+<section id="dependency-and-codec-notes">
+<h2>Dependency and codec notes<a class="headerlink" href="#dependency-and-codec-notes" title="Link to this heading">#</a></h2>
+<section id="dependencies">
+<h3>Dependencies<a class="headerlink" href="#dependencies" title="Link to this heading">#</a></h3>
+<p>Dependencies are declared in one place, <code class="docutils literal notranslate"><span class="pre">setup.py</span></code>. There is deliberately no <code class="docutils literal notranslate"><span class="pre">requirements.txt</span></code>: two lists drift apart, and only <code class="docutils literal notranslate"><span class="pre">install_requires</span></code> is consulted when you <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code>. <code class="docutils literal notranslate"><span class="pre">.[tests]</span></code> is enough to run the suite; <code class="docutils literal notranslate"><span class="pre">.[dev]</span></code> adds pylint and coverage.</p>
+</section>
+<section id="pylibjpeg-libjpeg-on-the-free-threaded-build">
+<h3><code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code> on the free-threaded build<a class="headerlink" href="#pylibjpeg-libjpeg-on-the-free-threaded-build" title="Link to this heading">#</a></h3>
+<p>Measured with <code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code> 2.4.0, which has no free-threaded wheel. On CPython 3.14t, <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span></code> builds it from the sdist, and the build either fails or produces a wheel with no extension module in it, depending on the compiler pip picks. The second was measured here: the install reported success and <code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">libjpeg</span></code> then failed with <code class="docutils literal notranslate"><span class="pre">ModuleNotFoundError:</span> <span class="pre">No</span> <span class="pre">module</span> <span class="pre">named</span> <span class="pre">'_libjpeg'</span></code>. Built from the sdist by hand it imports, with <code class="docutils literal notranslate"><span class="pre">RuntimeWarning:</span> <span class="pre">The</span> <span class="pre">global</span> <span class="pre">interpreter</span> <span class="pre">lock</span> <span class="pre">(GIL)</span> <span class="pre">has</span> <span class="pre">been</span> <span class="pre">enabled</span> <span class="pre">to</span> <span class="pre">load</span> <span class="pre">module</span> <span class="pre">'_libjpeg',</span> <span class="pre">which</span> <span class="pre">has</span> <span class="pre">not</span> <span class="pre">declared</span> <span class="pre">that</span> <span class="pre">it</span> <span class="pre">can</span> <span class="pre">run</span> <span class="pre">safely</span> <span class="pre">without</span> <span class="pre">the</span> <span class="pre">GIL</span></code>, so a 3.14t process that imports it runs with the GIL back on unless <code class="docutils literal notranslate"><span class="pre">PYTHON_GIL=0</span></code> is set. <a class="reference internal" href="../codecs/"><span class="std std-doc">Codec support</span></a> carries the user-facing summary.</p>
+</section>
+<section id="decode-limits-the-evidence">
+<h3>Decode limits: the evidence<a class="headerlink" href="#decode-limits-the-evidence" title="Link to this heading">#</a></h3>
+<p><a class="reference internal" href="../codecs/#decode-limits"><span class="std std-ref">Codec support</span></a> states each limit. The measurements behind the precision limits:</p>
+<ul class="simple">
+<li><p>A precision-12 JPEG Lossless stream under BitsStored 16 reads <code class="docutils literal notranslate"><span class="pre">0..4970</span></code> through <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> (lj92) and <code class="docutils literal notranslate"><span class="pre">0..4095</span></code> through pydicom with <code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code>, which saturates.</p></li>
+<li><p>A JPEG 2000 codestream written by <code class="docutils literal notranslate"><span class="pre">imagecodecs.jpeg2k_encode(a,</span> <span class="pre">level=0,</span> <span class="pre">codecformat=&quot;J2K&quot;,</span> <span class="pre">bitspersample=12)</span></code> over unsigned samples up to 4970 declares precision 12 and holds 4970: with the SIZ segment’s precision byte (<code class="docutils literal notranslate"><span class="pre">Ssiz</span></code>) changed from 0x0b to 0x0f, 16 bits, <code class="docutils literal notranslate"><span class="pre">imagecodecs.jpeg2k_decode</span></code> returns the input plus 30720, the difference between the two precisions’ level shifts (32768 − 2048): 35690 where the input holds 4970, and the input exactly once 30720 is subtracted. As written it reads <code class="docutils literal notranslate"><span class="pre">0..4095</span></code> through Pillow and through <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code>, the two decoders that install with Isocenter, both openjpeg, and <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> of a <code class="docutils literal notranslate"><span class="pre">.90</span></code> file holding it stores <code class="docutils literal notranslate"><span class="pre">0..4095</span></code> and writes no row. Measured on imagecodecs 2026.8.16 and 2026.10.10 (openjpeg 2.5.4). Through pydicom’s <code class="docutils literal notranslate"><span class="pre">pylibjpeg-openjpeg</span></code> plugin (2.6.0, also openjpeg) it reads <code class="docutils literal notranslate"><span class="pre">0..4095</span></code> as well. GDCM was not tried, and neither was any JPEG 2000 decoder that is not openjpeg (#1057).</p></li>
+<li><p>No JPEG-LS stream was found that decodes beyond its declared precision (#684). For a 16-bit array holding 4970, <code class="docutils literal notranslate"><span class="pre">imagecodecs.jpegls_encode</span></code> declares precision 16; with <code class="docutils literal notranslate"><span class="pre">bitspersample=12</span></code> (2026.10.10; 2026.8.16 refuses the keyword) it declares 12 and decodes to the array masked to 12 bits, 3570 at most. DCMTK’s <code class="docutils literal notranslate"><span class="pre">dcmcjpls</span></code> 3.7.0 over the same samples in a native file (BitsAllocated 16, BitsStored 12) writes the same two streams: <code class="docutils literal notranslate"><span class="pre">+pr</span></code> precision 16, decoding to the input, and <code class="docutils literal notranslate"><span class="pre">+pc</span></code> precision 12, byte for byte the <code class="docutils literal notranslate"><span class="pre">bitspersample=12</span></code> stream. Both encoders write an LSE segment stating MAXVAL 65535 into a precision-16 stream; <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> writes none into an 8-bit one. With the SOF55 precision byte of that array’s precision-16 stream (8 by 8, <code class="docutils literal notranslate"><span class="pre">0..4970</span></code>) rewritten to any value from 2 to 15, <code class="docutils literal notranslate"><span class="pre">imagecodecs.jpegls_decode</span></code> (CharLS 2.4.4) raises <code class="docutils literal notranslate"><span class="pre">JpeglsError</span></code>: <code class="docutils literal notranslate"><span class="pre">Invalid</span> <span class="pre">JPEG-LS</span> <span class="pre">stream:</span> <span class="pre">JPEG-LS</span> <span class="pre">preset</span> <span class="pre">parameters</span> <span class="pre">segment</span> <span class="pre">contains</span> <span class="pre">invalid</span> <span class="pre">values</span></code> while an LSE states a MAXVAL above 2^P − 1 (4096 at precision 12 is refused and 4095 is not), and, for this array, a refusal of the scan (<code class="docutils literal notranslate"><span class="pre">the</span> <span class="pre">encoded</span> <span class="pre">bit</span> <span class="pre">stream</span> <span class="pre">contains</span> <span class="pre">a</span> <span class="pre">general</span> <span class="pre">structural</span> <span class="pre">problem</span></code>, or <code class="docutils literal notranslate"><span class="pre">the</span> <span class="pre">decoding</span> <span class="pre">process</span> <span class="pre">is</span> <span class="pre">ready</span> <span class="pre">but</span> <span class="pre">the</span> <span class="pre">source</span> <span class="pre">buffer</span> <span class="pre">still</span> <span class="pre">contains</span> <span class="pre">encoded</span> <span class="pre">data</span></code>) once the LSE is taken out or states 2^P − 1. The scan’s refusal depends on the samples, not on the width: a 16-bit stream of one row of 64 samples, each 4970, rewritten to precision 12 is refused with its LSE as written or stating 4096, and with the LSE out or stating 4095 it decodes, to <code class="docutils literal notranslate"><span class="pre">31..4031</span></code> with no cell equal to the source (<code class="docutils literal notranslate"><span class="pre">455..1896</span></code> at precision 11); one pixel of 65535 with the LSE out decodes to 4095, 2047 and 255 at precisions 12, 11 and 8. <code class="docutils literal notranslate"><span class="pre">_decode_pixels</span></code> on the fallback returns the row’s array, the check returns None, and <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> of a <code class="docutils literal notranslate"><span class="pre">.80</span></code> file holding it (BitsAllocated 16, BitsStored 12) stores <code class="docutils literal notranslate"><span class="pre">31..4031</span></code> and writes no row (found by the review of #1099). Over 400 arrays (8-bit and 16-bit, one and three samples per pixel), each encoded lossless and near-lossless and rewritten to every lower precision in five ways, none of 28,000 rewritten 16-bit streams decoded (a near-lossless stream rewritten to precision 2 is refused for its NEAR value instead); of the 2,400 rewritten 8-bit streams of each way, 781 decoded with no LSE and 781 with an LSE stating 2^P − 1, each to samples inside the rewritten precision, and none with an LSE stating more. One 8-bit stream of samples up to 245, rewritten to precision 7, decodes to <code class="docutils literal notranslate"><span class="pre">0..127</span></code> with 1 cell of 64 equal to the source; <code class="docutils literal notranslate"><span class="pre">_decode_pixels</span></code> returns that array, the check returns None, and <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> of a <code class="docutils literal notranslate"><span class="pre">.80</span></code> file holding it stores <code class="docutils literal notranslate"><span class="pre">0..127</span></code> and writes no row. Identical on imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t. <code class="docutils literal notranslate"><span class="pre">tests/test_a_stream_narrower_than_its_own_samples_is_said.py</span></code> holds the <code class="docutils literal notranslate"><span class="pre">+pc</span></code> stream as bytes, runs the rewrites of the 8 by 8 array, and holds the two streams that decode.</p></li>
+<li><p>pydicom’s JPEG-LS plugins on the same rewritten streams, 3.12.14 only (<code class="docutils literal notranslate"><span class="pre">pylibjpeg</span></code> 2.1.0 with <code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code> 2.4.0, and <code class="docutils literal notranslate"><span class="pre">pyjpegls</span></code> 1.5.1; pydicom 3.0.2 registers <code class="docutils literal notranslate"><span class="pre">pylibjpeg</span></code>, <code class="docutils literal notranslate"><span class="pre">pyjpegls</span></code> and <code class="docutils literal notranslate"><span class="pre">gdcm</span></code> for JPEG-LS and takes <code class="docutils literal notranslate"><span class="pre">pylibjpeg</span></code> first). 29 streams: the 8 by 8 array’s and the row’s at precisions 12 and 11, the pixel’s at 12, 11 and 8, each with the LSE as written, out, stating 2^P − 1 and stating 2^P, and the 8-bit stream at precision 7. <code class="docutils literal notranslate"><span class="pre">libjpeg.decode</span></code> decodes all 29, none beyond its precision: the 8 by 8 array’s at precision 12 reads <code class="docutils literal notranslate"><span class="pre">0..4095</span></code> with the LSE as written, equal to the source clamped to 4095 in all 64 cells, and <code class="docutils literal notranslate"><span class="pre">0..4029</span></code> with the LSE out; CharLS refuses both. <code class="docutils literal notranslate"><span class="pre">jpeg_ls.decode</span></code> (CharLS) refuses and decodes as <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> does, in the same words and to the same ranges, except that it refuses the one-pixel streams <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> decodes. With the plugins importable, <code class="docutils literal notranslate"><span class="pre">_decode_pixels</span></code> returns a decode for each of the 29, with <code class="docutils literal notranslate"><span class="pre">libjpeg.decode</span></code>’s range, and the check returns None; <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> of four <code class="docutils literal notranslate"><span class="pre">.80</span></code> files (the 8 by 8 array’s at precision 12 with the LSE as written and out, the row’s with the LSE out, the 8-bit stream at 7) stores <code class="docutils literal notranslate"><span class="pre">0..4095</span></code>, <code class="docutils literal notranslate"><span class="pre">0..4029</span></code>, <code class="docutils literal notranslate"><span class="pre">31..4031</span></code> and <code class="docutils literal notranslate"><span class="pre">0..127</span></code> and writes no row. GDCM was not tried, and neither was any other JPEG-LS decoder; the plugins were not tried on 3.14t, where <code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code> has no wheel.</p></li>
+<li><p>The signed arm is measured unreachable for JPEG Baseline and Extended (<code class="docutils literal notranslate"><span class="pre">.50</span></code>/<code class="docutils literal notranslate"><span class="pre">.51</span></code>), whose decode is not sign-extended at all.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">693_J2KR.dcm</span></code> from pydicom’s test data (a signed JPEG 2000 codestream) reads <code class="docutils literal notranslate"><span class="pre">int16</span> <span class="pre">[-2000,</span> <span class="pre">2492]</span></code> identically through Pillow and through <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code>, and writes no row.</p></li>
+<li><p>An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream’s own precision; measured at BitsStored 12, 13 and 16, it reads <code class="docutils literal notranslate"><span class="pre">int16</span> <span class="pre">[-1996,</span> <span class="pre">1470]</span></code> on both routes, with no row.</p></li>
+<li><p>12-bit JPEG Extended decodes through <code class="docutils literal notranslate"><span class="pre">imagecodecs.jpeg_decode</span></code> value for value as DCMTK decodes pydicom’s <code class="docutils literal notranslate"><span class="pre">JPEG-lossy.dcm</span></code>.</p></li>
 </ul>
-<h3 id="dicomexporterwrite_tree-and-sessionexport"><code>DicomExporter.write_tree()</code> and <code>session.export()</code></h3>
-<p>The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what <code>anonymize()</code> edits, and so does Study Time: neither path writes <code>Study.study_time</code>, and an instance with no Study Time of its own is written with an empty one (#953). Both paths run the same Type 1 check (<code>IODValidator</code>, CT, MR and PET Image Storage only): <code>session.export()</code> withholds a failing instance with an <code>ERROR</code> row, and <code>write_tree()</code> raises <code>RuntimeError</code>. <code>write_tree()</code> applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in <code>scripts/</code> use.</p>
-<h2 id="configuration-and-storage-internals">Configuration and storage internals</h2>
+</section>
+<section id="dicomexporterwrite_tree-and-sessionexport">
+<span id="dicomexporter-write-tree-and-session-export"></span><h3><code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree()</span></code> and <code class="docutils literal notranslate"><span class="pre">session.export()</span></code><a class="headerlink" href="#dicomexporterwrite_tree-and-sessionexport" title="Link to this heading">#</a></h3>
+<p>The patient, study and series tags written over each instance’s own are the same on both write paths. Equipment comes from the instance, which is what <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> edits, and so does Study Time: neither path writes <code class="docutils literal notranslate"><span class="pre">Study.study_time</span></code>, and an instance with no Study Time of its own is written with an empty one (#953). Both paths run the same Type 1 check (<code class="docutils literal notranslate"><span class="pre">IODValidator</span></code>, CT, MR and PET Image Storage only): <code class="docutils literal notranslate"><span class="pre">session.export()</span></code> withholds a failing instance with an <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> row, and <code class="docutils literal notranslate"><span class="pre">write_tree()</span></code> raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>. <code class="docutils literal notranslate"><span class="pre">write_tree()</span></code> applies none of the export’s gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in <code class="docutils literal notranslate"><span class="pre">scripts/</span></code> use.</p>
+</section>
+</section>
+<section id="configuration-and-storage-internals">
+<h2>Configuration and storage internals<a class="headerlink" href="#configuration-and-storage-internals" title="Link to this heading">#</a></h2>
 <p>The user guides describe behaviour; the names behind it are here.</p>
-<ul>
-<li><strong>Profiles.</strong> <code>basic@2026c</code> is <code>profiles.BASIC_PROFILE</code> (649 rules, frozen for 1.x; <code>tests/test_profile_editions.py</code> pins its digest). The floor is <code>profiles.FLOOR_POLICY</code>, the same table with the three research defaults <code>create_config()</code> writes. Resolution of a file's <code>privacy_profile</code> lives in <code>config_manager._resolved_policy</code>, not in <code>profiles.py</code>.</li>
-<li><strong>The 65534-byte limit</strong> on held binary values is <code>io_handlers.BINARY_RETENTION_MAX_BYTES</code>, the largest value an explicit-VR 16-bit length field can carry. <code>io_handlers._retention_limit_for(tag)</code> reads it at the two retention gates and in the drop row (the odd-group <code>SCAN_GAP</code> size test and the #692 <code>UN</code>-decode pre-check, which never decodes a LUT tag, read the constant directly): it returns <code>LUT_RETENTION_MAX_BYTES</code> (393216) for the pixel lookup tables in <code>LUT_DATA_TAGS</code> (#902) and the 65534 limit for everything else.</li>
-<li><strong>Why large private values are not stored.</strong> Holding a megabyte vendor blob in <code>attributes</code> makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. <code>session.compact()</code> rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a <code>redact()</code> or <code>ingest()</code> pass is open. That is design work, not a flag (#125).</li>
-<li><strong>Data-loss rows</strong> are read with <code>session.store_backend.get_audit_losses()</code>; the compliance report's section 3.1 is the user-facing view.</li>
+<ul class="simple">
+<li><p><strong>Profiles.</strong> <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> is <code class="docutils literal notranslate"><span class="pre">profiles.BASIC_PROFILE</span></code> (649 rules, frozen for 1.x; <code class="docutils literal notranslate"><span class="pre">tests/test_profile_editions.py</span></code> pins its digest). The floor is <code class="docutils literal notranslate"><span class="pre">profiles.FLOOR_POLICY</span></code>, the same table with the three research defaults <code class="docutils literal notranslate"><span class="pre">create_config()</span></code> writes. Resolution of a file’s <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> lives in <code class="docutils literal notranslate"><span class="pre">config_manager._resolved_policy</span></code>, not in <code class="docutils literal notranslate"><span class="pre">profiles.py</span></code>.</p></li>
+<li><p><strong>The 65534-byte limit</strong> on held binary values is <code class="docutils literal notranslate"><span class="pre">io_handlers.BINARY_RETENTION_MAX_BYTES</span></code>, the largest value an explicit-VR 16-bit length field can carry. <code class="docutils literal notranslate"><span class="pre">io_handlers._retention_limit_for(tag)</span></code> reads it at the two retention gates and in the drop row (the odd-group <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code> size test and the #692 <code class="docutils literal notranslate"><span class="pre">UN</span></code>-decode pre-check, which never decodes a LUT tag, read the constant directly): it returns <code class="docutils literal notranslate"><span class="pre">LUT_RETENTION_MAX_BYTES</span></code> (393216) for the pixel lookup tables in <code class="docutils literal notranslate"><span class="pre">LUT_DATA_TAGS</span></code> (#902) and the 65534 limit for everything else.</p></li>
+<li><p><strong>Why large private values are not stored.</strong> Holding a megabyte vendor blob in <code class="docutils literal notranslate"><span class="pre">attributes</span></code> makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. <code class="docutils literal notranslate"><span class="pre">session.compact()</span></code> rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a <code class="docutils literal notranslate"><span class="pre">redact()</span></code> or <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> pass is open. That is design work, not a flag (#125).</p></li>
+<li><p><strong>Data-loss rows</strong> are read with <code class="docutils literal notranslate"><span class="pre">session.store_backend.get_audit_losses()</span></code>; the compliance report’s section 3.1 is the user-facing view.</p></li>
 </ul>
-<h2 id="mechanisms-behind-the-api">Mechanisms behind the API</h2>
+</section>
+<section id="mechanisms-behind-the-api">
+<h2>Mechanisms behind the API<a class="headerlink" href="#mechanisms-behind-the-api" title="Link to this heading">#</a></h2>
 <p>The API reference describes what a caller sees. The mechanisms behind
 four of those descriptions are here.</p>
-<p><strong><code>ingest()</code> and a worker that dies.</strong> When a worker process ends while
-reading a file (the out-of-memory killer, a decoder crash, <code>SIGKILL</code>),
+<p><strong><code class="docutils literal notranslate"><span class="pre">ingest()</span></code> and a worker that dies.</strong> When a worker process ends while
+reading a file (the out-of-memory killer, a decoder crash, <code class="docutils literal notranslate"><span class="pre">SIGKILL</span></code>),
 the results already returned are kept, and the files not yet returned
 are read again one at a time on a fresh one-worker process pool. A file
 is rejected only when a fresh worker ends on it as the first file it was
-given, with the reason "An ingest worker process ended before this file
+given, with the reason “An ingest worker process ended before this file
 was returned, and a fresh worker process given this file alone, as its
-first file, ended while reading it". The rest are read at full width,
-the call saves as usual, and the session's pool is replaced. A death
-that does not recur costs no file and writes no row; a <code>WARNING</code> log
+first file, ended while reading it”. The rest are read at full width,
+the call saves as usual, and the session’s pool is replaced. A death
+that does not recur costs no file and writes no row; a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> log
 line records it. If two fresh workers in a row cannot run a trivial
-task, every file left is rejected as "Not read" and the call returns. A
+task, every file left is rejected as “Not read” and the call returns. A
 worker that ends on a later file had read others first, so that file is
 not blamed: reading starts again from it on another fresh worker. Each
 worker death costs a fresh pool, a few tenths of a second; a fatal file
-costs two or three, and up to 2 x <code>ISOCENTER_MAX_WORKERS</code> + 1 files read
+costs two or three, and up to 2 x <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_WORKERS</span></code> + 1 files read
 one at a time.</p>
-<p><strong><code>compact()</code>, <code>ingest()</code> and <code>redact()</code> locks.</strong> Every frame writer, and
-<code>compact()</code> for the whole rewrite, holds the sidecar lock
-(<code>&lt;sidecar&gt;.lock</code>, a cross-process <code>fcntl.flock</code>); a writer that cannot
-take it within 180 s raises <code>RuntimeError</code> naming the lock file. An
-ingest or a redaction pass holds the pass-lock (<code>&lt;sidecar&gt;.pass.lock</code>)
-shared for the whole pass, and <code>compact()</code> takes it exclusively and
+<p><strong><code class="docutils literal notranslate"><span class="pre">compact()</span></code>, <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> and <code class="docutils literal notranslate"><span class="pre">redact()</span></code> locks.</strong> Every frame writer, and
+<code class="docutils literal notranslate"><span class="pre">compact()</span></code> for the whole rewrite, holds the sidecar lock
+(<code class="docutils literal notranslate"><span class="pre">&lt;sidecar&gt;.lock</span></code>, a cross-process <code class="docutils literal notranslate"><span class="pre">fcntl.flock</span></code>); a writer that cannot
+take it within 180 s raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> naming the lock file. An
+ingest or a redaction pass holds the pass-lock (<code class="docutils literal notranslate"><span class="pre">&lt;sidecar&gt;.pass.lock</span></code>)
+shared for the whole pass, and <code class="docutils literal notranslate"><span class="pre">compact()</span></code> takes it exclusively and
 without waiting, which is how it refuses while a pass is open. Neither
 file name is frozen.</p>
-<p><strong><code>redact(force=)</code>.</strong> An instance is skipped as already redacted when its
-<code>_ISOCENTER_REDACTION_HASH</code> attribute matches the configuration's zones;
-<code>force=True</code> ignores the match. A failed instance gets no hash.</p>
-<p><strong><code>Instance.unload_waveform_data()</code>.</strong> It unloads only when the instance
-has a <code>_waveform_loader</code> (set when the store holds the samples), because
-<code>get_waveform_data()</code> has no file fallback.</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">redact(force=)</span></code>.</strong> An instance is skipped as already redacted when its
+<code class="docutils literal notranslate"><span class="pre">_ISOCENTER_REDACTION_HASH</span></code> attribute matches the configuration’s zones;
+<code class="docutils literal notranslate"><span class="pre">force=True</span></code> ignores the match. A failed instance gets no hash.</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">Instance.unload_waveform_data()</span></code>.</strong> It unloads only when the instance
+has a <code class="docutils literal notranslate"><span class="pre">_waveform_loader</span></code> (set when the store holds the samples), because
+<code class="docutils literal notranslate"><span class="pre">get_waveform_data()</span></code> has no file fallback.</p>
+</section>
+</section>
 
 
-
-
-
-
-
-
-
-
-
-
-                
-              </article>
-            </div>
-          
-          
-  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
-
-<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
-        </div>
-        
-          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  Back to top
-</button>
-        
-      </main>
-      
-        <footer class="md-footer">
-  
-    
-      
-      <nav class="md-footer__inner md-grid" aria-label="Footer" >
-        
-          
-          <a href="../performance/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Performance">
-            <div class="md-footer__button md-icon">
+                </article>
               
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-            </div>
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Previous
-              </span>
-              <div class="md-ellipsis">
-                Performance
-              </div>
-            </div>
-          </a>
-        
-        
-      </nav>
-    
-  
-  <div class="md-footer-meta md-typeset">
-    <div class="md-footer-meta__inner md-grid">
-      <div class="md-copyright">
-  
-    <div class="md-copyright__highlight">
-      Copyright &copy; 2026 Kevin Long
-    </div>
-  
-  
-    Made with
-    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
-      Material for MkDocs
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="../performance/"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Performance</p>
+      </div>
     </a>
-  
 </div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#environment-setup">1. Environment Setup</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#code-quality">2. Code Quality</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pylint">Pylint</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#formatting">Formatting</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#testing">3. Testing</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#benchmarks">Benchmarks</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#documentation">Documentation</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#release-process">4. Release Process</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#archiving-and-dois">Archiving and DOIs</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#storage-schema">Storage schema</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#why-the-split">Why the split</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tables">Tables</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#tests-behind-the-documented-defaults">Tests behind the documented defaults</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#measuring-coverage-in-worker-processes">Measuring coverage in worker processes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#dependency-and-codec-notes">Dependency and codec notes</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dependencies">Dependencies</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#pylibjpeg-libjpeg-on-the-free-threaded-build"><code class="docutils literal notranslate"><span class="pre">pylibjpeg-libjpeg</span></code> on the free-threaded build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#decode-limits-the-evidence">Decode limits: the evidence</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dicomexporter-write-tree-and-session-export"><code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree()</span></code> and <code class="docutils literal notranslate"><span class="pre">session.export()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-and-storage-internals">Configuration and storage internals</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#mechanisms-behind-the-api">Mechanisms behind the API</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  
+  <div class="tocsection editthispage">
+    <a href="https://github.com/kvnlng/Isocenter/edit/main/docs/developer_guide.md">
+      <i class="fa-solid fa-pencil"></i>
+      
       
         
-<div class="md-social">
-  
-    
-    
-    
-    
-    <a href="mailto:support@isocenter.net" target="_blank" rel="noopener" title="" class="md-social__link">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
-    </a>
-  
-</div>
+          Edit on GitHub
+        
       
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+
+      </main>
     </div>
   </div>
-</footer>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026 Kevin Long.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+  </p>
+</div>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
-      <div class="md-dialog__inner md-typeset"></div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.23.0.
+</p></div>
+      
     </div>
-    
-    
-    
-      
-      
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
-    
-    
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
-      
-    
+  
+</div>
+
+  </footer>
   </body>
 </html>

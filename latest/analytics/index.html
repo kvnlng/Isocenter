@@ -1,2298 +1,885 @@
 
+<!DOCTYPE html>
 
-<!doctype html>
-<html lang="en" class="no-js">
+
+<html lang="en" data-content_root="../" data-theme="light">
+
   <head>
-    
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width,initial-scale=1">
-      
-        <meta name="description" content="De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.">
-      
-      
-      
-        <link rel="canonical" href="https://kvnlng.github.io/Isocenter/1.0/analytics/">
-      
-      
-        <link rel="prev" href="../configuration/">
-      
-      
-        <link rel="next" href="../export-output/">
-      
-      
-        
-      
-      
-      <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
-    
-    
-      
-        <title>Analytics & Reporting - Isocenter</title>
-      
-    
-    
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
-      
-        
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
-      
-      
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
+    <title>Analytics &amp; Reporting &#8212; Isocenter</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "light";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
 
-    
-    
-      
-    
-    
-      
-        
-        
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
-        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"JetBrains Mono"}</style>
-      
-    
-    
-      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
-    
-      <link rel="stylesheet" href="../stylesheets/extra.css">
-    
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
-    
-      
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
 
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" type="text/css" href="../_static/ledger.css?v=b7d448bb" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=18bd87630a240e9c25be"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
+
+    <script src="../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=ccdb6887"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'analytics';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.23.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://kvnlng.github.io/Isocenter/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '1.0';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            true;
+        </script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="../genindex/" />
+    <link rel="search" title="Search" href="../search/" />
+    <link rel="next" title="What the export writes" href="../export-output/" />
+    <link rel="prev" title="Configuration Guide" href="../configuration/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="1.0.0rc22" />
+  
     
-    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
   </head>
+  <body data-default-mode="light">
   
   
-    
-    
-    
-    
-    
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
-  
-    
-    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
-    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer"></label>
-    <div data-md-component="skip">
-      
-        
-        <a href="#analytics-reporting" class="md-skip">
-          Skip to content
-        </a>
-      
-    </div>
-    <div data-md-component="announce">
-      
-    </div>
-    
-      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
-        
-          <aside class="md-banner md-banner--warning">
-            <div class="md-banner__inner md-grid md-typeset">
-              
-  This is the documentation for a version other than the latest release.
-  <a href="../.."><strong>Go to the latest release.</strong></a>
-
-            </div>
-            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
-          </aside>
-        
-      </div>
-    
-    
-      
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
 
   
-
-<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="Isocenter" class="md-header__button md-logo" aria-label="Isocenter" data-md-component="logo">
-      
+  <div id="pst-scroll-pixel-helper"></div>
   
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search/"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
 
-    </a>
-    <label class="md-header__button md-icon" for="__drawer">
-      
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
-    </label>
-    <div class="md-header__title" data-md-component="header-title">
-      <div class="md-header__ellipsis">
-        <div class="md-header__topic">
-          <span class="md-ellipsis">
-            Isocenter
-          </span>
-        </div>
-        <div class="md-header__topic" data-md-component="header-topic">
-          <span class="md-ellipsis">
-            
-              Analytics & Reporting
-            
-          </span>
-        </div>
-      </div>
-    </div>
-    
-      
-    
-    
-    
-    
-      
-      
-        <label class="md-header__button md-icon" for="__search">
-          
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
-        </label>
-        <div class="md-search" data-md-component="search" role="dialog">
-  <label class="md-search__overlay" for="__search"></label>
-  <div class="md-search__inner" role="search">
-    <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
-      <label class="md-search__icon md-icon" for="__search">
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
-        
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-      </label>
-      <nav class="md-search__options" aria-label="Search">
-        
-        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
-          
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </nav>
-      
-    </form>
-    <div class="md-search__output">
-      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
-        <div class="md-search-result" data-md-component="search-result">
-          <div class="md-search-result__meta">
-            Initializing search
-          </div>
-          <ol class="md-search-result__list" role="presentation"></ol>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
 </div>
-      
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button type="button" class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
     
+      <div class="navbar-item">
+
+  
     
-      <div class="md-header__source">
-        <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
-  <div class="md-source__icon md-icon">
+  
+
+<a class="navbar-brand logo" href="../">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">Isocenter</p>
+  
+</a></div>
     
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
-  <div class="md-source__repository">
-    kvnlng/Isocenter
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
+    Get started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
+    Tutorials
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="../guides/">
+    Guides
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../migration/">
+    Upgrading from 0.9.x
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../about/">
+    About
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
   </div>
-</a>
-      </div>
-    
-  </nav>
-  
-    
+</div></div>
       
-<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
-  <div class="md-grid">
-    <ul class="md-tabs__list">
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
-        
-  
-  
-    
-  
-  Home
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../installation/" class="md-tabs__link">
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
           
-  
-  
-  Get started
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
           
-  
-  
-  Tutorials
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-    
-  
-  
-    
-    
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../configuration/" class="md-tabs__link">
           
-  
-  
-  Guides
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../migration/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  Upgrading from 0.9.x
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../api/stability/" class="md-tabs__link">
           
-  
-  
-  API Reference
-
-        </a>
-      </li>
-    
-  
-
-      
-        
-  
-  
-  
-  
-    
-    
-      <li class="md-tabs__item">
-        <a href="../for-institutions/" class="md-tabs__link">
           
-  
-  
-  About
-
-        </a>
-      </li>
-    
-  
-
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
       
-    </ul>
+    </div>
+    
   </div>
-</nav>
-    
   
-</header>
-    
-    <div class="md-container" data-md-component="container">
-      
-      
-        
-      
-      <main class="md-main" data-md-component="main">
-        <div class="md-main__inner md-grid">
-          
-            
-              
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
-                <div class="md-sidebar__scrollwrap">
-                  <div class="md-sidebar__inner">
-                    
-
-
   
+    <div class="navbar-persistent--mobile">
 
-
-<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
-  <label class="md-nav__title" for="__drawer">
-    <a href=".." title="Isocenter" class="md-nav__button md-logo" aria-label="Isocenter" data-md-component="logo">
-      
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
-
-    </a>
-    Isocenter
-  </label>
-  
-    <div class="md-nav__source">
-      <a href="https://github.com/kvnlng/Isocenter" title="Go to repository" class="md-source" data-md-component="source">
-  <div class="md-source__icon md-icon">
-    
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
-  </div>
-  <div class="md-source__repository">
-    kvnlng/Isocenter
-  </div>
-</a>
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
     </div>
   
-  <ul class="md-nav__list" data-md-scrollfix>
-    
-      
-      
+
   
+    <button type="button" class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
   
-  
-  
-    <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
+</div>
+
+    </header>
   
 
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
       
       
-  
-  
-  
-  
-    
-    
-    
-    
       
-      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
         
-      
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
     
     
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
+      <div class="sidebar-header-items__center">
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
     
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
     Get started
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Get started
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Installation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quick Start
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
     Tutorials
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Tutorials
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    De-identify a cohort and read the grade
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Select part of a cohort
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reversible anonymization: keep a way back
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/redact-burned-in-pixels/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Redact burned-in text for one machine
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/write-an-exporter/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Write your own export format
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorials/physionet-challenge-ecgs/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Prepare your own ECGs for a PhysioNet Challenge
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="../guides/">
     Guides
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_4">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Guides
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Analytics & Reporting
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Analytics & Reporting
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#compliance-reports" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compliance Reports
-      
-    </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Compliance Reports">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#how-the-grade-is-decided" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How the grade is decided
-      
-    </span>
-  </a>
-  
 </li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#manifests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Manifests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cohort-analysis-eda" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cohort Analysis (EDA)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Cohort Analysis (EDA)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-load-into-pandas" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Load into pandas
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-write-to-csv-or-parquet" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Write to CSV or Parquet
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#query-based-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Query-Based Export
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Query-Based Export">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#use-case-export-only-thick-slice-cts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use Case: "Export only thick-slice CTs"
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#use-case-export-a-list-of-series" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use Case: "Export a list of series"
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
-    </li>
-  
 
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../export-output/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    What the export writes
-  
 
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ocr/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Burned-in text (OCR)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../waveforms/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Waveforms & WFDB
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../codecs/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Codec support
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../ctp-import/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Import CTP rules
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../environment/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Environment Variables
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../migration/">
     Upgrading from 0.9.x
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
     API Reference
-  
+  </a>
+</li>
 
-    
-  </span>
-  
-  
 
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    API Reference
-  
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../about/">
+    About
+  </a>
+</li>
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/stability/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API stability
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/session/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Session
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/results/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Results and errors
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/configuration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/entities/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Entities
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/exporters/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Exporter registry
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/ocr/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    OCR API
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/persistence/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Audit trail
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
+  </ul>
+</nav></div>
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
         
+          <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    About
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_7">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    About
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../for-institutions/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
+      </div>
     
+  </div>
   
-    For institutions
-  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button type="button" id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar">
+  <svg class="pst-icon" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
 
-    
-  </span>
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../configuration/">Configuration</a></li>
+<li class="toctree-l1 current active"><a aria-current="page" class="current reference internal" href="#">Analytics &amp; Reporting</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../export-output/">What the export writes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ocr/">Burned-in text (OCR)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../waveforms/">Waveforms &amp; WFDB</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codecs/">Codec support</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ctp-import/">Import CTP rules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../environment/">Environment Variables</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
   
   
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
 
-      </a>
-    </li>
-  
 
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architecture
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../performance/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Performance
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../developer_guide/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Contributing
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Changelog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
+      </div>
       
-    </li>
-  
+      <main id="main-content" class="bd-main" role="main">
+        
+        
 
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
     
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="../guides/" class="nav-link">Guides</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Analytics &amp; Reporting</span></li>
   </ul>
 </nav>
-                  </div>
-                </div>
-              </div>
-            
-            
-              
-              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
-                <div class="md-sidebar__scrollwrap">
-                  <div class="md-sidebar__inner">
-                    
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#compliance-reports" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Compliance Reports
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Compliance Reports">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#how-the-grade-is-decided" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How the grade is decided
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#manifests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Manifests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cohort-analysis-eda" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cohort Analysis (EDA)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Cohort Analysis (EDA)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-load-into-pandas" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Load into pandas
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-write-to-csv-or-parquet" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Write to CSV or Parquet
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#query-based-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Query-Based Export
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Query-Based Export">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#use-case-export-only-thick-slice-cts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use Case: "Export only thick-slice CTs"
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#use-case-export-a-list-of-series" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Use Case: "Export a list of series"
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-                  </div>
-                </div>
-              </div>
-            
-          
-          
-            <div class="md-content" data-md-component="content">
-              
-                
-
-
-
-  
-
-
-  <nav class="md-path" aria-label="Navigation" >
-    <ol class="md-path__list">
-      
-        
-  
-  
-    <li class="md-path__item">
-      <a href=".." class="md-path__link">
-        
-  <span class="md-ellipsis">
-    Home
-  </span>
-
-      </a>
-    </li>
-  
-
-      
-      
-        
-  
-  
-    
-    
-      <li class="md-path__item">
-        <a href="../configuration/" class="md-path__link">
-          
-  <span class="md-ellipsis">
-    Guides
-  </span>
-
-        </a>
-      </li>
-    
-  
-
-      
-    </ol>
-  </nav>
-
-              
-              <article class="md-content__inner md-typeset">
-                
-                  
-
-
-  
-  
-
-
-<h1 id="analytics-reporting">Analytics &amp; Reporting</h1>
-<p>Isocenter is designed not just for de-identification, but for understanding your data. It includes built-in tools for compliance verification, cohort analysis, and data exploration.</p>
-<h2 id="compliance-reports">Compliance Reports</h2>
-<p>For regulatory audits (HIPAA/GDPR), Isocenter can generate a formal <strong>Compliance Report</strong>. This single-document artifact summarizes the entire session, ensuring transparent documentation of your de-identification process.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Generate a Markdown report</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"compliance_report.md"</span><span class="p">)</span>
-</code></pre></div>
-<p>The report includes:</p>
-<ol>
-<li><strong>Executive Summary</strong>: the grade (<code>PASS</code> / <code>REVIEW_REQUIRED</code>), how many patients and instances the session holds, the privacy profile and de-identification method, and the pre-export boundary note described below. An <strong>Instances Written</strong> row (<code>191 of 192 requested</code>) appears only when the last <code>export()</code> call in this session was a DICOM export that ran; it describes that export alone. A WFDB export, or an export that raised, removes the row, and a session that has not exported, a reopened store included, has none.</li>
-<li><strong>Processing Audit</strong>: aggregated counts of actions taken (e.g., tags remediated, pixels redacted, export runs completed).</li>
-<li><strong>Data Loss &amp; Unscanned Content</strong>: 3.1 lists every element that was
-   present in the source and is not in the exported data, named with its
-   VR. 3.2 lists content the PHI scan could not open -- a private value
-   whose bytes look like a sequence and do not parse as one -- with a
-   <strong>Disposition</strong> column resolved against the object graph at report
-   time: <code>removed before export</code> (the private-tag sweep deleted the
-   bytes; grades <code>PASS</code>, exactly as a swept parseable sequence does),
-   <code>retained for export</code>, or <code>unresolved</code> (the instance's UID changed
-   after ingest, e.g. by <code>redact()</code>, so the row cannot be matched back).
-   The latter two grade the session <code>REVIEW_REQUIRED</code>, with no scope
-   test: a run that exports bytes it could not read does not get to
-   call itself PASS. 3.3 lists remediations that were <strong>proposed and
-   did not run</strong> -- a finding whose entity could not be resolved
-   against the live graph, a target the action has no arm for, a date
-   with no PatientID to seed its jitter, a value that is not a date, a
-   remediation that raised (its value may be unchanged or partly
-   written) -- each with its reason. The element each row names is still in the
-   object graph and reached the exported files, so one row grades the
-   session <code>REVIEW_REQUIRED</code> on the same argument 3.2 makes. Unlike 3.1
-   and 3.2, 3.3 is omitted entirely from a run that declined nothing.</li>
-<li><strong>Exceptions &amp; Errors</strong>: every <code>ERROR</code> and <code>WARNING</code> audit row, plus report-time checks (<code>COMPLIANCE_CHECK</code>, <code>AUDIT_DROP</code>). Any row here grades the run <code>REVIEW_REQUIRED</code>.<ul>
-<li>An <code>ERROR</code> means something requested failed: a file refused at ingest, an instance that failed to write.</li>
-<li>A <code>WARNING</code> means the run did what it should, but something about the source data could not be honoured or read, or was deliberately held back. Among them:<ul>
-<li>a file declined because its SOP Instance UID is already held, or because its Study Instance UID belongs to a patient with a different Patient ID;</li>
-<li>an instance <code>export(check_burned_in=True)</code> withheld because it still carries an identifier (it is not written, and nothing failed);</li>
-<li>an instance OCR could not read;</li>
-<li>a store an older release de-identified, where what that release did cannot be vouched for (see <a href="../migration/">Upgrading from 0.9.x</a>);</li>
-<li>a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim;</li>
-<li>an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared;</li>
-<li>a WFDB record in which two signals would share a lead name, so each one named from the lead table is written as its Code Value (<a href="../waveforms/#lead-names">Lead names</a>).</li>
-</ul>
-</li>
-</ul>
-</li>
-<li><strong>Validation &amp; Verification</strong>: the <strong>Grade Basis</strong> -- every reason this run is not <code>PASS</code>, one line each, or a statement that nothing costs it its <code>PASS</code> -- then how many <code>REMEDIATION_*</code> rows the audit trail holds, what each <code>scan_pixel_content()</code> call in this session read and could not read, what each <a href="../configuration/#burned-in-text"><code>burned_in_text</code></a> pass of <code>redact()</code> in this session read under its scope, left out of scope, found and redacted, reported or left to be withheld, and what each <code>export(check_burned_in=True)</code> read under that policy read, left out of scope, found and withheld or wrote with a row (a scope that selected nothing costs no <code>PASS</code>; a session that ran either and no <code>scan_pixel_content()</code> is not told that no OCR ran), how many images, and how many icons, were read with an inferred Planar Configuration (0028,0006), and, on a line of its own, how many were read as 0 over a declared Planar Configuration under a compressed syntax, each counted over the store, when any were (neither costs a <code>PASS</code>), and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row. Every condition behind it is listed under <a href="#how-the-grade-is-decided">How the grade is decided</a>.</li>
-</ol>
-<p>A per-instance manifest is not part of the report. It is a separate document, written by <code>generate_manifest()</code>; see <a href="#manifests">Manifests</a>.</p>
-<h3 id="how-the-grade-is-decided">How the grade is decided</h3>
-<p>Worked example: <a href="../tutorials/deidentify-and-read-the-grade/">De-identify a cohort and read the grade</a>.</p>
-<p>The report grades a run <code>PASS</code> or <code>REVIEW_REQUIRED</code>. There is no <code>FAIL</code>: a failure the run records costs it its <code>PASS</code> (condition 2); one it cannot record raises.</p>
-<p><strong>The grade is <code>PASS</code> exactly when none of the conditions below holds.</strong> Section 5's <em>Grade Basis</em> lists each one that does, one line per condition, naming the section that holds the evidence. The grade and that list are computed from one list, so they cannot disagree.</p>
-<p>The conditions are read from the store's audit log and from the store itself. The audit log holds everything any session ever recorded in this store, not only the session generating the report. A row written once stays; only a new store starts clean.</p>
-<ol>
-<li><strong>Nothing is attested.</strong> The audit log holds no rows at all. A clean ingest followed by <code>audit()</code> alone writes none, for example.</li>
-<li><strong>Something failed, or the source could not be honoured.</strong> Any <code>ERROR</code> or <code>WARNING</code> row, or a report-time check (section 4):<ul>
-<li><code>COMPLIANCE_CHECK</code>: an instance stored with Burned In Annotation <code>YES</code>, or stored pixel descriptors that cannot describe its frame.</li>
-<li><code>AUDIT_DROP</code>: audit rows that failed to write.</li>
-</ul>
-</li>
-<li><strong>Graded data was lost.</strong> A <code>DATA_LOSS</code> row scoped <code>PRIVATE</code> or <code>SIGNAL</code> (section 3.1). A <code>STANDARD</code> loss is listed but does not grade.</li>
-<li><strong>The PHI scan could not read something the export still carries.</strong> A <code>SCAN_GAP</code> row whose element is retained for export, or whose disposition cannot be resolved (section 3.2).</li>
-<li><strong>A remediation was proposed and did not run.</strong> A <code>REMEDIATION_DECLINED</code> row, including a proposal that raised (section 3.3).</li>
-<li><strong>A verb left no evidence.</strong> <code>anonymize()</code> or <code>redact()</code> ran in the session generating the report, and none of the rows it writes is in the audit log.</li>
-<li><strong>A finding raised under your policy was not acted on.</strong> A patient, study or instance whose last PHI scan (<code>audit()</code>, or the scan <code>export(check_burned_in=True)</code> runs) found a value that a rule of the policy that scan ran with acts on, and which no <code>anonymize()</code> pass since has acted on. "Acted on" means the value was replaced, shifted or removed, or was already what the rule asks. A remediation that declined did not act, so its entity reads <code>IDENTIFIED</code> after the pass and counts here as well as under condition 5, unless it was edited after its scan and the pass changed nothing else on it, which leaves it <code>UNSCANNED</code>. This is the entity reading <code>IDENTIFIED</code> in <code>session.phi_status_summary()</code>, counted over the whole store; section 5's line gives the count per level. Series are never scanned and never counted. An entity edited after its scan reads <code>UNSCANNED</code>, and grades under condition 8 instead.</li>
-<li><strong>A patient, study or instance was edited after its PHI status was recorded.</strong> Its content was changed after a scan or a pass recorded its status, and no scan has read the change since. For an instance that is a change through its methods -- <code>set_attr</code>, a sequence added, filled or cleared, <code>set_pixel_data</code> -- or an assignment of <code>instance.sop_instance_uid</code>, which also sets its <code>(0008,0018)</code> element; a change to an item nested in it, at any depth; and an assignment of <code>series.series_instance_uid</code>, which the export writes into it, or of <code>series.modality</code> or <code>series.equipment</code>. Not <code>series.series_number</code>: the export writes each instance's own Series Number, so an assignment of the series' field changes no file. A series is counted through its instances, never by itself: the scan records nothing on a series, so a status of its own could never be cleared by one. For a patient or a study it is an assignment of a field the export writes from it into every file beneath it, or the scan reads on it: <code>patient.patient_name</code>, <code>patient.patient_id</code>, <code>study.study_date</code> or <code>study.study_instance_uid</code>. An assignment of <code>study.study_time</code> is counted too, though the export writes each instance's own Study Time and not the study's field. Such an entity reads <code>UNSCANNED</code>, and it grades until a scan reads it: <code>audit()</code> reads it, and the line goes. A save and a reopen keep it: the store records the status the edit left behind. An entity never scanned is not counted here: condition 9 counts it. Neither is what the library writes itself after a scan: a pass records its status after what it writes; redaction carries the status it found, since it writes the pixels, the new SOP Instance UID and its flags but no attribute a scan read; and so does the reversible lock (<code>lock_identities</code>), whose token is not PHI. Each carries it only when it still applied, so an edit made before them is not hidden by them. That includes <code>anonymize()</code>: an entity edited after its scan and before the pass is still counted after it, because the pass does not read the edit, so it keeps the status the scan left rather than stamping its own (#752). So <code>audit()</code>, then <code>redact()</code>, then <code>anonymize()</code> over that audit's report settles a redacted instance as the documented order does, while an edit made before the redaction is still counted after both. Assigning the value a field already holds is not an edit. A nested item's own status is not counted. A write that goes around the entity -- straight into <code>instance.attributes</code>, into a sequence's <code>items</code> list, or <code>instance.pixel_array = ...</code> -- is not seen. Section 5's line gives the count per level.</li>
-<li><strong>A patient, study or instance was never scanned, in a store that holds a recorded PHI status.</strong> At least one patient, study or instance in the store holds a recorded status, and this one holds none, from a scan or from a pass. The usual way there is a file ingested after the store's <code>audit()</code> or <code>anonymize()</code>. Until the next scan it is held as ingested and exported as the store holds it (a late series of a study already passed gets its owners' pseudonym, Patient ID, shifted Study Date and replaced Study Instance UID stamped on it, and keeps every other value of the source, its Series and SOP Instance UIDs included), and nothing your policy names has been looked for in it. <code>audit()</code> reads it, and the line goes; what that scan finds then grades under condition 7 until a pass acts on it. It is counted over the whole store, as conditions 7 and 8 are, so it holds before any export, and for an export whose <code>subset</code> or <code>patient_ids</code> left the entity out. "Holds a recorded status" means a status of any value on any patient, study or instance, one an edit has left stale included (condition 8). It is read from the statuses the store holds, so a save and a reopen keep it. A store in which no status is recorded anywhere is not counted; see "Unscanned data does not grade in a store that holds no PHI status", below. An entity is counted here or under condition 8, never under both: condition 8 is a status an edit left behind, this is no status at all. A series and a nested item are never counted and never read, since no scan records a status on either. A patient that holds no studies is counted. The condition does not say that an entity with a status was scanned: a pass over findings built by hand records one. Section 5's line gives the count per level.</li>
-</ol>
-<p><strong>What <code>PASS</code> does not mean.</strong> The grade is about what the run recorded doing, and what its own scan found and its own passes left. It does not say the exported data holds no identifiers:</p>
-<ul>
-<li><strong>Unscanned data does not grade in a store that holds no PHI status.</strong> While no patient, study or instance in the store holds a recorded PHI status -- <code>ingest()</code> then <code>export()</code> with no <code>audit()</code>, a format conversion for example -- the run grades <code>PASS</code> if nothing else is recorded: an unscanned instance is the absence of a measurement, not a finding. That stops once the store holds a recorded status anywhere: from then on each patient, study or instance that holds none costs the <code>PASS</code> (condition 9). So a file ingested after a pass grades <code>REVIEW_REQUIRED</code> until <code>audit()</code> reads it, and the same file in a store nobody audited does not. Either way section 5 says how many instances have no PHI scan at their current revision, and whether the Grade Basis counts them, so a <code>PASS</code> over data no scan has read does not pass for a <code>PASS</code> over data a scan cleared. The per-entity answer is <code>session.phi_status_summary()</code> and the manifest's <code>anonymized</code>.</li>
-<li><strong>The scan finds what your policy names, plus Patient's Name, Patient ID and Study Date, which it always checks, and, with <code>remove_private_tags</code> on, every private tag.</strong> An identifier anywhere else is not a finding, and the grade does not see it.</li>
-<li><strong>An edit made between <code>audit()</code> and <code>anonymize()</code></strong> can be stamped <code>REMEDIATED</code> by the pass without any scan having read it, and then does not grade (<a href="https://github.com/kvnlng/Isocenter/issues/752">#752</a>).</li>
-<li><strong>Burned-in pixel text is not graded.</strong> Text <code>scan_pixel_content()</code> finds is counted in section 5 and costs no <code>PASS</code>; an instance it could not read does (condition 2), as does a stored Burned In Annotation <code>YES</code>, in any letter case (a <code>COMPLIANCE_CHECK</code> row). A zone <code>redact()</code> applied writes Burned In Annotation <code>NO</code>, so a zone-redacted image no longer costs it; a zone applied only by <code>export()</code> leaves the attribute as the source had it, so the image still does. The check reads the store, not the files written, so it also counts a <code>YES</code> instance an export's <code>subset</code> left out. Under the <a href="../configuration/#burned-in-text"><code>burned_in_text</code></a> policy, a <code>redact</code> pass that blanked text costs no <code>PASS</code> by itself; these <code>WARNING</code> rows do, under condition 2: text still found when a redacted image is read again, an image the pass could not read, an image the export withheld or wrote because the policy never checked it, an image with text the export withheld (<code>withhold</code>, or <code>redact</code> before a redaction landed), and an image with text the export wrote (<code>report</code>), besides the row the <code>report</code> pass writes for it; under <code>export(check_burned_in=True)</code>, an image its read found text on or could not read in full, written or withheld. Under a narrowed <code>target</code> (<a href="https://github.com/kvnlng/Isocenter/issues/1121">#1121</a>), the text found is only text of a named kind; text left in place writes one <code>RISK</code> row per image, which is listed and does not grade. Text OCR does not find is not graded at all.</li>
-<li><strong>An inferred or overridden Planar Configuration is not graded.</strong> An image or icon whose source stated no Planar Configuration is read as 0, counted in section 5, and named per instance at INFO in the export's log; it costs no <code>PASS</code> (<a href="https://github.com/kvnlng/Isocenter/issues/1134">#1134</a>). So is one that declared a value other than 0 under a compressed syntax whose stream fixes the layout, counted on a line of its own (<a href="https://github.com/kvnlng/Isocenter/issues/1137">#1137</a>).</li>
-</ul>
-<p>The grade describes a run. Whether the result meets a protocol or a regulation is the data steward's determination.</p>
-<p>The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. The promise covers the conditions, not the direction a grade can move: a 1.x fix that stops writing a wrong row can move a run from <code>REVIEW_REQUIRED</code> to <code>PASS</code>, and the CHANGELOG entry for that fix says so. The wording of the report and of each Grade Basis line is not part of that promise (<a href="../api/stability/">API stability</a>).</p>
-<div class="admonition note">
-<p class="admonition-title">A <code>WARNING</code> row needs a person; a correction is not reported</p>
-<p>What you will <strong>not</strong> find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation, BitsStored, Rows or Columns rewritten to match the pixels actually written, or Encapsulated Document Length <code>(0042,0015)</code> rewritten to the length of the document written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at <code>INFO</code> and are neither recorded in the audit log nor graded. The default console handler shows <code>WARNING</code> and above, so they do not appear on screen either. Four more lines go out on that same <code>INFO</code> channel, with no row, and are not corrections of that kind. When a colour image or icon held no Planar Configuration in its source, the export says it wrote the 0 ingest inferred (<a href="https://github.com/kvnlng/Isocenter/issues/1134">#1134</a>). When one declared a value other than 0 under a compressed syntax whose stream fixes the layout, the export says it read and wrote 0 (<a href="https://github.com/kvnlng/Isocenter/issues/1137">#1137</a>). When a file carries no Encapsulated Document <code>(0042,0011)</code> -- a rule removed it, or it was dropped at ingest with its own <code>DATA_LOSS</code> row -- its Encapsulated Document Length is not written, and the line says so. And when the export writes a private value that this library's own <code>ingest()</code> would drop (over 65534 bytes, under a binary VR or <code>UN</code>), the line names the element: the file is written as asked, but re-ingesting it here will lose that value with a <code>DATA_LOSS</code> row. To see these lines, attach a handler at <code>INFO</code> to the <code>isocenter</code> logger. A <code>WARNING</code> row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself -- statuses recorded under another policy, or a <code>patient_ids</code> that named a patient the session does not hold, or a <code>subset</code> that named a UID it does not hold.</p>
-<p>Five grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: <strong>an empty audit trail</strong> (a clean ingest followed by <code>audit()</code> alone writes no row, and grades <code>REVIEW_REQUIRED</code> because nothing the run did is attested), <strong>a verb with no evidence</strong> (<code>anonymize()</code> or <code>redact()</code> did work and none of the rows it writes reached the audit log), <strong>findings nobody acted on</strong> (entities the last PHI scan left <code>IDENTIFIED</code>; condition 7 under <a href="#how-the-grade-is-decided">How the grade is decided</a>), <strong>entities edited after their scan</strong> (condition 8), and <strong>entities never scanned in a store that holds a recorded status</strong> (condition 9).</p>
 </div>
-<div class="admonition warning">
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="analytics-reporting">
+<h1>Analytics &amp; Reporting<a class="headerlink" href="#analytics-reporting" title="Link to this heading">#</a></h1>
+<p>Isocenter is designed not just for de-identification, but for understanding your data. It includes built-in tools for compliance verification, cohort analysis, and data exploration.</p>
+<section id="compliance-reports">
+<h2>Compliance Reports<a class="headerlink" href="#compliance-reports" title="Link to this heading">#</a></h2>
+<p>For regulatory audits (HIPAA/GDPR), Isocenter can generate a formal <strong>Compliance Report</strong>. This single-document artifact summarizes the entire session, ensuring transparent documentation of your de-identification process.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Generate a Markdown report</span>
+<span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"compliance_report.md"</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The report includes:</p>
+<ol class="arabic simple">
+<li><p><strong>Executive Summary</strong>: the grade (<code class="docutils literal notranslate"><span class="pre">PASS</span></code> / <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>), how many patients and instances the session holds, the privacy profile and de-identification method, and the pre-export boundary note described below. An <strong>Instances Written</strong> row (<code class="docutils literal notranslate"><span class="pre">191</span> <span class="pre">of</span> <span class="pre">192</span> <span class="pre">requested</span></code>) appears only when the last <code class="docutils literal notranslate"><span class="pre">export()</span></code> call in this session was a DICOM export that ran; it describes that export alone. A WFDB export, or an export that raised, removes the row, and a session that has not exported, a reopened store included, has none.</p></li>
+<li><p><strong>Processing Audit</strong>: aggregated counts of actions taken (e.g., tags remediated, pixels redacted, export runs completed).</p></li>
+<li><p><strong>Data Loss &amp; Unscanned Content</strong>: 3.1 lists every element that was
+present in the source and is not in the exported data, named with its
+VR. 3.2 lists content the PHI scan could not open – a private value
+whose bytes look like a sequence and do not parse as one – with a
+<strong>Disposition</strong> column resolved against the object graph at report
+time: <code class="docutils literal notranslate"><span class="pre">removed</span> <span class="pre">before</span> <span class="pre">export</span></code> (the private-tag sweep deleted the
+bytes; grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, exactly as a swept parseable sequence does),
+<code class="docutils literal notranslate"><span class="pre">retained</span> <span class="pre">for</span> <span class="pre">export</span></code>, or <code class="docutils literal notranslate"><span class="pre">unresolved</span></code> (the instance’s UID changed
+after ingest, e.g. by <code class="docutils literal notranslate"><span class="pre">redact()</span></code>, so the row cannot be matched back).
+The latter two grade the session <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>, with no scope
+test: a run that exports bytes it could not read does not get to
+call itself PASS. 3.3 lists remediations that were <strong>proposed and
+did not run</strong> – a finding whose entity could not be resolved
+against the live graph, a target the action has no arm for, a date
+with no PatientID to seed its jitter, a value that is not a date, a
+remediation that raised (its value may be unchanged or partly
+written) – each with its reason. The element each row names is still in the
+object graph and reached the exported files, so one row grades the
+session <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> on the same argument 3.2 makes. Unlike 3.1
+and 3.2, 3.3 is omitted entirely from a run that declined nothing.</p></li>
+<li><p><strong>Exceptions &amp; Errors</strong>: every <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> and <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, plus report-time checks (<code class="docutils literal notranslate"><span class="pre">COMPLIANCE_CHECK</span></code>, <code class="docutils literal notranslate"><span class="pre">AUDIT_DROP</span></code>). Any row here grades the run <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p>
+<ul class="simple">
+<li><p>An <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> means something requested failed: a file refused at ingest, an instance that failed to write.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> means the run did what it should, but something about the source data could not be honoured or read, or was deliberately held back. Among them:</p>
+<ul>
+<li><p>a file declined because its SOP Instance UID is already held, or because its Study Instance UID belongs to a patient with a different Patient ID;</p></li>
+<li><p>an instance <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> withheld because it still carries an identifier (it is not written, and nothing failed);</p></li>
+<li><p>an instance OCR could not read;</p></li>
+<li><p>a store an older release de-identified, where what that release did cannot be vouched for (see <a class="reference internal" href="../migration/"><span class="std std-doc">Upgrading from 0.9.x</span></a>);</p></li>
+<li><p>a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim;</p></li>
+<li><p>an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared;</p></li>
+<li><p>a WFDB record in which two signals would share a lead name, so each one named from the lead table is written as its Code Value (<a class="reference internal" href="../waveforms/#lead-names"><span class="std std-ref">Lead names</span></a>).</p></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p><strong>Validation &amp; Verification</strong>: the <strong>Grade Basis</strong> – every reason this run is not <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, one line each, or a statement that nothing costs it its <code class="docutils literal notranslate"><span class="pre">PASS</span></code> – then how many <code class="docutils literal notranslate"><span class="pre">REMEDIATION_*</span></code> rows the audit trail holds, what each <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> call in this session read and could not read, what each <a class="reference internal" href="../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a> pass of <code class="docutils literal notranslate"><span class="pre">redact()</span></code> in this session read under its scope, left out of scope, found and redacted, reported or left to be withheld, and what each <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> read under that policy read, left out of scope, found and withheld or wrote with a row (a scope that selected nothing costs no <code class="docutils literal notranslate"><span class="pre">PASS</span></code>; a session that ran either and no <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> is not told that no OCR ran), how many images, and how many icons, were read with an inferred Planar Configuration (0028,0006), and, on a line of its own, how many were read as 0 over a declared Planar Configuration under a compressed syntax, each counted over the store, when any were (neither costs a <code class="docutils literal notranslate"><span class="pre">PASS</span></code>), and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row. Every condition behind it is listed under <a class="reference internal" href="#how-the-grade-is-decided">How the grade is decided</a>.</p></li>
+</ol>
+<p>A per-instance manifest is not part of the report. It is a separate document, written by <code class="docutils literal notranslate"><span class="pre">generate_manifest()</span></code>; see <a class="reference internal" href="#manifests">Manifests</a>.</p>
+<section id="how-the-grade-is-decided">
+<h3>How the grade is decided<a class="headerlink" href="#how-the-grade-is-decided" title="Link to this heading">#</a></h3>
+<p>Worked example: <a class="reference internal" href="../tutorials/deidentify-and-read-the-grade/"><span class="std std-doc">De-identify a cohort and read the grade</span></a>.</p>
+<p>The report grades a run <code class="docutils literal notranslate"><span class="pre">PASS</span></code> or <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. There is no <code class="docutils literal notranslate"><span class="pre">FAIL</span></code>: a failure the run records costs it its <code class="docutils literal notranslate"><span class="pre">PASS</span></code> (condition 2); one it cannot record raises.</p>
+<p><strong>The grade is <code class="docutils literal notranslate"><span class="pre">PASS</span></code> exactly when none of the conditions below holds.</strong> Section 5’s <em>Grade Basis</em> lists each one that does, one line per condition, naming the section that holds the evidence. The grade and that list are computed from one list, so they cannot disagree.</p>
+<p>The conditions are read from the store’s audit log and from the store itself. The audit log holds everything any session ever recorded in this store, not only the session generating the report. A row written once stays; only a new store starts clean.</p>
+<ol class="arabic simple">
+<li><p><strong>Nothing is attested.</strong> The audit log holds no rows at all. A clean ingest followed by <code class="docutils literal notranslate"><span class="pre">audit()</span></code> alone writes none, for example.</p></li>
+<li><p><strong>Something failed, or the source could not be honoured.</strong> Any <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> or <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, or a report-time check (section 4):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">COMPLIANCE_CHECK</span></code>: an instance stored with Burned In Annotation <code class="docutils literal notranslate"><span class="pre">YES</span></code>, or stored pixel descriptors that cannot describe its frame.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AUDIT_DROP</span></code>: audit rows that failed to write.</p></li>
+</ul>
+</li>
+<li><p><strong>Graded data was lost.</strong> A <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row scoped <code class="docutils literal notranslate"><span class="pre">PRIVATE</span></code> or <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code> (section 3.1). A <code class="docutils literal notranslate"><span class="pre">STANDARD</span></code> loss is listed but does not grade.</p></li>
+<li><p><strong>The PHI scan could not read something the export still carries.</strong> A <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code> row whose element is retained for export, or whose disposition cannot be resolved (section 3.2).</p></li>
+<li><p><strong>A remediation was proposed and did not run.</strong> A <code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> row, including a proposal that raised (section 3.3).</p></li>
+<li><p><strong>A verb left no evidence.</strong> <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> or <code class="docutils literal notranslate"><span class="pre">redact()</span></code> ran in the session generating the report, and none of the rows it writes is in the audit log.</p></li>
+<li><p><strong>A finding raised under your policy was not acted on.</strong> A patient, study or instance whose last PHI scan (<code class="docutils literal notranslate"><span class="pre">audit()</span></code>, or the scan <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> runs) found a value that a rule of the policy that scan ran with acts on, and which no <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> pass since has acted on. “Acted on” means the value was replaced, shifted or removed, or was already what the rule asks. A remediation that declined did not act, so its entity reads <code class="docutils literal notranslate"><span class="pre">IDENTIFIED</span></code> after the pass and counts here as well as under condition 5, unless it was edited after its scan and the pass changed nothing else on it, which leaves it <code class="docutils literal notranslate"><span class="pre">UNSCANNED</span></code>. This is the entity reading <code class="docutils literal notranslate"><span class="pre">IDENTIFIED</span></code> in <code class="docutils literal notranslate"><span class="pre">session.phi_status_summary()</span></code>, counted over the whole store; section 5’s line gives the count per level. Series are never scanned and never counted. An entity edited after its scan reads <code class="docutils literal notranslate"><span class="pre">UNSCANNED</span></code>, and grades under condition 8 instead.</p></li>
+<li><p><strong>A patient, study or instance was edited after its PHI status was recorded.</strong> Its content was changed after a scan or a pass recorded its status, and no scan has read the change since. For an instance that is a change through its methods – <code class="docutils literal notranslate"><span class="pre">set_attr</span></code>, a sequence added, filled or cleared, <code class="docutils literal notranslate"><span class="pre">set_pixel_data</span></code> – or an assignment of <code class="docutils literal notranslate"><span class="pre">instance.sop_instance_uid</span></code>, which also sets its <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> element; a change to an item nested in it, at any depth; and an assignment of <code class="docutils literal notranslate"><span class="pre">series.series_instance_uid</span></code>, which the export writes into it, or of <code class="docutils literal notranslate"><span class="pre">series.modality</span></code> or <code class="docutils literal notranslate"><span class="pre">series.equipment</span></code>. Not <code class="docutils literal notranslate"><span class="pre">series.series_number</span></code>: the export writes each instance’s own Series Number, so an assignment of the series’ field changes no file. A series is counted through its instances, never by itself: the scan records nothing on a series, so a status of its own could never be cleared by one. For a patient or a study it is an assignment of a field the export writes from it into every file beneath it, or the scan reads on it: <code class="docutils literal notranslate"><span class="pre">patient.patient_name</span></code>, <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>, <code class="docutils literal notranslate"><span class="pre">study.study_date</span></code> or <code class="docutils literal notranslate"><span class="pre">study.study_instance_uid</span></code>. An assignment of <code class="docutils literal notranslate"><span class="pre">study.study_time</span></code> is counted too, though the export writes each instance’s own Study Time and not the study’s field. Such an entity reads <code class="docutils literal notranslate"><span class="pre">UNSCANNED</span></code>, and it grades until a scan reads it: <code class="docutils literal notranslate"><span class="pre">audit()</span></code> reads it, and the line goes. A save and a reopen keep it: the store records the status the edit left behind. An entity never scanned is not counted here: condition 9 counts it. Neither is what the library writes itself after a scan: a pass records its status after what it writes; redaction carries the status it found, since it writes the pixels, the new SOP Instance UID and its flags but no attribute a scan read; and so does the reversible lock (<code class="docutils literal notranslate"><span class="pre">lock_identities</span></code>), whose token is not PHI. Each carries it only when it still applied, so an edit made before them is not hidden by them. That includes <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>: an entity edited after its scan and before the pass is still counted after it, because the pass does not read the edit, so it keeps the status the scan left rather than stamping its own (#752). So <code class="docutils literal notranslate"><span class="pre">audit()</span></code>, then <code class="docutils literal notranslate"><span class="pre">redact()</span></code>, then <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> over that audit’s report settles a redacted instance as the documented order does, while an edit made before the redaction is still counted after both. Assigning the value a field already holds is not an edit. A nested item’s own status is not counted. A write that goes around the entity – straight into <code class="docutils literal notranslate"><span class="pre">instance.attributes</span></code>, into a sequence’s <code class="docutils literal notranslate"><span class="pre">items</span></code> list, or <code class="docutils literal notranslate"><span class="pre">instance.pixel_array</span> <span class="pre">=</span> <span class="pre">...</span></code> – is not seen. Section 5’s line gives the count per level.</p></li>
+<li><p><strong>A patient, study or instance was never scanned, in a store that holds a recorded PHI status.</strong> At least one patient, study or instance in the store holds a recorded status, and this one holds none, from a scan or from a pass. The usual way there is a file ingested after the store’s <code class="docutils literal notranslate"><span class="pre">audit()</span></code> or <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>. Until the next scan it is held as ingested and exported as the store holds it (a late series of a study already passed gets its owners’ pseudonym, Patient ID, shifted Study Date and replaced Study Instance UID stamped on it, and keeps every other value of the source, its Series and SOP Instance UIDs included), and nothing your policy names has been looked for in it. <code class="docutils literal notranslate"><span class="pre">audit()</span></code> reads it, and the line goes; what that scan finds then grades under condition 7 until a pass acts on it. It is counted over the whole store, as conditions 7 and 8 are, so it holds before any export, and for an export whose <code class="docutils literal notranslate"><span class="pre">subset</span></code> or <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> left the entity out. “Holds a recorded status” means a status of any value on any patient, study or instance, one an edit has left stale included (condition 8). It is read from the statuses the store holds, so a save and a reopen keep it. A store in which no status is recorded anywhere is not counted; see “Unscanned data does not grade in a store that holds no PHI status”, below. An entity is counted here or under condition 8, never under both: condition 8 is a status an edit left behind, this is no status at all. A series and a nested item are never counted and never read, since no scan records a status on either. A patient that holds no studies is counted. The condition does not say that an entity with a status was scanned: a pass over findings built by hand records one. Section 5’s line gives the count per level.</p></li>
+</ol>
+<p><strong>What <code class="docutils literal notranslate"><span class="pre">PASS</span></code> does not mean.</strong> The grade is about what the run recorded doing, and what its own scan found and its own passes left. It does not say the exported data holds no identifiers:</p>
+<ul class="simple">
+<li><p><strong>Unscanned data does not grade in a store that holds no PHI status.</strong> While no patient, study or instance in the store holds a recorded PHI status – <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> then <code class="docutils literal notranslate"><span class="pre">export()</span></code> with no <code class="docutils literal notranslate"><span class="pre">audit()</span></code>, a format conversion for example – the run grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code> if nothing else is recorded: an unscanned instance is the absence of a measurement, not a finding. That stops once the store holds a recorded status anywhere: from then on each patient, study or instance that holds none costs the <code class="docutils literal notranslate"><span class="pre">PASS</span></code> (condition 9). So a file ingested after a pass grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> until <code class="docutils literal notranslate"><span class="pre">audit()</span></code> reads it, and the same file in a store nobody audited does not. Either way section 5 says how many instances have no PHI scan at their current revision, and whether the Grade Basis counts them, so a <code class="docutils literal notranslate"><span class="pre">PASS</span></code> over data no scan has read does not pass for a <code class="docutils literal notranslate"><span class="pre">PASS</span></code> over data a scan cleared. The per-entity answer is <code class="docutils literal notranslate"><span class="pre">session.phi_status_summary()</span></code> and the manifest’s <code class="docutils literal notranslate"><span class="pre">anonymized</span></code>.</p></li>
+<li><p><strong>The scan finds what your policy names, plus Patient’s Name, Patient ID and Study Date, which it always checks, and, with <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code> on, every private tag.</strong> An identifier anywhere else is not a finding, and the grade does not see it.</p></li>
+<li><p><strong>An edit made between <code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code></strong> can be stamped <code class="docutils literal notranslate"><span class="pre">REMEDIATED</span></code> by the pass without any scan having read it, and then does not grade (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/752">#752</a>).</p></li>
+<li><p><strong>Burned-in pixel text is not graded.</strong> Text <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> finds is counted in section 5 and costs no <code class="docutils literal notranslate"><span class="pre">PASS</span></code>; an instance it could not read does (condition 2), as does a stored Burned In Annotation <code class="docutils literal notranslate"><span class="pre">YES</span></code>, in any letter case (a <code class="docutils literal notranslate"><span class="pre">COMPLIANCE_CHECK</span></code> row). A zone <code class="docutils literal notranslate"><span class="pre">redact()</span></code> applied writes Burned In Annotation <code class="docutils literal notranslate"><span class="pre">NO</span></code>, so a zone-redacted image no longer costs it; a zone applied only by <code class="docutils literal notranslate"><span class="pre">export()</span></code> leaves the attribute as the source had it, so the image still does. The check reads the store, not the files written, so it also counts a <code class="docutils literal notranslate"><span class="pre">YES</span></code> instance an export’s <code class="docutils literal notranslate"><span class="pre">subset</span></code> left out. Under the <a class="reference internal" href="../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a> policy, a <code class="docutils literal notranslate"><span class="pre">redact</span></code> pass that blanked text costs no <code class="docutils literal notranslate"><span class="pre">PASS</span></code> by itself; these <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> rows do, under condition 2: text still found when a redacted image is read again, an image the pass could not read, an image the export withheld or wrote because the policy never checked it, an image with text the export withheld (<code class="docutils literal notranslate"><span class="pre">withhold</span></code>, or <code class="docutils literal notranslate"><span class="pre">redact</span></code> before a redaction landed), and an image with text the export wrote (<code class="docutils literal notranslate"><span class="pre">report</span></code>), besides the row the <code class="docutils literal notranslate"><span class="pre">report</span></code> pass writes for it; under <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code>, an image its read found text on or could not read in full, written or withheld. Under a narrowed <code class="docutils literal notranslate"><span class="pre">target</span></code> (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1121">#1121</a>), the text found is only text of a named kind; text left in place writes one <code class="docutils literal notranslate"><span class="pre">RISK</span></code> row per image, which is listed and does not grade. Text OCR does not find is not graded at all.</p></li>
+<li><p><strong>An inferred or overridden Planar Configuration is not graded.</strong> An image or icon whose source stated no Planar Configuration is read as 0, counted in section 5, and named per instance at INFO in the export’s log; it costs no <code class="docutils literal notranslate"><span class="pre">PASS</span></code> (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1134">#1134</a>). So is one that declared a value other than 0 under a compressed syntax whose stream fixes the layout, counted on a line of its own (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1137">#1137</a>).</p></li>
+</ul>
+<p>The grade describes a run. Whether the result meets a protocol or a regulation is the data steward’s determination.</p>
+<p>The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. The promise covers the conditions, not the direction a grade can move: a 1.x fix that stops writing a wrong row can move a run from <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> to <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, and the CHANGELOG entry for that fix says so. The wording of the report and of each Grade Basis line is not part of that promise (<a class="reference internal" href="../api/stability/"><span class="std std-doc">API stability</span></a>).</p>
+<div class="note admonition">
+<p class="admonition-title">A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row needs a person; a correction is not reported</p>
+<p>What you will <strong>not</strong> find in section 4 is Isocenter correcting a descriptor of its own making – PixelRepresentation, BitsStored, Rows or Columns rewritten to match the pixels actually written, or Encapsulated Document Length <code class="docutils literal notranslate"><span class="pre">(0042,0015)</span></code> rewritten to the length of the document written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at <code class="docutils literal notranslate"><span class="pre">INFO</span></code> and are neither recorded in the audit log nor graded. The default console handler shows <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> and above, so they do not appear on screen either. Four more lines go out on that same <code class="docutils literal notranslate"><span class="pre">INFO</span></code> channel, with no row, and are not corrections of that kind. When a colour image or icon held no Planar Configuration in its source, the export says it wrote the 0 ingest inferred (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1134">#1134</a>). When one declared a value other than 0 under a compressed syntax whose stream fixes the layout, the export says it read and wrote 0 (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1137">#1137</a>). When a file carries no Encapsulated Document <code class="docutils literal notranslate"><span class="pre">(0042,0011)</span></code> – a rule removed it, or it was dropped at ingest with its own <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row – its Encapsulated Document Length is not written, and the line says so. And when the export writes a private value that this library’s own <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> would drop (over 65534 bytes, under a binary VR or <code class="docutils literal notranslate"><span class="pre">UN</span></code>), the line names the element: the file is written as asked, but re-ingesting it here will lose that value with a <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row. To see these lines, attach a handler at <code class="docutils literal notranslate"><span class="pre">INFO</span></code> to the <code class="docutils literal notranslate"><span class="pre">isocenter</span></code> logger. A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself – statuses recorded under another policy, or a <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> that named a patient the session does not hold, or a <code class="docutils literal notranslate"><span class="pre">subset</span></code> that named a UID it does not hold.</p>
+<p>Five grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: <strong>an empty audit trail</strong> (a clean ingest followed by <code class="docutils literal notranslate"><span class="pre">audit()</span></code> alone writes no row, and grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> because nothing the run did is attested), <strong>a verb with no evidence</strong> (<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> or <code class="docutils literal notranslate"><span class="pre">redact()</span></code> did work and none of the rows it writes reached the audit log), <strong>findings nobody acted on</strong> (entities the last PHI scan left <code class="docutils literal notranslate"><span class="pre">IDENTIFIED</span></code>; condition 7 under <a class="reference internal" href="#how-the-grade-is-decided">How the grade is decided</a>), <strong>entities edited after their scan</strong> (condition 8), and <strong>entities never scanned in a store that holds a recorded status</strong> (condition 9).</p>
+</div>
+<div class="warning admonition">
 <p class="admonition-title">Which losses move the Validation Status</p>
 <p>A dropped <strong>private</strong> (odd-group) element grades the session
-<code>REVIEW_REQUIRED</code>. It may be a vendor block <code>remove_private_tags: false</code>
-was set specifically to keep (<a href="../configuration/#the-65534-byte-limit">The 65534-byte limit</a>), and nobody outside the vendor can size
+<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. It may be a vendor block <code class="docutils literal notranslate"><span class="pre">remove_private_tags:</span> <span class="pre">false</span></code>
+was set specifically to keep (<a class="reference internal" href="../configuration/#the-65534-byte-limit"><span class="std std-ref">The 65534-byte limit</span></a>), and nobody outside the vendor can size
 or identify what went missing.</p>
-<p>A dropped <strong>standard</strong> element -- a large Overlay Data plane
-<code>(60xx,3000)</code>, say -- does not. Those come off ordinary images by the thousand,
-so a grade that moved on them would read <code>REVIEW_REQUIRED</code> for most
+<p>A dropped <strong>standard</strong> element – a large Overlay Data plane
+<code class="docutils literal notranslate"><span class="pre">(60xx,3000)</span></code>, say – does not. Those come off ordinary images by the thousand,
+so a grade that moved on them would read <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> for most
 cohorts and stop carrying information.</p>
 <p>Read the Data Loss section on its own terms either way: its <strong>Scope</strong>
-column says which rows were graded -- <code>PRIVATE</code> and <code>SIGNAL</code> rows are,
-<code>STANDARD</code> rows are not -- and <code>unrecorded</code> means a row written by an
-older release, before the scope was recorded. <code>SIGNAL</code> is the
+column says which rows were graded – <code class="docutils literal notranslate"><span class="pre">PRIVATE</span></code> and <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code> rows are,
+<code class="docutils literal notranslate"><span class="pre">STANDARD</span></code> rows are not – and <code class="docutils literal notranslate"><span class="pre">unrecorded</span></code> means a row written by an
+older release, before the scope was recorded. <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code> is the
 standard-group loss that grades: acquired content that was in the
-source and is not in the export -- a discarded waveform multiplex group
-(see <a href="../waveforms/">Waveforms</a>), or a nested icon image dropped because
+source and is not in the export – a discarded waveform multiplex group
+(see <a class="reference internal" href="../waveforms/"><span class="std std-doc">Waveforms</span></a>), or a nested icon image dropped because
 pixel data is redacted.</p>
 </div>
-<div class="admonition warning">
-<p class="admonition-title">Generate the report after <code>export()</code></p>
-<p><code>generate_report()</code> grades the audit log as it stands when you call
+<div class="warning admonition">
+<p class="admonition-title">Generate the report after <code class="docutils literal notranslate"><span class="pre">export()</span></code></p>
+<p><code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> grades the audit log as it stands when you call
 it. Losses recorded at ingest are already in it; losses recorded on
-the way <em>out</em> -- an element that could not be encoded, a waveform
-with no samples -- are written during <code>export()</code>. Call
-<code>generate_report()</code> <strong>after</strong> <code>export()</code>, or those losses cannot
+the way <em>out</em> – an element that could not be encoded, a waveform
+with no samples – are written during <code class="docutils literal notranslate"><span class="pre">export()</span></code>. Call
+<code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> <strong>after</strong> <code class="docutils literal notranslate"><span class="pre">export()</span></code>, or those losses cannot
 reach the Validation Status no matter what group they are in.</p>
 <p>A report generated before any export says so itself: when the
-audit trail holds no <code>EXPORT</code> row, the Executive Summary carries a
+audit trail holds no <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row, the Executive Summary carries a
 boundary note under the grade and a warning is logged. The note
 states the boundary without moving the grade. (An audit-only session
-grades <code>REVIEW_REQUIRED</code> anyway, for a different reason: <code>audit()</code>
-writes no audit row, and an empty trail attests nothing -- see
-section 5's Grade Basis.)</p>
+grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> anyway, for a different reason: <code class="docutils literal notranslate"><span class="pre">audit()</span></code>
+writes no audit row, and an empty trail attests nothing – see
+section 5’s Grade Basis.)</p>
 </div>
-<div class="admonition tip">
+<div class="tip admonition">
 <p class="admonition-title">Format</p>
-<p>The report is Markdown. <code>generate_report(output_path, format="markdown")</code> is the default and the only accepted spelling; any other <code>format</code> raises <code>ValueError</code> naming it, and no file is written.</p>
+<p>The report is Markdown. <code class="docutils literal notranslate"><span class="pre">generate_report(output_path,</span> <span class="pre">format=&quot;markdown&quot;)</span></code> is the default and the only accepted spelling; any other <code class="docutils literal notranslate"><span class="pre">format</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> naming it, and no file is written.</p>
 </div>
-<h2 id="manifests">Manifests</h2>
-<p><code>generate_manifest(output_path, format="html")</code> writes one row per instance the session holds: every instance in <code>session.store</code>, whatever an export selected. <code>format</code> is <code>"html"</code> (the default) or <code>"json"</code>, exactly; any other spelling, a case variant included, raises <code>ValueError</code> and writes no file.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_manifest</span><span class="p">(</span><span class="s2">"manifest.html"</span><span class="p">)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">session</span><span class="o">.</span><span class="n">generate_manifest</span><span class="p">(</span><span class="s2">"manifest.json"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"json"</span><span class="p">)</span>
-</code></pre></div>
-<p>Each row holds the instance's Patient ID, its Study, Series and SOP Instance UIDs, its modality, the manufacturer and model name of its series' equipment, and the path of the file it was ingested from. The values are the session's, as they stand when the manifest is written:</p>
-<ul>
-<li><strong>After <code>anonymize()</code></strong>, the Patient ID is the replacement and the UIDs are the replacement UIDs, next to the source file path. The manifest is then a crosswalk from each source file to the identifiers its export carries. Keep it with the store, not with an export.</li>
-<li><strong>A subject whose files carried no Patient ID</strong> is listed under its key, the value <code>get_cohort_report()</code> shows in its <code>PatientID</code> column: <code>\no-patient-id\</code> followed by the subject's <em>source</em> Study Instance UID. No export writes that key.</li>
-<li><strong>The file path</strong> is the path as <code>ingest()</code> walked it, so it is relative when the directory you passed was relative. It is still that path after <code>redact()</code> changes an instance's pixels: the instance no longer matches its source file, but the manifest names the file it was read from, which is kept in the store and survives a reopen. An instance with no source file (one built in code) has <code>null</code> in JSON and an empty cell in HTML.</li>
+</section>
+</section>
+<section id="manifests">
+<h2>Manifests<a class="headerlink" href="#manifests" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">generate_manifest(output_path,</span> <span class="pre">format=&quot;html&quot;)</span></code> writes one row per instance the session holds: every instance in <code class="docutils literal notranslate"><span class="pre">session.store</span></code>, whatever an export selected. <code class="docutils literal notranslate"><span class="pre">format</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;html&quot;</span></code> (the default) or <code class="docutils literal notranslate"><span class="pre">&quot;json&quot;</span></code>, exactly; any other spelling, a case variant included, raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> and writes no file.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">generate_manifest</span><span class="p">(</span><span class="s2">"manifest.html"</span><span class="p">)</span>
+<span class="n">session</span><span class="o">.</span><span class="n">generate_manifest</span><span class="p">(</span><span class="s2">"manifest.json"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"json"</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Each row holds the instance’s Patient ID, its Study, Series and SOP Instance UIDs, its modality, the manufacturer and model name of its series’ equipment, and the path of the file it was ingested from. The values are the session’s, as they stand when the manifest is written:</p>
+<ul class="simple">
+<li><p><strong>After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code></strong>, the Patient ID is the replacement and the UIDs are the replacement UIDs, next to the source file path. The manifest is then a crosswalk from each source file to the identifiers its export carries. Keep it with the store, not with an export.</p></li>
+<li><p><strong>A subject whose files carried no Patient ID</strong> is listed under its key, the value <code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> shows in its <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> column: <code class="docutils literal notranslate"><span class="pre">\no-patient-id\</span></code> followed by the subject’s <em>source</em> Study Instance UID. No export writes that key.</p></li>
+<li><p><strong>The file path</strong> is the path as <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> walked it, so it is relative when the directory you passed was relative. It is still that path after <code class="docutils literal notranslate"><span class="pre">redact()</span></code> changes an instance’s pixels: the instance no longer matches its source file, but the manifest names the file it was read from, which is kept in the store and survives a reopen. An instance with no source file (one built in code) has <code class="docutils literal notranslate"><span class="pre">null</span></code> in JSON and an empty cell in HTML.</p></li>
 </ul>
-<p>The <strong>HTML</strong> manifest is one page: the store file's name, when the manifest was generated, the number of instances, and a table with the columns Patient ID, Study UID, Series UID, Modality, Manufacturer, Model, SOP Instance UID and File Path. It has no column for <code>anonymized</code>.</p>
-<p>The <strong>JSON</strong> manifest is one object. This one was written after <code>ingest()</code>, <code>audit()</code>, <code>anonymize()</code> and <code>export()</code> into a store named <code>my_project.db</code>, over pydicom's <code>CT_small.dcm</code> and a copy of its <code>MR_small.dcm</code> with the Patient ID deleted:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"generated_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-23T21:03:55.218090"</span><span class="p">,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"project_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_project.db"</span><span class="p">,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">"total_files"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">"patient_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ANON_28e5c87cd169c80d0dd05bfb"</span><span class="p">,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">"study_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.297990125461744647168780076193196812719"</span><span class="p">,</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">"series_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.188531152787603764149085731129800765062"</span><span class="p">,</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">"sop_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.102433379052112046212620522432915392421"</span><span class="p">,</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">"file_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input/CT_small.dcm"</span><span class="p">,</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="nt">"modality"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CT"</span><span class="p">,</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="nt">"manufacturer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GE MEDICAL SYSTEMS"</span><span class="p">,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="nt">"model_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RHAPSODE"</span><span class="p">,</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="nt">"anonymized"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="p">},</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">      </span><span class="nt">"patient_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"\\no-patient-id\\1.3.6.1.4.1.5962.1.2.4.20040826185059.5457"</span><span class="p">,</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">      </span><span class="nt">"study_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.276106521748935728200388598927172523634"</span><span class="p">,</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">      </span><span class="nt">"series_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.163640163259226614858004570992412354281"</span><span class="p">,</span>
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">      </span><span class="nt">"sop_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.261339294768423179199607825024297936589"</span><span class="p">,</span>
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">      </span><span class="nt">"file_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input/MR_noid.dcm"</span><span class="p">,</span>
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">      </span><span class="nt">"modality"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MR"</span><span class="p">,</span>
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">      </span><span class="nt">"manufacturer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TOSHIBA_MEC"</span><span class="p">,</span>
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">      </span><span class="nt">"model_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MRT50H1"</span><span class="p">,</span>
-<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">      </span><span class="nt">"anonymized"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="p">}</span>
-</code></pre></div>
-<p>The pseudonym and the replacement UIDs come from the store's project secret, so another store gives other values.</p>
-<p><code>generated_at</code> is local time with no UTC offset, <code>project_name</code> is the store file's name, and <code>total_files</code> is the number of items. The manifest carries no file sizes.</p>
-<p>An item's <strong><code>anonymized</code></strong> is <code>true</code> when the last tag-policy PHI scan left no identifier unremediated on the instance's patient, its study or the instance itself, and none of the three has been edited since. It is <code>false</code> when the scan never ran on one of them, when one was edited after it, or when a remediation on it was declined in its last pass. It does not mean "<code>anonymize()</code> ran": a file the scan found clean reads <code>true</code> after <code>audit()</code> alone. It says nothing about burned-in text in the pixels, which the tag scan does not read. The series is not consulted, because the scan records no status on a series. <code>session.phi_status_summary()</code> gives the same statuses as counts.</p>
-<p><code>generate_manifest()</code> and its two formats are frozen at 1.0. The JSON keys, the meaning of <code>anonymized</code> and the HTML layout are documented but internal: a 1.x release may change them, with a CHANGELOG entry (<a href="../api/stability/">API stability</a>).</p>
-<hr />
-<h2 id="cohort-analysis-eda">Cohort Analysis (EDA)</h2>
-<p><code>get_cohort_report()</code> returns the cohort as a pandas DataFrame, one row per instance, for analysis with pandas, Jupyter or a BI tool. It reads the session's in-memory graph and writes nothing.</p>
-<h3 id="1-load-into-pandas">1. Load into pandas</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># expand_metadata=True adds one column per DICOM attribute</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Inspect the data</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'Modality'</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
-</code></pre></div>
-<p><strong>How the columns are named.</strong> The base columns are keywords: <code>PatientID</code>, <code>PatientName</code>, <code>StudyInstanceUID</code>, <code>StudyDate</code>, <code>SeriesInstanceUID</code>, <code>Modality</code>, <code>SOPInstanceUID</code>, <code>Manufacturer</code>, <code>Model</code> and <code>DeviceSerial</code>. The columns <code>expand_metadata=True</code> adds are lowercase <code>gggg,eeee</code> tag keys: Slice Thickness is <code>df["0018,0050"]</code>, not <code>df["SliceThickness"]</code>. The values are the session's as they stand, so before <code>anonymize()</code> the frame holds the original identifiers.</p>
-<h3 id="2-write-to-csv-or-parquet">2. Write to CSV or Parquet</h3>
-<p><code>export_dataframe()</code> builds the frame <code>get_cohort_report()</code> builds, writes it to a file and returns it. It takes the same <code>expand_metadata</code> argument, also <code>False</code> by default, so pass <code>expand_metadata=True</code> for the tag columns. Either format holds the expanded frame. In Parquet, a multi-valued tag such as Image Type is a list column when its values are uniform: every value present is a list whose elements are all of one kind (all text, all numbers, all dates, and so on). A column that is not uniform, such as a tag that is single-valued in one file and multi-valued in another, or text in one file and a number in another, is written as text, each value as the CSV writes it. Missing values are null in both, never the text <code>nan</code>, and every other column keeps its type. The format follows the extension: Parquet for <code>.parquet</code>, CSV for anything else. The path is required: called before <code>anonymize()</code>, the file holds the original identifiers, so name a place where PHI may live, or use <code>get_cohort_report()</code> when you only want the frame. A call with no path raises <code>TypeError</code> and writes nothing.</p>
+<p>The <strong>HTML</strong> manifest is one page: the store file’s name, when the manifest was generated, the number of instances, and a table with the columns Patient ID, Study UID, Series UID, Modality, Manufacturer, Model, SOP Instance UID and File Path. It has no column for <code class="docutils literal notranslate"><span class="pre">anonymized</span></code>.</p>
+<p>The <strong>JSON</strong> manifest is one object. This one was written after <code class="docutils literal notranslate"><span class="pre">ingest()</span></code>, <code class="docutils literal notranslate"><span class="pre">audit()</span></code>, <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> and <code class="docutils literal notranslate"><span class="pre">export()</span></code> into a store named <code class="docutils literal notranslate"><span class="pre">my_project.db</span></code>, over pydicom’s <code class="docutils literal notranslate"><span class="pre">CT_small.dcm</span></code> and a copy of its <code class="docutils literal notranslate"><span class="pre">MR_small.dcm</span></code> with the Patient ID deleted:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"generated_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-23T21:03:55.218090"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"project_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_project.db"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"total_files"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"items"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"patient_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ANON_28e5c87cd169c80d0dd05bfb"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"study_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.297990125461744647168780076193196812719"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"series_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.188531152787603764149085731129800765062"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"sop_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.102433379052112046212620522432915392421"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"file_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input/CT_small.dcm"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"modality"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CT"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"manufacturer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GE MEDICAL SYSTEMS"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"model_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RHAPSODE"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"anonymized"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"patient_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"\\no-patient-id\\1.3.6.1.4.1.5962.1.2.4.20040826185059.5457"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"study_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.276106521748935728200388598927172523634"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"series_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.163640163259226614858004570992412354281"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"sop_instance_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.25.261339294768423179199607825024297936589"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"file_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input/MR_noid.dcm"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"modality"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MR"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"manufacturer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TOSHIBA_MEC"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"model_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MRT50H1"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"anonymized"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The pseudonym and the replacement UIDs come from the store’s project secret, so another store gives other values.</p>
+<p><code class="docutils literal notranslate"><span class="pre">generated_at</span></code> is local time with no UTC offset, <code class="docutils literal notranslate"><span class="pre">project_name</span></code> is the store file’s name, and <code class="docutils literal notranslate"><span class="pre">total_files</span></code> is the number of items. The manifest carries no file sizes.</p>
+<p>An item’s <strong><code class="docutils literal notranslate"><span class="pre">anonymized</span></code></strong> is <code class="docutils literal notranslate"><span class="pre">true</span></code> when the last tag-policy PHI scan left no identifier unremediated on the instance’s patient, its study or the instance itself, and none of the three has been edited since. It is <code class="docutils literal notranslate"><span class="pre">false</span></code> when the scan never ran on one of them, when one was edited after it, or when a remediation on it was declined in its last pass. It does not mean “<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> ran”: a file the scan found clean reads <code class="docutils literal notranslate"><span class="pre">true</span></code> after <code class="docutils literal notranslate"><span class="pre">audit()</span></code> alone. It says nothing about burned-in text in the pixels, which the tag scan does not read. The series is not consulted, because the scan records no status on a series. <code class="docutils literal notranslate"><span class="pre">session.phi_status_summary()</span></code> gives the same statuses as counts.</p>
+<p><code class="docutils literal notranslate"><span class="pre">generate_manifest()</span></code> and its two formats are frozen at 1.0. The JSON keys, the meaning of <code class="docutils literal notranslate"><span class="pre">anonymized</span></code> and the HTML layout are documented but internal: a 1.x release may change them, with a CHANGELOG entry (<a class="reference internal" href="../api/stability/"><span class="std std-doc">API stability</span></a>).</p>
+</section>
+<hr class="docutils" />
+<section id="cohort-analysis-eda">
+<h2>Cohort Analysis (EDA)<a class="headerlink" href="#cohort-analysis-eda" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> returns the cohort as a pandas DataFrame, one row per instance, for analysis with pandas, Jupyter or a BI tool. It reads the session’s in-memory graph and writes nothing.</p>
+<section id="1-load-into-pandas">
+<span id="load-into-pandas"></span><h3>1. Load into pandas<a class="headerlink" href="#1-load-into-pandas" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># expand_metadata=True adds one column per DICOM attribute</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Inspect the data</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'Modality'</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
+</pre></div>
+</div>
+<p><strong>How the columns are named.</strong> The base columns are keywords: <code class="docutils literal notranslate"><span class="pre">PatientID</span></code>, <code class="docutils literal notranslate"><span class="pre">PatientName</span></code>, <code class="docutils literal notranslate"><span class="pre">StudyInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">StudyDate</span></code>, <code class="docutils literal notranslate"><span class="pre">SeriesInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">Modality</span></code>, <code class="docutils literal notranslate"><span class="pre">SOPInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">Manufacturer</span></code>, <code class="docutils literal notranslate"><span class="pre">Model</span></code> and <code class="docutils literal notranslate"><span class="pre">DeviceSerial</span></code>. The columns <code class="docutils literal notranslate"><span class="pre">expand_metadata=True</span></code> adds are lowercase <code class="docutils literal notranslate"><span class="pre">gggg,eeee</span></code> tag keys: Slice Thickness is <code class="docutils literal notranslate"><span class="pre">df[&quot;0018,0050&quot;]</span></code>, not <code class="docutils literal notranslate"><span class="pre">df[&quot;SliceThickness&quot;]</span></code>. The values are the session’s as they stand, so before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> the frame holds the original identifiers.</p>
+</section>
+<section id="2-write-to-csv-or-parquet">
+<span id="write-to-csv-or-parquet"></span><h3>2. Write to CSV or Parquet<a class="headerlink" href="#2-write-to-csv-or-parquet" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">export_dataframe()</span></code> builds the frame <code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> builds, writes it to a file and returns it. It takes the same <code class="docutils literal notranslate"><span class="pre">expand_metadata</span></code> argument, also <code class="docutils literal notranslate"><span class="pre">False</span></code> by default, so pass <code class="docutils literal notranslate"><span class="pre">expand_metadata=True</span></code> for the tag columns. Either format holds the expanded frame. In Parquet, a multi-valued tag such as Image Type is a list column when its values are uniform: every value present is a list whose elements are all of one kind (all text, all numbers, all dates, and so on). A column that is not uniform, such as a tag that is single-valued in one file and multi-valued in another, or text in one file and a number in another, is written as text, each value as the CSV writes it. Missing values are null in both, never the text <code class="docutils literal notranslate"><span class="pre">nan</span></code>, and every other column keeps its type. The format follows the extension: Parquet for <code class="docutils literal notranslate"><span class="pre">.parquet</span></code>, CSV for anything else. The path is required: called before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, the file holds the original identifiers, so name a place where PHI may live, or use <code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> when you only want the frame. A call with no path raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> and writes nothing.</p>
 <p>For large cohorts (100k+ images), Parquet is smaller and faster to read, and BI tools (PowerBI, Tableau, Apache Spark) read it directly.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Export the full cohort's base columns to Parquet</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"cohort_inventory.parquet"</span><span class="p">)</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Every tag column too, as CSV</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"cohort_full.csv"</span><span class="p">,</span> <span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Or just part of it</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"arm_a.parquet"</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="p">[</span><span class="s2">"P001"</span><span class="p">,</span> <span class="s2">"P002"</span><span class="p">])</span>
-</code></pre></div>
-<hr />
-<h2 id="query-based-export">Query-Based Export</h2>
-<p>Instead of exporting the entire session, you can pass <code>export()</code> a subset: a filtered cohort DataFrame, or a list of IDs and UIDs.</p>
-<p>Worked example: <a href="../tutorials/select-part-of-a-cohort/">Select part of a cohort</a>.</p>
-<h3 id="use-case-export-only-thick-slice-cts">Use Case: "Export only thick-slice CTs"</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 1. Get the inventory</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 2. Define your criteria (Standard Pandas syntax)</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># e.g., Keep only CT scans with Slice Thickness (0018,0050) &gt; 2.5 mm</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">subset</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'Modality'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'CT'</span><span class="p">)</span> <span class="o">&amp;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'0018,0050'</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">2.5</span><span class="p">)</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="p">]</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Filtering: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">subset</span><span class="p">)</span><span class="si">}</span><span class="s2"> instances."</span><span class="p">)</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="c1"># 3. Feed the subset back into the exporter</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_thick_cts"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">subset</span><span class="p">)</span>
-</code></pre></div>
-<h3 id="use-case-export-a-list-of-series">Use Case: "Export a list of series"</h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Export the full cohort's base columns to Parquet</span>
+<span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"cohort_inventory.parquet"</span><span class="p">)</span>
+
+<span class="c1"># Every tag column too, as CSV</span>
+<span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"cohort_full.csv"</span><span class="p">,</span> <span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Or just part of it</span>
+<span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"arm_a.parquet"</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="p">[</span><span class="s2">"P001"</span><span class="p">,</span> <span class="s2">"P002"</span><span class="p">])</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="query-based-export">
+<h2>Query-Based Export<a class="headerlink" href="#query-based-export" title="Link to this heading">#</a></h2>
+<p>Instead of exporting the entire session, you can pass <code class="docutils literal notranslate"><span class="pre">export()</span></code> a subset: a filtered cohort DataFrame, or a list of IDs and UIDs.</p>
+<p>Worked example: <a class="reference internal" href="../tutorials/select-part-of-a-cohort/"><span class="std std-doc">Select part of a cohort</span></a>.</p>
+<section id="use-case-export-only-thick-slice-cts">
+<h3>Use Case: “Export only thick-slice CTs”<a class="headerlink" href="#use-case-export-only-thick-slice-cts" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># 1. Get the inventory</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># 2. Define your criteria (Standard Pandas syntax)</span>
+<span class="c1"># e.g., Keep only CT scans with Slice Thickness (0018,0050) &gt; 2.5 mm</span>
+<span class="n">subset</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span>
+    <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'Modality'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'CT'</span><span class="p">)</span> <span class="o">&amp;</span>
+    <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">'0018,0050'</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">2.5</span><span class="p">)</span>
+<span class="p">]</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Filtering: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">subset</span><span class="p">)</span><span class="si">}</span><span class="s2"> instances."</span><span class="p">)</span>
+
+<span class="c1"># 3. Feed the subset back into the exporter</span>
+<span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_thick_cts"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">subset</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="use-case-export-a-list-of-series">
+<h3>Use Case: “Export a list of series”<a class="headerlink" href="#use-case-export-a-list-of-series" title="Link to this heading">#</a></h3>
 <p>You can also filter by a list of identifiers if you have an external manifest.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Filter by Series Instance UIDs</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">target_series</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"1.2.840..."</span><span class="p">,</span> <span class="s2">"1.2.840..."</span><span class="p">]</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Filter the dataframe</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">subset</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">'SeriesInstanceUID'</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">target_series</span><span class="p">)]</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_selected_series"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">subset</span><span class="p">)</span>
-</code></pre></div>
-<p><code>subset</code> also takes the UIDs themselves, as any iterable -- a list, a
-tuple, a set -- at any level: Patient ID, Study, Series or SOP Instance
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Filter by Series Instance UIDs</span>
+<span class="n">target_series</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"1.2.840..."</span><span class="p">,</span> <span class="s2">"1.2.840..."</span><span class="p">]</span>
+
+<span class="c1"># Filter the dataframe</span>
+<span class="n">subset</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">'SeriesInstanceUID'</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">target_series</span><span class="p">)]</span>
+
+<span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_selected_series"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">subset</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">subset</span></code> also takes the UIDs themselves, as any iterable – a list, a
+tuple, a set – at any level: Patient ID, Study, Series or SOP Instance
 UID. A UID that names nothing in the session is not silently dropped:
-the export writes what the rest selects, and one <code>WARNING</code> audit row
-counts the others by position, so the report grades <code>REVIEW_REQUIRED</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_selected_series"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">target_series</span><span class="p">)</span>
-</code></pre></div>
+the export writes what the rest selects, and one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row
+counts the others by position, so the report grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export_selected_series"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">target_series</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
 
 
-
-
-
-
-
-
-
-
-
-
-                
-              </article>
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="../configuration/"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Configuration Guide</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../export-output/"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">What the export writes</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
             </div>
-          
-          
-  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
 
-<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
-        </div>
-        
-          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#compliance-reports">Compliance Reports</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-the-grade-is-decided">How the grade is decided</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#manifests">Manifests</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cohort-analysis-eda">Cohort Analysis (EDA)</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#load-into-pandas">1. Load into pandas</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#write-to-csv-or-parquet">2. Write to CSV or Parquet</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#query-based-export">Query-Based Export</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-case-export-only-thick-slice-cts">Use Case: “Export only thick-slice CTs”</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-case-export-a-list-of-series">Use Case: “Export a list of series”</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
   
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  Back to top
-</button>
+  <div class="tocsection editthispage">
+    <a href="https://github.com/kvnlng/Isocenter/edit/main/docs/analytics.md">
+      <i class="fa-solid fa-pencil"></i>
+      
+      
         
+          Edit on GitHub
+        
+      
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+
       </main>
-      
-        <footer class="md-footer">
-  
-    
-      
-      <nav class="md-footer__inner md-grid" aria-label="Footer" >
-        
-          
-          <a href="../configuration/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Configuration">
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
-            </div>
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Previous
-              </span>
-              <div class="md-ellipsis">
-                Configuration
-              </div>
-            </div>
-          </a>
-        
-        
-          
-          <a href="../export-output/" class="md-footer__link md-footer__link--next" aria-label="Next: What the export writes">
-            <div class="md-footer__title">
-              <span class="md-footer__direction">
-                Next
-              </span>
-              <div class="md-ellipsis">
-                What the export writes
-              </div>
-            </div>
-            <div class="md-footer__button md-icon">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
-            </div>
-          </a>
-        
-      </nav>
-    
-  
-  <div class="md-footer-meta md-typeset">
-    <div class="md-footer-meta__inner md-grid">
-      <div class="md-copyright">
-  
-    <div class="md-copyright__highlight">
-      Copyright &copy; 2026 Kevin Long
-    </div>
-  
-  
-    Made with
-    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
-      Material for MkDocs
-    </a>
-  
-</div>
-      
-        
-<div class="md-social">
-  
-    
-    
-    
-    
-    <a href="mailto:support@isocenter.net" target="_blank" rel="noopener" title="" class="md-social__link">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
-    </a>
-  
-</div>
-      
     </div>
   </div>
-</footer>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026 Kevin Long.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+  </p>
+</div>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
-      <div class="md-dialog__inner md-typeset"></div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.23.0.
+</p></div>
+      
     </div>
-    
-    
-    
-      
-      
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
-    
-    
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
-      
-    
+  
+</div>
+
+  </footer>
   </body>
 </html>
