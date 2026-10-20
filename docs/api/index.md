@@ -1,6 +1,6 @@
 # API Reference
 
-The Python API is the whole interface; [API stability](stability.md) says which of it is frozen at 1.0.
+The Python API is the whole interface. [API stability](stability.md) says which part of it is frozen at 1.0.
 
 ```{toctree}
 :maxdepth: 1

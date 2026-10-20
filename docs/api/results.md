@@ -74,7 +74,7 @@ Import the two exceptions from the package:
 
 ## Building a graph by hand
 
-`isocenter.Builder` is the frozen name of the class below; only
+`isocenter.Builder` is the frozen name of the class below. Only
 `start_patient()` is frozen, and the chain it starts is tier 2.
 
 ## Builder

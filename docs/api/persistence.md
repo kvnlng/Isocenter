@@ -2,8 +2,8 @@
 
 `session.store_backend` is the session's SQLite store. The methods below
 read its audit rows and its flattened instance table. They are
-*documented but internal* (see [API stability](stability.md)): the words
-in the rows are frozen, and these methods that return them may change in
+*documented but internal* (see [API stability](stability.md)). The words
+in the rows are frozen, and the methods that return them may change in
 a 1.x release. What each `action_type` means is on
 [Analytics & Reporting](../analytics.md).
 
