@@ -334,11 +334,10 @@ one exception. It stores a numpy bool, integer or float (a scalar or a
 0-d array) as the Python number it equals (`np.int64(7)` as the `int`
 7). It stores a `list` or `tuple` that directly holds a numpy value as
 a new `list`, with each numpy number in it replaced in the same way. A
-converted value is not the same object as the value set. A converted
-number equals the numpy value set, and a new `list` made from a `list`
-equals that `list`. A new `list` made from a `tuple` does not equal the
-`tuple`. `set_attr()` raises nothing for a value that the store cannot
-hold. The save raises instead (Exceptions, below).
+converted value is not the same object as the value set. A new `list`
+made from a `tuple` does not equal the `tuple`. `set_attr()` raises
+nothing for a value that the store cannot hold. The save raises instead
+(Exceptions, below).
 
 On `Instance`, `set_attr()` also keeps resident pixels reading as a
 pixel-descriptor edit declares. It raises `ValueError` when pixels set
@@ -524,7 +523,7 @@ unless its entry says otherwise.
   unavailable to the calling process. Under `detector: db`, `redact()`
   also raises it when the `textdetect` extra (OpenCV) or the shipped
   model is unavailable (always, on the free-threaded build). `redact()`
-  raises after the entry drain and before anything is redacted, the
+  raises after its drain and before anything is redacted, the
   configured zones included. It raises the same way when the policy's
   `target` names `names` and spaCy or its model cannot load (#1121).
   `export(check_burned_in=True)` under that policy raises too, before
@@ -575,9 +574,9 @@ unless its entry says otherwise.
   patient found, or none with an instance) creates no key file (#813).
   When no key file exists and the session holds an identity token this
   library wrote, which no new key could open,
-  `enable_reversible_anonymization()` does not raise. The next
-  `lock_identities()` or `lock_identities_batch()` raises `RuntimeError`
-  and creates no key file.
+  `enable_reversible_anonymization()` does not raise. A later
+  `lock_identities()` or `lock_identities_batch()` that reaches its key
+  check raises `RuntimeError` and creates no key file.
 - `lock_identities()` and `lock_identities_batch()`: `RuntimeError`
   when reversible anonymization is not enabled.
 - `lock_identities()` refusals name no patient. A batch refusal numbers

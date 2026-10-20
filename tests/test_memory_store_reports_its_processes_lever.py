@@ -431,9 +431,11 @@ def test_the_refusal_has_done_nothing(monkeypatch, caplog):
 
         # The other side of the same placement: *after* the drain.
         # `docs/api/stability.md`'s frozen "redact() drains it after it
-        # reads its burned_in_text policy" is stated of every call, and
-        # the CHANGELOG and `redact()`'s `Raises:` both say the refusal
-        # is raised after it so that stays true of a refused one.
+        # reads its burned_in_text policy" is stated of every call that
+        # does not return 0 first (no rules and no policy; this call has
+        # a policy), and the CHANGELOG and `redact()`'s `Raises:` both
+        # say the refusal is raised after it so that stays true of a
+        # refused one.
         # Measured: resolution and refusal moved *above*
         # `persistence_manager.flush()` passes the entire suite --
         # 1795/2 on 3.12.14, identical to unmutated. Three committed
