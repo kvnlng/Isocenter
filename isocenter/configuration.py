@@ -708,7 +708,9 @@ class IsocenterConfiguration:
                 `SHIFT`, `JITTER` (`JITTER` is `SHIFT`) or `SCRUB`.
             value (str, optional): The value that `REPLACE` writes. It is
                 stored as the rule's `value`, the key that a file spells it
-                with. An empty value is no value, on every tag. `value=""`
+                with. An empty value, or another value that is false in
+                Python (`None`, `0`, `False`), is no value, on every tag.
+                `value=""`
                 stores no `value` key, so on a UI tag the rule writes the
                 keyed replacement UID. But a file's `value: ''` on a UI tag
                 is refused (#883).

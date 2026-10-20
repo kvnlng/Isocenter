@@ -4990,8 +4990,9 @@ class DicomSession:
           patient without it (#761).
         - The patient has instances, and any of them holds no value in any
           tag that `tags_to_lock` names (or `tags_to_lock` names none). The
-          message counts them. A tag held blank is a value, except as the
-          refusal above says. A patient with no instances locks as 0
+          message counts them. For `0010,0010` and `0010,0020`, the lock
+          reads the patient's value when an instance holds none. A tag held
+          blank is a value, except as the refusal above says. A patient with no instances locks as 0
           instances.
 
         Each of these is judged on every instance's own values, so a value
@@ -6773,8 +6774,9 @@ class DicomSession:
                 persisted. So a corrected configuration retries it.
             Exception: Whatever the redaction backend raised, after it is
                 logged. Also, before the pass starts, what a failed
-                background `save()` raises when the entry drain runs it
-                again and it still fails. A failure that has passed is
+                background `save()` raises when its drain runs it again and
+                it still fails. The drain comes after the call reads its
+                `burned_in_text` policy. A failure that has passed is
                 saved there, and nothing is raised (#941). A call with no
                 rules loaded and no `burned_in_text` policy returns 0 before
                 that drain.
@@ -7838,7 +7840,7 @@ class DicomSession:
                 `":memory:"` store whose environment asks for worker
                 recycling, and a pass-lock wait that expires. The original
                 rules are restored first.
-            Exception: Propagated from `redact()`'s entry drain, if a
+            Exception: Propagated from `redact()`'s drain, if a
                 background `save()` failed and still fails (#941). It is
                 raised before anything is redacted. The original rules are
                 restored first.
