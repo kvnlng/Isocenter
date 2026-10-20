@@ -1,6 +1,6 @@
 # Tutorials
 
-Each tutorial follows one question end to end over files bundled with pydicom, and every code block in them runs in the test suite.
+Each tutorial follows one question end to end over files bundled with pydicom. Every code block in them runs in the test suite.
 
 ```{toctree}
 :maxdepth: 1

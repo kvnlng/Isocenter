@@ -12,6 +12,7 @@ Who Isocenter is for, how it is built, how it performs, and how to contribute.
 
 For institutions <../for-institutions>
 Architecture <../architecture>
+Glossary <../glossary>
 Performance <../performance>
 Contributing <../developer_guide>
 Changelog <https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md>

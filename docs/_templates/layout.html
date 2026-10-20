@@ -1,9 +1,11 @@
 {#
   The landing page's hero, report excerpt and pipeline band (#350),
   above index.md's own content, which ledger.css styles as the ledger
-  sections. Carried verbatim from the MkDocs site's
-  docs/overrides/home.html; only the quick-start link changed, from
-  MkDocs' `url` filter to Sphinx's `pathto`. The report figures are
+  sections. Carried from the MkDocs site's docs/overrides/home.html;
+  the quick-start link changed, from MkDocs' `url` filter to Sphinx's
+  `pathto`, and the lede lost its leading "And" when README line 7 became
+  two sentences (STE B1), so the h1 and the lede together still read as
+  README line 7, word for word. The report figures are
   illustrative sample values, not a recorded run; the copy is the same
   copy the README carries, and the claims policy in the positioning
   document applies to every word here. Every other page renders exactly
@@ -19,7 +21,7 @@
       <div class="ledger-hero__copy">
         <div class="ledger-eyebrow">A Python library</div>
         <h1>De-identify a DICOM cohort without touching the source files.</h1>
-        <p class="ledger-hero__lede">And hand compliance a report that names anything the run could not do.</p>
+        <p class="ledger-hero__lede">Hand compliance a report that names anything the run could not do.</p>
         <div class="ledger-hero__actions">
           <div class="ledger-install"><span>$</span><code>pip install isocenter</code></div>
           <a href="{{ pathto('quickstart') }}">Read the quick start</a>
