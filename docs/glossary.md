@@ -24,7 +24,7 @@ The procedure pages and the tutorials use these terms every time. The other page
 | **PHI status** | `REMEDIATED`, `CLEARED`, `IDENTIFIED` or `UNSCANNED`. "Status" alone means this. | dirty, state, flag |
 | **scan**, **audit** | To scan is to read the graph for PHI. The audit is the step that scans, `audit()`. `examine()` is a different step. | inspect, examine, check |
 | **remediate**, **remediation** | Change a tag as a rule says. The procedures say "remove", "replace" or "shift" instead. | fix, clean, apply |
-| **decline** | Not apply a rule, and write a `REMEDIATION_DECLINED` row. A decline is not an error. `IngestSummary.declined` is ingest's count of files it did not add. That use is the API's own name. | skip, refuse |
+| **decline** | Not apply a rule, and write a `REMEDIATION_DECLINED` row. A decline is not an error. `IngestSummary.declined` is ingest's count of files whose SOP Instance UID the session already holds, or whose study another patient holds. That use is the API's own name. | skip, refuse |
 | **refuse** | Turn an input or a call away with an error or an `ERROR` row. For example, ingest refuses a file. | reject, deny |
 | **withhold** | Not write an instance, on purpose. | skip, drop, exclude |
 | **data loss** | Data that the export could not carry, recorded in a `DATA_LOSS` row. A verb is fine: "the export drops X". | "dropped data", "lost data" |
