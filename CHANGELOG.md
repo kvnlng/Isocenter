@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **docs: the "Upgrading from 0.9.x" page (`docs/migration.md`).** Nothing before 1.0 is accommodated (owner ruling on #790), and each change it listed is recorded in this changelog's 0.9.x and 1.0.0rc sections. Its URLs, `/1.0/migration/` and `/latest/migration/`, and their anchors (`#configuration-files`, `#hollow-waveform-multiplex-items` and the rest) no longer resolve once the site is next deployed. The links to it from the index, analytics, configuration, for-institutions and waveforms pages, and from the README, are removed, not repointed. Two docstrings (`reconcile_private_tags()`, `redact(force=)`) still say "see Upgrading from 0.9.x" until the next release.
 
+### Fixed
+
+- **docs: sentences on the API pages that the code did not bear out (#1172).** Found during the ASD-STE100 rewrite (#1170). They were already on `main` before it. No behaviour changes.
+  - `docs/api/stability.md`: `redact()` and the two lock methods do not run a failed background save again "on entry, before anything else". `redact()` first reads its `burned_in_text` policy, and returns 0 with no rules and no policy. The locks first check that reversible anonymization is enabled, and the key. The single form also checks the Patient ID. The batch form also checks its selection and the refusals of every patient. The page now lists these checks, and the Behaviours bullet says the same for `redact()`.
+  - The `RuntimeError` for no key file while the session holds a token of ours is the lock's, not `enable_reversible_anonymization()`'s. The lock methods' "not enabled" `RuntimeError` is now listed.
+  - `recover_patient_identity()` also raises `RuntimeError` when reversible anonymization is not enabled, `ValueError` for a malformed key file, and `RuntimeError` for a token from a later release. Nothing on the patient is restored after any of the errors that the page lists.
+  - `set_attr()` stores a `tuple` that holds a numpy value as a new `list`, so the value held does not equal the `tuple` set (also `docs/api/entities.md`). #1173 is to keep the `tuple`.
+  - For the `tags_to_lock` refusal, the lock reads Patient's Name and Patient ID from the patient when an instance holds none. So under the default tags this refusal does not occur for a patient whose Patient ID is a `str`. An empty `tags_to_lock` is also refused.
+  - `set_phi_tag()` stores no `value` key for `None`, `""` or another value that is false in Python, such as `0` or `False`. #1174 is to refuse `0` and `False`.
+  - `docs/api/entities.md`: under a standard `AT` element, `export()` writes a `tuple` of exactly two integers or two `str` as one tag (#1009). A pair that `set_attr()` stored as a `list` (a `tuple` that holds a numpy number), or that a reopened store holds as a `list` (#1016), is written as two tags. `set_attr()` does not raise for a value of another type, but `Instance.set_attr()` can raise `ValueError` for an edit to a pixel descriptor.
+  - `docs/api/exporters.md`: after a third-party export, the report shows the "generated before any export" note only when the store holds no `EXPORT` row from an earlier export.
+
 ## [1.0.0rc22] - 2026-10-19
 
 ### Breaking
