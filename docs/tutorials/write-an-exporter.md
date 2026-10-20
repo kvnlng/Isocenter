@@ -5,9 +5,9 @@
 Isocenter writes DICOM and WFDB. If a recipient needs something else, you
 can register an **exporter** of your own and select it with
 `session.export(folder, format=...)`. This tutorial writes the smallest
-useful one, a CSV listing each exported Patient ID, runs it over
-pydicom's bundled `CT_small.dcm`, and reads what the report says about
-it.
+useful one: a CSV that lists each exported Patient ID. It runs the
+exporter over pydicom's bundled `CT_small.dcm`. Then it reads what the
+report says about the export.
 
 :::{admonition} Provisional until 1.1
 :class: warning
@@ -33,7 +33,7 @@ Isocenter's test suite, and every output shown is checked.
 - Paste the blocks into a Python prompt or a notebook. In a `.py`
   script, put them under `if __name__ == "__main__":`
   ([why](../quickstart.md#1-initialize-a-session)).
-- In a block with `>>>`, type what follows each `>>>`; the lines
+- In a block with `>>>`, type what follows each `>>>`. The lines
   under it are what Python prints. A `...` inside a printed value
   stands for a part that differs on every run, such as a pseudonym or
   a UID.
@@ -86,8 +86,9 @@ Three choices in it follow the
 - **It reads and never writes the graph.** Export is a read.
 - **It writes `exported_patient_id(patient)`, not `patient.patient_id`.**
   A patient whose files carry no Patient ID is held under a key that must
-  never reach an output, and `exported_patient_id()` returns the value
-  the patient's files should carry: its ID, or `''` for that key.
+  never reach an output. `exported_patient_id()` returns the value that
+  the patient's files should carry. That value is the patient's ID, or
+  `''` for that key.
 - **It returns the paths it wrote.** A caller can then tell an export
   that wrote nothing from one that worked.
 
@@ -107,14 +108,15 @@ exporters.register("patient-ids", PatientIdCsv)
 ['dicom', 'patient-ids', 'wfdb']
 ```
 
-Registering under a name that is already taken replaces what was there,
-the built-in `dicom` and `wfdb` included: `format="dicom"` would then run
-your class, without any of the built-in format's gates.
+If you register under a name that is already taken, your class replaces
+what was there. This includes the built-in `dicom` and `wfdb`. Then
+`format="dicom"` would run your class, without any of the built-in
+format's gates.
 
 ## 3. De-identify, export, and read the CSV
 
 A plugin runs on the graph as it stands, so de-identify first. No
-configuration is loaded here, so `anonymize()` applies the session's
+configuration is loaded here. So `anonymize()` applies the session's
 default policy:
 
 ```python
@@ -173,12 +175,14 @@ def exceptions(path):
 Export to export in format 'patient-ids' ran ...PatientIdCsv, an exporter Isocenter does not ship: its output is not attested by Isocenter. None of the export gates ran for it (...), so this report does not know what it wrote.
 ```
 
-This is by design, and it is the same for every exporter Isocenter does
-not ship, however well it behaves. The export gates (the burned-in
-re-audit, the redaction zones, the de-identification markers and the
-rest) live inside the two built-in formats, so none of them ran for
-`PatientIdCsv`. Before calling it, `export()` wrote one `WARNING` row
-saying so, and a `WARNING` row grades the report `REVIEW_REQUIRED`
+This is by design. It is the same for every exporter that Isocenter does
+not ship, however well it behaves. The export gates live inside the two
+built-in formats. These gates are the burned-in re-audit, the redaction
+zones, the de-identification markers and the rest. So none of them ran
+for `PatientIdCsv`.
+
+Before it called the exporter, `export()` wrote one `WARNING` row that
+says so. A `WARNING` row grades the report `REVIEW_REQUIRED`
 (condition 2 of
 [How the grade is decided](../analytics.md#how-the-grade-is-decided)).
 In 1.0, no third-party export grades `PASS`.
@@ -186,10 +190,10 @@ In 1.0, no third-party export grades `PASS`.
 lists every gate it runs without.
 
 The report also carries the note that it was generated before any
-export, because only the built-in formats record an `EXPORT` row. Ignore
-its advice to regenerate the report after exporting: with an exporter of
-your own and no built-in export, every report of this store carries this
-note.
+export. The reason is that only the built-in formats record an `EXPORT`
+row. Ignore the note's advice to regenerate the report after you export.
+With an exporter of your own and no built-in export, every report of
+this store carries this note.
 
 ## 5. Save before you close
 

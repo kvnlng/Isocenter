@@ -1,9 +1,9 @@
 # Waveforms and WFDB Export
 
-Isocenter ingests any DICOM instance carrying a Waveform Sequence
-`(5400,0100)` — 12-Lead ECG, General ECG, Hemodynamic, and similar
-Waveform Storage IODs — alongside image data, and exports them as
-PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
+Isocenter ingests any DICOM instance that carries a Waveform Sequence
+`(5400,0100)`, alongside image data. Examples are 12-Lead ECG, General
+ECG, Hemodynamic, and similar Waveform Storage IODs. Isocenter exports
+these instances as PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
 as WFDB, for tools like [Murmur Studio](https://github.com/kvnlng/Murmur)
 to read. Isocenter does not read WFDB back in.
 
@@ -48,16 +48,16 @@ Challenge's code reads it.
 
 In a `.py` script, put the second block under
 `if __name__ == "__main__":`
-([why](quickstart.md#1-initialize-a-session)): ingest starts worker
-processes that re-import the script. A WFDB
-export saves the session before it writes, as a DICOM export does, so the
-de-identified graph is in the store when the block ends.
+([why](quickstart.md#1-initialize-a-session)). Ingest starts worker
+processes that re-import the script. A WFDB export saves the session
+before it writes, as a DICOM export does. So the de-identified graph is
+in the store when the block ends.
 
-Each waveform instance becomes one WFDB record, written into the same
-directory tree the DICOM exporter uses, so a record's `.hea`/`.dat` files
-sit alongside that series' `.dcm` files if you also export
-`format="dicom"` into the same folder. `export()` returns the path of each
-record's header:
+Each waveform instance becomes one WFDB record. The record is written
+into the same directory tree that the DICOM exporter uses. So if you also
+export `format="dicom"` into the same folder, a record's `.hea`/`.dat`
+files sit alongside that series' `.dcm` files. `export()` returns the
+path of each record's header:
 
 ```python
 >>> records
@@ -79,28 +79,29 @@ has any. The header's signal lines end with each lead's name:
 The folder names are `Subject_<Patient ID>`, `Study_<date>_<description>_<last
 5 characters of the Study UID>` and `Series_<number>_<modality>_<description>_<last 5
 characters of the Series UID>`, each read from the exported values after
-the configuration's rules; a missing value becomes a placeholder such as
+the configuration's rules. A missing value becomes a placeholder such as
 `NoNumber` or `Series`. A record name is the exported Patient ID, the Series
-Number and the file's Instance Number, joined by `_`, read from the file's
-own elements after the rules: a number the rules remove, or an empty one,
-reads `0`, as does a number the file never had (an empty Series Number
-reads `NoNumber` in the folder). When two records in one folder would share a name,
-the later ones get `_2`, `_3`, and so on. The pseudonym, the shifted date
-and the UID suffixes differ in your run: all three are derived from a secret
-generated for each store. That file carries two multiplex groups, so ingest
-also warns that it kept group 0 and discarded 1 (see
-[Limitations](#limitations)).
+Number and the file's Instance Number, joined by `_`. These parts are read
+from the file's own elements after the rules. A number that the rules
+remove, or an empty one, reads `0`, as does a number that the file never
+had. (An empty Series Number reads `NoNumber` in the folder.) When two
+records in one folder would share a name, the later ones get `_2`, `_3`,
+and so on. The pseudonym, the shifted date and the UID suffixes differ in
+your run, because all three are derived from a secret generated for each
+store. That file carries two multiplex groups, so ingest also warns that
+it kept group 0 and discarded 1 (see [Limitations](#limitations)).
 
-`export(format="wfdb")` returns the path of each record's `.hea` file. Each
-record that fails is logged, written to the audit log as an `ERROR` row
-naming the instance, and counted in that export's `EXPORT` row, so the
-compliance report lists it and grades the run `REVIEW_REQUIRED`. A partial
-export returns the records that did reach disk. When at least one record
-was attempted and none was written, the call raises
-`io_handlers.ExportError` after those rows, as a DICOM export does; its
-`.failures` names each record. A store with no
-waveform instances, or only waveforms with no samples (each of which gets
-its own `DATA_LOSS` row), attempted nothing and returns `[]`.
+`export(format="wfdb")` returns the path of each record's `.hea` file.
+Each record that fails is logged, written to the audit log as an `ERROR`
+row that names the instance, and counted in that export's `EXPORT` row.
+So the compliance report lists it and grades the run `REVIEW_REQUIRED`. A
+partial export returns the records that did reach disk. When at least one
+record was attempted and none was written, the call raises
+`io_handlers.ExportError` after those rows, as a DICOM export does. Its
+`.failures` names each record. A store can hold no waveform instances, or
+only waveforms with no samples, and each waveform with no samples gets
+its own `DATA_LOSS` row. An export of such a store attempts nothing and
+returns `[]`.
 
 ## What is exported
 
@@ -109,7 +110,7 @@ its own `DATA_LOSS` row), attempted nothing and returns `[]`.
 | `fs` | Sampling Frequency `(003A,001A)` |
 | `gain` | Derived from Channel Sensitivity `(003A,0210)` and its correction factor |
 | `units` | Channel Sensitivity Units Sequence `(003A,0211)` |
-| signal description | Channel Source Sequence `(003A,0208)`: the lead's name (`I`, `II`, `III`, `aVR`, `aVL`, `aVF`, `V1`...`V6`; see "Lead names" below) when the source is an ECG lead code of DICOM CID 3001, otherwise its Code Value as written; a lead name two signals of the record would share is written as each one's Code Value, with a `WARNING` row; falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
+| signal description | Channel Source Sequence `(003A,0208)`. When the source is an ECG lead code of DICOM CID 3001, the description is the lead's name (`I`, `II`, `III`, `aVR`, `aVL`, `aVF`, `V1`...`V6`, see "Lead names" below). Otherwise it is the source's Code Value as written. A lead name that two signals of the record would share is written as each one's Code Value, with a `WARNING` row. The description falls back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name. Otherwise it is a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below). |
 
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
@@ -120,50 +121,61 @@ downstream tool mis-parses that field, check the tool's parser first.
 ### Lead names
 
 A lead whose Channel Source is coded in DICOM's ECG lead context group,
-CID 3001, is named by its conventional short name, the spelling
-`KNOWN_LEAD_NAMES` uses: `I`, `II`, `III`, `aVR`,
+CID 3001, is named by its conventional short name. That is the spelling
+that `KNOWN_LEAD_NAMES` uses: `I`, `II`, `III`, `aVR`,
 `aVL`, `aVF`, `V1` to `V9`, `V3R`, `V4R`, `V5R`, `X`, `Y`, `Z`, and, in
-MDC only, `MCL1`, `MCL6`, `ES`, `AS` and `AI`. Both schemes the context
-group has used are read: IEEE 11073 `MDC` (`2:1` is lead I) and the
-SCP-ECG codes it used before, `SCPECG` (`5.6.3-9-1` is lead I), which
-carts still write. The Coding Scheme Designator is compared ignoring
-case, and the Code Value without the whitespace around it (` 2:1` is
-`2:1`). Any other code, in any scheme, is written as its Code Value: a
-derived or Frank lead, a calibration lead, a lead with no conventional
-short name (`-aVR`, `V2R`, `V6R` to `V9R`), a code under a local `99`
-scheme, and a source that is not a lead (a pressure or respiration
-waveform). That Code Value is written as the file holds it, so a local
-code is exported as the cart's operator typed it, and a rule of your own
-that replaces Code Value `(0008,0100)` exports its dummy, `ANONYMIZED`,
-as every signal's name. Both are as they were before 1.0.2; whether a
-code outside a published scheme should be written at all is issue #973.
+MDC only, `MCL1`, `MCL6`, `ES`, `AS` and `AI`. Isocenter reads both
+schemes that the context group has used. They are IEEE 11073 `MDC`
+(`2:1` is lead I), and the SCP-ECG codes that the group used before,
+`SCPECG` (`5.6.3-9-1` is lead I), which carts still write. The Coding
+Scheme Designator is compared ignoring case, and the Code Value without
+the whitespace around it (` 2:1` is `2:1`).
+
+Any other code, in any scheme, is written as its Code Value:
+
+- a derived or Frank lead
+- a calibration lead
+- a lead with no conventional short name (`-aVR`, `V2R`, `V6R` to `V9R`)
+- a code under a local `99` scheme
+- a source that is not a lead (a pressure or respiration waveform)
+
+That Code Value is written as the file holds it. So a local code is
+exported as the cart's operator typed it. For the same reason, a rule of
+your own that replaces Code Value `(0008,0100)` exports its dummy,
+`ANONYMIZED`, as every signal's name. Both are as they were before
+1.0.2. Whether a code outside a published scheme should be written at
+all is issue #973.
 
 **`MDC 2:3` is Lead III or Lead V1.** The 2008 version of the context
-group (printed in PS3.16 2011) gave `MDC 2:3` to both leads; the 2013
+group (printed in PS3.16 2011) gave `MDC 2:3` to both leads. The 2013
 version, current in PS3.16 2026d, moved Lead III to `2:61`. A cart built
 between the two codes Lead III as `2:3`, so the code alone cannot say
 which lead it is. For this code only, Isocenter reads the Channel Source
-item's Code Meaning `(0008,0104)`: when it says Lead III (`Lead III`,
-`lead iii` or `III`) the signal is named `III`, and otherwise `V1`. The
-limit: a Lead III coded `2:3` whose Code Meaning is empty, or says it
-another way (`Ableitung III`), is still named `V1`. The same holds when a
-rule of your own replaces, empties or removes Code Meaning `(0008,0104)`:
-a 2008 Lead III is then named `V1` again, with no row saying so (the
-`basic` profile has no such rule). No other code's name
-depends on its Code Meaning, and nothing from the Code Meaning is written.
+item's Code Meaning `(0008,0104)`. When the Code Meaning says Lead III
+(`Lead III`, `lead iii` or `III`), the signal is named `III`. Otherwise
+the signal is named `V1`. The limit: a Lead III coded `2:3` whose Code
+Meaning is empty, or says it another way (`Ableitung III`), is still
+named `V1`. The same holds when a rule of your own replaces, empties or
+removes Code Meaning `(0008,0104)`. A 2008 Lead III is then named `V1`
+again, and no row says so. (The `basic` profile has no such rule.) No
+other code's name depends on its Code Meaning, and nothing from the Code
+Meaning is written.
 
 **Two signals of one record do not share a lead name.** When two or more
-signals of a record would carry the same name, compared ignoring case,
-each one that got its name from the table above is written as its Code
-Value instead, in the `.hea` file and in `annotations.json` alike. Two
-channels both coded `MDC 2:2` are written `2:2` and `2:2`, not `II` and
-`II`: the file says one code twice, and so does the header. A name that
-did not come from the table (a Code Value written as it stands, a kept
-Channel Label, a `ch<N>` token) is left as it is. The export writes one
-`WARNING` row for such a record, naming the channel numbers (from 1, as
-DICOM numbers them) and the lead name, and no value from the file, so the
-compliance report grades the run `REVIEW_REQUIRED`: a person should look
-at a record whose leads the export could not name.
+signals of a record would carry the same name (compared ignoring case),
+each one that got its name from the table above is
+written as its Code Value instead. This applies in the `.hea` file and in
+`annotations.json` alike. Two channels both coded `MDC 2:2` are written
+`2:2` and `2:2`, not `II` and `II`. The file says one code twice, and so
+does the header. A name that did not come from the table (a Code Value
+written as it stands, a kept Channel Label, a `ch<N>` token) is left as
+it is.
+
+The export writes one `WARNING` row for such a record. The row names the
+channel numbers (from 1, as DICOM numbers them) and the lead name, and no
+value from the file. So the compliance report grades the run
+`REVIEW_REQUIRED`: a person should look at a record whose leads the
+export could not name.
 
 When present, Waveform Annotation Sequence `(0040,B020)` items --
 cart-generated findings such as rhythm calls -- are exported as
@@ -172,13 +184,13 @@ cart-generated findings such as rhythm calls -- are exported as
 
 ## What is and isn't de-identified
 
-Isocenter's PHI scan is **tag-gated, not content-based**: a tag is
-flagged only if your policy names it -- explicit `phi_tags` entries, or a
-privacy profile expanded into them. A tag outside that set is never
+Isocenter's PHI scan is **tag-gated, not content-based**. A tag is
+flagged only if your policy names it, by explicit `phi_tags` entries or
+by a privacy profile expanded into them. A tag outside that set is never
 inspected for what it contains, however identifying the text inside it is.
 Private (odd-group) tags are removed whenever `remove_private_tags` is
 `True`, the default, whatever `phi_tags` says. Setting it `False` does not
-keep every private value: large private binary values, which cart vendors
+keep every private value. Large private binary values, which cart vendors
 use routinely, are dropped at ingest (see
 [Private Tags](configuration.md#private-tags)).
 
@@ -204,10 +216,10 @@ description becomes a **directory name**: every `.hea`, `.dat` and
 `.annotations.json` file lives inside it.
 
 **The exporter itself handles the three free-text surfaces specific to
-waveform export, whatever the profile says.** The
-PHI scan is tag-gated (see above), so a profile entry alone protects
-only a session whose policy carries it, and `privacy_profile: none`
-applies nothing. All three are handled whichever configuration you run:
+waveform export, whatever the profile says.** The PHI scan is tag-gated
+(see above). So a profile entry alone protects only a session whose
+policy carries it, and `privacy_profile: none` applies nothing. All three
+are handled whichever configuration you run:
 
 - **Channel Label `(003A,0203)`** -- reaches the `.hea` signal-line
   description and the `annotations.json` `lead` field **only** when it
@@ -216,38 +228,37 @@ applies nothing. All three are handled whichever configuration you run:
   including genuinely operator-typed text -- is replaced with a
   positional `ch<N>` token instead of being written verbatim. `N` is
   the **zero-based** channel index, not DICOM's 1-based ChannelNumber
-  -- `ch1` is the *second* channel. Channel Label is also removed by the
-  basic profile (PS3.15 Table E.1-1 gives it `X`), so on a
-  configured or bare session a channel with no coded Channel Source is
-  named `ch<N>` even when its label was a known lead name. Give
+  -- `ch1` is the *second* channel. The basic profile also removes
+  Channel Label (PS3.15 Table E.1-1 gives it `X`). So on a configured or
+  bare session, a channel with no coded Channel Source is named `ch<N>`
+  even when its label was a known lead name. Give
   `(003A,0203)` `action: KEEP` to keep recognisable lead names.
 - **Unformatted Text Value `(0070,0006)`** -- is omitted from the
   `note` field of `annotations.json` by default. It routinely holds
-  free-text clinical commentary, so exporting it is opt-in: pass
-  `session.export(folder, format="wfdb", include_annotation_text=True)`
-  to restore it. `(0070,0006)` is also in the basic profile, so a
-  configured session that passes `include_annotation_text=True` exports
-  the profile's remediated value: the text dummy `ANONYMIZED` in the
+  free-text clinical commentary, so its export is opt-in. To restore it,
+  pass `session.export(folder, format="wfdb", include_annotation_text=True)`.
+  `(0070,0006)` is also in the basic profile. So a configured session
+  that passes `include_annotation_text=True` exports the profile's
+  remediated value. That value is the text dummy `ANONYMIZED` in the
   exported DICOM, as Table E.1-1's `D` asks. The bridge reads the dummy as
   no text, so the finding carries no `note`, exactly as when the value was
   emptied.
 
 - **Concept Name `(0040,A043)`** -- the annotation's Code Meaning
   reaches `annotations.json` as `label`, and its scheme-qualified Code
-  Value as `category`, **only when the Coding Scheme Designator
-  `(0008,0102)` names a published vocabulary** such as SNOMED CT, LOINC,
-  DICOM's own `DCM`, IEEE 11073 `MDC` or SCP-ECG (`SCPECG`, which ECG
-  carts use for measurements such as QRS Onset). A
-  coded finding is
-  unaffected: `SCT:164889003` still arrives with its label
-  `"Atrial fibrillation"`, because SNOMED defined that term, not an
+  Value as `category`. Both reach it **only when the Coding Scheme
+  Designator `(0008,0102)` names a published vocabulary**. Examples are
+  SNOMED CT, LOINC, DICOM's own `DCM`, IEEE 11073 `MDC` and SCP-ECG
+  (`SCPECG`, which ECG carts use for measurements such as QRS Onset). A
+  coded finding is unaffected. `SCT:164889003` still arrives with its
+  label `"Atrial fibrillation"`, because SNOMED defined that term, not an
   operator.
 
   For a site-defined scheme the cart populates Code Meaning with typed
   text instead, so `label` is omitted and `category` collapses to
   `uncoded`. The finding itself survives -- kind, sample positions and
-  lead are untouched -- because a reviewer seeing fewer marks than the
-  record carried, with nothing saying any were withheld, is a worse
+  lead are untouched. This is because a reviewer seeing fewer marks than
+  the record carried, with nothing saying any were withheld, is a worse
   failure than seeing them unnamed. What is lost is the name and the
   ability to group two site-defined annotation types apart from each
   other.
@@ -256,96 +267,101 @@ applies nothing. All three are handled whichever configuration you run:
   so a `99...` value is never recognised, however conformant it looks.
 
   `include_annotation_text=True` restores both fields, exactly as it
-  does for `note`. That flag is the protocol's voice here: a study whose
-  auditor has determined that site-defined annotation labels may be
-  released says so by passing it.
+  does for `note`. That flag is the protocol's voice here. A study whose
+  auditor determined that site-defined annotation labels may be
+  released says so by passing the flag.
 
-All three are safe by default: no PHI tag configuration is required to
+All three are safe by default. No PHI tag configuration is required to
 get this behaviour, and it applies even to a bare `Session()`.
 
-`annotations.json`'s `source` field is producer provenance only: the
-running Isocenter version plus Manufacturer `(0008,0070)`, for example
+`annotations.json`'s `source` field is producer provenance only. It holds
+the running Isocenter version plus Manufacturer `(0008,0070)`, for example
 `isocenter/1.0.0 (Mortara Instrument, Inc.)`. It does not read Device Serial Number
 `(0018,1000)` or any other equipment identifier.
 
 **Record timing** in the `.hea` file combines two independently
 sourced parts. The *date* comes from `study.study_date`, which *is*
-shifted by `anonymize()` (the same per-patient date shift applied to
-every date tag under a `SHIFT` or `JITTER` rule). The *time-of-day* comes from the
-instance's own timestamp tags -- Acquisition DateTime `(0008,002A)`
-when present, else Study Time `(0008,0030)` -- and the date shift
-never changes it. This is deliberate: time-of-day alone is not a
+shifted by `anonymize()`. That is the same per-patient date shift that is
+applied to every date tag under a `SHIFT` or `JITTER` rule. The
+*time-of-day* comes from the instance's own timestamp tags: Acquisition
+DateTime `(0008,002A)` when present, else Study Time `(0008,0030)`. The
+date shift never changes it. This is deliberate: time-of-day alone is not a
 Safe Harbor identifier. If you export without running `anonymize()` at
 all, the date is real too -- exactly like every other un-remediated
 field in Isocenter.
 
 On the documented Quick Start path, both instance-level timestamp tags
-above are in the Basic profile (`(0008,002A)` and `(0008,0030)`), so a
+above are in the Basic profile (`(0008,002A)` and `(0008,0030)`). So a
 configured, anonymized session has no real time-of-day left to write.
-Isocenter does **not** substitute a fake `00:00:00` in that case: when
+Isocenter does **not** substitute a fake `00:00:00` in that case. When
 `study.study_date` is real but no real time-of-day is available, the
 record line's start time/date fields are omitted entirely. This is a
-deliberate limitation, not an oversight -- `header(5)` does not support
-a date-only start time (PhysioNet's own spec, and `wfdb-python`'s
+deliberate limitation, not an oversight. `header(5)` does not support
+a date-only start time. PhysioNet's own spec, and `wfdb-python`'s
 reference reader/writer, both treat `base_date` as depending on
-`base_time` being present), so the record line's choice is between
-omitting both fields and fabricating a time; Isocenter omits both.
+`base_time` being present. So the record line's choice is between
+omitting both fields and fabricating a time. Isocenter omits both.
 
 The date is not lost, though, because it is useful for ordering records
 within a cohort. It is written instead as a single comment line, in the
-same `DD/MM/YYYY` format the record line's own date field would have
-used: `# de-identified start date: DD/MM/YYYY` when `anonymize()` shifted
-the study date, or `# start date: DD/MM/YYYY` when it was not shifted
-(an export without `anonymize()`, or a date the policy keeps). That
-second form is the real date. The comment follows the signal lines, where
-`wfdb`'s own writer puts comments, so a reader that takes lines
-`1..n_sig` as the signal lines (the Moody Challenge's helper code does)
-reads the signals and nothing else. A consumer reading the record line alone
-sees no timing at all; a consumer that also reads comments gets the
-date, labelled by whether it was shifted.
+same `DD/MM/YYYY` format that the record line's own date field would have
+used:
+
+- `# de-identified start date: DD/MM/YYYY` when `anonymize()` shifted
+  the study date
+- `# start date: DD/MM/YYYY` when the study date was not shifted (an
+  export without `anonymize()`, or a date the policy keeps)
+
+That second form is the real date. The comment follows the signal lines,
+where `wfdb`'s own writer puts comments. So a reader that takes lines
+`1..n_sig` as the signal lines reads the signals and nothing else. (The
+Moody Challenge's helper code is such a reader.) A consumer that reads
+the record line alone sees no timing at all. A consumer that also reads
+comments gets the date, labelled by whether it was shifted.
 
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
 
 - **No `#` comment lines are written, except the start date.** WFDB
   readers render header comments verbatim, and MIT-BIH convention
-  places age, sex, and diagnosis there; Isocenter never writes one for
+  places age, sex, and diagnosis there. Isocenter never writes one for
   content. The one exception is the start-date line described above
-  (`# de-identified start date:` or `# start date:`), a computed
-  `DD/MM/YYYY` string written through the same sanitizer as every
-  other field, never operator-typed text.
+  (`# de-identified start date:` or `# start date:`). That line is a
+  computed `DD/MM/YYYY` string, written through the same sanitizer as
+  every other field, and never operator-typed text.
 - **Record names are built from the exported Patient ID, series number
-  and instance number**: the pseudonym once `anonymize()` has run (the
-  source Patient ID before it, or under a `KEEP` rule on Patient ID),
-  and never the patient's name or other free text. Lead identity in
-  the header prefers the
-  coded channel source over the free-text label wherever a coded
-  source exists. That preference is a likelihood argument, not a
-  filter: a conformant coded source is far less likely to carry
-  operator-typed text than a free-text label, but a coded value other
-  than a CID 3001 lead code is written as it stands, **not** run
-  through the lead-name allowlist or any content check --
-  a non-conformant source can still put arbitrary text there. Both the
-  `.hea` writer and the Murmur `annotations.json` bridge strip
-  line-break characters out of it regardless, so it can't forge a
-  `.hea` comment line, but the text itself is trusted, not filtered.
+  and instance number**. That Patient ID is the pseudonym once
+  `anonymize()` has run, and the source Patient ID before it, or under a
+  `KEEP` rule on Patient ID. A record name never holds the patient's name
+  or other free text. Lead identity in the header prefers the coded
+  channel source over the free-text label wherever a coded source exists.
+
+  That preference is a likelihood argument, not a filter. A conformant
+  coded source is far less likely to carry operator-typed text than a
+  free-text label. But a coded value other than a CID 3001 lead code is
+  written as it stands, **not** run through the lead-name allowlist or
+  any content check. A non-conformant source can still put arbitrary
+  text there. Both the `.hea` writer and the Murmur `annotations.json`
+  bridge remove line-break characters from that text regardless. So the
+  text can't forge a `.hea` comment line, but the text itself is
+  trusted, not filtered.
 
 ## DICOM to DICOM round trips
 
 Exporting with `format="dicom"` writes the waveform samples back. The
-bytes are copied from the sidecar **verbatim** rather than re-encoded
-from the decoded array, so a round trip is byte-exact and the exported
+bytes are copied from the sidecar **verbatim**, not re-encoded from the
+decoded array. So a round trip is byte-exact, and the exported
 `Waveform Sample Interpretation (5400,1006)` cannot disagree with the
 samples it labels.
 
 That verbatim copy is deliberate. Isocenter decodes `US`/`SB`/`UB` to
-int16 internally, rebasing `US` by 32768; re-encoding from that array
-while leaving `(5400,1006)` saying `US` would shift every value by 32768
+int16 internally, and rebases `US` by 32768. A re-encode from that array,
+while `(5400,1006)` still says `US`, would shift every value by 32768
 without anything raising. Nothing in the pipeline mutates waveform
-samples -- unlike pixels, which redaction burns into -- so there is
+samples -- unlike pixels, which redaction burns into. So there is
 nothing a re-encode could add, and the mismatch is made structurally
 impossible instead of merely tested against. De-identification is
-unaffected: waveform PHI lives in tags (channel labels, annotation
+unaffected. Waveform PHI lives in tags (channel labels, annotation
 concepts), which are remediated in the object graph and rebuilt into the
 exported dataset as usual.
 
@@ -371,70 +387,73 @@ interpretations.
 
 **Multi-rate records are truncated at ingest, not at export.** Each
 Waveform Sequence `(5400,0100)` item is a multiplex group with its own
-sampling frequency and channel set -- how DICOM carries ECG at 500 Hz
-alongside respiration at 25 Hz. Isocenter reads group 0 and discards the
-rest, so groups 1..n never enter the object graph: neither their samples
-nor their sequence items are in the session, in the sidecar, or reachable
-by any export format or API. What is written is a conformant single-group
-record. The discard is announced: a warning naming the number of groups
-dropped, plus a `DATA_LOSS` entry in the audit log. Multi-group support is
-not yet available ([#277](https://github.com/kvnlng/Isocenter/issues/277)).
-A store written before 0.9.1 can still hold the discarded groups' items.
+sampling frequency and channel set. That is how DICOM carries ECG at
+500 Hz alongside respiration at 25 Hz. Isocenter reads group 0 and
+discards the rest, so groups 1..n never enter the object graph. Neither
+their samples nor their sequence items are in the session, in the
+sidecar, or reachable by any export format or API. What is written is a
+conformant single-group record. The discard is announced: a warning
+naming the number of groups dropped, plus a `DATA_LOSS` row in the audit
+log. Multi-group support is not yet available
+([#277](https://github.com/kvnlng/Isocenter/issues/277)). A store written
+before 0.9.1 can still hold the discarded groups' items.
 
-That entry is scoped `SIGNAL`, and it **does** move Validation Status:
-a session that discarded a multiplex group grades `REVIEW_REQUIRED`,
-not `PASS`. The tag is standard -- Waveform Sequence `(5400,0100)` is an
-even group -- but what was discarded is acquired signal that was in the
-source and is not in the export, which is not routine the way a dropped
-overlay is. Routine standard-group losses keep the `STANDARD` scope and
-keep grading `PASS`.
+That row is scoped `SIGNAL`, and it **does** move Validation Status. A
+session that discarded a multiplex group grades `REVIEW_REQUIRED`, not
+`PASS`. The tag is standard -- Waveform Sequence `(5400,0100)` is an
+even group. But what was discarded is acquired signal that was in the
+source and is not in the export. That loss is not routine the way a
+dropped overlay is. Routine standard-group losses keep the `STANDARD`
+scope and keep grading `PASS`.
 
 **Annotations naming a discarded group are dropped, not re-pointed.**
 Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
 `(multiplex group, channel)` pair, and DICOM numbers both from 1. PS3.3
 C.10.10.1.1 "Referenced Channels" defines the first value of each pair as
-the ordinal of the Waveform Sequence `(5400,0100)` Item, and its worked
-example writes an annotation covering the entire first multiplex group
+the ordinal of the Waveform Sequence `(5400,0100)` Item. Its worked
+example writes an annotation that covers the entire first multiplex group
 plus channels 2 and 3 of the third as `0001 0000 0003 0002 0003 0003`.
 Ordinal 1 is therefore the group Isocenter keeps. (The `0000` in that
 example is the same section's rule that a channel number of 0 means every
-channel in the group; Isocenter honours it by emitting the mark with no
-`lead`.) A mark that names any other group has no place in the exported
-record: its sample positions index that group's samples, and its lead is
-that group's channel. It is left out of `annotations.json` rather than
-resolved against the surviving group, which would give a plausible lead
-name at a plausible sample position, both belonging to a signal that is
-not in the record.
+channel in the group. Isocenter honours that rule by emitting the mark
+with no `lead`.) A mark that names any other group has no place in the
+exported record. Its sample positions index that group's samples, and
+its lead is that group's channel. Such a mark is left out of
+`annotations.json`, not resolved against the surviving group. That
+resolution would give a plausible lead name at a plausible sample
+position, both belonging to a signal that is not in the record.
 
 A mark that names a channel of the kept group which the record has no
-signal for is kept, with no `lead`. That is a file with more Channel
-Definitions than `NumberOfWaveformChannels`: the `.hea` has one signal
-line per sample column, so a mark on a channel past the last column names
-a lead no signal of the record carries. Its sample position is still on
-the record's axis, so the mark stays.
+signal for is kept, with no `lead`. That case is a file with more Channel
+Definitions than `NumberOfWaveformChannels`. The `.hea` has one signal
+line per sample column. So a mark on a channel past the last column names
+a lead that no signal of the record carries. Its sample position is still
+on the record's axis, so the mark stays.
 
-The same filtering happens on the object graph at ingest, so a **DICOM**
+The same filtering happens on the object graph at ingest. So a **DICOM**
 export does not carry a Waveform Annotation Sequence `(0040,B020)` item
 whose reference names a group that is not in the file. The filter works
-on `(group, channel)` pairs before it drops items: an annotation naming
-all of group 1 plus a channel of group 3 keeps its surviving pairs, and an
-item goes only when every pair it named is gone. Surviving ordinals are
-**never renumbered**: the ordinal is positional, so renumbering after a
-discard would make the file internally consistent and wrong relative to
-the source, with no way to tell afterwards. An annotation with no
-`(0040,A0B0)` at all is untouched: the attribute is Type 1C, and its
-absence means the mark applies to the whole waveform.
+on `(group, channel)` pairs before it drops items. An annotation that
+names all of group 1 plus a channel of group 3 keeps its surviving pairs,
+and an item goes only when every pair it named is gone. Surviving
+ordinals are **never renumbered**. The ordinal is positional, so a
+renumber after a discard would make the file internally consistent and
+wrong relative to the source, with no way to tell afterwards. An
+annotation with no `(0040,A0B0)` at all is untouched. The attribute is
+Type 1C, and its absence means the mark applies to the whole waveform.
 
 That drop is announced the same way the group discard is: a warning, and
-one `DATA_LOSS` entry per instance naming how many annotations were
-dropped and which groups they referenced -- one row, not one per mark,
-so a cart that marks forty beats on a discarded group does not fill the
-report's Data Loss section with forty near-identical lines. It is scoped
-`STANDARD`, although the group discard itself is scoped `SIGNAL`: an
-annotation is a mark *about* the signal, the loss of the samples already
-moves Validation Status through the group's own row, and grading the
-marks too would count one loss twice. A record with two `DATA_LOSS` rows
--- one for the groups discarded, one for the marks that referenced them --
-is the expected shape: they report different losses. Both rows are
-written at ingest; the WFDB export repeats the drop, with its own row, only
-for a graph that never passed through ingest.
+one `DATA_LOSS` row per instance. The row names how many annotations were
+dropped and which groups they referenced. It is one row, not one per
+mark, so a cart that marks forty beats on a discarded group does not fill
+the report's Data Loss section with forty near-identical lines.
+
+That row is scoped `STANDARD`, although the group discard itself is
+scoped `SIGNAL`. An annotation is a mark *about* the signal. The loss of
+the samples already moves Validation Status through the group's own row,
+and to grade the marks too would count one loss twice. A record with two
+`DATA_LOSS` rows -- one for the groups discarded, one for the marks that
+referenced them -- is the expected shape. The two rows report different
+losses. Both rows are written at ingest. The WFDB export repeats the
+drop, with its own row, only for a graph that never passed through
+ingest.

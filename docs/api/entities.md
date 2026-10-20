@@ -18,51 +18,55 @@ or tier 2.
 ## Frozen (tier 1)
 
 The entity classes as reached from `session.store`, and the key a subject
-with no Patient ID is held under, with its test. A class being here does
-not make every method rendered under it tier 1: the frozen ones are
-`Instance.get_pixel_data()`, `set_pixel_data()`, `unload_pixel_data()`,
+with no Patient ID is held under, with its test. A class in this section
+does not make every method rendered under it tier 1. The frozen methods
+are `Instance.get_pixel_data()`, `set_pixel_data()`, `unload_pixel_data()`,
 `discard_pixel_data()`, `get_waveform_data()` and `set_attr()`. The other
 methods shown, such as `Instance.regenerate_uid()` and the sequence
-methods, are tier 2, and so are `pixel_array` and `waveform_array` in
+methods, are tier 2. So are `pixel_array` and `waveform_array` in
 `Instance`'s attribute table.
 
-**What `set_attr()` stores.** The value it is given, with one exception:
-a numpy bool, integer or float (a scalar or a 0-d array), and a `list`
-or `tuple` directly holding one, is stored as the Python number it
-equals, so
-`set_attr("0018,1150", np.int64(7))` leaves the `int` 7 in `attributes`
-and a live export writes what a reopened session writes. An array of one
-or more dimensions is not converted; pass `.tolist()` or `.tobytes()`.
-Nor is any other numpy value: a `datetime64`, a `timedelta64`, a complex
-number and a masked value stay as given, and the save refuses them.
-A value written straight into `attributes` is not seen by the entity
-(call `mark_modified()`), and a numpy number written that way is
-converted when it is saved. `export()` writes one as the Python number
-it equals whether or not it was saved, so the file is the same before
-and after a save and a reopen; it writes a `tuple` as the list it
-equals, and a `Decimal` (which the save refuses, and which only a value
-written straight into `attributes` or a graph built by hand can hold) as
-the `float` it equals. None of the three is changed in `attributes`.
+**What `set_attr()` stores.** It stores the value it is given, with one
+exception. It stores a numpy bool, integer or float (a scalar or a 0-d
+array), and a `list` or `tuple` directly holding one, as the Python
+number it equals. So `set_attr("0018,1150", np.int64(7))` leaves the
+`int` 7 in `attributes`, and a live export writes what a reopened session
+writes. An array of one or more dimensions is not converted. Pass
+`.tolist()` or `.tobytes()` instead. No other numpy value is converted
+either. A `datetime64`, a `timedelta64`, a complex number and a masked
+value stay as given, and the save refuses them.
+
+The entity does not see a value written straight into `attributes`
+(call `mark_modified()`). A numpy number written that way is converted
+when it is saved. `export()` writes such a number as the Python number
+it equals, whether or not it was saved. So the file is the same before
+and after a save and a reopen. `export()` also writes a `tuple` as the
+list it equals, and a finite `Decimal` that a float can hold as the
+`float` it equals. The save refuses a `Decimal`, and only a value written straight into
+`attributes`, or a graph built by hand, can hold one. `export()` changes
+none of the three in `attributes`.
+
 A number under a standard element whose VR holds text
-(`set_attr("0008,1090", 7)`) is not written: the file is exported
-without that element, under one `DATA_LOSS` row naming the tag, the type
-and the VR. Pass the text. The store holds `None`, `str`, `bytes`,
-`bool`, `int`, `float`, pydicom's DS and IS values, and lists of those;
-`set_attr()` raises nothing for anything else, and the next
-`save(sync=True)`, `export()` or `compact()` raises `TypeError` naming
-the instance, the tag and the type ([API stability](stability.md),
-Exceptions).
+(`set_attr("0008,1090", 7)`) is not written. The file is exported
+without that element, under one `DATA_LOSS` row that names the tag, the
+type and the VR. Pass the text instead. The store holds `None`, `str`,
+`bytes`, `bool`, `int`, `float`, pydicom's DS and IS values, and lists
+of those. `set_attr()` raises nothing for anything else. The next
+`save(sync=True)`, `export()` or `compact()` raises `TypeError` that
+names the instance, the tag and the type
+([API stability](stability.md), Exceptions).
 
 **What assigning `Instance.sop_instance_uid` does.** It moves the field
-and the `(0008,0018)` element together, and marks the instance edited:
-`instance.sop_instance_uid = "1.2.3.4"` leaves `"1.2.3.4"` in
-`instance.attributes["0008,0018"]`, and the export writes the file as
-`1.2.3.4.dcm` with that UID inside. An instance assigned `''` is not
-written: the export's file-name rule refuses a UID that cannot name a
-file, and reports it as a failure keyed `UNKNOWN`. Assigning
-the value the field already holds changes nothing. `series.series_instance_uid`,
-`study.study_instance_uid` and `patient.patient_id` need no such step:
-the export stamps each file's copy from the owner.
+and the `(0008,0018)` element together, and marks the instance edited.
+For example, `instance.sop_instance_uid = "1.2.3.4"` leaves `"1.2.3.4"`
+in `instance.attributes["0008,0018"]`, and the export writes the file as
+`1.2.3.4.dcm` with that UID inside. The export does not write an
+instance assigned `''`. Its file-name rule refuses a UID that cannot
+name a file, and reports the instance as a failure keyed `UNKNOWN`.
+Assigning the value that the field already holds changes nothing.
+`series.series_instance_uid`, `study.study_instance_uid` and
+`patient.patient_id` need no such step. The export stamps each file's
+copy from the owner.
 
 ```{eval-rst}
 .. automodule:: isocenter.entities
@@ -105,8 +109,8 @@ file.
 
 ## Documented but internal (tier 2)
 
-Safe to call, and may change in a 1.x release with a CHANGELOG entry that
-names the old spelling and the new one.
+These names are safe to call. They may change in a 1.x release, with a
+CHANGELOG entry that names the old spelling and the new one.
 
 ```{eval-rst}
 .. autoclass:: isocenter.entities.TrackedEntity

@@ -2,10 +2,10 @@
 
 <!-- tutorial: inputs=CT_small.dcm,MR_small.dcm,rtdose.dcm -->
 
-You rarely hand out everything you ingested. One recipient gets the
-images, another gets one patient. Two questions come with that: **how do
-you export only the patients or series you chose**, and **how do you
-find out when you asked for something the session does not hold**? This
+You rarely share everything you ingested. One recipient gets the
+images, another gets one patient. Two questions come with that. **How do
+you export only the patients or series you chose?** And **how do you
+know when you asked for something that the session does not hold?** This
 tutorial answers both over the same three files as
 [the first tutorial](deidentify-and-read-the-grade.md), in a folder of
 their own.
@@ -23,7 +23,7 @@ Isocenter's test suite, and every output shown is checked.
 - Paste the blocks into a Python prompt or a notebook. In a `.py`
   script, put them under `if __name__ == "__main__":`
   ([why](../quickstart.md#1-initialize-a-session)).
-- In a block with `>>>`, type what follows each `>>>`; the lines
+- In a block with `>>>`, type what follows each `>>>`. The lines
   under it are what Python prints. A `...` inside a printed value
   stands for a part that differs on every run, such as a pseudonym or
   a UID.
@@ -89,26 +89,26 @@ images = early.query("Modality in ['CT', 'MR']")
 1      4MR1       MR
 ```
 
-`get_cohort_report(expand_metadata=True)` adds a column for every
-attribute in the files, if the column you want to select on is not among
-the ten above.
+If the column you want to select on is not among the ten above, use
+`get_cohort_report(expand_metadata=True)`. It adds a column for every
+attribute in the files.
 
 ## 3. De-identify, then export the selection
 
-On this page, nothing leaves before it is de-identified. No configuration is loaded
-here, so `anonymize()` applies the session's default policy (the first
-tutorial shows how to write your own). With no argument it audits and
-then acts on every finding.
+On this page, nothing leaves before it is de-identified. No configuration
+is loaded here. So `anonymize()` applies the session's default policy.
+The first tutorial shows how to write your own. With no argument,
+`anonymize()` audits and then acts on every finding.
 
 ```python
 session.anonymize()
 ```
 
 Now pass the rows you chose as `subset=`. `rtdose.dcm` stores 32-bit
-dose values, which Isocenter's JPEG 2000 encoder cannot write exactly, so
-with compression on that one instance would be written uncompressed, with
-an INFO note ([#771](https://github.com/kvnlng/Isocenter/issues/771)).
-Every export on this page uses `use_compression=False`, so every file it
+dose values. Isocenter's JPEG 2000 encoder cannot write them exactly. So
+with compression on, that one instance would be written uncompressed,
+with an INFO note ([#771](https://github.com/kvnlng/Isocenter/issues/771)).
+Every export on this page uses `use_compression=False`. So every file it
 writes is in the same transfer syntax.
 
 ```python
@@ -142,7 +142,7 @@ def grade_line(path):
 | **Validation Status** | **PASS** |
 ```
 
-The CT and the MR were written; the dose grid was not.
+The CT and the MR were written. The dose grid was not.
 
 **Why a report from before `anonymize()` still selects.** A DataFrame is
 read by the most precise of four columns it carries: `SOPInstanceUID`,
@@ -193,9 +193,9 @@ session.generate_report("report-dose.md")
 | **Validation Status** | **PASS** |
 ```
 
-`patient_ids` takes a list, or any other iterable, of Patient IDs, and
-each one must match exactly. A bare string is refused with a
-`TypeError`, because a string is itself an iterable of characters: write
+`patient_ids` takes a list, or any other iterable, of Patient IDs. Each
+ID must match exactly. A bare string is refused with a `TypeError`,
+because a string is itself an iterable of characters. Write
 `patient_ids=["ANON_..."]`, not `patient_ids="ANON_..."`.
 
 ## 5. Check a list before you export it
@@ -218,21 +218,21 @@ check = session.get_cohort_report(patient_ids=source_ids)
 0
 ```
 
-No row came back. The call also logged one `WARNING` line: no patient
-matches 3 of the 3 IDs given, and after `anonymize()` a patient is
-selected by its replacement Patient ID. The same holds for `subset=` with
-a frame that has only a `PatientID` column.
+No row came back. The call also logged one `WARNING` line. The line says
+that no patient matches 3 of the 3 IDs given. It also says that after
+`anonymize()`, a patient is selected by its replacement Patient ID. The
+same holds for `subset=` with a frame that has only a `PatientID` column.
 
 `get_cohort_report()` is a read. It logs the count and writes nothing to
-the store, so it is the place to try a list. `export()` counts in the
-same way, and also writes a row into the store's audit log, as the next
+the store. So it is the place to try a list. `export()` counts in the
+same way. It also writes a row into the store's audit log, as the next
 section shows.
 
 ## 6. Export with a mistyped ID, and read the grade
 
-The steps above ended at `PASS`, and this one will not. A row, once
-written, stays in the store for good, so this page keeps its one mistake
-for last.
+The steps above ended at `PASS`. This one will not. A row stays in the
+store for good once it is written. So this page keeps its one mistake for
+last.
 
 Say your list holds the dose patient's ID and a second ID with a typo in it:
 
@@ -274,8 +274,8 @@ DICOM export to export-typo: patient_ids: no patient in the session matches 1 of
 ```
 
 Position 2 is `"ANON_TYPO"`. The row names the export folder and the
-position, never the value, because an ID in a list you pass may be a
-source identifier.
+position, never the value. The reason is that an ID in a list you pass
+may be a source identifier.
 
 :::{admonition} These helpers read the report's layout, which can change
 :class: note
@@ -287,10 +287,11 @@ report's layout and the wording of each row are not
 one.
 :::
 
-The report grades every row the store holds: every row any session has
-ever written into this store, not only the rows of the last export.
-Exporting again with the right list writes the right files, and the
-grade stays `REVIEW_REQUIRED`, because the typo's row is still there:
+The report grades every row that the store holds. That is every row that
+any session ever wrote into this store, not only the rows of the last
+export. If you export again with the right list, the export writes the
+right files. But the grade stays `REVIEW_REQUIRED`, because the typo's
+row is still there:
 
 ```python
 session.export("export-dose-again", patient_ids=dose_patient,
@@ -308,12 +309,14 @@ session.generate_report("report-dose-again.md")
 DICOM export to export-typo: patient_ids: no patient in the session matches 1 of the 2 ids given (position 2, in the order given); it selects nothing. After anonymize(), a patient is selected by its replacement Patient ID.
 ```
 
-The one row is still the typo's, naming `export-typo`; the correct
-export added none. That is deliberate. The report is the record of every
-session run over this store, and an export that asked for someone who was
-not there is part of it. The reviewer reads section 4, sees that the row
-names `export-typo`, and decides. Nothing removes a row: only a new store
-starts clean ([How the grade is decided](../analytics.md#how-the-grade-is-decided)).
+The one row is still the typo's, and it names `export-typo`. The correct
+export added no row. That is deliberate. The report is the record of
+every session run over this store. An export that asked for someone who
+was not there is part of that record. The reviewer reads section 4, sees
+that the row names `export-typo`, and decides.
+
+Nothing removes a row. Only a new store starts clean
+([How the grade is decided](../analytics.md#how-the-grade-is-decided)).
 Section 5 is the way to avoid the row: try the list with
 `get_cohort_report()` first.
 
@@ -331,9 +334,9 @@ session.close()
 | `patient_ids=[id, ...]` | Every instance of each patient whose ID matches exactly | Use the replacement IDs |
 
 A value that names nothing is counted, never named, in one `WARNING`
-line; `export()` also writes one `WARNING` row, which grades the report
-`REVIEW_REQUIRED`. `subset=` is for the `dicom` format; `patient_ids=`
-works for both `dicom` and `wfdb`.
+line. `export()` also writes one `WARNING` row, and that row grades the
+report `REVIEW_REQUIRED`. `subset=` is for the `dicom` format.
+`patient_ids=` works for both `dicom` and `wfdb`.
 [API stability](../api/stability.md) states these rules as 1.x promises,
 and [Query-Based Export](../analytics.md#query-based-export) has more
 examples.
