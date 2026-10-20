@@ -385,7 +385,7 @@ Text of two characters or fewer is skipped as noise.
 
 **What is scanned.** Only instances of a machine a rule covers, by exact serial, `""`, `"*"` or `match:`, and only when at least one of the rules covering it has a zone. So:
 
-* A session that has loaded no configuration, or whose rules are all fresh from `create_config()` with empty `redaction_zones`, scans nothing. It prints "No matching configured instances found to scan." with how many instances it skipped. That count gives the instances of machines that no rule names apart from those whose rules have no zone. `scan_pixel_content()` then returns an empty report.
+* A session that has loaded no configuration, or whose rules are all fresh from `create_config()` with empty `redaction_zones`, scans nothing. It prints "No matching configured instances found to scan." with how many instances it skipped. It counts the instances of machines that no rule names, and separately the instances whose rules have no zone. `scan_pixel_content()` then returns an empty report.
 * A series with no Device Serial Number is scanned under a `""`, `"*"` or `match:` rule with a zone, as `redact()` redacts it. `scan_pixel_content(serial_number="")` is still no filter. It scans every configured series, not only the serial-less ones.
 
 Load a configuration whose rules have zones first:
