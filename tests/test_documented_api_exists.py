@@ -95,8 +95,8 @@ NOT_OURS = frozenset({
 # these roots needs no allowlist at all.
 #
 # This is a NAME list, not a type check. A session bound to any other
-# name escapes it -- `docs/migration.md` writes
-# `with Session("store.db") as s:`, which is why `s` is here. A new
+# name escapes it; `s` is here because `with Session(...) as s:` is a
+# common spelling (`docs/api/stability.md` uses it in prose). A new
 # short alias in a future fence goes unchecked until someone adds it.
 #
 # The deliberate blind spot, stated in full because understating it

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **docs: a MIDI-B benchmark page.** `docs/midi-b.md` (`/1.0/midi-b/`) gives Isocenter 1.0.0rc22's scores on TCIA's MIDI-B de-identification benchmark, scored with the benchmark's validation script at commit `ccc0939`: 99.22% of the Validation set's checks and 99.23% of the Test set's, against 72.51% and 68.45% for the default configuration. It sets out the configuration part by part with what each part is worth, what is left and why, the choices a site may want to change, how to reproduce the run, and the whole configuration. The configuration was tuned on both sets, so neither figure is a held-out estimate. Example values are synthetic: MIDI-B's own where an issue already quotes them, invented values of the same shape otherwise. It takes the place "Upgrading from 0.9.x" held in the site's navigation and the README.
+
+### Removed
+
+- **docs: the "Upgrading from 0.9.x" page (`docs/migration.md`).** Nothing before 1.0 is accommodated (owner ruling on #790), and each change it listed is recorded in this changelog's 0.9.x and 1.0.0rc sections. Its URLs, `/1.0/migration/` and `/latest/migration/`, and their anchors (`#configuration-files`, `#hollow-waveform-multiplex-items` and the rest) no longer resolve once the site is next deployed. The links to it from the index, analytics, configuration, for-institutions and waveforms pages, and from the README, are removed, not repointed. Two docstrings (`reconcile_private_tags()`, `redact(force=)`) still say "see Upgrading from 0.9.x" until the next release.
+
 ## [1.0.0rc22] - 2026-10-19
 
 ### Breaking

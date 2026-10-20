@@ -118,7 +118,7 @@ machines:
 - [Configuration](https://kvnlng.github.io/Isocenter/latest/configuration/), [Analytics & Reporting](https://kvnlng.github.io/Isocenter/latest/analytics/) and [how the grade is decided](https://kvnlng.github.io/Isocenter/latest/analytics/#how-the-grade-is-decided)
 - [What the export writes](https://kvnlng.github.io/Isocenter/latest/export-output/) and [Codec support](https://kvnlng.github.io/Isocenter/latest/codecs/)
 - [Import CTP rules](https://kvnlng.github.io/Isocenter/latest/ctp-import/), for a CTP `DicomPixelAnonymizer.script`
-- [Upgrading from 0.9.x](https://kvnlng.github.io/Isocenter/latest/migration/)
+- [MIDI-B benchmark](https://kvnlng.github.io/Isocenter/latest/midi-b/): the scores, and the configuration that reaches them
 - [API reference](https://kvnlng.github.io/Isocenter/latest/api/session/) and [API stability](https://kvnlng.github.io/Isocenter/latest/api/stability/)
 - [Architecture](https://kvnlng.github.io/Isocenter/latest/architecture/) and [Performance](https://kvnlng.github.io/Isocenter/latest/performance/)
 - [For institutions](https://kvnlng.github.io/Isocenter/latest/for-institutions/) and the [changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md)

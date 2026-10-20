@@ -52,13 +52,13 @@ python -c "import isocenter; print(isocenter.__version__)"
 
 The **Tutorials** each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md): what `PASS` and `REVIEW_REQUIRED` mean, and what to keep so a later export matches this one.
 
-If you used Isocenter 0.9.x, [Upgrading from 0.9.x](migration.md) says what 1.0 does with your stores, configurations and identity tokens.
+How Isocenter scores on a public de-identification benchmark, and the configuration that gets there, is on the [MIDI-B benchmark](midi-b.md) page: 99.22% of the Validation set's checks and 99.23% of the Test set's, with every setting explained.
 
 If you are evaluating Isocenter for an institution rather than running it, [For institutions](for-institutions.md) is the page to read: the license, the citation, and what the report gives a reviewer.
 
 ## Measured, not promised
 
-One benchmark has a recorded run behind it: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026. The numbers and the machine are on the [Performance](performance.md) page, and larger runs will appear there when they exist.
+Two benchmarks have a recorded run behind them. For speed: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026; the numbers and the machine are on the [Performance](performance.md) page, and larger runs will appear there when they exist. For de-identification: TCIA's MIDI-B datasets, scored with the benchmark's own validation script, October 2026, on the [MIDI-B benchmark](midi-b.md) page.
 
 ## License and citation
 
@@ -73,7 +73,7 @@ Bug reports and questions about documented behaviour go to [GitHub Issues](https
 Get started <get-started/index>
 Tutorials <tutorials/index>
 Guides <guides/index>
-Upgrading from 0.9.x <migration>
+MIDI-B benchmark <midi-b>
 API Reference <api/index>
 About <about/index>
 ```
