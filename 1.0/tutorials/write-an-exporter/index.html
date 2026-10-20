@@ -486,9 +486,9 @@
 <p>Isocenter writes DICOM and WFDB. If a recipient needs something else, you
 can register an <strong>exporter</strong> of your own and select it with
 <code class="docutils literal notranslate"><span class="pre">session.export(folder,</span> <span class="pre">format=...)</span></code>. This tutorial writes the smallest
-useful one, a CSV listing each exported Patient ID, runs it over
-pydicom’s bundled <code class="docutils literal notranslate"><span class="pre">CT_small.dcm</span></code>, and reads what the report says about
-it.</p>
+useful one: a CSV that lists each exported Patient ID. It runs the
+exporter over pydicom’s bundled <code class="docutils literal notranslate"><span class="pre">CT_small.dcm</span></code>. Then it reads what the
+report says about the export.</p>
 <div class="warning admonition">
 <p class="admonition-title">Provisional until 1.1</p>
 <p>The exporter registry (<code class="docutils literal notranslate"><span class="pre">Exporter</span></code>, <code class="docutils literal notranslate"><span class="pre">register()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_exporter()</span></code>,
@@ -510,7 +510,7 @@ copies the input file from pydicom into <code class="docutils literal notranslat
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a UID.</p></li>
@@ -560,8 +560,9 @@ returns what it wrote:</p>
 <li><p><strong>It reads and never writes the graph.</strong> Export is a read.</p></li>
 <li><p><strong>It writes <code class="docutils literal notranslate"><span class="pre">exported_patient_id(patient)</span></code>, not <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>.</strong>
 A patient whose files carry no Patient ID is held under a key that must
-never reach an output, and <code class="docutils literal notranslate"><span class="pre">exported_patient_id()</span></code> returns the value
-the patient’s files should carry: its ID, or <code class="docutils literal notranslate"><span class="pre">''</span></code> for that key.</p></li>
+never reach an output. <code class="docutils literal notranslate"><span class="pre">exported_patient_id()</span></code> returns the value that
+the patient’s files should carry. That value is the patient’s ID, or
+<code class="docutils literal notranslate"><span class="pre">''</span></code> for that key.</p></li>
 <li><p><strong>It returns the paths it wrote.</strong> A caller can then tell an export
 that wrote nothing from one that worked.</p></li>
 </ul>
@@ -578,14 +579,15 @@ exporter does.</p>
 <span class="go">['dicom', 'patient-ids', 'wfdb']</span>
 </pre></div>
 </div>
-<p>Registering under a name that is already taken replaces what was there,
-the built-in <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> included: <code class="docutils literal notranslate"><span class="pre">format=&quot;dicom&quot;</span></code> would then run
-your class, without any of the built-in format’s gates.</p>
+<p>If you register under a name that is already taken, your class replaces
+what was there. This includes the built-in <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and <code class="docutils literal notranslate"><span class="pre">wfdb</span></code>. Then
+<code class="docutils literal notranslate"><span class="pre">format=&quot;dicom&quot;</span></code> would run your class, without any of the built-in
+format’s gates.</p>
 </section>
 <section id="3-de-identify-export-and-read-the-csv">
 <span id="de-identify-export-and-read-the-csv"></span><h2>3. De-identify, export, and read the CSV<a class="headerlink" href="#3-de-identify-export-and-read-the-csv" title="Link to this heading">#</a></h2>
 <p>A plugin runs on the graph as it stands, so de-identify first. No
-configuration is loaded here, so <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> applies the session’s
+configuration is loaded here. So <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> applies the session’s
 default policy:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
 
@@ -636,22 +638,23 @@ default policy:</p>
 <span class="go">Export to export in format 'patient-ids' ran ...PatientIdCsv, an exporter Isocenter does not ship: its output is not attested by Isocenter. None of the export gates ran for it (...), so this report does not know what it wrote.</span>
 </pre></div>
 </div>
-<p>This is by design, and it is the same for every exporter Isocenter does
-not ship, however well it behaves. The export gates (the burned-in
-re-audit, the redaction zones, the de-identification markers and the
-rest) live inside the two built-in formats, so none of them ran for
-<code class="docutils literal notranslate"><span class="pre">PatientIdCsv</span></code>. Before calling it, <code class="docutils literal notranslate"><span class="pre">export()</span></code> wrote one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row
-saying so, and a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row grades the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>
+<p>This is by design. It is the same for every exporter that Isocenter does
+not ship, however well it behaves. The export gates live inside the two
+built-in formats. These gates are the burned-in re-audit, the redaction
+zones, the de-identification markers and the rest. So none of them ran
+for <code class="docutils literal notranslate"><span class="pre">PatientIdCsv</span></code>.</p>
+<p>Before it called the exporter, <code class="docutils literal notranslate"><span class="pre">export()</span></code> wrote one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row that
+says so. A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row grades the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>
 (condition 2 of
 <a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>).
 In 1.0, no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>.
 <a class="reference internal" href="../../api/exporters/#what-a-third-party-exporter-receives"><span class="std std-ref">What a third-party exporter receives</span></a>
 lists every gate it runs without.</p>
 <p>The report also carries the note that it was generated before any
-export, because only the built-in formats record an <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row. Ignore
-its advice to regenerate the report after exporting: with an exporter of
-your own and no built-in export, every report of this store carries this
-note.</p>
+export. The reason is that only the built-in formats record an <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code>
+row. Ignore the note’s advice to regenerate the report after you export.
+With an exporter of your own and no built-in export, every report of
+this store carries this note.</p>
 </section>
 <section id="5-save-before-you-close">
 <span id="save-before-you-close"></span><h2>5. Save before you close<a class="headerlink" href="#5-save-before-you-close" title="Link to this heading">#</a></h2>

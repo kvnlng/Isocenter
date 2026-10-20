@@ -486,16 +486,21 @@
 <p>The <a class="reference external" href="https://moody-challenge.physionet.org/">George B. Moody PhysioNet Challenge</a>
 publishes its data as WFDB records: a <code class="docutils literal notranslate"><span class="pre">.hea</span></code> header and a <code class="docutils literal notranslate"><span class="pre">.dat</span></code> signal
 file for each ECG. The organizers have already de-identified that data.
-This tutorial is for a team that also holds <strong>its own ECGs as DICOM</strong> and
-wants to use them alongside the Challenge’s: as extra training data, or to
-test a model locally on a population the public sets do not cover.</p>
-<p>That raises three questions. <strong>How do you turn a folder of DICOM ECGs
-into de-identified WFDB records</strong>, <strong>how do you make each header read the
-way the Challenge’s code expects</strong>, and <strong>how do you look at the records
-before you train on them</strong>? This tutorial answers them over the one
-12-lead ECG bundled with pydicom. Your folder will hold many. Every step
-loops over every record, and the notes after each step say what changes
-when your files differ from this one.</p>
+This tutorial is for a team that also holds <strong>its own ECGs as DICOM</strong>. The
+team wants to use them alongside the Challenge’s data. They can be extra
+training data. Or the team can use them to test a model locally on a
+population that the public sets do not cover.</p>
+<p>That raises three questions:</p>
+<ul class="simple">
+<li><p><strong>How do you turn a folder of DICOM ECGs into de-identified WFDB
+records?</strong></p></li>
+<li><p><strong>How do you make each header read the way the Challenge’s code
+expects?</strong></p></li>
+<li><p><strong>How do you look at the records before you train on them?</strong></p></li>
+</ul>
+<p>This tutorial answers them over the one 12-lead ECG bundled with pydicom.
+Your folder will hold many. Every step loops over every record. The notes
+after each step say what changes when your files differ from this one.</p>
 <p>The Challenge changes its question every year. The header lines below are
 the 2025 Challenge’s (detecting Chagas disease), taken from its
 <a class="reference external" href="https://moody-challenge.physionet.org/2025/">data description</a>. Check the
@@ -513,7 +518,7 @@ copies the input file from pydicom into <code class="docutils literal notranslat
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a date.</p></li>
@@ -541,8 +546,8 @@ waveform_ecg.dcm,False
 </div>
 <section id="1-de-identify-and-export-as-wfdb">
 <span id="de-identify-and-export-as-wfdb"></span><h2>1. De-identify and export as WFDB<a class="headerlink" href="#1-de-identify-and-export-as-wfdb" title="Link to this heading">#</a></h2>
-<p>The Challenge’s own data has already been through this step; yours has
-not. Write and load a configuration, audit, anonymize, then export with
+<p>The Challenge’s own data has already been through this step. Yours has
+not. Write and load a configuration, audit and anonymize. Then export with
 <code class="docutils literal notranslate"><span class="pre">format=&quot;wfdb&quot;</span></code>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
 
@@ -557,7 +562,7 @@ not. Write and load a configuration, audit, anonymize, then export with
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">create_config()</span></code> writes a configuration built on the DICOM Basic Profile
 (<a class="reference internal" href="../../configuration/"><span class="std std-doc">Configuration</span></a>). A WFDB export saves the session
-before it writes, as a DICOM export does, so the de-identified graph is
+before it writes, as a DICOM export does. So the de-identified graph is
 already in the store.</p>
 <p><code class="docutils literal notranslate"><span class="pre">export()</span></code> returns the path of each record’s header:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">records</span>
@@ -591,32 +596,37 @@ uses:</p>
 </pre></div>
 </div>
 <p>Twelve leads, ten seconds at 1000 Hz, named as the Challenge names them.
-This file codes each lead in the SCP-ECG vocabulary, and the export
-writes the lead’s name for a lead code of DICOM’s ECG lead context group,
-in SCP-ECG or in IEEE 11073 MDC
+This file codes each lead in the SCP-ECG vocabulary. The export writes
+the lead’s name for a lead code of DICOM’s ECG lead context group, in
+SCP-ECG or in IEEE 11073 MDC
 (<a class="reference internal" href="../../waveforms/#lead-names"><span class="std std-ref">Lead names</span></a>). The Challenge’s headers say
-<code class="docutils literal notranslate"><span class="pre">AVR</span></code>, <code class="docutils literal notranslate"><span class="pre">AVL</span></code> and <code class="docutils literal notranslate"><span class="pre">AVF</span></code>; its helper code matches lead names without regard
-to case, so <code class="docutils literal notranslate"><span class="pre">aVR</span></code> and <code class="docutils literal notranslate"><span class="pre">AVR</span></code> are the same lead to it.</p>
+<code class="docutils literal notranslate"><span class="pre">AVR</span></code>, <code class="docutils literal notranslate"><span class="pre">AVL</span></code> and <code class="docutils literal notranslate"><span class="pre">AVF</span></code>. Its helper code matches lead names without regard
+to case. So <code class="docutils literal notranslate"><span class="pre">aVR</span></code> and <code class="docutils literal notranslate"><span class="pre">AVR</span></code> are the same lead to it.</p>
 <p>Two things differ from a Challenge header:</p>
 <ul class="simple">
 <li><p><strong>The units are microvolts.</strong> The Challenge’s headers use millivolts.</p></li>
 <li><p><strong>There is no label.</strong> The Challenge’s headers end with comment lines
 such as <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Chagas</span> <span class="pre">label:</span> <span class="pre">False</span></code> and <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Source:</span> <span class="pre">CODE-15%</span></code>. Isocenter
-writes no comment line except the start date, because WFDB readers show
-comments verbatim and MIT-BIH convention puts age, sex and diagnosis
-there (<a class="reference internal" href="../../waveforms/#what-is-and-isn-t-de-identified"><span class="std std-ref">what is and isn’t de-identified</span></a>).
+writes no comment line except the start date. The reason is that WFDB
+readers show comments verbatim, and MIT-BIH convention puts age, sex
+and diagnosis there
+(<a class="reference internal" href="../../waveforms/#what-is-and-isn-t-de-identified"><span class="std std-ref">what is and isn’t de-identified</span></a>).
 The label is yours to add. The start date comes after the signal lines,
 where the Challenge’s helper code does not read it as a signal.</p></li>
 </ul>
 <p>The sampling rate differs too: the Challenge’s records are 400 Hz or
 500 Hz. That is a question for your model’s preprocessing, not for the
 header, so this page leaves it alone.</p>
-<p>Check every record’s lead names, not only the first. A lead with no
-coded source is written <code class="docutils literal notranslate"><span class="pre">ch0</span></code>, <code class="docutils literal notranslate"><span class="pre">ch1</span></code> and so on, because the Basic Profile
-removes Channel Label <code class="docutils literal notranslate"><span class="pre">(003A,0203)</span></code> (give it <code class="docutils literal notranslate"><span class="pre">action:</span> <span class="pre">KEEP</span></code> to keep lead
-names); a code outside the lead context group is written as its code
-value; and a record in which two signals would share a lead name shows
-code values for them, with a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> in the report. Each shows up here:</p>
+<p>Check every record’s lead names, not only the first:</p>
+<ul class="simple">
+<li><p>A lead with no coded source is written <code class="docutils literal notranslate"><span class="pre">ch0</span></code>, <code class="docutils literal notranslate"><span class="pre">ch1</span></code> and so on. The
+reason is that the Basic Profile removes Channel Label <code class="docutils literal notranslate"><span class="pre">(003A,0203)</span></code>.
+To keep lead names, give it <code class="docutils literal notranslate"><span class="pre">action:</span> <span class="pre">KEEP</span></code>.</p></li>
+<li><p>A code outside the lead context group is written as its code value.</p></li>
+<li><p>A record in which two signals would share a lead name shows code
+values for them, with a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> in the report.</p></li>
+</ul>
+<p>Each of these appears here:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">TWELVE_LEADS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"I"</span><span class="p">,</span> <span class="s2">"II"</span><span class="p">,</span> <span class="s2">"III"</span><span class="p">,</span> <span class="s2">"aVR"</span><span class="p">,</span> <span class="s2">"aVL"</span><span class="p">,</span> <span class="s2">"aVF"</span><span class="p">,</span>
                 <span class="s2">"V1"</span><span class="p">,</span> <span class="s2">"V2"</span><span class="p">,</span> <span class="s2">"V3"</span><span class="p">,</span> <span class="s2">"V4"</span><span class="p">,</span> <span class="s2">"V5"</span><span class="p">,</span> <span class="s2">"V6"</span><span class="p">}</span>
 </pre></div>
@@ -631,10 +641,11 @@ code values for them, with a <code class="docutils literal notranslate"><span cl
 <span id="make-each-header-read-like-the-challenge-s"></span><h2>3. Make each header read like the Challenge’s<a class="headerlink" href="#3-make-each-header-read-like-the-challenges" title="Link to this heading">#</a></h2>
 <p>The next block rewrites only the header. The samples in the <code class="docutils literal notranslate"><span class="pre">.dat</span></code> file
 are not touched.</p>
-<p><strong>Labels.</strong> Your table is keyed by source file, and the export is named
-by pseudonym. The link between them is the session’s manifest: one row
-per instance, holding the file it was read from and, after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>,
-the Patient ID its export carries.</p>
+<p><strong>Labels.</strong> Your table is keyed by source file. The export is named by
+pseudonym. The link between them is the session’s manifest. The manifest
+has one row per instance. Each row holds the file that the instance was
+read from. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, the row also holds the Patient ID that
+the instance’s export carries.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 
@@ -652,8 +663,9 @@ the Patient ID its export carries.</p>
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">'patient_id'</span><span class="p">]</span><span class="si">}</span><span class="s2">: files disagree on the label"</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>The table is keyed by the path under <code class="docutils literal notranslate"><span class="pre">input/</span></code> rather than the bare file
-name, because archives often reuse a file name in different folders. The
+<p>The table is keyed by the path under <code class="docutils literal notranslate"><span class="pre">input/</span></code>, not by the bare file
+name. The reason is that archives often reuse a file name in different
+folders. The
 loop refuses a patient whose files disagree on the label, rather than
 keeping whichever came last.</p>
 <p>The manifest pairs each source file with its pseudonym, so it is a
@@ -662,16 +674,20 @@ the records you share (<a class="reference internal" href="../../analytics/#mani
 <p>The Chagas label belongs to the patient, so this page labels every record
 of a patient the same. Each record sits in a folder named
 <code class="docutils literal notranslate"><span class="pre">Subject_&lt;pseudonym&gt;</span></code>, which says whose record it is.</p>
-<p>Two cases this join does not reach
-(<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/830">#830</a>). If your labels
-belong to each recording rather than each patient, the manifest cannot
-join them yet: a record’s name is the pseudonym, the Series Number and the
-Instance Number, and the manifest carries neither number. And a file with
-no Patient ID exports under <code class="docutils literal notranslate"><span class="pre">Subject_UnknownPatient</span></code>, while the manifest
-lists it under a key of its own, so the lookup below fails for it.</p>
-<p><strong>The rewrite.</strong> For each record: restate the gain in
-millivolts (the gain is ADC units per physical unit, so a thousandfold
-larger unit needs a thousandfold larger gain), and add the two lines:</p>
+<p>This join does not reach two cases
+(<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/830">#830</a>):</p>
+<ul class="simple">
+<li><p>If your labels belong to each recording rather than each patient, the
+manifest cannot join them yet. A record’s name is the pseudonym, the
+Series Number and the Instance Number. The manifest carries neither
+number.</p></li>
+<li><p>A file with no Patient ID exports under <code class="docutils literal notranslate"><span class="pre">Subject_UnknownPatient</span></code>. The
+manifest lists it under a key of its own. So the lookup below fails for
+it.</p></li>
+</ul>
+<p><strong>The rewrite.</strong> For each record, restate the gain in millivolts. The
+gain is ADC units per physical unit, so a thousandfold larger unit needs
+a thousandfold larger gain. Then add the two lines:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">hea</span> <span class="ow">in</span> <span class="n">records</span><span class="p">:</span>
     <span class="n">name</span> <span class="o">=</span> <span class="n">hea</span><span class="o">.</span><span class="n">removesuffix</span><span class="p">(</span><span class="s2">".hea"</span><span class="p">)</span>
     <span class="n">patient_id</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">hea</span><span class="p">)</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">"Subject_"</span><span class="p">)</span>
@@ -684,7 +700,7 @@ larger unit needs a thousandfold larger gain), and add the two lines:</p>
     <span class="n">header</span><span class="o">.</span><span class="n">wrheader</span><span class="p">(</span><span class="n">write_dir</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">hea</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
 </pre></div>
 </div>
-<p>A record whose signals are already in millivolts keeps its gain; only
+<p>A record whose signals are already in millivolts keeps its gain. Only
 microvolt signals are restated.</p>
 </section>
 <section id="4-read-it-back-the-way-the-challenge-does">
@@ -735,19 +751,19 @@ precision, is a decision for your study, not for this tutorial.</p>
 <p>This file is why. A DICOM waveform can hold several multiplex groups,
 each with its own channels and sampling rate. This one holds two at the
 same rate: the ten-second rhythm and a median beat the cart derived from
-it. Isocenter keeps the first group, the rhythm, and discards the rest at
+it. Isocenter keeps the first group, the rhythm. It discards the rest at
 ingest, with a warning and a <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row
-(<a class="reference internal" href="../../waveforms/#limitations"><span class="std std-ref">Limitations</span></a>). Signal that was in
-the source and is not in the export is a loss a person should look at,
-so the report asks for review rather than grading <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. Your own files
+(<a class="reference internal" href="../../waveforms/#limitations"><span class="std std-ref">Limitations</span></a>). Signal that was in the
+source and is not in the export is a loss that a person should look at.
+So the report asks for review rather than grading <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. Your own files
 may hold one group and grade <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. Either way, read the report before
 you train on the records.</p>
 </section>
 <section id="6-look-at-the-records-in-murmur-studio">
 <span id="look-at-the-records-in-murmur-studio"></span><h2>6. Look at the records in Murmur Studio<a class="headerlink" href="#6-look-at-the-records-in-murmur-studio" title="Link to this heading">#</a></h2>
 <p><a class="reference external" href="https://kvnlng.github.io/Murmur/">Murmur Studio</a> is a macOS viewer for
-WFDB recordings. A folder with no <code class="docutils literal notranslate"><span class="pre">RECORDS</span></code> index is scanned flat, and the
-export puts each record three folders down, so first write the index
+WFDB recordings. A folder with no <code class="docutils literal notranslate"><span class="pre">RECORDS</span></code> index is scanned flat. The
+export puts each record three folders down. So first write the index that
 PhysioNet corpora carry: one record path per line, relative to the folder.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="s2">"challenge"</span><span class="p">,</span> <span class="s2">"RECORDS"</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
     <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">hea</span><span class="p">)</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="s2">"challenge"</span><span class="p">)</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">""</span><span class="p">)</span><span class="o">.</span><span class="n">as_posix</span><span class="p">()</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span>
@@ -757,8 +773,8 @@ PhysioNet corpora carry: one record path per line, relative to the folder.</p>
 <p>Then open the <code class="docutils literal notranslate"><span class="pre">challenge</span></code> folder with <strong>File ▸ Open Record…</strong>. Murmur
 follows the <code class="docutils literal notranslate"><span class="pre">RECORDS</span></code> index down the tree and lists each record by its
 path, with its signal count, sample rate and duration. It is a quick way
-to see that each record holds twelve leads and, opening each, that none
-looks flat or clipped, before a model sees them. Murmur’s guide to
+to see that each record holds twelve leads. If you open each record, you
+can also see that none looks flat or clipped, before a model sees them. Murmur’s guide to
 <a class="reference external" href="https://kvnlng.github.io/Murmur/reviewing-a-corpus.html">reviewing a PhysioNet corpus</a>
 covers folders of many thousands of records.</p>
 <p>Beside each record, the export writes the cart’s own findings as
@@ -776,16 +792,16 @@ layer:</p>
 <span class="go">'SCPECG:...'</span>
 </pre></div>
 </div>
-<p>The cart marked six fiducial points on each of eleven beats; each finding
-keeps its kind and sample position, so Murmur draws it where the cart put
-it, under the name the cart gave it. The exporter writes a finding’s name
-and its scheme-qualified code only when the code comes from a published
-vocabulary, SCP-ECG here; a code under a site-defined scheme exports as
-<code class="docutils literal notranslate"><span class="pre">uncoded</span></code>, with no name. Passing <code class="docutils literal notranslate"><span class="pre">include_annotation_text=True</span></code> to
-<code class="docutils literal notranslate"><span class="pre">export()</span></code> would write those names too, and an annotation’s free text,
-but the Basic Profile has already replaced that text with a dummy, so
-none would come out here. Pass it only when your protocol allows the
-cart’s text out
+<p>The cart marked six fiducial points on each of eleven beats. Each finding
+keeps its kind and sample position. So Murmur draws it where the cart put
+it, under the name that the cart gave it.</p>
+<p>The exporter writes a finding’s name and its scheme-qualified code only
+when the code comes from a published vocabulary. Here that vocabulary is
+SCP-ECG. A code under a site-defined scheme exports as <code class="docutils literal notranslate"><span class="pre">uncoded</span></code>, with no
+name. Passing <code class="docutils literal notranslate"><span class="pre">include_annotation_text=True</span></code> to <code class="docutils literal notranslate"><span class="pre">export()</span></code> would write
+those names too, and an annotation’s free text. But the Basic Profile has
+already replaced that text with a dummy, so none of it would be written
+here. Pass it only when your protocol allows the cart’s text to leave
 (<a class="reference internal" href="../../waveforms/#what-is-and-isn-t-de-identified"><span class="std std-ref">what is and isn’t de-identified</span></a>).</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </pre></div>
@@ -818,7 +834,7 @@ cart’s text out
 <td class="text-left"><p>From your own labels, through the manifest</p></td>
 </tr>
 <tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Age:</span></code>, <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Sex:</span></code></p></td>
-<td class="text-left"><p>Never written; the Basic Profile removes both</p></td>
+<td class="text-left"><p>Never written. The Basic Profile removes both</p></td>
 <td class="text-left"><p>Only if your protocol allows it</p></td>
 </tr>
 </tbody>

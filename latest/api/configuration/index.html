@@ -485,8 +485,8 @@
   <section id="configuration-api">
 <h1>Configuration API<a class="headerlink" href="#configuration-api" title="Link to this heading">#</a></h1>
 <p>A session’s configuration is <code class="docutils literal notranslate"><span class="pre">session.configuration</span></code>, an
-<code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration</span></code>. <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> fills it from a YAML file;
-the methods below change it in memory and write it back with <code class="docutils literal notranslate"><span class="pre">save()</span></code>.
+<code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration</span></code>. <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> fills it from a YAML file.
+The methods below change it in memory, and <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes it back.
 The file format is on <a class="reference internal" href="../../configuration/"><span class="std std-doc">Configuration</span></a>. The class,
 its fields and these six methods are frozen at 1.0
 (<a class="reference internal" href="../stability/#frozen-at-1-0"><span class="std std-ref">API stability</span></a>).</p>

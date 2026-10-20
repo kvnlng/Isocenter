@@ -500,49 +500,51 @@ or tier 2.</p>
 <section id="frozen-tier-1">
 <h2>Frozen (tier 1)<a class="headerlink" href="#frozen-tier-1" title="Link to this heading">#</a></h2>
 <p>The entity classes as reached from <code class="docutils literal notranslate"><span class="pre">session.store</span></code>, and the key a subject
-with no Patient ID is held under, with its test. A class being here does
-not make every method rendered under it tier 1: the frozen ones are
-<code class="docutils literal notranslate"><span class="pre">Instance.get_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code>,
+with no Patient ID is held under, with its test. A class in this section
+does not make every method rendered under it tier 1. The frozen methods
+are <code class="docutils literal notranslate"><span class="pre">Instance.get_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_waveform_data()</span></code> and <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code>. The other
 methods shown, such as <code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code> and the sequence
-methods, are tier 2, and so are <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code> and <code class="docutils literal notranslate"><span class="pre">waveform_array</span></code> in
+methods, are tier 2. So are <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code> and <code class="docutils literal notranslate"><span class="pre">waveform_array</span></code> in
 <code class="docutils literal notranslate"><span class="pre">Instance</span></code>’s attribute table.</p>
-<p><strong>What <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> stores.</strong> The value it is given, with one exception:
-a numpy bool, integer or float (a scalar or a 0-d array), and a <code class="docutils literal notranslate"><span class="pre">list</span></code>
-or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding one, is stored as the Python number it
-equals, so
-<code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0018,1150&quot;,</span> <span class="pre">np.int64(7))</span></code> leaves the <code class="docutils literal notranslate"><span class="pre">int</span></code> 7 in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>
-and a live export writes what a reopened session writes. An array of one
-or more dimensions is not converted; pass <code class="docutils literal notranslate"><span class="pre">.tolist()</span></code> or <code class="docutils literal notranslate"><span class="pre">.tobytes()</span></code>.
-Nor is any other numpy value: a <code class="docutils literal notranslate"><span class="pre">datetime64</span></code>, a <code class="docutils literal notranslate"><span class="pre">timedelta64</span></code>, a complex
-number and a masked value stay as given, and the save refuses them.
-A value written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> is not seen by the entity
-(call <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code>), and a numpy number written that way is
-converted when it is saved. <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes one as the Python number
-it equals whether or not it was saved, so the file is the same before
-and after a save and a reopen; it writes a <code class="docutils literal notranslate"><span class="pre">tuple</span></code> as the list it
-equals, and a <code class="docutils literal notranslate"><span class="pre">Decimal</span></code> (which the save refuses, and which only a value
-written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> or a graph built by hand can hold) as
-the <code class="docutils literal notranslate"><span class="pre">float</span></code> it equals. None of the three is changed in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>.
-A number under a standard element whose VR holds text
-(<code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0008,1090&quot;,</span> <span class="pre">7)</span></code>) is not written: the file is exported
-without that element, under one <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row naming the tag, the type
-and the VR. Pass the text. The store holds <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">str</span></code>, <code class="docutils literal notranslate"><span class="pre">bytes</span></code>,
-<code class="docutils literal notranslate"><span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">int</span></code>, <code class="docutils literal notranslate"><span class="pre">float</span></code>, pydicom’s DS and IS values, and lists of those;
-<code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> raises nothing for anything else, and the next
-<code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code> or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> naming
-the instance, the tag and the type (<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>,
-Exceptions).</p>
+<p><strong>What <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> stores.</strong> It stores the value it is given, with one
+exception. It stores a numpy bool, integer or float (a scalar or a 0-d
+array), and a <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding one, as the Python
+number it equals. So <code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0018,1150&quot;,</span> <span class="pre">np.int64(7))</span></code> leaves the
+<code class="docutils literal notranslate"><span class="pre">int</span></code> 7 in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>, and a live export writes what a reopened session
+writes. An array of one or more dimensions is not converted. Pass
+<code class="docutils literal notranslate"><span class="pre">.tolist()</span></code> or <code class="docutils literal notranslate"><span class="pre">.tobytes()</span></code> instead. No other numpy value is converted
+either. A <code class="docutils literal notranslate"><span class="pre">datetime64</span></code>, a <code class="docutils literal notranslate"><span class="pre">timedelta64</span></code>, a complex number and a masked
+value stay as given, and the save refuses them.</p>
+<p>The entity does not see a value written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code>
+(call <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code>). A numpy number written that way is converted
+when it is saved. <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes such a number as the Python number
+it equals, whether or not it was saved. So the file is the same before
+and after a save and a reopen. <code class="docutils literal notranslate"><span class="pre">export()</span></code> also writes a <code class="docutils literal notranslate"><span class="pre">tuple</span></code> as the
+list it equals, and a finite <code class="docutils literal notranslate"><span class="pre">Decimal</span></code> that a float can hold as the
+<code class="docutils literal notranslate"><span class="pre">float</span></code> it equals. The save refuses a <code class="docutils literal notranslate"><span class="pre">Decimal</span></code>, and only a value written straight into
+<code class="docutils literal notranslate"><span class="pre">attributes</span></code>, or a graph built by hand, can hold one. <code class="docutils literal notranslate"><span class="pre">export()</span></code> changes
+none of the three in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>.</p>
+<p>A number under a standard element whose VR holds text
+(<code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0008,1090&quot;,</span> <span class="pre">7)</span></code>) is not written. The file is exported
+without that element, under one <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row that names the tag, the
+type and the VR. Pass the text instead. The store holds <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">str</span></code>,
+<code class="docutils literal notranslate"><span class="pre">bytes</span></code>, <code class="docutils literal notranslate"><span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">int</span></code>, <code class="docutils literal notranslate"><span class="pre">float</span></code>, pydicom’s DS and IS values, and lists
+of those. <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> raises nothing for anything else. The next
+<code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code> or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> that
+names the instance, the tag and the type
+(<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>, Exceptions).</p>
 <p><strong>What assigning <code class="docutils literal notranslate"><span class="pre">Instance.sop_instance_uid</span></code> does.</strong> It moves the field
-and the <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> element together, and marks the instance edited:
-<code class="docutils literal notranslate"><span class="pre">instance.sop_instance_uid</span> <span class="pre">=</span> <span class="pre">&quot;1.2.3.4&quot;</span></code> leaves <code class="docutils literal notranslate"><span class="pre">&quot;1.2.3.4&quot;</span></code> in
-<code class="docutils literal notranslate"><span class="pre">instance.attributes[&quot;0008,0018&quot;]</span></code>, and the export writes the file as
-<code class="docutils literal notranslate"><span class="pre">1.2.3.4.dcm</span></code> with that UID inside. An instance assigned <code class="docutils literal notranslate"><span class="pre">''</span></code> is not
-written: the export’s file-name rule refuses a UID that cannot name a
-file, and reports it as a failure keyed <code class="docutils literal notranslate"><span class="pre">UNKNOWN</span></code>. Assigning
-the value the field already holds changes nothing. <code class="docutils literal notranslate"><span class="pre">series.series_instance_uid</span></code>,
-<code class="docutils literal notranslate"><span class="pre">study.study_instance_uid</span></code> and <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code> need no such step:
-the export stamps each file’s copy from the owner.</p>
+and the <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> element together, and marks the instance edited.
+For example, <code class="docutils literal notranslate"><span class="pre">instance.sop_instance_uid</span> <span class="pre">=</span> <span class="pre">&quot;1.2.3.4&quot;</span></code> leaves <code class="docutils literal notranslate"><span class="pre">&quot;1.2.3.4&quot;</span></code>
+in <code class="docutils literal notranslate"><span class="pre">instance.attributes[&quot;0008,0018&quot;]</span></code>, and the export writes the file as
+<code class="docutils literal notranslate"><span class="pre">1.2.3.4.dcm</span></code> with that UID inside. The export does not write an
+instance assigned <code class="docutils literal notranslate"><span class="pre">''</span></code>. Its file-name rule refuses a UID that cannot
+name a file, and reports the instance as a failure keyed <code class="docutils literal notranslate"><span class="pre">UNKNOWN</span></code>.
+Assigning the value that the field already holds changes nothing.
+<code class="docutils literal notranslate"><span class="pre">series.series_instance_uid</span></code>, <code class="docutils literal notranslate"><span class="pre">study.study_instance_uid</span></code> and
+<code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code> need no such step. The export stamps each file’s
+copy from the owner.</p>
 <p id="module-isocenter.entities">The in-memory DICOM object graph.</p>
 <p><code class="docutils literal notranslate"><span class="pre">Patient</span></code>, <code class="docutils literal notranslate"><span class="pre">Study</span></code>, <code class="docutils literal notranslate"><span class="pre">Series</span></code> and <code class="docutils literal notranslate"><span class="pre">Instance</span></code>, the <code class="docutils literal notranslate"><span class="pre">DicomItem</span></code> and
 <code class="docutils literal notranslate"><span class="pre">DicomSequence</span></code> nesting beneath an instance, <code class="docutils literal notranslate"><span class="pre">Equipment</span></code>, and the
@@ -1254,8 +1256,8 @@ three is present.</p>
 </section>
 <section id="documented-but-internal-tier-2">
 <h2>Documented but internal (tier 2)<a class="headerlink" href="#documented-but-internal-tier-2" title="Link to this heading">#</a></h2>
-<p>Safe to call, and may change in a 1.x release with a CHANGELOG entry that
-names the old spelling and the new one.</p>
+<p>These names are safe to call. They may change in a 1.x release, with a
+CHANGELOG entry that names the old spelling and the new one.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="isocenter.entities.TrackedEntity">
 <span class="sig-name descname"><span class="pre">TrackedEntity</span></span><a class="headerlink" href="#isocenter.entities.TrackedEntity" title="Link to this definition">#</a></dt>

@@ -488,8 +488,8 @@ into the image itself. That text is pixels, not an attribute, so no
 <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> rule reaches it. What reaches it is a <strong>redaction zone</strong>: a
 rectangle that <code class="docutils literal notranslate"><span class="pre">redact()</span></code> sets to zero in every image from a given
 machine. This tutorial writes one zone for the machine that made
-pydicom’s bundled <code class="docutils literal notranslate"><span class="pre">MR_small.dcm</span></code>, redacts, exports, and reads the
-exported pixels back to show which ones changed.</p>
+pydicom’s bundled <code class="docutils literal notranslate"><span class="pre">MR_small.dcm</span></code>. Then it redacts and exports. Then it
+reads the exported pixels back to show which ones changed.</p>
 <div class="tip admonition">
 <p class="admonition-title">Run it yourself</p>
 <p>Every Python block on this page runs, in order, as part of
@@ -502,7 +502,7 @@ copies the input file from pydicom into <code class="docutils literal notranslat
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a UID.</p></li>
@@ -577,8 +577,8 @@ number -128, and <code class="docutils literal notranslate"><span class="pre">lo
 </div>
 <p>It changes the pixels in the session’s store, never the file in
 <code class="docutils literal notranslate"><span class="pre">input/</span></code>. The Basic Profile replaced the Device Serial Number in the
-attributes, and the rule still matched: a rule is matched on the serial
-the series was ingested with.</p>
+attributes. The rule still matched, because a rule is matched on the
+serial that the series was ingested with.</p>
 </section>
 <section id="4-export-and-read-the-pixels-back">
 <span id="export-and-read-the-pixels-back"></span><h2>4. Export and read the pixels back<a class="headerlink" href="#4-export-and-read-the-pixels-back" title="Link to this heading">#</a></h2>
@@ -618,7 +618,7 @@ every row below it:</p>
 </pre></div>
 </div>
 <p>The exported file also says what was done to it: Burned In Annotation
-<code class="docutils literal notranslate"><span class="pre">(0028,0301)</span></code> reads <code class="docutils literal notranslate"><span class="pre">NO</span></code>, because <code class="docutils literal notranslate"><span class="pre">redact()</span></code> cleared the region the rule
+<code class="docutils literal notranslate"><span class="pre">(0028,0301)</span></code> reads <code class="docutils literal notranslate"><span class="pre">NO</span></code>, because <code class="docutils literal notranslate"><span class="pre">redact()</span></code> cleared the zone the rule
 names.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">exported</span><span class="o">.</span><span class="n">BurnedInAnnotation</span>
 <span class="go">'NO'</span>
@@ -640,29 +640,34 @@ names.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">PASS</span></code> says the zones you wrote were applied. It does not say the rest
-of each image is free of text: nothing on this page read the pixels for
-text. <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> does, with OCR, over the images of every
-series a rule with zones covers (by exact serial, <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> or
-<code class="docutils literal notranslate"><span class="pre">match:</span></code>), and reports text no zone covers
-(<a class="reference internal" href="../../ocr/#checking-zones-verification"><span class="std std-ref">Checking Zones</span></a>). Or configure
-<a class="reference internal" href="../../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a>, under which
-<code class="docutils literal notranslate"><span class="pre">redact()</span></code> reads every image that holds pixels with OCR and redacts,
-reports or withholds the text it finds, serial or not, whatever the
-rules.</p>
-<p>A zone is applied whether or not you call <code class="docutils literal notranslate"><span class="pre">redact()</span></code>: <code class="docutils literal notranslate"><span class="pre">export()</span></code> looks up
-every matching rule and zeroes a copy of each frame it writes. Calling
-<code class="docutils literal notranslate"><span class="pre">redact()</span></code> first is what puts the redacted pixels in the store, so the
-store and the export agree. Only <code class="docutils literal notranslate"><span class="pre">redact()</span></code> writes Burned In Annotation
-<code class="docutils literal notranslate"><span class="pre">NO</span></code>: an export that applies a zone by itself zeroes the same pixels and
-leaves that attribute as the source had it.</p>
+<p><code class="docutils literal notranslate"><span class="pre">PASS</span></code> says that the zones you wrote were applied. It does not say that
+the rest of each image is free of text. Nothing on this page read the
+pixels for text. To read them:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> reads with OCR the images of every series that
+a rule with zones covers (by exact serial, <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">match:</span></code>).
+It reports text that no zone covers
+(<a class="reference internal" href="../../ocr/#checking-zones-verification"><span class="std std-ref">Checking Zones</span></a>).</p></li>
+<li><p>Or configure <a class="reference internal" href="../../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a>.
+Under it, <code class="docutils literal notranslate"><span class="pre">redact()</span></code> reads with OCR every image in the policy’s
+<a class="reference internal" href="../../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">scope</span></code></span></a> that holds pixels, serial
+or not, whatever the rules. It redacts, reports or withholds the text
+it finds.</p></li>
+</ul>
+<p>A zone is applied whether or not you call <code class="docutils literal notranslate"><span class="pre">redact()</span></code>. <code class="docutils literal notranslate"><span class="pre">export()</span></code> finds
+every matching rule and zeroes a copy of each frame that it writes.
+Calling <code class="docutils literal notranslate"><span class="pre">redact()</span></code> first is what puts the redacted pixels in the store.
+Then the store and the export agree. Only <code class="docutils literal notranslate"><span class="pre">redact()</span></code> writes Burned In
+Annotation <code class="docutils literal notranslate"><span class="pre">NO</span></code>. An export that applies a zone by itself zeroes the same
+pixels, and leaves that attribute as the source had it.</p>
 <div class="note admonition">
 <p class="admonition-title">Finding the zones for a new machine</p>
-<p>This page wrote its zone by hand. For a machine you have not seen,
-<code class="docutils literal notranslate"><span class="pre">session.discover_redaction_zones(serial_number)</span></code> reads a sample of
-that machine’s images with OCR and returns the text it found, with
-<code class="docutils literal notranslate"><span class="pre">to_zones()</span></code> to group it into zones for a rule. It needs the <code class="docutils literal notranslate"><span class="pre">ocr</span></code>
-extra and the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> program, so this page does not run it.
+<p>This page wrote its zone by hand. For a machine that is new to you, use
+<code class="docutils literal notranslate"><span class="pre">session.discover_redaction_zones(serial_number)</span></code>. It reads a sample of
+that machine’s images with OCR and returns the text it found. The
+result’s <code class="docutils literal notranslate"><span class="pre">to_zones()</span></code> groups that text into zones for a rule. Discovery
+needs the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> program, so this page does not
+run it.
 <a class="reference internal" href="../../ocr/#setting-up-new-machines-zone-discovery"><span class="std std-ref">Zone Discovery</span></a>
 shows how.</p>
 </div>
@@ -672,7 +677,7 @@ shows how.</p>
 <ul class="simple">
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">serial_number</span></code></strong> is compared exactly with Device Serial Number
 <code class="docutils literal notranslate"><span class="pre">(0018,1000)</span></code>. <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> matches every series with no serial, and <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>
-every series.</p></li>
+matches every series.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">match:</span></code></strong> selects by <code class="docutils literal notranslate"><span class="pre">manufacturer</span></code> and/or <code class="docutils literal notranslate"><span class="pre">model_name</span></code> instead of
 a serial.</p></li>
 <li><p><strong>Every matching rule applies.</strong> An exact rule and a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule both

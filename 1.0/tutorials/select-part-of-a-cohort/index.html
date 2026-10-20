@@ -483,10 +483,10 @@
   <section id="select-part-of-a-cohort">
 <h1>Select part of a cohort<a class="headerlink" href="#select-part-of-a-cohort" title="Link to this heading">#</a></h1>
 <!-- tutorial: inputs=CT_small.dcm,MR_small.dcm,rtdose.dcm -->
-<p>You rarely hand out everything you ingested. One recipient gets the
-images, another gets one patient. Two questions come with that: <strong>how do
-you export only the patients or series you chose</strong>, and <strong>how do you
-find out when you asked for something the session does not hold</strong>? This
+<p>You rarely share everything you ingested. One recipient gets the
+images, another gets one patient. Two questions come with that. <strong>How do
+you export only the patients or series you chose?</strong> And <strong>how do you
+know when you asked for something that the session does not hold?</strong> This
 tutorial answers both over the same three files as
 <a class="reference internal" href="../deidentify-and-read-the-grade/"><span class="std std-doc">the first tutorial</span></a>, in a folder of
 their own.</p>
@@ -502,7 +502,7 @@ copies the input files from pydicom into <code class="docutils literal notransla
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a UID.</p></li>
@@ -560,24 +560,24 @@ This recipient gets the images and not the dose grid:</p>
 <span class="go">1      4MR1       MR</span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">get_cohort_report(expand_metadata=True)</span></code> adds a column for every
-attribute in the files, if the column you want to select on is not among
-the ten above.</p>
+<p>If the column you want to select on is not among the ten above, use
+<code class="docutils literal notranslate"><span class="pre">get_cohort_report(expand_metadata=True)</span></code>. It adds a column for every
+attribute in the files.</p>
 </section>
 <section id="3-de-identify-then-export-the-selection">
 <span id="de-identify-then-export-the-selection"></span><h2>3. De-identify, then export the selection<a class="headerlink" href="#3-de-identify-then-export-the-selection" title="Link to this heading">#</a></h2>
-<p>On this page, nothing leaves before it is de-identified. No configuration is loaded
-here, so <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> applies the session’s default policy (the first
-tutorial shows how to write your own). With no argument it audits and
-then acts on every finding.</p>
+<p>On this page, nothing leaves before it is de-identified. No configuration
+is loaded here. So <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> applies the session’s default policy.
+The first tutorial shows how to write your own. With no argument,
+<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> audits and then acts on every finding.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
 </pre></div>
 </div>
 <p>Now pass the rows you chose as <code class="docutils literal notranslate"><span class="pre">subset=</span></code>. <code class="docutils literal notranslate"><span class="pre">rtdose.dcm</span></code> stores 32-bit
-dose values, which Isocenter’s JPEG 2000 encoder cannot write exactly, so
-with compression on that one instance would be written uncompressed, with
-an INFO note (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/771">#771</a>).
-Every export on this page uses <code class="docutils literal notranslate"><span class="pre">use_compression=False</span></code>, so every file it
+dose values. Isocenter’s JPEG 2000 encoder cannot write them exactly. So
+with compression on, that one instance would be written uncompressed,
+with an INFO note (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/771">#771</a>).
+Every export on this page uses <code class="docutils literal notranslate"><span class="pre">use_compression=False</span></code>. So every file it
 writes is in the same transfer syntax.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export-images"</span><span class="p">,</span> <span class="n">subset</span><span class="o">=</span><span class="n">images</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report-images.md"</span><span class="p">)</span>
@@ -606,7 +606,7 @@ that holds its grade, as in the first tutorial:</p>
 <span class="go">| **Validation Status** | **PASS** |</span>
 </pre></div>
 </div>
-<p>The CT and the MR were written; the dose grid was not.</p>
+<p>The CT and the MR were written. The dose grid was not.</p>
 <p><strong>Why a report from before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> still selects.</strong> A DataFrame is
 read by the most precise of four columns it carries: <code class="docutils literal notranslate"><span class="pre">SOPInstanceUID</span></code>,
 then <code class="docutils literal notranslate"><span class="pre">SeriesInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">StudyInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">PatientID</span></code>. <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>
@@ -649,9 +649,9 @@ now, not from <code class="docutils literal notranslate"><span class="pre">early
 <span class="go">| **Validation Status** | **PASS** |</span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> takes a list, or any other iterable, of Patient IDs, and
-each one must match exactly. A bare string is refused with a
-<code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, because a string is itself an iterable of characters: write
+<p><code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> takes a list, or any other iterable, of Patient IDs. Each
+ID must match exactly. A bare string is refused with a <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>,
+because a string is itself an iterable of characters. Write
 <code class="docutils literal notranslate"><span class="pre">patient_ids=[&quot;ANON_...&quot;]</span></code>, not <code class="docutils literal notranslate"><span class="pre">patient_ids=&quot;ANON_...&quot;</span></code>.</p>
 </section>
 <section id="5-check-a-list-before-you-export-it">
@@ -671,20 +671,20 @@ IDs:</p>
 <span class="go">0</span>
 </pre></div>
 </div>
-<p>No row came back. The call also logged one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line: no patient
-matches 3 of the 3 IDs given, and after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> a patient is
-selected by its replacement Patient ID. The same holds for <code class="docutils literal notranslate"><span class="pre">subset=</span></code> with
-a frame that has only a <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> column.</p>
+<p>No row came back. The call also logged one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line. The line says
+that no patient matches 3 of the 3 IDs given. It also says that after
+<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, a patient is selected by its replacement Patient ID. The
+same holds for <code class="docutils literal notranslate"><span class="pre">subset=</span></code> with a frame that has only a <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> column.</p>
 <p><code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> is a read. It logs the count and writes nothing to
-the store, so it is the place to try a list. <code class="docutils literal notranslate"><span class="pre">export()</span></code> counts in the
-same way, and also writes a row into the store’s audit log, as the next
+the store. So it is the place to try a list. <code class="docutils literal notranslate"><span class="pre">export()</span></code> counts in the
+same way. It also writes a row into the store’s audit log, as the next
 section shows.</p>
 </section>
 <section id="6-export-with-a-mistyped-id-and-read-the-grade">
 <span id="export-with-a-mistyped-id-and-read-the-grade"></span><h2>6. Export with a mistyped ID, and read the grade<a class="headerlink" href="#6-export-with-a-mistyped-id-and-read-the-grade" title="Link to this heading">#</a></h2>
-<p>The steps above ended at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, and this one will not. A row, once
-written, stays in the store for good, so this page keeps its one mistake
-for last.</p>
+<p>The steps above ended at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. This one will not. A row stays in the
+store for good once it is written. So this page keeps its one mistake for
+last.</p>
 <p>Say your list holds the dose patient’s ID and a second ID with a typo in it:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">wanted</span> <span class="o">=</span> <span class="n">dose_patient</span> <span class="o">+</span> <span class="p">[</span><span class="s2">"ANON_TYPO"</span><span class="p">]</span>
 <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export-typo"</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="n">wanted</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
@@ -718,8 +718,8 @@ helper counts the rows there and prints the details of each:</p>
 </pre></div>
 </div>
 <p>Position 2 is <code class="docutils literal notranslate"><span class="pre">&quot;ANON_TYPO&quot;</span></code>. The row names the export folder and the
-position, never the value, because an ID in a list you pass may be a
-source identifier.</p>
+position, never the value. The reason is that an ID in a list you pass
+may be a source identifier.</p>
 <div class="note admonition">
 <p class="admonition-title">These helpers read the report’s layout, which can change</p>
 <p>The grade values <code class="docutils literal notranslate"><span class="pre">PASS</span></code> and <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> are frozen for 1.x. The
@@ -728,10 +728,11 @@ report’s layout and the wording of each row are not
 <code class="docutils literal notranslate"><span class="pre">exceptions</span></code> are for reading a report, not for gating automation on
 one.</p>
 </div>
-<p>The report grades every row the store holds: every row any session has
-ever written into this store, not only the rows of the last export.
-Exporting again with the right list writes the right files, and the
-grade stays <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>, because the typo’s row is still there:</p>
+<p>The report grades every row that the store holds. That is every row that
+any session ever wrote into this store, not only the rows of the last
+export. If you export again with the right list, the export writes the
+right files. But the grade stays <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>, because the typo’s
+row is still there:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export-dose-again"</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="n">dose_patient</span><span class="p">,</span>
                <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report-dose-again.md"</span><span class="p">)</span>
@@ -746,12 +747,13 @@ grade stays <code class="docutils literal notranslate"><span class="pre">REVIEW_
 <span class="go">DICOM export to export-typo: patient_ids: no patient in the session matches 1 of the 2 ids given (position 2, in the order given); it selects nothing. After anonymize(), a patient is selected by its replacement Patient ID.</span>
 </pre></div>
 </div>
-<p>The one row is still the typo’s, naming <code class="docutils literal notranslate"><span class="pre">export-typo</span></code>; the correct
-export added none. That is deliberate. The report is the record of every
-session run over this store, and an export that asked for someone who was
-not there is part of it. The reviewer reads section 4, sees that the row
-names <code class="docutils literal notranslate"><span class="pre">export-typo</span></code>, and decides. Nothing removes a row: only a new store
-starts clean (<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>).
+<p>The one row is still the typo’s, and it names <code class="docutils literal notranslate"><span class="pre">export-typo</span></code>. The correct
+export added no row. That is deliberate. The report is the record of
+every session run over this store. An export that asked for someone who
+was not there is part of that record. The reviewer reads section 4, sees
+that the row names <code class="docutils literal notranslate"><span class="pre">export-typo</span></code>, and decides.</p>
+<p>Nothing removes a row. Only a new store starts clean
+(<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>).
 Section 5 is the way to avoid the row: try the list with
 <code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> first.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
@@ -788,9 +790,9 @@ Section 5 is the way to avoid the row: try the list with
 </table>
 </div>
 <p>A value that names nothing is counted, never named, in one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>
-line; <code class="docutils literal notranslate"><span class="pre">export()</span></code> also writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, which grades the report
-<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. <code class="docutils literal notranslate"><span class="pre">subset=</span></code> is for the <code class="docutils literal notranslate"><span class="pre">dicom</span></code> format; <code class="docutils literal notranslate"><span class="pre">patient_ids=</span></code>
-works for both <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and <code class="docutils literal notranslate"><span class="pre">wfdb</span></code>.
+line. <code class="docutils literal notranslate"><span class="pre">export()</span></code> also writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, and that row grades the
+report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. <code class="docutils literal notranslate"><span class="pre">subset=</span></code> is for the <code class="docutils literal notranslate"><span class="pre">dicom</span></code> format.
+<code class="docutils literal notranslate"><span class="pre">patient_ids=</span></code> works for both <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and <code class="docutils literal notranslate"><span class="pre">wfdb</span></code>.
 <a class="reference internal" href="../../api/stability/"><span class="std std-doc">API stability</span></a> states these rules as 1.x promises,
 and <a class="reference internal" href="../../analytics/#query-based-export"><span class="std std-ref">Query-Based Export</span></a> has more
 examples.</p>

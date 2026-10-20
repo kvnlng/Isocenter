@@ -484,45 +484,46 @@
                   
   <section id="api-stability">
 <h1>API stability<a class="headerlink" href="#api-stability" title="Link to this heading">#</a></h1>
-<p>What the 1.0 tag promises, in three tiers. The facade is what gets
-frozen; the internal seams behind it are not.</p>
+<p>This page states what the 1.0 tag promises, in three tiers. The tag
+freezes the facade, not the internal seams behind it.</p>
 <ul class="simple">
 <li><p><strong>Frozen (tier 1)</strong> names keep their spelling, their parameter names,
 their return shapes and their documented behaviour for every 1.x
-release; a change is a 2.0.</p></li>
-<li><p><strong>Documented but internal (tier 2)</strong> names are listed on this page,
-and rendered in the API reference or named by a guide where a reader
-needs them. They are safe to call, and may change in a 1.x release with
-a CHANGELOG entry that names the old spelling and the new one. They exist so a
-reader can see the seams, not so a program can lean on them.</p></li>
+release. A change to them is a 2.0.</p></li>
+<li><p><strong>Documented but internal (tier 2)</strong> names are on this page. Where a
+reader needs them, the API reference renders them or a guide names
+them. They are safe to call. They may change in a 1.x release, with a
+CHANGELOG entry that names the old spelling and the new one. They
+exist so that a reader can see the seams, not so that a program can
+depend on them.</p></li>
 <li><p><strong>Private (tier 3)</strong> names — everything with a leading underscore, and
 every module not listed below — may change without notice.</p></li>
 </ul>
-<p>Optional extras (<code class="docutils literal notranslate"><span class="pre">ocr</span></code>, <code class="docutils literal notranslate"><span class="pre">nlp</span></code>) degrade to the documented fallback; the
-fallback is frozen, the extra’s internals are not. How each method
-behaves is on its own page — start at <a class="reference internal" href="../session/"><span class="std std-doc">Session</span></a> — and how a
-behaviour came to be is in the
-<a class="reference external" href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md">changelog</a>.</p>
+<p>Optional extras (<code class="docutils literal notranslate"><span class="pre">ocr</span></code>, <code class="docutils literal notranslate"><span class="pre">nlp</span></code>) degrade to the documented fallback. The
+fallback is frozen, and the extra’s internals are not. Each method’s
+behaviour is on its own page: start at <a class="reference internal" href="../session/"><span class="std std-doc">Session</span></a>. The
+<a class="reference external" href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md">changelog</a>
+says how a behaviour came to be.</p>
 <section id="what-10-promises">
 <span id="what-1-0-promises"></span><h2>What 1.0 promises<a class="headerlink" href="#what-10-promises" title="Link to this heading">#</a></h2>
 <ul class="simple">
 <li><p><strong>The facade.</strong> <code class="docutils literal notranslate"><span class="pre">Session</span></code>, its 28 methods and their parameters, the
-shapes they return, and the other callables the frozen tables list
-keep their spelling and behaviour for every 1.x
+shapes they return, and the other callables that the frozen tables
+list keep their spelling and behaviour for every 1.x
 (<a class="reference internal" href="#frozen-at-1-0">Frozen at 1.0</a>).</p></li>
 <li><p><strong>The output.</strong> For the same input, configuration and project secret,
 a 1.x exports what the previous release exported, or its changelog
 says what changed (<a class="reference internal" href="#frozen-at-1-0">Data promises</a>). The grade’s
-values and the audit words keep their spelling, and no condition that
-grades a run is removed or narrowed; a 1.x may add words and
+values and the audit words keep their spelling. No 1.x removes or
+narrows a condition that grades a run. A 1.x may add words and
 conditions, with a changelog entry.</p></li>
-<li><p><strong>The configuration.</strong> A file 1.0 loads, every 1.x loads, and a 1.x
+<li><p><strong>The configuration.</strong> Every 1.x loads a file that 1.0 loads. A 1.x
 that applies an unchanged file differently raises the schema’s minor
 version (<a class="reference internal" href="#frozen-at-1-0">Data promises</a>).</p></li>
 <li><p><strong>Plugins, provisionally.</strong> The exporter registry is usable and
-provisional until 1.1, which may replace it rather than extend it; a
-plugin written against 1.0 should pin <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>, and in
-1.0 no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>
+provisional until 1.1. Version 1.1 may replace it rather than extend
+it. A plugin written against 1.0 should pin <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>.
+In 1.0, no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>
 (<a class="reference internal" href="#the-exporter-registry-provisional-until-1-1">The exporter registry</a>).</p></li>
 </ul>
 </section>
@@ -532,26 +533,26 @@ plugin written against 1.0 should pin <code class="docutils literal notranslate"
 <code class="docutils literal notranslate"><span class="pre">isocenter.Equipment</span></code>, <code class="docutils literal notranslate"><span class="pre">isocenter.RedactionError</span></code>,
 <code class="docutils literal notranslate"><span class="pre">isocenter.ExportError</span></code> — the five names in <code class="docutils literal notranslate"><span class="pre">__all__</span></code> — and
 <code class="docutils literal notranslate"><span class="pre">isocenter.__version__</span></code>.</p>
-<p><strong><code class="docutils literal notranslate"><span class="pre">Session</span></code> construction and lifetime.</strong> <code class="docutils literal notranslate"><span class="pre">Session(persistence_file=None)</span></code>,
-<code class="docutils literal notranslate"><span class="pre">None</span></code> meaning <code class="docutils literal notranslate"><span class="pre">ISOCENTER_DB_PATH</span></code> then <code class="docutils literal notranslate"><span class="pre">isocenter.db</span></code>; <code class="docutils literal notranslate"><span class="pre">&quot;:memory:&quot;</span></code> is
-accepted. <code class="docutils literal notranslate"><span class="pre">with</span> <span class="pre">Session(...)</span> <span class="pre">as</span> <span class="pre">s:</span></code> (<code class="docutils literal notranslate"><span class="pre">__enter__</span></code> returns the session,
-<code class="docutils literal notranslate"><span class="pre">__exit__</span></code> closes); <code class="docutils literal notranslate"><span class="pre">close()</span></code> is idempotent and releases the executor
-and both threads. When a file named <code class="docutils literal notranslate"><span class="pre">isocenter.key</span></code> exists in the
-current working directory at construction, <code class="docutils literal notranslate"><span class="pre">Session()</span></code> calls
-<code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code> with it, resolved to an absolute
-path then, so a later change of directory does not move it; a key
-beside the store in another directory is not looked for. With no such
-file, reversible anonymization stays off and no key is created. A
-malformed one makes <code class="docutils literal notranslate"><span class="pre">Session()</span></code> raise its <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. So does anything
-at that path that is not a regular file, such as a directory. The
-message names the path, and the threads the session had started are
-released first. Keeping the key
-in the directory you run from, beside the store and the exported data,
-is not advised: whoever holds the key and an export can read the
-identities it carries.</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">Session</span></code> construction and lifetime.</strong> <code class="docutils literal notranslate"><span class="pre">Session(persistence_file=None)</span></code>.
+<code class="docutils literal notranslate"><span class="pre">None</span></code> means <code class="docutils literal notranslate"><span class="pre">ISOCENTER_DB_PATH</span></code>, then <code class="docutils literal notranslate"><span class="pre">isocenter.db</span></code>. <code class="docutils literal notranslate"><span class="pre">Session()</span></code> also
+accepts <code class="docutils literal notranslate"><span class="pre">&quot;:memory:&quot;</span></code>. <code class="docutils literal notranslate"><span class="pre">with</span> <span class="pre">Session(...)</span> <span class="pre">as</span> <span class="pre">s:</span></code> (<code class="docutils literal notranslate"><span class="pre">__enter__</span></code> returns the
+session, and <code class="docutils literal notranslate"><span class="pre">__exit__</span></code> closes it). <code class="docutils literal notranslate"><span class="pre">close()</span></code> is idempotent and releases
+the executor and both threads. When a file named <code class="docutils literal notranslate"><span class="pre">isocenter.key</span></code> exists
+in the current working directory at construction, <code class="docutils literal notranslate"><span class="pre">Session()</span></code> calls
+<code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code> with it. <code class="docutils literal notranslate"><span class="pre">Session()</span></code> resolves that
+path to an absolute path at construction, so a later change of
+directory does not move it. <code class="docutils literal notranslate"><span class="pre">Session()</span></code> does not look for a key beside
+the store in another directory. With no such file, reversible
+anonymization stays off and <code class="docutils literal notranslate"><span class="pre">Session()</span></code> creates no key. A malformed one
+makes <code class="docutils literal notranslate"><span class="pre">Session()</span></code> raise its <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. So does anything at that path
+that is not a regular file, such as a directory. The message names the
+path. Before <code class="docutils literal notranslate"><span class="pre">Session()</span></code> raises, it releases the threads that the
+session started. Keeping the key in the directory you run from, beside
+the store and the exported data, is not advised. Whoever holds the key
+and an export can read the identities that the export carries.</p>
 <p><strong><code class="docutils literal notranslate"><span class="pre">Session</span></code> methods — all 28 public names, with their parameters.</strong>
-<code class="docutils literal notranslate"><span class="pre">self</span></code> is omitted, <code class="docutils literal notranslate"><span class="pre">*</span></code> marks the keyword-only boundary, and a parameter
-moved across it is a different call.</p>
+The table omits <code class="docutils literal notranslate"><span class="pre">self</span></code>. <code class="docutils literal notranslate"><span class="pre">*</span></code> marks the keyword-only boundary, and a
+parameter moved across it is a different call.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Method</p></th>
@@ -646,10 +647,10 @@ moved across it is a different call.</p>
 </tbody>
 </table>
 </div>
-<p><strong>Other frozen callables, with their parameters.</strong> Spelled as the
-Session table spells them, and each qualified by the class (or module)
-that defines it. The classes’ fields and the rules each method follows
-are in the paragraphs below.</p>
+<p><strong>Other frozen callables, with their parameters.</strong> This table spells
+them as the Session table does, and qualifies each by the class (or
+module) that defines it. The paragraphs below give the classes’ fields
+and the rules that each method follows.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Callable</p></th>
@@ -724,366 +725,402 @@ are in the paragraphs below.</p>
 </table>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">DiscoveryResult.filter(predicate=)</span></code> takes either a minimum confidence
-(a number, <code class="docutils literal notranslate"><span class="pre">0.0</span></code> by default) or a callable given each candidate, and
-keeps what passes; both forms are frozen.</p>
+(a number, <code class="docutils literal notranslate"><span class="pre">0.0</span></code> by default) or a callable that is given each
+candidate, and keeps what passes. Both forms are frozen.</p>
 <p><strong>Module-level names.</strong> <code class="docutils literal notranslate"><span class="pre">entities.NO_PATIENT_ID_PREFIX</span></code>
 (<code class="docutils literal notranslate"><span class="pre">&quot;\\no-patient-id\\&quot;</span></code>) and <code class="docutils literal notranslate"><span class="pre">entities.is_synthetic_patient_id()</span></code>: the
 key a subject with no Patient ID is held under, and the test for it
 (below).</p>
-<p><code class="docutils literal notranslate"><span class="pre">export(format=)</span></code> accepts <code class="docutils literal notranslate"><span class="pre">'dicom'</span></code> and <code class="docutils literal notranslate"><span class="pre">'wfdb'</span></code>, and the option names
-are frozen with the method. The <code class="docutils literal notranslate"><span class="pre">dicom</span></code> options are
-<code class="docutils literal notranslate"><span class="pre">use_compression=True,</span> <span class="pre">check_burned_in=False,</span> <span class="pre">check_reversibility=True,</span> <span class="pre">patient_ids=None,</span> <span class="pre">show_progress=True,</span> <span class="pre">subset=None,</span> <span class="pre">verify_readback=False</span></code>; the <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> options are
-<code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> and <code class="docutils literal notranslate"><span class="pre">include_annotation_text</span></code>. An option name the format
-does not recognise raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, and nothing is written. The two
-formats do not accept the same options, so a caller forwarding one
-options dict to both must split it per format.</p>
+<p><code class="docutils literal notranslate"><span class="pre">export(format=)</span></code> accepts <code class="docutils literal notranslate"><span class="pre">'dicom'</span></code> and <code class="docutils literal notranslate"><span class="pre">'wfdb'</span></code>. The option names are
+frozen with the method. The <code class="docutils literal notranslate"><span class="pre">dicom</span></code> options are
+<code class="docutils literal notranslate"><span class="pre">use_compression=True,</span> <span class="pre">check_burned_in=False,</span> <span class="pre">check_reversibility=True,</span> <span class="pre">patient_ids=None,</span> <span class="pre">show_progress=True,</span> <span class="pre">subset=None,</span> <span class="pre">verify_readback=False</span></code>. The <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> options are
+<code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> and <code class="docutils literal notranslate"><span class="pre">include_annotation_text</span></code>. An option name that the
+format does not recognise raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, and <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes
+nothing. The two formats do not accept the same options. So a caller
+that forwards one options dict to both must split it per format.</p>
 <p><code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> means the same thing on every method that takes it:
 <code class="docutils literal notranslate"><span class="pre">export</span></code> (both formats), <code class="docutils literal notranslate"><span class="pre">get_cohort_report</span></code>, <code class="docutils literal notranslate"><span class="pre">export_dataframe</span></code> and
 <code class="docutils literal notranslate"><span class="pre">lock_identities_batch</span></code>. <code class="docutils literal notranslate"><span class="pre">lock_identities</span></code> sends any argument that is
 not a <code class="docutils literal notranslate"><span class="pre">str</span></code> to <code class="docutils literal notranslate"><span class="pre">lock_identities_batch</span></code>. Only <code class="docutils literal notranslate"><span class="pre">None</span></code> means every patient,
 and neither lock method accepts <code class="docutils literal notranslate"><span class="pre">None</span></code>. An empty iterable selects
-nobody, and an iterator is read once. A bare <code class="docutils literal notranslate"><span class="pre">str</span></code>, a bytes-like value,
-a non-iterable, or an element that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>
-before anything is written, with one exception: the two lock methods
-also take a <code class="docutils literal notranslate"><span class="pre">PhiReport</span></code>, and <code class="docutils literal notranslate"><span class="pre">PhiFinding</span></code> elements mixed with IDs, and
-lock the patients those findings name. The report <code class="docutils literal notranslate"><span class="pre">audit()</span></code> returns
-locks every patient with at least one finding, by the Patient ID the
-finding holds. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> has replaced a patient’s ID, the
-report no longer names that patient; lock before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>. A
-report with no findings locks nobody. A patient is selected by its <code class="docutils literal notranslate"><span class="pre">patient_id</span></code>
-exactly: after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> that is its replacement Patient ID, and a
-subject whose files carried no Patient ID is selected by the key
-<code class="docutils literal notranslate"><span class="pre">get_cohort_report</span></code> shows in its <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> column, not by <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>. An ID
-that no patient in the session holds selects nothing and is counted,
-never named. <code class="docutils literal notranslate"><span class="pre">export</span></code>, <code class="docutils literal notranslate"><span class="pre">get_cohort_report</span></code> and <code class="docutils literal notranslate"><span class="pre">export_dataframe</span></code> log
-one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line for it. <code class="docutils literal notranslate"><span class="pre">export</span></code> also writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row,
-which grades the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. The lock methods log the
-count as an error.</p>
+nobody, and the method reads an iterator once. A bare <code class="docutils literal notranslate"><span class="pre">str</span></code>, a
+bytes-like value, a non-iterable, or an element that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code>
+raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> before anything is written, with one exception. The
+two lock methods also take a <code class="docutils literal notranslate"><span class="pre">PhiReport</span></code>, and <code class="docutils literal notranslate"><span class="pre">PhiFinding</span></code> elements
+mixed with IDs, and lock the patients those findings name.</p>
+<p>The report that <code class="docutils literal notranslate"><span class="pre">audit()</span></code> returns locks every patient with at least one
+finding, by the Patient ID the finding holds. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> has
+replaced a patient’s ID, the report no longer names that patient. Lock
+before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>. A report with no findings locks nobody.</p>
+<p>A patient is selected by its <code class="docutils literal notranslate"><span class="pre">patient_id</span></code>, exactly. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>,
+that is its replacement Patient ID. A subject whose files carried no
+Patient ID is selected by the key that <code class="docutils literal notranslate"><span class="pre">get_cohort_report</span></code> shows in its
+<code class="docutils literal notranslate"><span class="pre">PatientID</span></code> column, not by <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>.</p>
+<p>An ID that no patient in the session holds selects nothing and is
+counted, never named. <code class="docutils literal notranslate"><span class="pre">export</span></code>, <code class="docutils literal notranslate"><span class="pre">get_cohort_report</span></code> and
+<code class="docutils literal notranslate"><span class="pre">export_dataframe</span></code> log one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line for it. <code class="docutils literal notranslate"><span class="pre">export</span></code> also writes
+one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, which grades the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. The
+lock methods log the count as an error.</p>
 <p><code class="docutils literal notranslate"><span class="pre">export(subset=)</span></code> (the <code class="docutils literal notranslate"><span class="pre">dicom</span></code> format) takes a pandas query string, a
-DataFrame, or any other iterable of UIDs, and reads that iterable the
-way <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> is read: only <code class="docutils literal notranslate"><span class="pre">None</span></code> means no filter, an empty one
-selects nothing, and a bytes-like value, a non-iterable, or an element
-that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> before anything is written. A
-DataFrame is read by the first of <code class="docutils literal notranslate"><span class="pre">SOPInstanceUID</span></code>,
-<code class="docutils literal notranslate"><span class="pre">SeriesInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">StudyInstanceUID</span></code> and <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> it carries,
-and one with none of them raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. A UID matches at any of
-the four levels. A Study, Series or SOP Instance UID taken before
-<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> or <code class="docutils literal notranslate"><span class="pre">redact()</span></code> still names its entity, except a SOP
-Instance UID that is none of these three: the one the first move of the
-instance’s UID (by <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code> or
-<code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code>) left, which is the ingested one unless
-<code class="docutils literal notranslate"><span class="pre">sop_instance_uid</span></code> was assigned before it; that UID’s <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>
-replacement; and the current one. A UID taken between a first redaction
-and a <code class="docutils literal notranslate"><span class="pre">force=True</span></code> second, or between two <code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code>
-calls, is such a UID. A value that names nothing in the
-session is counted, never named, in one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line and one
-<code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, which grades the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p>
+DataFrame, or any other iterable of UIDs. It reads that iterable as
+<code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> is read. Only <code class="docutils literal notranslate"><span class="pre">None</span></code> means no filter, and an empty
+iterable selects nothing. A bytes-like value, a non-iterable, or an
+element that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> before anything is
+written. A DataFrame is read by the first of <code class="docutils literal notranslate"><span class="pre">SOPInstanceUID</span></code>,
+<code class="docutils literal notranslate"><span class="pre">SeriesInstanceUID</span></code>, <code class="docutils literal notranslate"><span class="pre">StudyInstanceUID</span></code> and <code class="docutils literal notranslate"><span class="pre">PatientID</span></code> that it
+carries. A DataFrame with none of them raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>.</p>
+<p>A UID matches at any of the four levels. A Study, Series or SOP
+Instance UID taken before <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> or <code class="docutils literal notranslate"><span class="pre">redact()</span></code> still names its
+entity, except a SOP Instance UID that is none of these three. The
+first is the UID that the first move of the instance’s UID (by
+<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code> or <code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code>) left, which
+is the ingested one unless <code class="docutils literal notranslate"><span class="pre">sop_instance_uid</span></code> was assigned before it.
+The second is that UID’s <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> replacement. The third is the
+current one. A UID taken between a first redaction and a <code class="docutils literal notranslate"><span class="pre">force=True</span></code>
+second, or between two <code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code> calls, is such a
+UID. A value that names nothing in the session is counted, never
+named, in one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> line and one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, which grades
+the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p>
 <p><code class="docutils literal notranslate"><span class="pre">generate_report(format=)</span></code> accepts <code class="docutils literal notranslate"><span class="pre">'markdown'</span></code> only, and
-<code class="docutils literal notranslate"><span class="pre">generate_manifest(format=)</span></code> <code class="docutils literal notranslate"><span class="pre">'html'</span></code> and <code class="docutils literal notranslate"><span class="pre">'json'</span></code>; any other spelling
-raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, a case variant included. On
+<code class="docutils literal notranslate"><span class="pre">generate_manifest(format=)</span></code> accepts <code class="docutils literal notranslate"><span class="pre">'html'</span></code> and <code class="docutils literal notranslate"><span class="pre">'json'</span></code>. Any other
+spelling raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, a case variant included. On
 <code class="docutils literal notranslate"><span class="pre">lock_identities</span></code> and <code class="docutils literal notranslate"><span class="pre">lock_identities_batch</span></code>, <code class="docutils literal notranslate"><span class="pre">persist</span></code> and <code class="docutils literal notranslate"><span class="pre">verbose</span></code>
 reach every patient.</p>
 <p><strong><code class="docutils literal notranslate"><span class="pre">Session</span></code> attributes.</strong> <code class="docutils literal notranslate"><span class="pre">store</span></code> (a <code class="docutils literal notranslate"><span class="pre">DicomStore</span></code> whose <code class="docutils literal notranslate"><span class="pre">.patients</span></code> is
 the <code class="docutils literal notranslate"><span class="pre">List[Patient]</span></code> the quickstart indexes), <code class="docutils literal notranslate"><span class="pre">configuration</span></code> (an
-<code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration</span></code>), <code class="docutils literal notranslate"><span class="pre">persistence_file</span></code>. <code class="docutils literal notranslate"><span class="pre">audit()</span></code>, <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>
-and <code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code> merge two patients that end up with the
-same Patient ID into the one that was in the session first, removing the
-other from <code class="docutils literal notranslate"><span class="pre">store.patients</span></code>; <code class="docutils literal notranslate"><span class="pre">audit()</span></code> runs inside
-<code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code>, so that merges too.</p>
-<p><strong>Shapes the frozen methods return</strong> (attribute names; each is
-rendered on <a class="reference internal" href="../results/"><span class="std std-doc">Results and errors</span></a>, except <code class="docutils literal notranslate"><span class="pre">DiscoveryResult</span></code>,
-on <a class="reference internal" href="../ocr/"><span class="std std-doc">OCR API</span></a>).
-<code class="docutils literal notranslate"><span class="pre">IngestSummary(ingested,</span> <span class="pre">failures,</span> <span class="pre">declined,</span> <span class="pre">skipped,</span> <span class="pre">hidden)</span></code> plus <code class="docutils literal notranslate"><span class="pre">failed</span></code>;
-<code class="docutils literal notranslate"><span class="pre">ExportSummary(written_uids,</span> <span class="pre">failures)</span></code> plus <code class="docutils literal notranslate"><span class="pre">written</span></code>, <code class="docutils literal notranslate"><span class="pre">failed</span></code>;
+<code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration</span></code>), <code class="docutils literal notranslate"><span class="pre">persistence_file</span></code>. When two patients get the
+same Patient ID, <code class="docutils literal notranslate"><span class="pre">audit()</span></code>, <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code> merge them into the one that was in the
+session first. They remove the other from <code class="docutils literal notranslate"><span class="pre">store.patients</span></code>. <code class="docutils literal notranslate"><span class="pre">audit()</span></code>
+runs inside <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code>, so that call merges too.</p>
+<p><strong>Shapes the frozen methods return.</strong> These are attribute names.
+<a class="reference internal" href="../results/"><span class="std std-doc">Results and errors</span></a> renders each one, except
+<code class="docutils literal notranslate"><span class="pre">DiscoveryResult</span></code>, which is on <a class="reference internal" href="../ocr/"><span class="std std-doc">OCR API</span></a>.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">IngestSummary(ingested,</span> <span class="pre">failures,</span> <span class="pre">declined,</span> <span class="pre">skipped,</span> <span class="pre">hidden)</span></code> plus
+<code class="docutils literal notranslate"><span class="pre">failed</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ExportSummary(written_uids,</span> <span class="pre">failures)</span></code> plus <code class="docutils literal notranslate"><span class="pre">written</span></code> and <code class="docutils literal notranslate"><span class="pre">failed</span></code>.
 <code class="docutils literal notranslate"><span class="pre">written_uids</span></code> holds the SOP Instance UID of each written instance and
-nothing else: an instance with no UID is not written and is in
-<code class="docutils literal notranslate"><span class="pre">failures</span></code>, and so is an instance whose file another instance’s write
-replaced because the export volume treats their two file names as one
-(<a class="reference internal" href="../../export-output/#where-files-land"><span class="std std-ref">Export output</span></a>);
-<code class="docutils literal notranslate"><span class="pre">PhiReport(findings,</span> <span class="pre">failures)</span></code> with <code class="docutils literal notranslate"><span class="pre">__len__</span></code>, <code class="docutils literal notranslate"><span class="pre">__iter__</span></code>, <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code>,
-<code class="docutils literal notranslate"><span class="pre">to_dataframe()</span></code>; <code class="docutils literal notranslate"><span class="pre">PhiFinding(entity_uid,</span> <span class="pre">entity_type,</span> <span class="pre">field_name,</span> <span class="pre">value,</span> <span class="pre">reason,</span> <span class="pre">tag,</span> <span class="pre">patient_id,</span> <span class="pre">entity,</span> <span class="pre">remediation_proposal,</span> <span class="pre">metadata,</span> <span class="pre">entity_path)</span></code>; <code class="docutils literal notranslate"><span class="pre">DiscoveryResult.filter(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">.to_zones()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">.to_dataframe()</span></code>; <code class="docutils literal notranslate"><span class="pre">LockingResult</span></code> (a <code class="docutils literal notranslate"><span class="pre">list</span></code> of <code class="docutils literal notranslate"><span class="pre">Instance</span></code>);
-<code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code> → <code class="docutils literal notranslate"><span class="pre">Dict[str,</span> <span class="pre">Dict[str,</span> <span class="pre">Any]]</span></code>, mapping the
-SOP Instance UID of each instance that carries an identity token of ours
-to a copy of the values that token holds, in graph order, from both
-<code class="docutils literal notranslate"><span class="pre">restore=False</span></code> and <code class="docutils literal notranslate"><span class="pre">restore=True</span></code>;
-<code class="docutils literal notranslate"><span class="pre">export(format='dicom')</span></code> → <code class="docutils literal notranslate"><span class="pre">ExportSummary</span></code>, and
-<code class="docutils literal notranslate"><span class="pre">export(format='wfdb')</span></code> → <code class="docutils literal notranslate"><span class="pre">List[str]</span></code>, the paths written, empty
-when nothing was attempted;
-<code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> → <code class="docutils literal notranslate"><span class="pre">pandas.DataFrame</span></code>; <code class="docutils literal notranslate"><span class="pre">phi_status_summary()</span></code> →
-<code class="docutils literal notranslate"><span class="pre">Dict[str,</span> <span class="pre">Counter]</span></code>; <code class="docutils literal notranslate"><span class="pre">redact()</span></code>, <code class="docutils literal notranslate"><span class="pre">reconcile_private_tags()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">auto_remediate_config()</span></code> → <code class="docutils literal notranslate"><span class="pre">int</span></code>.</p>
-<p><code class="docutils literal notranslate"><span class="pre">PhiFinding.entity</span></code>, on the findings <code class="docutils literal notranslate"><span class="pre">audit()</span></code> and
-<code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> return, is the live object in <code class="docutils literal notranslate"><span class="pre">session.store</span></code>
-that the finding names — the same object whether the pass ran in
-threads or in processes — or <code class="docutils literal notranslate"><span class="pre">None</span></code> when that object cannot be found;
-it is never a worker’s copy. The object is found by its UID.
-<code class="docutils literal notranslate"><span class="pre">ingest()</span></code> does not admit a second instance with an SOP Instance UID the
-graph already holds, so only a graph built or edited by hand can carry
-one UID on more than one instance, and findings on such a UID all
+nothing else. An instance with no UID is not written and is in
+<code class="docutils literal notranslate"><span class="pre">failures</span></code>. So is an instance whose file another instance’s write
+replaced, because the export volume treats their two file names as one
+(<a class="reference internal" href="../../export-output/#where-files-land"><span class="std std-ref">Export output</span></a>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PhiReport(findings,</span> <span class="pre">failures)</span></code> with <code class="docutils literal notranslate"><span class="pre">__len__</span></code>, <code class="docutils literal notranslate"><span class="pre">__iter__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">__getitem__</span></code> and <code class="docutils literal notranslate"><span class="pre">to_dataframe()</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PhiFinding(entity_uid,</span> <span class="pre">entity_type,</span> <span class="pre">field_name,</span> <span class="pre">value,</span> <span class="pre">reason,</span> <span class="pre">tag,</span> <span class="pre">patient_id,</span> <span class="pre">entity,</span> <span class="pre">remediation_proposal,</span> <span class="pre">metadata,</span> <span class="pre">entity_path)</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DiscoveryResult.filter(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">.to_zones()</span></code> and <code class="docutils literal notranslate"><span class="pre">.to_dataframe()</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LockingResult</span></code> (a <code class="docutils literal notranslate"><span class="pre">list</span></code> of <code class="docutils literal notranslate"><span class="pre">Instance</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code> → <code class="docutils literal notranslate"><span class="pre">Dict[str,</span> <span class="pre">Dict[str,</span> <span class="pre">Any]]</span></code>. It maps
+the SOP Instance UID of each instance that carries an identity token
+of ours to a copy of the values that token holds, in graph order. Both
+<code class="docutils literal notranslate"><span class="pre">restore=False</span></code> and <code class="docutils literal notranslate"><span class="pre">restore=True</span></code> return it.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export(format='dicom')</span></code> → <code class="docutils literal notranslate"><span class="pre">ExportSummary</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export(format='wfdb')</span></code> → <code class="docutils literal notranslate"><span class="pre">List[str]</span></code>, the paths written, empty
+when nothing was attempted.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_cohort_report()</span></code> → <code class="docutils literal notranslate"><span class="pre">pandas.DataFrame</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">phi_status_summary()</span></code> → <code class="docutils literal notranslate"><span class="pre">Dict[str,</span> <span class="pre">Counter]</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">redact()</span></code>, <code class="docutils literal notranslate"><span class="pre">reconcile_private_tags()</span></code> and <code class="docutils literal notranslate"><span class="pre">auto_remediate_config()</span></code>
+→ <code class="docutils literal notranslate"><span class="pre">int</span></code>.</p></li>
+</ul>
+<p>On the findings that <code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> return,
+<code class="docutils literal notranslate"><span class="pre">PhiFinding.entity</span></code> is the live object in <code class="docutils literal notranslate"><span class="pre">session.store</span></code> that the
+finding names. It is the same object whether the pass ran in threads or
+in processes. When that object cannot be found, <code class="docutils literal notranslate"><span class="pre">PhiFinding.entity</span></code> is
+<code class="docutils literal notranslate"><span class="pre">None</span></code>. <code class="docutils literal notranslate"><span class="pre">PhiFinding.entity</span></code> is never a worker’s copy. The object is
+found by its UID.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ingest()</span></code> does not admit a second instance with an SOP Instance UID
+that the graph already holds. So only a graph built or edited by hand
+can carry one UID on more than one instance. Findings on such a UID all
 resolve to a single one of those instances.</p>
-<p><code class="docutils literal notranslate"><span class="pre">anonymize(findings)</span></code> never writes to an object outside <code class="docutils literal notranslate"><span class="pre">session.store</span></code>
-and does not modify the findings passed. A finding whose <code class="docutils literal notranslate"><span class="pre">entity</span></code> is
-itself in the graph is acted on as it is; any other is resolved against
-the live graph at its <code class="docutils literal notranslate"><span class="pre">entity_uid</span></code> and <code class="docutils literal notranslate"><span class="pre">entity_path</span></code> and acts on the
+<p><code class="docutils literal notranslate"><span class="pre">anonymize(findings)</span></code> never writes to an object outside <code class="docutils literal notranslate"><span class="pre">session.store</span></code>,
+and does not modify the findings passed to it. When a finding’s
+<code class="docutils literal notranslate"><span class="pre">entity</span></code> is itself in the graph, <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> acts on that finding as
+it is. <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> resolves any other finding against the live graph
+at its <code class="docutils literal notranslate"><span class="pre">entity_uid</span></code> and <code class="docutils literal notranslate"><span class="pre">entity_path</span></code>. That finding then acts on the
 object found there, or declines when the address names no single
-object. A removal of a value already gone from the object at the
-finding’s address is satisfied. A Patient ID is written, and a date
-shifted, only with a value that belongs to the live patient holding it.</p>
-<p><code class="docutils literal notranslate"><span class="pre">PhiReport.failures</span></code> is a list of <code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">reason)</span></code>, one per
-instance <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> could not read in full, and is always a
-list; <code class="docutils literal notranslate"><span class="pre">audit()</span></code>’s is always empty, because a failure in its workers
-raises. Each instance <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> or
+object. When the value is already gone from the object at the finding’s
+address, a removal is satisfied. <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> writes a Patient ID, and
+shifts a date, only with a value that belongs to the live patient
+holding it.</p>
+<p><code class="docutils literal notranslate"><span class="pre">PhiReport.failures</span></code> is always a list. It holds one
+<code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">reason)</span></code> for each instance that <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code>
+could not read in full. The <code class="docutils literal notranslate"><span class="pre">failures</span></code> list of the report from
+<code class="docutils literal notranslate"><span class="pre">audit()</span></code> is always empty, because a failure in its workers raises.
+Each instance that <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> or
 <code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code> could not read also writes one audit
-warning naming it and the reason, before any raise, so a run with a
-scan failure does not grade as passing.</p>
+warning, before any raise. The warning names the instance and the
+reason. So a run with a scan failure does not grade as passing.</p>
 <p><strong>Entities, as reached from <code class="docutils literal notranslate"><span class="pre">session.store</span></code>.</strong> The graph is <code class="docutils literal notranslate"><span class="pre">Patient</span></code>
-→ <code class="docutils literal notranslate"><span class="pre">Study</span></code> → <code class="docutils literal notranslate"><span class="pre">Series</span></code> → <code class="docutils literal notranslate"><span class="pre">Instance</span></code>. Fields, in dataclass order (which is
-the positional constructor order, except where marked <code class="docutils literal notranslate"><span class="pre">init=False</span></code>):
+→ <code class="docutils literal notranslate"><span class="pre">Study</span></code> → <code class="docutils literal notranslate"><span class="pre">Series</span></code> → <code class="docutils literal notranslate"><span class="pre">Instance</span></code>. The fields follow, in dataclass
+order. That is the positional constructor order, except where a field
+is marked <code class="docutils literal notranslate"><span class="pre">init=False</span></code>.
 <code class="docutils literal notranslate"><span class="pre">Patient</span></code>: <code class="docutils literal notranslate"><span class="pre">patient_id,</span> <span class="pre">patient_name,</span> <span class="pre">studies</span></code>. <code class="docutils literal notranslate"><span class="pre">Study</span></code>:
 <code class="docutils literal notranslate"><span class="pre">study_instance_uid,</span> <span class="pre">study_date,</span> <span class="pre">series,</span> <span class="pre">date_shifted,</span> <span class="pre">study_time</span></code>.
 <code class="docutils literal notranslate"><span class="pre">Series</span></code>: <code class="docutils literal notranslate"><span class="pre">series_instance_uid,</span> <span class="pre">modality,</span> <span class="pre">series_number,</span> <span class="pre">equipment,</span> <span class="pre">instances</span></code>. <code class="docutils literal notranslate"><span class="pre">Instance</span></code>: <code class="docutils literal notranslate"><span class="pre">attributes,</span> <span class="pre">sequences,</span> <span class="pre">attribute_vrs</span></code> (inherited
 from <code class="docutils literal notranslate"><span class="pre">DicomItem</span></code>, <code class="docutils literal notranslate"><span class="pre">init=False</span></code>), then <code class="docutils literal notranslate"><span class="pre">sop_instance_uid,</span> <span class="pre">sop_class_uid,</span> <span class="pre">instance_number,</span> <span class="pre">file_path,</span> <span class="pre">source_path</span></code> (<code class="docutils literal notranslate"><span class="pre">pixel_array</span></code> and
 <code class="docutils literal notranslate"><span class="pre">waveform_array</span></code> follow and are tier 2). <code class="docutils literal notranslate"><span class="pre">Instance</span></code> carried a
-<code class="docutils literal notranslate"><span class="pre">date_shifted</span></code> field until 0.9.6; it is gone, and reading it raises
-<code class="docutils literal notranslate"><span class="pre">AttributeError</span></code>. <code class="docutils literal notranslate"><span class="pre">Equipment</span></code>: <code class="docutils literal notranslate"><span class="pre">manufacturer,</span> <span class="pre">model_name,</span> <span class="pre">device_serial_number</span></code>.</p>
+<code class="docutils literal notranslate"><span class="pre">date_shifted</span></code> field until 0.9.6. The field is gone, and reading it
+raises <code class="docutils literal notranslate"><span class="pre">AttributeError</span></code>. <code class="docutils literal notranslate"><span class="pre">Equipment</span></code>: <code class="docutils literal notranslate"><span class="pre">manufacturer,</span> <span class="pre">model_name,</span> <span class="pre">device_serial_number</span></code>.</p>
 <p>Assigning <code class="docutils literal notranslate"><span class="pre">Instance.sop_instance_uid</span></code> a value it does not already hold
 also sets <code class="docutils literal notranslate"><span class="pre">attributes[&quot;0008,0018&quot;]</span></code> to it and marks the instance edited,
 once. So the export writes that instance under the assigned UID: in the
-file’s name, in <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> and in Media Storage SOP Instance UID. An
-instance assigned a UID that cannot name a file (<code class="docutils literal notranslate"><span class="pre">''</span></code> among them) is
-refused at export by the file-name rule and not written, as any such
-instance is: <code class="docutils literal notranslate"><span class="pre">''</span></code> is one of <code class="docutils literal notranslate"><span class="pre">ExportSummary.failures</span></code>, keyed <code class="docutils literal notranslate"><span class="pre">UNKNOWN</span></code>,
-with one <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row. Assigning the value already held
-changes nothing, so an element written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> is not
-brought back by it (#936).</p>
+file’s name, in <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> and in Media Storage SOP Instance UID.
+Some UIDs cannot name a file, and <code class="docutils literal notranslate"><span class="pre">''</span></code> is one of them. At export, the
+file-name rule refuses an instance assigned such a UID, as it refuses
+any such instance, and the export does not write it. An instance with
+the UID <code class="docutils literal notranslate"><span class="pre">''</span></code> is in <code class="docutils literal notranslate"><span class="pre">ExportSummary.failures</span></code>, keyed <code class="docutils literal notranslate"><span class="pre">UNKNOWN</span></code>, with one
+<code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row. Assigning the value that the field already holds
+changes nothing. So that assignment does not restore an element
+written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> (#936).</p>
 <p><code class="docutils literal notranslate"><span class="pre">Series.series_number</span></code> and <code class="docutils literal notranslate"><span class="pre">Series.modality</span></code> are the source’s Series
-Number and Modality as ingested, and <code class="docutils literal notranslate"><span class="pre">Instance.instance_number</span></code> the
-file’s Instance Number. None of the three is what an export writes: the
-export writes each instance’s own <code class="docutils literal notranslate"><span class="pre">(0020,0011)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0008,0060)</span></code> and
-<code class="docutils literal notranslate"><span class="pre">(0020,0013)</span></code> after the configuration’s rules, and the folder and WFDB
+Number and Modality as ingested. <code class="docutils literal notranslate"><span class="pre">Instance.instance_number</span></code> is the
+file’s Instance Number. An export does not write any of the three. It
+writes each instance’s own <code class="docutils literal notranslate"><span class="pre">(0020,0011)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0008,0060)</span></code> and
+<code class="docutils literal notranslate"><span class="pre">(0020,0013)</span></code> after the configuration’s rules. The folder and WFDB
 record names read the same elements (#869). Assigning
 <code class="docutils literal notranslate"><span class="pre">Series.series_number</span></code> changes no exported file and does not mark the
 series’ instances edited.</p>
 <p>A subject whose files carry no Patient ID (absent, empty or blank) is a
-<code class="docutils literal notranslate"><span class="pre">Patient</span></code> per study, whose <code class="docutils literal notranslate"><span class="pre">patient_id</span></code> is
+<code class="docutils literal notranslate"><span class="pre">Patient</span></code> per study. Its <code class="docutils literal notranslate"><span class="pre">patient_id</span></code> is
 <code class="docutils literal notranslate"><span class="pre">entities.NO_PATIENT_ID_PREFIX</span> <span class="pre">+</span> <span class="pre">&lt;its</span> <span class="pre">source</span> <span class="pre">Study</span> <span class="pre">Instance</span> <span class="pre">UID&gt;</span></code>
-(<code class="docutils literal notranslate"><span class="pre">&quot;\\no-patient-id\\1.2.3...&quot;</span></code>); <code class="docutils literal notranslate"><span class="pre">entities.is_synthetic_patient_id()</span></code>
-is the test for it. No single-valued Patient ID read from a file
-can take that form, because the backslash is DICOM’s value delimiter. The
-key is never exported: such a subject’s exported Patient ID is empty
-under <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> and <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> alike, and its folder is
+(<code class="docutils literal notranslate"><span class="pre">&quot;\\no-patient-id\\1.2.3...&quot;</span></code>). <code class="docutils literal notranslate"><span class="pre">entities.is_synthetic_patient_id()</span></code>
+is the test for this key. No single-valued Patient ID read from a file
+can take that form, because the backslash is DICOM’s value delimiter.
+The export never writes the key. Such a subject’s exported Patient ID
+is empty under <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> and <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> alike, and its folder is
 <code class="docutils literal notranslate"><span class="pre">Subject_UnknownPatient</span></code>.</p>
 <p><code class="docutils literal notranslate"><span class="pre">attributes</span></code> is keyed by lowercase <code class="docutils literal notranslate"><span class="pre">&quot;gggg,eeee&quot;</span></code> strings. On <code class="docutils literal notranslate"><span class="pre">Instance</span></code>:
 <code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_waveform_data()</span></code>, and the
-two-names-two-behaviours rule between <code class="docutils literal notranslate"><span class="pre">unload</span></code> and <code class="docutils literal notranslate"><span class="pre">discard</span></code> (<code class="docutils literal notranslate"><span class="pre">unload</span></code>
-refuses an unsaved replacement; <code class="docutils literal notranslate"><span class="pre">discard</span></code> throws it away, with the
+two-names-two-behaviours rule between <code class="docutils literal notranslate"><span class="pre">unload</span></code> and <code class="docutils literal notranslate"><span class="pre">discard</span></code>. <code class="docutils literal notranslate"><span class="pre">unload</span></code>
+refuses an unsaved replacement. <code class="docutils literal notranslate"><span class="pre">discard</span></code> throws it away, with the
 descriptors <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> wrote for it — and a <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> edit
-to any of those descriptors made since the set). On <code class="docutils literal notranslate"><span class="pre">DicomItem</span></code>:
-<code class="docutils literal notranslate"><span class="pre">set_attr()</span></code>. It stores the value it is given, except that a numpy
-bool, integer or float (a scalar or a 0-d array), and a <code class="docutils literal notranslate"><span class="pre">list</span></code> or
-<code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding one, is
-stored as the Python number it equals (<code class="docutils literal notranslate"><span class="pre">np.int64(7)</span></code> as the <code class="docutils literal notranslate"><span class="pre">int</span></code> 7), so
-<code class="docutils literal notranslate"><span class="pre">attributes[tag]</span></code> equals what was set and is not the same object. It
-raises nothing for a value the store cannot hold; the save does
-(Exceptions, below). On <code class="docutils literal notranslate"><span class="pre">Instance</span></code> it also keeps resident pixels reading as a
-pixel-descriptor edit declares, and raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for an edit that
-pixels set through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> and not yet saved cannot be read
-under. <code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reads an instance’s samples under its pixel
-descriptors — Rows, Columns, SamplesPerPixel, NumberOfFrames,
-BitsAllocated and PixelRepresentation — whether the samples are in the
-store or in the file an <code class="docutils literal notranslate"><span class="pre">Instance(file_path=...)</span></code> names, and raises
-<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> for descriptors the samples cannot be read under.</p>
+to any of those descriptors made since the set.</p>
+<p>On <code class="docutils literal notranslate"><span class="pre">DicomItem</span></code>: <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code>. It stores the value it is given, with
+one exception. It stores a numpy bool, integer or float (a scalar or a
+0-d array), and a <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding one, as the Python
+number it equals (<code class="docutils literal notranslate"><span class="pre">np.int64(7)</span></code> as the <code class="docutils literal notranslate"><span class="pre">int</span></code> 7). So <code class="docutils literal notranslate"><span class="pre">attributes[tag]</span></code>
+equals what was set and is not the same object. It raises nothing for
+a value that the store cannot hold. The save raises instead
+(Exceptions, below).</p>
+<p>On <code class="docutils literal notranslate"><span class="pre">Instance</span></code>, <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> also keeps resident pixels reading as a
+pixel-descriptor edit declares. It raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when pixels set
+through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>, and not yet saved, cannot be read under the
+edit.</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reads an instance’s samples under its pixel
+descriptors: Rows, Columns, SamplesPerPixel, NumberOfFrames,
+BitsAllocated and PixelRepresentation. It reads them this way
+whether the samples are in the store or in the file an
+<code class="docutils literal notranslate"><span class="pre">Instance(file_path=...)</span></code> names. It raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> for
+descriptors that the samples cannot be read under.</p>
 <p><strong><code class="docutils literal notranslate"><span class="pre">Builder</span></code>.</strong> The name, <code class="docutils literal notranslate"><span class="pre">Builder.start_patient()</span></code>, and <code class="docutils literal notranslate"><span class="pre">Equipment</span></code>’s
 three fields. The rest of the fluent chain is tier 2.</p>
 <p><strong><code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration</span></code></strong> as <code class="docutils literal notranslate"><span class="pre">session.configuration</span></code>: <code class="docutils literal notranslate"><span class="pre">save()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">add_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">update_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">delete_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">get_rule()</span></code>, and the fields <code class="docutils literal notranslate"><span class="pre">rules</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code>, <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code>,
-<code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code>, <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code>, <code class="docutils literal notranslate"><span class="pre">config_path</span></code>, <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>. On a session that has loaded
-no configuration, <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> is a copy of the floor policy
-(<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> with the three research defaults, below; the name it is
-held under is tier 2), and <code class="docutils literal notranslate"><span class="pre">audit()</span></code>/<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> apply it; a config
-with no <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> line, or a null one, extends it, and one with
-<code class="docutils literal notranslate"><span class="pre">privacy_profile:</span> <span class="pre">none</span></code> opts out of it. <code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code> stores lowercase
-keys (a private creator’s case kept), stores its <code class="docutils literal notranslate"><span class="pre">value</span></code> argument as the
-rule’s <code class="docutils literal notranslate"><span class="pre">value</span></code> and its <code class="docutils literal notranslate"><span class="pre">target</span></code> argument as the rule’s <code class="docutils literal notranslate"><span class="pre">target</span></code>, which
-only <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> takes and <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> requires, and raises
-<code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, leaving the policy and its file unchanged, for an unknown
-action or a rule <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse. <code class="docutils literal notranslate"><span class="pre">add_rule()</span></code> and
-<code class="docutils literal notranslate"><span class="pre">update_rule()</span></code> raise <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, leaving the rules and the file
-unchanged, for a machine rule <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse. The four
-methods that change the configuration write <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when
-<code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is true (default false). With auto-save on, a change whose
-write fails is undone and the error raised. <code class="docutils literal notranslate"><span class="pre">save()</span></code> raises
-<code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when <code class="docutils literal notranslate"><span class="pre">config_path</span></code> is unset, raises the error of a failed
-write, and writes the profile by name with only the <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> that
-differ from it, never the profile’s rules. A file <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes loads
-to the configuration it was written from. A built-in
-profile’s name is pinned to the PS3.15 edition its table was taken from,
-and what a pinned name contains is frozen: <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> holds the rules
-1.0 shipped under it in every 1.x. A bare <code class="docutils literal notranslate"><span class="pre">basic</span></code> means <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>,
-and the floor policy is <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> with the three research defaults,
-in every 1.x. A later edition arrives in a minor release as a new name,
-never as a new meaning for an existing one. The one exception: a 1.x may
-correct a row of <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> that the published 2026c standard shows
-was transcribed wrongly, as a Breaking changelog entry quoting the
-standard’s row. <code class="docutils literal notranslate"><span class="pre">configuration.privacy_profile</span></code> holds the pinned name of
-the built-in profile that was loaded, even when the file said <code class="docutils literal notranslate"><span class="pre">basic</span></code>.</p>
-<p><strong>Exceptions.</strong> Each is raised before any work is done unless it says
-otherwise.</p>
-<ul class="simple">
+<code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code>, <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code>, <code class="docutils literal notranslate"><span class="pre">config_path</span></code>, <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>.
+On a session that has loaded no configuration, <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> is a copy of
+the floor policy, and <code class="docutils literal notranslate"><span class="pre">audit()</span></code>/<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> apply it. The floor
+policy is <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> with the three research defaults (below). The
+name the floor policy is held under is tier 2. A configuration with no
+<code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> line, or a null one, extends the floor policy. One
+with <code class="docutils literal notranslate"><span class="pre">privacy_profile:</span> <span class="pre">none</span></code> opts out of it.</p>
+<p><code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code> stores lowercase keys, and keeps a private creator’s
+case. It stores its <code class="docutils literal notranslate"><span class="pre">value</span></code> argument as the rule’s <code class="docutils literal notranslate"><span class="pre">value</span></code>, and its
+<code class="docutils literal notranslate"><span class="pre">target</span></code> argument as the rule’s <code class="docutils literal notranslate"><span class="pre">target</span></code>. Only <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> takes a
+<code class="docutils literal notranslate"><span class="pre">target</span></code>, and <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> requires one. For an unknown action, or a rule
+that <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse, <code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>
+and leaves the policy and its file unchanged. For a machine rule that
+<code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse, <code class="docutils literal notranslate"><span class="pre">add_rule()</span></code> and <code class="docutils literal notranslate"><span class="pre">update_rule()</span></code> raise
+<code class="docutils literal notranslate"><span class="pre">ValueError</span></code> and leave the rules and the file unchanged.</p>
+<p>The four methods that change the configuration write <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only
+when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is true (default false). With auto-save on, when the
+write of a change fails, the method undoes the change and raises the
+error. <code class="docutils literal notranslate"><span class="pre">save()</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when <code class="docutils literal notranslate"><span class="pre">config_path</span></code> is unset, and
+raises the error of a failed write. It writes the profile by name, with
+only the <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> that differ from the profile, and never the
+profile’s rules. A file that <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes loads to the configuration
+it was written from.</p>
+<p>A built-in profile’s name is pinned to the PS3.15 edition that its
+table was taken from. What a pinned name contains is frozen: in every
+1.x, <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> holds the rules that 1.0 shipped under it. In every
+1.x, a bare <code class="docutils literal notranslate"><span class="pre">basic</span></code> means <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>, and the floor policy is
+<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> with the three research defaults. A later edition arrives
+in a minor release as a new name, never as a new meaning for an
+existing one. There is one exception: a 1.x may correct a row of
+<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> that the published 2026c standard shows was transcribed
+wrongly. It does so in a Breaking changelog entry that quotes the
+standard’s row. <code class="docutils literal notranslate"><span class="pre">configuration.privacy_profile</span></code> holds the pinned name
+of the built-in profile that was loaded, even when the file said
+<code class="docutils literal notranslate"><span class="pre">basic</span></code>.</p>
+<p><strong>Exceptions.</strong> Each exception is raised before any work is done,
+unless its entry says otherwise.</p>
+<ul>
 <li><p><code class="docutils literal notranslate"><span class="pre">RedactionError(failures,</span> <span class="pre">attempted)</span></code>, a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> with
 <code class="docutils literal notranslate"><span class="pre">.failures</span></code> (a list of <code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">details)</span></code>) and <code class="docutils literal notranslate"><span class="pre">.attempted</span></code>,
 raised after the whole pass.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">ExportError(failures,</span> <span class="pre">attempted,</span> <span class="pre">folder=None)</span></code>, a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>,
-raised last and only when zero of N are reported written, by both
-formats. (One file can be in the folder then: N instances written
-under names the volume resolved to one file that could not be read
-back, <a class="reference internal" href="../../export-output/#where-files-land"><span class="std std-ref">Export output</span></a>.)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ExportError(failures,</span> <span class="pre">attempted,</span> <span class="pre">folder=None)</span></code>, a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>.
+Both formats raise it last, and only when zero of N are reported
+written. (One file can be in the folder then. That is the case where
+N instances were written under names that the volume resolved to one
+file that could not be read back,
+<a class="reference internal" href="../../export-output/#where-files-land"><span class="std std-ref">Export output</span></a>.)</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">compact()</span></code>: <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> while a pass is open (below).</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">compact()</span></code> and <code class="docutils literal notranslate"><span class="pre">export()</span></code> (both formats begin with
 a save): <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> when an instance with unsaved changes holds an
-attribute value the store cannot hold. An attribute’s value is <code class="docutils literal notranslate"><span class="pre">None</span></code>,
-a <code class="docutils literal notranslate"><span class="pre">str</span></code>, <code class="docutils literal notranslate"><span class="pre">bytes</span></code>, a <code class="docutils literal notranslate"><span class="pre">bool</span></code>, an <code class="docutils literal notranslate"><span class="pre">int</span></code>, a <code class="docutils literal notranslate"><span class="pre">float</span></code>, a pydicom DS or IS
-value, or a list of those; a numpy bool, integer or float is saved as
-the Python number it equals. The message names the instance, the tag
-(with its path inside a sequence) and the type, never the value.
-Nothing of the save is stored: no row reaches the database, no
-instance’s revision moves, no file is exported, no audit row is
-written, and the instances stay unsaved, so the same call succeeds
+attribute value that the store cannot hold. An attribute’s value is
+<code class="docutils literal notranslate"><span class="pre">None</span></code>, a <code class="docutils literal notranslate"><span class="pre">str</span></code>, <code class="docutils literal notranslate"><span class="pre">bytes</span></code>, a <code class="docutils literal notranslate"><span class="pre">bool</span></code>, an <code class="docutils literal notranslate"><span class="pre">int</span></code>, a <code class="docutils literal notranslate"><span class="pre">float</span></code>, a pydicom DS
+or IS value, or a list of those. A numpy bool, integer or float is
+saved as the Python number it equals. The message names the
+instance, the tag (with its path inside a sequence) and the type,
+never the value. Nothing of the save is stored. No row reaches the
+database, no instance’s revision moves, no file is exported, no audit
+row is written, and the instances stay unsaved. So the same call succeeds
 once the value is one of those types. A pixel frame of another unsaved
-instance may already have been appended to the sidecar; the next save
-reuses it, and <code class="docutils literal notranslate"><span class="pre">compact()</span></code> reclaims it otherwise. A private tag at the
-top level of an instance follows the same rule, narrower in one
-respect: a list under it holds no <code class="docutils literal notranslate"><span class="pre">bytes</span></code> and no list. <code class="docutils literal notranslate"><span class="pre">save()</span></code>
+instance may already have been appended to the sidecar. The next save
+reuses that frame, and <code class="docutils literal notranslate"><span class="pre">compact()</span></code> reclaims it otherwise. A private
+tag at the top level of an instance follows the same rule, narrower in
+one respect: a list under it holds no <code class="docutils literal notranslate"><span class="pre">bytes</span></code> and no list. <code class="docutils literal notranslate"><span class="pre">save()</span></code>
 without <code class="docutils literal notranslate"><span class="pre">sync=True</span></code> returns before the write, and logs the same
-message at ERROR.
-<code class="docutils literal notranslate"><span class="pre">lock_identities(persist=True)</span></code> raises it after the tokens are
-embedded in memory, as it does the <code class="docutils literal notranslate"><span class="pre">sqlite3.Error</span></code> below.</p></li>
+message at ERROR. <code class="docutils literal notranslate"><span class="pre">lock_identities(persist=True)</span></code> raises the
+<code class="docutils literal notranslate"><span class="pre">TypeError</span></code> after the tokens are embedded in memory, as it raises the
+<code class="docutils literal notranslate"><span class="pre">sqlite3.Error</span></code> below.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">compact()</span></code> and <code class="docutils literal notranslate"><span class="pre">export()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when an
 instance with unsaved changes holds a SOP Instance UID that is not a
-<code class="docutils literal notranslate"><span class="pre">str</span></code> (<code class="docutils literal notranslate"><span class="pre">None</span></code>, or a value of another type), giving the count. Raised
-by the save before it stores or appends anything, so nothing is saved
-or exported. Under <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> the
-pre-export scan has already run. The same three calls raise
+<code class="docutils literal notranslate"><span class="pre">str</span></code> (<code class="docutils literal notranslate"><span class="pre">None</span></code>, or a value of another type). The message gives the
+count. The save raises it before it stores or appends anything, so
+nothing is saved or exported. Under <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code>,
+the pre-export scan has already run. The same three calls raise
 <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, at the same point and with the same guarantees, when a
 patient, study or series in the session holds a key that is not a
 <code class="docutils literal notranslate"><span class="pre">str</span></code>: <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>, <code class="docutils literal notranslate"><span class="pre">study.study_instance_uid</span></code> or
 <code class="docutils literal notranslate"><span class="pre">series.series_instance_uid</span></code>. The message gives the count at each of
-the three levels and no value. An empty <code class="docutils literal notranslate"><span class="pre">str</span></code> is not refused by either
-check. <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> never clears one of those three keys: a
-<code class="docutils literal notranslate"><span class="pre">REMOVE_TAG</span></code> finding naming one is declined with a
-<code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> audit row, and <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> refuses the rule
-(#949).</p></li>
+the three levels and no value. Neither check refuses an empty <code class="docutils literal notranslate"><span class="pre">str</span></code>.
+<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> never clears one of those three keys. It declines a
+<code class="docutils literal notranslate"><span class="pre">REMOVE_TAG</span></code> finding that names one, with a <code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code>
+audit row, and <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> refuses the rule (#949).</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">audit()</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code>, <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> and <code class="docutils literal notranslate"><span class="pre">lock_identities_batch()</span></code>,
 after a <code class="docutils literal notranslate"><span class="pre">save()</span></code> without <code class="docutils literal notranslate"><span class="pre">sync=True</span></code> whose write failed: each drains
-the queue on entry and then runs that save again itself, on the calling
-thread, before it does anything else. That save writes the session’s
-patients as they stand then (<code class="docutils literal notranslate"><span class="pre">session.store.patients</span></code>, read at that
-moment), not as they stood when <code class="docutils literal notranslate"><span class="pre">save()</span></code> was called: a patient removed
-from the session since, by editing the list or by assigning
-<code class="docutils literal notranslate"><span class="pre">session.store.patients</span></code> a new one, is removed from the store, and one
-added since is saved. If the save now succeeds, nothing is raised and
-nothing is said. If it fails again, the call raises what the save
-raises: the <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> or <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> above, an <code class="docutils literal notranslate"><span class="pre">OSError</span></code>, or the
-sidecar lock’s <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>. The next such call runs it again, until
-a save succeeds. A lock that raises this way has embedded no token and
-created no key file.
-The calls that begin with one of those four raise it too, from that
-inner call and before they write anything: <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> with no
-findings (it calls <code class="docutils literal notranslate"><span class="pre">audit()</span></code>), <code class="docutils literal notranslate"><span class="pre">redact_by_machine()</span></code> (it calls
-<code class="docutils literal notranslate"><span class="pre">redact()</span></code>), <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> (its pre-export scan is an
-<code class="docutils literal notranslate"><span class="pre">audit()</span></code>, before the export’s own save), and <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code>
-given a list or a report (the batch form).
-<code class="docutils literal notranslate"><span class="pre">anonymize(report)</span></code>, handed its findings, makes no such call and
-returns; so does <code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code>. Both wait for the queue
+the queue on entry. Then it runs that save again itself, on the
+calling thread, before it does anything else. That save writes the
+session’s patients as they stand then (<code class="docutils literal notranslate"><span class="pre">session.store.patients</span></code>, read
+at that moment), not as they stood when <code class="docutils literal notranslate"><span class="pre">save()</span></code> was called. A patient
+removed from the session since then, by an edit to the list or by
+assigning <code class="docutils literal notranslate"><span class="pre">session.store.patients</span></code> a new one, is removed from the
+store. A patient added since then is saved. If the save now succeeds,
+the call raises nothing and says nothing. If the save fails again, the
+call raises what the save raises: the <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> or <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>
+above, an <code class="docutils literal notranslate"><span class="pre">OSError</span></code>, or the sidecar lock’s <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>. The next
+such call runs the save again, until a save succeeds. A lock that
+raises this way embeds no token and creates no key file.
+The calls that begin with one of those four raise that error too, from
+that inner call and before they write anything:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> with no findings (it calls <code class="docutils literal notranslate"><span class="pre">audit()</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">redact_by_machine()</span></code> (it calls <code class="docutils literal notranslate"><span class="pre">redact()</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> (its pre-export scan is an <code class="docutils literal notranslate"><span class="pre">audit()</span></code>,
+before the export’s own save)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> given a list or a report (the batch form)</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">anonymize(report)</span></code>, handed its findings, makes no such call and
+returns. So does <code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code>. Both wait for the queue
 where they did and do not run a failed save.
 <code class="docutils literal notranslate"><span class="pre">save()</span></code> itself still returns before the write and raises nothing for
 it, and <code class="docutils literal notranslate"><span class="pre">close()</span></code> does not raise for it. <code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code>
 and <code class="docutils literal notranslate"><span class="pre">compact()</span></code> save the session themselves, as before. <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
 with no rules loaded and no <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code> policy returns 0 before
 it drains.
-A session that ends, by <code class="docutils literal notranslate"><span class="pre">close()</span></code> or when the process exits with the
-session still referenced and never closed, with a failed background
-save that no later save has healed
-writes one <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row keyed <code class="docutils literal notranslate"><span class="pre">SESSION</span></code> (<code class="docutils literal notranslate"><span class="pre">A</span> <span class="pre">background</span> <span class="pre">save()</span> <span class="pre">failed</span> <span class="pre">and</span> <span class="pre">no</span> <span class="pre">later</span> <span class="pre">save</span> <span class="pre">succeeded</span> <span class="pre">before</span> <span class="pre">the</span> <span class="pre">session</span> <span class="pre">ended,</span> <span class="pre">...</span></code>), so
-a later session’s report on that store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.
-<code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> is not one of the calls above, and the row is
-written when the session ends: a report generated in the same session,
-with no <code class="docutils literal notranslate"><span class="pre">audit()</span></code> after the failed save, does not show the failure.
-One session used from two threads at once can have a retry on one
-thread fail while a save on the other succeeds; the failure then
-stays recorded although nothing is unsaved (#941).</p></li>
+A session can end by <code class="docutils literal notranslate"><span class="pre">close()</span></code>, or when the process exits with the
+session still referenced and never closed. If it ends either way with
+a failed background save that no later save has healed, it writes one
+<code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row keyed <code class="docutils literal notranslate"><span class="pre">SESSION</span></code> (<code class="docutils literal notranslate"><span class="pre">A</span> <span class="pre">background</span> <span class="pre">save()</span> <span class="pre">failed</span> <span class="pre">and</span> <span class="pre">no</span> <span class="pre">later</span> <span class="pre">save</span> <span class="pre">succeeded</span> <span class="pre">before</span> <span class="pre">the</span> <span class="pre">session</span> <span class="pre">ended,</span> <span class="pre">...</span></code>).
+So a later session’s report on that store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.
+<code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> is not one of the calls above, and the session
+writes the row when it ends. So a report generated in the same
+session, with no <code class="docutils literal notranslate"><span class="pre">audit()</span></code> after the failed save, does not show the
+failure. One session used from two threads at once can have a retry
+on one thread fail while a save on the other succeeds. The failure
+then stays recorded, although nothing is unsaved (#941).</p>
+</li>
 <li><p><code class="docutils literal notranslate"><span class="pre">redact()</span></code>: <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> on a <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> store when the environment
 asks for worker recycling.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">audit()</span></code>, <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code> and <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code>:
-<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> on a store holding dates shifted, or UIDs replaced,
-under a project secret it no longer has (on a store with no secret
-yet, each generates one and commits it); and, with <code class="docutils literal notranslate"><span class="pre">recover_patient_identity(restore=True)</span></code>,
-<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when patients sharing a Patient ID were de-identified
-under different date-offset schemes, which <code class="docutils literal notranslate"><span class="pre">audit()</span></code> raises before it
+<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> on a store that holds dates shifted, or UIDs replaced,
+under a project secret it no longer has. On a store with no secret
+yet, each of these generates one and commits it. These four, and
+<code class="docutils literal notranslate"><span class="pre">recover_patient_identity(restore=True)</span></code>, also raise <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>
+when patients that share a Patient ID were de-identified under
+different date-offset schemes. <code class="docutils literal notranslate"><span class="pre">audit()</span></code> raises that error before it
 creates a project secret.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> and <code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code>:
 <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra or the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> binary is
-unavailable to the calling process; and <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> after the pass
-when at least one instance failed and none could be read. A scan that
-read some instances returns its report with the others in <code class="docutils literal notranslate"><span class="pre">failures</span></code>.</p></li>
+unavailable to the calling process. They also raise <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>
+after the pass when at least one instance failed and none could be
+read. A scan that read some instances returns its report with the
+others in <code class="docutils literal notranslate"><span class="pre">failures</span></code>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">redact()</span></code>, when the configuration holds a <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code> policy:
 <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra or the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> binary is
-unavailable to the calling process, or under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code> when the
-<code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra (OpenCV) or the shipped model is (always, on the
-free-threaded build), after the entry drain and before
-anything is redacted, the configured zones included; and, the same
-way, when the policy’s <code class="docutils literal notranslate"><span class="pre">target</span></code> names <code class="docutils literal notranslate"><span class="pre">names</span></code> and spaCy or its model
-cannot load (#1121). So does
-<code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> under that policy, before its pre-export
-scan and its save. An instance the
-pass cannot read is a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, not a raise.</p></li>
+unavailable to the calling process. Under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
+also raises it when the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra (OpenCV) or the shipped
+model is unavailable (always, on the free-threaded build). <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
+raises after the entry drain and before anything is redacted, the
+configured zones included. It raises the same way when the policy’s
+<code class="docutils literal notranslate"><span class="pre">target</span></code> names <code class="docutils literal notranslate"><span class="pre">names</span></code> and spaCy or its model cannot load (#1121).
+<code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> under that policy raises too, before
+its pre-export scan and its save. An instance that the pass cannot
+read is a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, not a raise.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> and <code class="docutils literal notranslate"><span class="pre">generate_manifest()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for a
-<code class="docutils literal notranslate"><span class="pre">format</span></code> other than the spellings above, naming them; no file is
-written.</p></li>
+<code class="docutils literal notranslate"><span class="pre">format</span></code> other than the spellings above. The message names those
+spellings, and no file is written.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration.save()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> with no <code class="docutils literal notranslate"><span class="pre">config_path</span></code>,
-or when <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> lacks a rule its <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> (or the floor)
-supplies; the <code class="docutils literal notranslate"><span class="pre">OSError</span></code> of a failed write. With <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> on,
-<code class="docutils literal notranslate"><span class="pre">add_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">update_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">delete_rule()</span></code> and <code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code>
-raise the same, and leave the configuration as it was.</p></li>
+or when <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> lacks a rule that its <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> (or the
+floor) supplies. <code class="docutils literal notranslate"><span class="pre">save()</span></code> raises the <code class="docutils literal notranslate"><span class="pre">OSError</span></code> of a failed write. With
+<code class="docutils literal notranslate"><span class="pre">auto_save</span></code> on, <code class="docutils literal notranslate"><span class="pre">add_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">update_rule()</span></code>, <code class="docutils literal notranslate"><span class="pre">delete_rule()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">set_phi_tag()</span></code> raise the same, and leave the configuration as it was.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">load_config(config_file)</span></code> and <code class="docutils literal notranslate"><span class="pre">audit(config_path=)</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>
-when the file fails validation — its extension, YAML syntax or shape,
-a <code class="docutils literal notranslate"><span class="pre">version</span></code> this library does not read, a key the schema does not
-have, a value of the wrong type, an unknown <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code>
-(including an edition this version does not ship) or <code class="docutils literal notranslate"><span class="pre">action</span></code>, or a
-rule Isocenter cannot honour
-(<a class="reference internal" href="../../configuration/"><span class="std std-doc">Configuration</span></a> lists them) — and
-<code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> when it does not exist; after either, the
-configuration is exactly what it was. <code class="docutils literal notranslate"><span class="pre">audit()</span></code> without <code class="docutils literal notranslate"><span class="pre">config_path</span></code>
-raises the same <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for such a rule in
-<code class="docutils literal notranslate"><span class="pre">session.configuration.phi_tags</span></code>. Both are raised before a project
-secret is created.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code>: <code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> when no key file
-exists at the path <code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code> was given,
-without creating one; <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when no patient holds the ID;
-<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when the patient has no instances or no identity token,
-the key does not decrypt it, or it holds no identity record this
-library writes, or the token is in the layout releases before 1.0
-wrote, in which case nothing on the patient is restored. It
-prints nothing, and no message names a Patient ID.
-It returns the identity rather than printing it.</p></li>
+when the file fails validation, and <code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> when the file
+does not exist. After either, the configuration is exactly what it
+was. The file fails validation on any of these:</p>
+<ul class="simple">
+<li><p>its extension, YAML syntax or shape</p></li>
+<li><p>a <code class="docutils literal notranslate"><span class="pre">version</span></code> this library does not read</p></li>
+<li><p>a key the schema does not have</p></li>
+<li><p>a value of the wrong type</p></li>
+<li><p>an unknown <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> (including an edition this version does
+not ship) or <code class="docutils literal notranslate"><span class="pre">action</span></code></p></li>
+<li><p>a rule Isocenter cannot honour (<a class="reference internal" href="../../configuration/"><span class="std std-doc">Configuration</span></a>
+lists them)</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">audit()</span></code> without <code class="docutils literal notranslate"><span class="pre">config_path</span></code> raises the same <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for such
+a rule in <code class="docutils literal notranslate"><span class="pre">session.configuration.phi_tags</span></code>. Both are raised before a
+project secret is created.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code>: <code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code>, without creating a
+key file, when no key file exists at the path that
+<code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code> was given. <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when no patient holds the
+ID. <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when the patient has no instances or no identity
+token, the key does not decrypt it, or it holds no identity record
+this library writes, or the token is in the layout releases before
+1.0 wrote, in which case nothing on the patient is restored. It
+prints nothing, and no message names a Patient ID. It returns the
+identity rather than printing it.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for a malformed key
-file, or a path that is not a regular file, creating none; the session
-stays open (#791). The first <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> that writes a token
-creates the key, exclusively and with mode 0600; a lock that writes
-none (a refusal, or no patient found, or none with an instance) creates
-no key file (#813). When no key file exists and the session holds an
-identity token this library wrote, which no new key could open, it
-raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> and creates none.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> refusals name no patient: a batch refusal numbers
-each refused patient by its place among the patients found, in Patient
-ID order. A patient any of whose instances holds no value in any tag
-<code class="docutils literal notranslate"><span class="pre">tags_to_lock</span></code> names is refused. A blank value is a value, except
-that a patient holding a Patient ID (or a Patient’s Name) whose every
-instance’s copy of <code class="docutils literal notranslate"><span class="pre">0010,0020</span></code> (or <code class="docutils literal notranslate"><span class="pre">0010,0010</span></code>) is present and blank
-is refused: the token would restore the patient without it (#761).</p></li>
+file, or for a path that is not a regular file. In both cases, no key
+file is created, and the session stays open (#791). The first
+<code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> that writes a token creates the key, exclusively
+and with mode 0600. A lock that writes no token (a refusal, or no
+patient found, or none with an instance) creates no key file (#813).
+When no key file exists and the session holds an identity token this
+library wrote, which no new key could open, it raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>
+and creates none.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> refusals name no patient. A batch refusal numbers
+each refused patient by its place among the patients found, in
+Patient ID order. A patient is refused when any of its instances
+holds no value in any tag that <code class="docutils literal notranslate"><span class="pre">tags_to_lock</span></code> names. A blank value is
+a value, with one exception. A patient that holds a Patient ID (or a
+Patient’s Name) is refused when every instance’s copy of <code class="docutils literal notranslate"><span class="pre">0010,0020</span></code>
+(or <code class="docutils literal notranslate"><span class="pre">0010,0010</span></code>) is present and blank. The token would restore the
+patient without it (#761).</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">lock_identities(persist=True)</span></code> and <code class="docutils literal notranslate"><span class="pre">lock_identities_batch()</span></code> raise
 the <code class="docutils literal notranslate"><span class="pre">sqlite3.Error</span></code> of a store write that fails, and <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>
 for a write that finds no store row for one of its instances. Both are
@@ -1094,132 +1131,155 @@ rolled back.</p></li>
 </ul>
 <p><strong>Environment.</strong> Every <code class="docutils literal notranslate"><span class="pre">ISOCENTER_*</span></code> name in
 <a class="reference internal" href="../../environment/"><span class="std std-doc">Environment Variables</span></a>, its default and its
-documented semantics — including the order the three
-threads-or-processes levers resolve in, which paths each reaches, and
-that a value below a variable’s floor is reported and replaced by the
-default.</p>
+documented semantics. These include the order that the three
+threads-or-processes levers resolve in, and which paths each lever
+reaches. They also include the rule that a value below a variable’s
+floor is reported and replaced by the default.</p>
 <p><strong>Data promises.</strong></p>
-<ul class="simple">
+<ul>
 <li><p>For the same input, configuration and project secret, a 1.x release
 exports what the previous release exported, or its changelog says
 what changed.</p></li>
 <li><p>A store written by 1.0 opens under every 1.x. The sidecar and schema
-<em>layout</em> are not frozen; their forward compatibility is.</p></li>
-<li><p>A DICOM file exported with reversible anonymization by 1.0 is
-recoverable by every 1.x with its key. Frozen: the Encrypted
-Attributes Sequence <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>, whose item carries the identity
-token in Encrypted Content <code class="docutils literal notranslate"><span class="pre">(0400,0520)</span></code> (OB) and <code class="docutils literal notranslate"><span class="pre">1.2.840.10008.1.2</span></code>
-in Encrypted Content Transfer Syntax UID <code class="docutils literal notranslate"><span class="pre">(0400,0510)</span></code> (UI), as PS3.6
-lays the item out; and the key file’s format (raw Fernet key bytes).
-The token is Isocenter’s own Fernet token over a JSON record, not a
-CMS envelope, so only Isocenter reads it; the transfer syntax UID is
-a label. Releases before 1.0 wrote the two item elements the other
-way round (the token in <code class="docutils literal notranslate"><span class="pre">(0400,0510)</span></code>). 1.x does not read that
-layout: recovering such a file, or locking over it, raises an error
-naming the layout, and 0.9.x recovers it with its key.</p></li>
+<em>layout</em> are not frozen. Their forward compatibility is frozen.</p></li>
+<li><p>Every 1.x can recover a DICOM file that 1.0 exported with reversible
+anonymization, given the project’s key file. Two things are frozen.
+The first is the Encrypted Attributes Sequence <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>. Its item
+carries
+the identity token in Encrypted Content <code class="docutils literal notranslate"><span class="pre">(0400,0520)</span></code> (OB) and
+<code class="docutils literal notranslate"><span class="pre">1.2.840.10008.1.2</span></code> in Encrypted Content Transfer Syntax UID
+<code class="docutils literal notranslate"><span class="pre">(0400,0510)</span></code> (UI), as PS3.6 lays the item out. The second is the key
+file’s format (raw Fernet key bytes). The token is Isocenter’s own
+Fernet token over a JSON record, not a CMS envelope, so only Isocenter
+reads it. The transfer syntax UID is a label. Releases before 1.0
+wrote the two item elements the other way round (the token in
+<code class="docutils literal notranslate"><span class="pre">(0400,0510)</span></code>). 1.x does not read that layout. Recovering such a file,
+or locking over it, raises an error that names the layout. 0.9.x
+recovers such a file with its key.</p></li>
 <li><p>An identity token holds exactly the locked values captured from each
-instance that carries it: a lock writes one token per distinct set of
-values, and a restore gives each instance the values of the token it
-carries. Since 1.0 a token’s encrypted content says so
-(<code class="docutils literal notranslate"><span class="pre">&quot;__isocenter_token__&quot;:</span> <span class="pre">2</span></code>, never returned as a tag), so this holds in
-any store it reaches. The exception is a token written before 1.0 that
-carries no such mark and no stamp from this store, is shared across
-studies, and holds a non-blank value outside group 0010. It is
-restored in full only on the first study carrying it, and as its
-group 0010 on the others. A file carries no stamp, so this also applies
-to a 0.9.8 export ingested elsewhere whose studies’ locked values were
-equal. The promise runs forward only: a release before 1.0 reads the
-mark as one more value, so recovering a 1.0 token needs 1.0 or later,
-and a token naming a scheme this release does not know is refused.</p></li>
-<li><p>An exported DICOM file whose policy was applied in full carries
-Patient Identity Removed <code class="docutils literal notranslate"><span class="pre">(0012,0062)</span></code> <code class="docutils literal notranslate"><span class="pre">YES</span></code> and one De-identification
-Method <code class="docutils literal notranslate"><span class="pre">(0012,0063)</span></code> value naming the release and the policy, and,
-where its dates determine it, Longitudinal Temporal Information
-Modified <code class="docutils literal notranslate"><span class="pre">(0028,0303)</span></code>. <code class="docutils literal notranslate"><span class="pre">YES</span></code> reflects the attribute policy and no
-declared burned-in text: it is held back from a file whose Burned In
-Annotation <code class="docutils literal notranslate"><span class="pre">(0028,0301)</span></code> says <code class="docutils literal notranslate"><span class="pre">YES</span></code>, and the pixels themselves are not
-read. The fields and the condition are what is promised
-(<a class="reference internal" href="../../configuration/#what-an-exported-file-says-about-itself"><span class="std std-ref">What an exported file says about itself</span></a>);
-the value’s exact text moves with the release and the policy’s
-fingerprint.</p></li>
-<li><p>Date jitter and the <code class="docutils literal notranslate"><span class="pre">ANON_</span></code> pseudonym are deterministic per patient
-within a store: the same patient under the same <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code> range
+instance that carries it. A lock writes one token per distinct set of
+values. A restore gives each instance the values of the token it
+carries. Since 1.0, a token’s encrypted content says so
+(<code class="docutils literal notranslate"><span class="pre">&quot;__isocenter_token__&quot;:</span> <span class="pre">2</span></code>, never returned as a tag). So this
+promise holds in any store that the token reaches. The exception is a
+token written before 1.0 that has all three of these properties:</p>
+<ul class="simple">
+<li><p>It carries no such mark and no stamp from this store.</p></li>
+<li><p>It is shared across studies.</p></li>
+<li><p>It holds a non-blank value outside group 0010.</p></li>
+</ul>
+<p>Such a token is restored in full only on the first study that carries
+it. On the other studies, it is restored as its group 0010. A file
+carries no stamp, so this also applies to a 0.9.8 export ingested
+elsewhere whose studies’ locked values were equal. The promise runs
+forward only. A release before 1.0 reads the mark as one more value,
+so recovering a 1.0 token needs 1.0 or later. A token that names a
+scheme this release does not know is refused.</p>
+</li>
+<li><p>An exported DICOM file whose policy was applied in full carries these
+elements:</p>
+<ul class="simple">
+<li><p>Patient Identity Removed <code class="docutils literal notranslate"><span class="pre">(0012,0062)</span></code> <code class="docutils literal notranslate"><span class="pre">YES</span></code></p></li>
+<li><p>one De-identification Method <code class="docutils literal notranslate"><span class="pre">(0012,0063)</span></code> value that names the
+release and the policy</p></li>
+<li><p>where the file’s dates determine it, Longitudinal Temporal
+Information Modified <code class="docutils literal notranslate"><span class="pre">(0028,0303)</span></code></p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">YES</span></code> reflects the attribute policy and no declared burned-in text.
+The export holds it back from a file whose Burned In Annotation
+<code class="docutils literal notranslate"><span class="pre">(0028,0301)</span></code> says <code class="docutils literal notranslate"><span class="pre">YES</span></code>. The pixels themselves are not read. The
+fields and the condition are the promise
+(<a class="reference internal" href="../../configuration/#what-an-exported-file-says-about-itself"><span class="std std-ref">What an exported file says about itself</span></a>).
+The value’s exact text moves with the release and the policy’s
+fingerprint.</p>
+</li>
+<li><p>The date shift and the <code class="docutils literal notranslate"><span class="pre">ANON_</span></code> pseudonym are deterministic per patient
+within a store. The same patient under the same <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code> range
 gets the same offset and pseudonym every time that store derives
-them, and in every copy of its file. So is a replacement UID: the same
-source UID gets the same replacement, and a redaction with the same
-zones the same SOP Instance UID. Pseudonyms, date offsets and
-replacement UIDs are derived from the store’s project secret, which
-the store generates and never exports. The same configuration over a
-different store gives different ones.
-A patient a store classed as de-identified before 0.9.7 keeps that
-store’s offset.</p></li>
+them, and in every copy of its file. A replacement UID is
+deterministic too. The same source UID gets the same replacement, and
+a redaction with the same zones gets the same SOP Instance UID.
+Isocenter derives pseudonyms, date offsets and replacement UIDs from
+the store’s project secret. The store generates that secret and never
+exports it. The same configuration over a different store gives
+different ones. A patient that a store classed as de-identified before
+0.9.7 keeps that store’s offset.</p></li>
 <li><p>A configuration file determines the policy, not the pseudonyms or
-offsets. The three things a de-identification depends on, and what is
-lost with each, are listed in
-<a class="reference internal" href="../../configuration/#what-to-keep"><span class="std std-ref">What to keep</span></a>.</p></li>
+offsets. <a class="reference internal" href="../../configuration/#what-to-keep"><span class="std std-ref">What to keep</span></a> lists the
+three things a de-identification depends on, and what is lost with
+each.</p></li>
 <li><p>The offset is not derivable from the exported pseudonym, or from any
 other value its derivation uses, without the secret. That is not a
-promise that no exported date is recoverable: a date tag no rule names
-is exported as ingested, and a UID the configuration keeps can embed
-one.</p></li>
-<li><p>A configuration file that 1.0 loads, every 1.x loads unchanged. The
-promise runs forward: a file a 1.x loads, every later 1.x loads, but
-an earlier 1.x refuses a file declaring a newer minor than its own,
-and refuses to save over one. Its schema is version 2, and a 1.x
-never raises the major. A 1.x raises
-the 2.x minor when it adds keys or values, and when it applies an
-unchanged file differently. A 1.x never changes how a file is
-applied without raising the minor. The minor is part of the policy
-each PHI status records, so a store scanned under an older minor is
-asked to re-audit. Its next <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row saying
-the statuses were recorded under another policy, and the report
-grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. An <code class="docutils literal notranslate"><span class="pre">audit()</span></code> under the new release stops
-further rows; the row already written stays in the store’s audit log.</p></li>
+promise that no exported date is recoverable. A date tag that no rule
+names is exported as ingested, and a UID that the configuration keeps
+can embed a date.</p></li>
+<li><p>Every 1.x loads, unchanged, a configuration file that 1.0 loads. The
+promise runs forward. Every later 1.x loads a file that a 1.x loads.
+But an earlier 1.x refuses a file that declares a newer minor than its
+own, and refuses to save over one. The configuration schema is
+version 2, and a 1.x never raises the major. A 1.x raises the 2.x
+minor when it adds keys or values, and when it applies an unchanged
+file differently. A 1.x never changes how a file is applied without
+raising the minor.</p></li>
+<li><p>The schema’s minor is part of the policy that each PHI status
+records. So a
+store scanned under an older minor is asked to re-audit. The store’s
+next <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row that says the statuses were
+recorded under another policy, and the report grades
+<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. An <code class="docutils literal notranslate"><span class="pre">audit()</span></code> under the new release stops further
+rows. The row already written stays in the store’s audit log.</p></li>
 </ul>
-<p><strong>Output vocabularies.</strong> Five separate vocabularies, not one list.</p>
+<p><strong>Output vocabularies.</strong> There are five separate vocabularies, not one
+list.</p>
 <ul class="simple">
-<li><p>The <strong>grade</strong>: <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. There is no <code class="docutils literal notranslate"><span class="pre">FAIL</span></code>. The
-conditions that decide it are listed in
-<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>,
-and they are a promise about the conditions: no condition is removed
-or narrowed in 1.x, and one may be added with a CHANGELOG entry. It
-is not a promise about which way a grade can move: a 1.x fix that
-stops writing a wrong row can move a run from REVIEW_REQUIRED to
-PASS, and the CHANGELOG entry for that fix says so. The report’s
-layout and the wording of each Grade Basis line are tier 2.</p></li>
-<li><p>The <strong>audit <code class="docutils literal notranslate"><span class="pre">action_type</span></code> strings</strong>, written to the audit table and
-counted by type in section 2 of the report: <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code>, <code class="docutils literal notranslate"><span class="pre">ERROR</span></code>,
-<code class="docutils literal notranslate"><span class="pre">EXPORT</span></code>, <code class="docutils literal notranslate"><span class="pre">RECONCILE_PRIVATE</span></code>, <code class="docutils literal notranslate"><span class="pre">REDACTION</span></code>, <code class="docutils literal notranslate"><span class="pre">REVERSIBLE_EXPORT</span></code>,
-<code class="docutils literal notranslate"><span class="pre">RISK</span></code>, <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code>, <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>; and the four a remediation writes,
-<code class="docutils literal notranslate"><span class="pre">REMEDIATION_REPLACE</span></code>, <code class="docutils literal notranslate"><span class="pre">REMEDIATION_SHIFT_DATE</span></code> and
-<code class="docutils literal notranslate"><span class="pre">REMEDIATION_REMOVE</span></code> when it acts on a proposal and
-<code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> when it declines to, or fails to.</p></li>
+<li><p>The <strong>grade</strong>: <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. There is no <code class="docutils literal notranslate"><span class="pre">FAIL</span></code>.
+<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>
+lists the conditions that decide it. The list is a promise about the
+conditions. No 1.x removes or narrows a condition, and a 1.x may add
+one with a CHANGELOG entry. The list is not a promise about which way
+a grade can move. A 1.x fix that stops writing a wrong row can move a
+run from REVIEW_REQUIRED to PASS, and the CHANGELOG entry for that fix
+says so. The report’s layout and the wording of each Grade Basis line
+are tier 2.</p></li>
+<li><p>The <strong>audit <code class="docutils literal notranslate"><span class="pre">action_type</span></code> strings</strong>. Isocenter writes them to the
+audit table, and section 2 of the report counts them by type. They are
+<code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code>, <code class="docutils literal notranslate"><span class="pre">ERROR</span></code>, <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code>, <code class="docutils literal notranslate"><span class="pre">RECONCILE_PRIVATE</span></code>, <code class="docutils literal notranslate"><span class="pre">REDACTION</span></code>,
+<code class="docutils literal notranslate"><span class="pre">REVERSIBLE_EXPORT</span></code>, <code class="docutils literal notranslate"><span class="pre">RISK</span></code>, <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code>, <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>, and the four that a
+remediation writes. A remediation writes <code class="docutils literal notranslate"><span class="pre">REMEDIATION_REPLACE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">REMEDIATION_SHIFT_DATE</span></code> and <code class="docutils literal notranslate"><span class="pre">REMEDIATION_REMOVE</span></code> when it acts on a
+proposal. It writes <code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> when it declines to act on
+a proposal, or fails to.</p></li>
 <li><p>The <strong>remediation-proposal <code class="docutils literal notranslate"><span class="pre">action_type</span></code> strings</strong>, carried on
 <code class="docutils literal notranslate"><span class="pre">PhiFinding.remediation_proposal</span></code>: <code class="docutils literal notranslate"><span class="pre">REMOVE_TAG</span></code>, <code class="docutils literal notranslate"><span class="pre">REPLACE_TAG</span></code>,
 <code class="docutils literal notranslate"><span class="pre">SHIFT_DATE</span></code>. These say what a proposal <em>will</em> do and are never an
 audit row.</p></li>
 <li><p>The <strong>report exception categories</strong> <code class="docutils literal notranslate"><span class="pre">COMPLIANCE_CHECK</span></code> and
-<code class="docutils literal notranslate"><span class="pre">AUDIT_DROP</span></code>, synthesised into the report’s <code class="docutils literal notranslate"><span class="pre">exceptions</span></code> list at
-report time and never written to the audit table. The second says
-audit rows failed to write and were dropped; either one costs the run
-its passing grade.</p></li>
+<code class="docutils literal notranslate"><span class="pre">AUDIT_DROP</span></code>. The report synthesises them into its <code class="docutils literal notranslate"><span class="pre">exceptions</span></code> list
+at report time, and never writes them to the audit table. The second
+says that audit rows failed to write and were dropped. Either one
+costs the run its passing grade.</p></li>
 <li><p>The <strong><code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> strings</strong>: <code class="docutils literal notranslate"><span class="pre">STANDARD</span></code>, <code class="docutils literal notranslate"><span class="pre">PRIVATE</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code>. The
 third is acquired content that was in the source and is not in the
 export.</p></li>
 </ul>
-<p>An existing string is never renamed or removed in 1.x; new strings may
-be added with a CHANGELOG entry. The <em>method</em> that returns the rows
-(<code class="docutils literal notranslate"><span class="pre">store_backend.get_audit_losses()</span></code>) is tier 2: the words are frozen,
-the access path is not.</p>
-<p><strong>Behaviours.</strong> The call order the README documents and its
-consequences (a report generated before any export carries a boundary
-note; export-time <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> rows are in a report generated after it);
-<code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">redact()</span></code> drain the persistence manager on entry;
-until <code class="docutils literal notranslate"><span class="pre">export()</span></code>, the session writes only the store, <code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code>
+<p>No 1.x renames or removes an existing string. A 1.x may add new strings
+with a CHANGELOG entry. The <em>method</em> that returns the rows
+(<code class="docutils literal notranslate"><span class="pre">store_backend.get_audit_losses()</span></code>) is tier 2. The words are frozen,
+and the access path is not.</p>
+<p><strong>Behaviours.</strong> These are frozen:</p>
+<ul class="simple">
+<li><p>The call order that the README documents, and its consequences. A
+report generated before any export carries a boundary note, and
+export-time <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> rows are in a report generated after the
+export.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">redact()</span></code> drain the persistence manager on entry.</p></li>
+<li><p>Until <code class="docutils literal notranslate"><span class="pre">export()</span></code>, the session writes only the store, <code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code>
 and files you ask for (a configuration, a key, a report, a manifest or
-a cohort table); source files are never
-modified; <code class="docutils literal notranslate"><span class="pre">redact()</span></code> on a <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> store runs in threads on every
-interpreter; and the two below.</p>
+a cohort table).</p></li>
+<li><p>Isocenter never modifies source files.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">redact()</span></code> on a <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> store runs in threads on every interpreter.</p></li>
+<li><p>The two numbered behaviours below.</p></li>
+</ul>
 <ol class="arabic simple">
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> while a <code class="docutils literal notranslate"><span class="pre">redact()</span></code> or <code class="docutils literal notranslate"><span class="pre">ingest()</span></code>
 pass is open on the same store, from any thread of this session, and
@@ -1235,9 +1295,10 @@ regenerated. Not frozen: the bound itself.</p></li>
 </section>
 <section id="documented-but-internal">
 <h2>Documented but internal<a class="headerlink" href="#documented-but-internal" title="Link to this heading">#</a></h2>
-<p>Listed here, rendered in the API reference or named by a guide where a
-reader needs them, safe to call, and changeable in a 1.x release with a
-CHANGELOG entry naming both spellings:</p>
+<p>This page lists the names below. Where a reader needs them, the API
+reference renders them or a guide names them. They are safe to call. A
+1.x release can change them, with a CHANGELOG entry that names both
+spellings.</p>
 <ul class="simple">
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">DicomSession</span></code></strong>, the class’s own name. <code class="docutils literal notranslate"><span class="pre">isocenter.Session</span></code> is the
 frozen spelling.</p></li>
@@ -1246,44 +1307,46 @@ frozen spelling.</p></li>
 <code class="docutils literal notranslate"><span class="pre">get_audit_errors()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_audit_losses()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_audit_declines()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">get_audit_scan_gaps()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_audit_drops()</span></code> and
 <code class="docutils literal notranslate"><span class="pre">get_flattened_instances()</span></code>. The store’s <em>forward compatibility</em> is
-frozen; its API is not, and its other methods are private.</p></li>
+frozen. Its API is not frozen, and its other methods are private.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">session.key_manager</span></code>, <code class="docutils literal notranslate"><span class="pre">session.persistence_manager</span></code>,
 <code class="docutils literal notranslate"><span class="pre">session.reversibility_service</span></code></strong> — attributes that expose services.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">TrackedEntity</span></code> bookkeeping</strong>: <code class="docutils literal notranslate"><span class="pre">has_unsaved_changes</span></code>, <code class="docutils literal notranslate"><span class="pre">phi_status</span></code>,
 <code class="docutils literal notranslate"><span class="pre">phi_status_policy</span></code>, <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code>, <code class="docutils literal notranslate"><span class="pre">mark_persisted()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">mark_subtree_persisted()</span></code>, <code class="docutils literal notranslate"><span class="pre">record_phi_status()</span></code>; <code class="docutils literal notranslate"><span class="pre">PhiStatus</span></code>;
-<code class="docutils literal notranslate"><span class="pre">ScanPolicy</span></code>, the policy a status was recorded under, which the store
-keeps beside it; <code class="docutils literal notranslate"><span class="pre">DicomItem.add_sequence()</span></code> and
-<code class="docutils literal notranslate"><span class="pre">add_sequence_item()</span></code>, <code class="docutils literal notranslate"><span class="pre">record_attr_vr()</span></code>; <code class="docutils literal notranslate"><span class="pre">DicomSequence</span></code>;
+<code class="docutils literal notranslate"><span class="pre">mark_subtree_persisted()</span></code> and <code class="docutils literal notranslate"><span class="pre">record_phi_status()</span></code>. <code class="docutils literal notranslate"><span class="pre">PhiStatus</span></code> is
+tier 2 too. So is <code class="docutils literal notranslate"><span class="pre">ScanPolicy</span></code>, the policy a status was recorded
+under, which the store keeps beside it. So are
+<code class="docutils literal notranslate"><span class="pre">DicomItem.add_sequence()</span></code>, <code class="docutils literal notranslate"><span class="pre">add_sequence_item()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">record_attr_vr()</span></code>, and <code class="docutils literal notranslate"><span class="pre">DicomSequence</span></code>. So are
 <code class="docutils literal notranslate"><span class="pre">Instance.regenerate_uid()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_waveform_bytes()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">unload_waveform_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code>, <code class="docutils literal notranslate"><span class="pre">waveform_array</span></code>;
+<code class="docutils literal notranslate"><span class="pre">unload_waveform_data()</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code> and <code class="docutils literal notranslate"><span class="pre">waveform_array</span></code>, and
 <code class="docutils literal notranslate"><span class="pre">Equipment.from_parts()</span></code>.</p></li>
-<li><p><strong>The recording helpers</strong> the scan, remediation and the reversible
-lock call on an entity: <code class="docutils literal notranslate"><span class="pre">Instance.record_remediation()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">remediation_vouches_for()</span></code>, <code class="docutils literal notranslate"><span class="pre">record_identity_token()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">identity_token_is_this_stores()</span></code>; <code class="docutils literal notranslate"><span class="pre">DicomItem.record_date_shift()</span></code>,
-<code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for()</span></code>, <code class="docutils literal notranslate"><span class="pre">clear_sequence_items()</span></code>; and <code class="docutils literal notranslate"><span class="pre">Study</span></code>’s
-own <code class="docutils literal notranslate"><span class="pre">record_date_shift()</span></code> and <code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for()</span></code>. Every other
-public name on a class tier 1 names is listed on this page, in one
-tier or the other.</p></li>
+<li><p><strong>The recording helpers</strong> that the scan, remediation and the
+reversible lock call on an entity. They are
+<code class="docutils literal notranslate"><span class="pre">Instance.record_remediation()</span></code>, <code class="docutils literal notranslate"><span class="pre">remediation_vouches_for()</span></code>,
+<code class="docutils literal notranslate"><span class="pre">record_identity_token()</span></code> and <code class="docutils literal notranslate"><span class="pre">identity_token_is_this_stores()</span></code>. They
+are also <code class="docutils literal notranslate"><span class="pre">DicomItem.record_date_shift()</span></code>, <code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for()</span></code>
+and <code class="docutils literal notranslate"><span class="pre">clear_sequence_items()</span></code>, and <code class="docutils literal notranslate"><span class="pre">Study</span></code>’s own <code class="docutils literal notranslate"><span class="pre">record_date_shift()</span></code>
+and <code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for()</span></code>. Every other public name on a class
+that tier 1 names is listed on this page, in one tier or the other.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">DicomStore</span></code>’s methods</strong> <code class="docutils literal notranslate"><span class="pre">get_unique_equipment()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">get_ingested_paths()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_superseded_uids()</span></code>, <code class="docutils literal notranslate"><span class="pre">save_state()</span></code> and
-<code class="docutils literal notranslate"><span class="pre">load_state()</span></code>. Its <code class="docutils literal notranslate"><span class="pre">patients</span></code> list is frozen (above); what else the
-store object offers is not.</p></li>
+<code class="docutils literal notranslate"><span class="pre">load_state()</span></code>. Its <code class="docutils literal notranslate"><span class="pre">patients</span></code> list is frozen (above). Nothing else
+that the store object offers is frozen.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">IsocenterConfiguration.burned_in_text</span></code></strong>, the <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code>
 policy a configuration file holds (<code class="docutils literal notranslate"><span class="pre">{&quot;action&quot;:</span> <span class="pre">...,</span> <span class="pre">&quot;scope&quot;:</span> <span class="pre">...,</span> <span class="pre">&quot;min_confidence&quot;:</span> <span class="pre">...}</span></code>, plus <code class="docutils literal notranslate"><span class="pre">&quot;modalities&quot;</span></code> under <code class="docutils literal notranslate"><span class="pre">scope:</span> <span class="pre">modalities</span></code>,
-or <code class="docutils literal notranslate"><span class="pre">None</span></code>), as <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> sets it. The file key and what
-each action does are documented on the
-<a class="reference internal" href="../../configuration/#burned-in-text"><span class="std std-ref">Configuration</span></a> page; the
-attribute’s name and shape are not frozen.</p></li>
+or <code class="docutils literal notranslate"><span class="pre">None</span></code>), as <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> sets it. The
+<a class="reference internal" href="../../configuration/#burned-in-text"><span class="std std-ref">Configuration</span></a> page documents the
+file key and what each action does. The attribute’s name and shape
+are not frozen.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">profiles.FLOOR_POLICY</span></code></strong>, the name the floor policy is held under.
-What the floor <em>contains</em> is frozen (above); the name is not.</p></li>
+What the floor <em>contains</em> is frozen (above). The name is not.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">entities</span></code> helpers</strong> <code class="docutils literal notranslate"><span class="pre">clone_sequences</span></code>, <code class="docutils literal notranslate"><span class="pre">exported_patient_id</span></code>,
 <code class="docutils literal notranslate"><span class="pre">iter_item_tree</span></code>, <code class="docutils literal notranslate"><span class="pre">normalize_study_date</span></code>, <code class="docutils literal notranslate"><span class="pre">resolve_item_path</span></code>, and the
-constant <code class="docutils literal notranslate"><span class="pre">SOURCE_SOP_UID_ATTR</span></code>, the <code class="docutils literal notranslate"><span class="pre">attributes</span></code> key under which an
-instance keeps the SOP Instance UID it held before its UID first
-changed (the ingested one, unless <code class="docutils literal notranslate"><span class="pre">sop_instance_uid</span></code> was assigned first).
-<code class="docutils literal notranslate"><span class="pre">exported_patient_id</span></code> is on the registry’s provisional terms (below).</p></li>
+constant <code class="docutils literal notranslate"><span class="pre">SOURCE_SOP_UID_ATTR</span></code>. That constant is the <code class="docutils literal notranslate"><span class="pre">attributes</span></code> key
+under which an instance keeps the SOP Instance UID it held before its
+UID first changed (the ingested one, unless <code class="docutils literal notranslate"><span class="pre">sop_instance_uid</span></code> was
+assigned first). <code class="docutils literal notranslate"><span class="pre">exported_patient_id</span></code> is on the registry’s
+provisional terms (below).</p></li>
 <li><p><strong>The <a class="reference internal" href="../ocr/"><span class="std std-doc">OCR API</span></a> page</strong>: <code class="docutils literal notranslate"><span class="pre">DiscoveryCandidate</span></code>,
 <code class="docutils literal notranslate"><span class="pre">ZoneDiscoverer.group_boxes</span></code>,
 <code class="docutils literal notranslate"><span class="pre">RedactionVerifier</span></code> (<code class="docutils literal notranslate"><span class="pre">__init__</span></code>, <code class="docutils literal notranslate"><span class="pre">get_matching_rule</span></code>, <code class="docutils literal notranslate"><span class="pre">is_covered</span></code>,
@@ -1291,22 +1354,21 @@ changed (the ingested one, unless <code class="docutils literal notranslate"><sp
 <code class="docutils literal notranslate"><span class="pre">pixel_analysis.analyze_pixels</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_analysis.detect_text_regions</span></code>,
 <code class="docutils literal notranslate"><span class="pre">pixel_analysis.TextRegion</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_analysis.HAS_OCR</span></code>,
 <code class="docutils literal notranslate"><span class="pre">pixel_analysis.OcrUnavailableError</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_analysis.NlpUnavailableError</span></code>
-(an <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code>, #1121), <code class="docutils literal notranslate"><span class="pre">pixel_analysis.PixelScanError</span></code>,
-<code class="docutils literal notranslate"><span class="pre">text_detection.TextDetectorUnavailableError</span></code> (an <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code>,
-#1121);
-<code class="docutils literal notranslate"><span class="pre">DiscoveryResult.get_density_matrix</span></code>, <code class="docutils literal notranslate"><span class="pre">visualize_heatmap</span></code>,
-<code class="docutils literal notranslate"><span class="pre">analyze_temporal_stability</span></code>, <code class="docutils literal notranslate"><span class="pre">inspect_clusters</span></code>, and its attributes
-<code class="docutils literal notranslate"><span class="pre">candidates</span></code> and <code class="docutils literal notranslate"><span class="pre">n_sources</span></code>.</p></li>
+(an <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code>, #1121), <code class="docutils literal notranslate"><span class="pre">pixel_analysis.PixelScanError</span></code> and
+<code class="docutils literal notranslate"><span class="pre">text_detection.TextDetectorUnavailableError</span></code> (an
+<code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code>, #1121). Also <code class="docutils literal notranslate"><span class="pre">DiscoveryResult.get_density_matrix</span></code>,
+<code class="docutils literal notranslate"><span class="pre">visualize_heatmap</span></code>, <code class="docutils literal notranslate"><span class="pre">analyze_temporal_stability</span></code> and
+<code class="docutils literal notranslate"><span class="pre">inspect_clusters</span></code>, and its attributes <code class="docutils literal notranslate"><span class="pre">candidates</span></code> and <code class="docutils literal notranslate"><span class="pre">n_sources</span></code>.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree()</span></code></strong> (the serializer alone) and the
 exporter registry <code class="docutils literal notranslate"><span class="pre">Exporter</span></code>, <code class="docutils literal notranslate"><span class="pre">register()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_exporter()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">available_formats()</span></code>, which is provisional (below).</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">RedactionService.apply_redaction_to_array</span></code></strong> (static).</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">PhiRemediation</span></code></strong>, the proposal a <code class="docutils literal notranslate"><span class="pre">PhiFinding</span></code> carries in
-<code class="docutils literal notranslate"><span class="pre">remediation_proposal</span></code>. Its <code class="docutils literal notranslate"><span class="pre">action_type</span></code> words are frozen (above);
-the class is not.</p></li>
+<code class="docutils literal notranslate"><span class="pre">remediation_proposal</span></code>. Its <code class="docutils literal notranslate"><span class="pre">action_type</span></code> words are frozen (above).
+The class is not.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">Builder</span></code>’s fluent chain beyond <code class="docutils literal notranslate"><span class="pre">start_patient()</span></code>.</strong></p></li>
-<li><p><strong><code class="docutils literal notranslate"><span class="pre">ComplianceReport</span></code>’s fields</strong> and the report’s section layout and
-wording; log messages and <code class="docutils literal notranslate"><span class="pre">print</span></code> lines; the manifest’s HTML.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">ComplianceReport</span></code>’s fields</strong>, the report’s section layout and
+wording, log messages, <code class="docutils literal notranslate"><span class="pre">print</span></code> lines and the manifest’s HTML.</p></li>
 <li><p><strong>The JSON manifest’s item keys</strong> (<code class="docutils literal notranslate"><span class="pre">generate_manifest(format=&quot;json&quot;)</span></code>).
 An item’s <code class="docutils literal notranslate"><span class="pre">anonymized</span></code> is <code class="docutils literal notranslate"><span class="pre">true</span></code> when the last tag-policy PHI scan
 left no identifier unremediated on that instance’s patient, study or
@@ -1318,42 +1380,52 @@ suffix, the audit table’s columns, the schema’s table names.</p></li>
 <section id="the-exporter-registry-provisional-until-11">
 <span id="the-exporter-registry-provisional-until-1-1"></span><h3>The exporter registry: provisional until 1.1<a class="headerlink" href="#the-exporter-registry-provisional-until-11" title="Link to this heading">#</a></h3>
 <p><code class="docutils literal notranslate"><span class="pre">Exporter</span></code>, <code class="docutils literal notranslate"><span class="pre">register()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_exporter()</span></code> and <code class="docutils literal notranslate"><span class="pre">available_formats()</span></code> are
-<strong>provisional</strong>. A real plugin API is planned for 1.1, and 1.1 may
-replace these four names rather than extend them; the change will be a
-CHANGELOG entry naming both spellings, as for anything in this section.
-A plugin written against 1.0 should pin <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>.
-<code class="docutils literal notranslate"><span class="pre">entities.exported_patient_id()</span></code>, which the
-<a class="reference internal" href="../exporters/"><span class="std std-doc">exporter registry</span></a> page tells plugin authors to call, is
-documented but internal on the same terms.</p>
+<strong>provisional</strong>. A real plugin API is planned for 1.1. Version 1.1 may
+replace these four names rather than extend them. As for anything in
+this section, the change will be a CHANGELOG entry that names both
+spellings. A plugin written against 1.0 should pin
+<code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>. <code class="docutils literal notranslate"><span class="pre">entities.exported_patient_id()</span></code> is documented
+but internal on the same terms. The <a class="reference internal" href="../exporters/"><span class="std std-doc">exporter registry</span></a>
+page tells plugin authors to call it.</p>
 <p>Every export gate lives inside the two built-in formats, so a
 third-party exporter receives the graph with none of them applied. Each
-of its runs writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, and <strong>in 1.0 no third-party
-export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code></strong>. <a class="reference internal" href="../exporters/"><span class="std std-doc">Exporter registry</span></a> lists what
-does not run for it and the rules for its author; running the gates
-above dispatch is <a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/783">#783</a>.</p>
-<p>There is no read-side seam: ingest reads through pydicom and the
-library’s own codec dispatch, and a reader or codec plugin point is 1.1
-or later.</p>
+run of such an exporter writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, and <strong>in 1.0 no
+third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code></strong>. The <a class="reference internal" href="../exporters/"><span class="std std-doc">Exporter registry</span></a>
+page lists what does not run for such an exporter, and the rules for
+its author. Running the gates above dispatch is
+<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/783">#783</a>.</p>
+<p>There is no read-side seam. Ingest reads through pydicom and the
+library’s own codec dispatch. A reader or codec plugin point is 1.1 or
+later.</p>
 </section>
 </section>
 <section id="private">
 <h2>Private<a class="headerlink" href="#private" title="Link to this heading">#</a></h2>
-<p>Every leading-underscore name, and wholesale: <code class="docutils literal notranslate"><span class="pre">parallel.py</span></code>
-(<code class="docutils literal notranslate"><span class="pre">run_parallel</span></code> included — the environment registry is the contract,
-the function is not), <code class="docutils literal notranslate"><span class="pre">io_handlers.py</span></code> except <code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree</span></code>,
-the two summaries and <code class="docutils literal notranslate"><span class="pre">ExportError</span></code>, <code class="docutils literal notranslate"><span class="pre">privacy.py</span></code> except <code class="docutils literal notranslate"><span class="pre">PhiFinding</span></code>,
-<code class="docutils literal notranslate"><span class="pre">PhiReport</span></code> and <code class="docutils literal notranslate"><span class="pre">PhiRemediation</span></code> (tier 2), <code class="docutils literal notranslate"><span class="pre">persistence.py</span></code> except the
-<code class="docutils literal notranslate"><span class="pre">SqliteStore</span></code> methods named above, <code class="docutils literal notranslate"><span class="pre">remediation.py</span></code>, <code class="docutils literal notranslate"><span class="pre">services.py</span></code> except <code class="docutils literal notranslate"><span class="pre">RedactionError</span></code> and
-<code class="docutils literal notranslate"><span class="pre">apply_redaction_to_array</span></code>, <code class="docutils literal notranslate"><span class="pre">crypto.py</span></code>, <code class="docutils literal notranslate"><span class="pre">reversibility.py</span></code>,
-<code class="docutils literal notranslate"><span class="pre">sidecar.py</span></code>, <code class="docutils literal notranslate"><span class="pre">persistence_manager.py</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_geometry.py</span></code>,
-<code class="docutils literal notranslate"><span class="pre">murmur.py</span></code>, <code class="docutils literal notranslate"><span class="pre">reporting.py</span></code> except <code class="docutils literal notranslate"><span class="pre">ComplianceReport</span></code>, <code class="docutils literal notranslate"><span class="pre">discovery.py</span></code>
-except <code class="docutils literal notranslate"><span class="pre">DiscoveryResult</span></code>, <code class="docutils literal notranslate"><span class="pre">DiscoveryCandidate</span></code> and
-<code class="docutils literal notranslate"><span class="pre">ZoneDiscoverer.group_boxes</span></code>,
-<code class="docutils literal notranslate"><span class="pre">verification.py</span></code> except <code class="docutils literal notranslate"><span class="pre">RedactionVerifier</span></code>, <code class="docutils literal notranslate"><span class="pre">automation.py</span></code> except
-<code class="docutils literal notranslate"><span class="pre">ConfigAutomator.suggest_config_updates</span></code>, <code class="docutils literal notranslate"><span class="pre">config_manager.py</span></code>,
-<code class="docutils literal notranslate"><span class="pre">profiles.py</span></code> except <code class="docutils literal notranslate"><span class="pre">FLOOR_POLICY</span></code> (tier 2),
-<code class="docutils literal notranslate"><span class="pre">builders.py</span></code> internals, <code class="docutils literal notranslate"><span class="pre">utils/</span></code>, <code class="docutils literal notranslate"><span class="pre">logger.py</span></code>, <code class="docutils literal notranslate"><span class="pre">_version.py</span></code>’s module
-(the <code class="docutils literal notranslate"><span class="pre">__version__</span></code> string is frozen, its module is not).</p>
+<p>Every leading-underscore name is private, and so are these, wholesale:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">parallel.py</span></code>, <code class="docutils literal notranslate"><span class="pre">run_parallel</span></code> included. The environment registry is
+the contract, and the function is not.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">io_handlers.py</span></code> except <code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree</span></code>, the two summaries
+and <code class="docutils literal notranslate"><span class="pre">ExportError</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">privacy.py</span></code> except <code class="docutils literal notranslate"><span class="pre">PhiFinding</span></code>, <code class="docutils literal notranslate"><span class="pre">PhiReport</span></code> and <code class="docutils literal notranslate"><span class="pre">PhiRemediation</span></code>
+(tier 2)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">persistence.py</span></code> except the <code class="docutils literal notranslate"><span class="pre">SqliteStore</span></code> methods named above</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">remediation.py</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services.py</span></code> except <code class="docutils literal notranslate"><span class="pre">RedactionError</span></code> and <code class="docutils literal notranslate"><span class="pre">apply_redaction_to_array</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">crypto.py</span></code>, <code class="docutils literal notranslate"><span class="pre">reversibility.py</span></code>, <code class="docutils literal notranslate"><span class="pre">sidecar.py</span></code>,
+<code class="docutils literal notranslate"><span class="pre">persistence_manager.py</span></code>, <code class="docutils literal notranslate"><span class="pre">pixel_geometry.py</span></code> and <code class="docutils literal notranslate"><span class="pre">murmur.py</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">reporting.py</span></code> except <code class="docutils literal notranslate"><span class="pre">ComplianceReport</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">discovery.py</span></code> except <code class="docutils literal notranslate"><span class="pre">DiscoveryResult</span></code>, <code class="docutils literal notranslate"><span class="pre">DiscoveryCandidate</span></code> and
+<code class="docutils literal notranslate"><span class="pre">ZoneDiscoverer.group_boxes</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">verification.py</span></code> except <code class="docutils literal notranslate"><span class="pre">RedactionVerifier</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">automation.py</span></code> except <code class="docutils literal notranslate"><span class="pre">ConfigAutomator.suggest_config_updates</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">config_manager.py</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">profiles.py</span></code> except <code class="docutils literal notranslate"><span class="pre">FLOOR_POLICY</span></code> (tier 2)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">builders.py</span></code> internals</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">utils/</span></code> and <code class="docutils literal notranslate"><span class="pre">logger.py</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_version.py</span></code>’s module. The <code class="docutils literal notranslate"><span class="pre">__version__</span></code> string is frozen, and its
+module is not.</p></li>
+</ul>
 </section>
 </section>
 

@@ -60,7 +60,7 @@
     <link rel="index" title="Index" href="../genindex/" />
     <link rel="search" title="Search" href="../search/" />
     <link rel="next" title="Contributing" href="../developer_guide/" />
-    <link rel="prev" title="Architecture" href="../architecture/" />
+    <link rel="prev" title="Glossary" href="../glossary/" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
@@ -415,6 +415,7 @@
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../for-institutions/">For institutions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../architecture/">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary/">Glossary</a></li>
 <li class="toctree-l1 current active"><a aria-current="page" class="current reference internal" href="#">Performance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_guide/">Contributing</a></li>
 <li class="toctree-l1"><a class="reference external" href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md">Changelog</a></li>
@@ -481,10 +482,10 @@
                   
   <section id="performance">
 <h1>Performance<a class="headerlink" href="#performance" title="Link to this heading">#</a></h1>
-<p>This page carries the one benchmark that has a recorded run behind it, the machine it ran on, and the architecture that produced the numbers. Larger runs are planned; they will be added here with their own machine and date when they exist, and nothing on this page describes a run that has not happened.</p>
+<p>This page carries the one benchmark that has a recorded run behind it, the machine it ran on, and the architecture that produced the numbers. Larger runs are planned. They will be added here with their own machine and date when they exist. Nothing on this page describes a run that has not happened.</p>
 <section id="the-recorded-run">
 <h2>The recorded run<a class="headerlink" href="#the-recorded-run" title="Link to this heading">#</a></h2>
-<p><strong>January 2026, Google Cloud <code class="docutils literal notranslate"><span class="pre">n2-highmem-16</span></code>, Ubuntu 22.04, 1 TB <code class="docutils literal notranslate"><span class="pre">pd-ssd</span></code> boot disk.</strong> The dataset generator in the repository (<code class="docutils literal notranslate"><span class="pre">tests/benchmarks/generate_dataset.py</span></code>) generated multi-frame instances with frame counts from 1 to 100, in three phases of one order of magnitude each, and the stress harness (<code class="docutils literal notranslate"><span class="pre">tests/benchmarks/run_stress_test.py</span></code>) ran the full pipeline on each phase: ingest, examine, audit, backup (locking identities), anonymize, redact, export with JPEG 2000 compression.</p>
+<p><strong>January 2026, Google Cloud <code class="docutils literal notranslate"><span class="pre">n2-highmem-16</span></code>, Ubuntu 22.04, 1 TB <code class="docutils literal notranslate"><span class="pre">pd-ssd</span></code> boot disk.</strong> The dataset generator in the repository (<code class="docutils literal notranslate"><span class="pre">tests/benchmarks/generate_dataset.py</span></code>) generated multi-frame instances with frame counts from 1 to 100. It generated them in three phases of one order of magnitude each. The stress harness (<code class="docutils literal notranslate"><span class="pre">tests/benchmarks/run_stress_test.py</span></code>) ran the full pipeline on each phase: ingest, examine, audit, backup (locking identities), anonymize, redact, export with JPEG 2000 compression.</p>
 <section id="peak-memory">
 <h3>Peak memory<a class="headerlink" href="#peak-memory" title="Link to this heading">#</a></h3>
 <div class="pst-scrollable-table-container"><table class="table">
@@ -518,7 +519,7 @@
 </tbody>
 </table>
 </div>
-<p>From phase 1 to phase 2 the data grew tenfold and peak memory grew about threefold. That is the measurement. It is consistent with the design below, in which resident memory is bounded by the working set of the workers rather than by the size of the cohort, and it is the only scaling claim this page makes.</p>
+<p>From phase 1 to phase 2 the data grew tenfold and peak memory grew about threefold. That is the measurement. It is consistent with the design below. In that design, resident memory is bounded by the working set of the workers rather than by the size of the cohort. The measurement is the only scaling claim this page makes.</p>
 </section>
 <section id="timing">
 <h3>Timing<a class="headerlink" href="#timing" title="Link to this heading">#</a></h3>
@@ -581,7 +582,7 @@
 <ul class="simple">
 <li><p>It used generated multi-frame files, not a clinical archive. Real cohorts have more instances per gigabyte and more metadata per instance.</p></li>
 <li><p>It is one machine, one run. Repeat it before using the numbers for sizing, and record the machine.</p></li>
-<li><p>A larger, 412 GB three-phase run is planned and has not been completed; there are no numbers for it.</p></li>
+<li><p>A larger, 412 GB three-phase run is planned and has not been completed. There are no numbers for it.</p></li>
 </ul>
 </section>
 </section>
@@ -589,37 +590,39 @@
 <h2>The architecture behind the numbers<a class="headerlink" href="#the-architecture-behind-the-numbers" title="Link to this heading">#</a></h2>
 <section id="pixel-data-lives-in-a-sidecar-not-in-memory">
 <h3>Pixel data lives in a sidecar, not in memory<a class="headerlink" href="#pixel-data-lives-in-a-sidecar-not-in-memory" title="Link to this heading">#</a></h3>
-<p>At ingest, pixel and waveform bytes are appended to a binary sidecar beside the SQLite index and referenced by offset and length. An <code class="docutils literal notranslate"><span class="pre">Instance</span></code> holds a loader, not an array. <code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reads from the sidecar on demand and <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> releases the array, so a cohort’s pixels are never resident as a whole. <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> refuses to drop an array that was replaced in memory and not yet written, because the loader would bring back the old frame; <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> is the explicit form of that decision.</p>
+<p>At ingest, pixel and waveform bytes are appended to a binary sidecar beside the SQLite index and referenced by offset and length. An <code class="docutils literal notranslate"><span class="pre">Instance</span></code> holds a loader, not an array. <code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reads from the sidecar on demand and <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> releases the array, so a cohort’s pixels are never resident as a whole. <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> refuses to drop an array that was replaced in memory and not yet written, because the loader would bring back the old frame. <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> is the explicit form of that decision.</p>
 </section>
 <section id="redaction-runs-in-worker-processes">
 <h3>Redaction runs in worker processes<a class="headerlink" href="#redaction-runs-in-worker-processes" title="Link to this heading">#</a></h3>
-<p>Pixel redaction loads full arrays and is the most memory-intensive step. It runs through a pool of half the CPUs, at most eight – a memory ceiling, not a throughput choice: each worker loads the instance’s pixels, applies the zones, writes the result, and returns. On a free-threaded interpreter the same dispatcher uses threads instead, because there is no GIL to escape, and on a <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> store it always uses threads, because a process cannot share an in-memory database. The worker count, chunk size, and strategy are set by the environment variables in <a class="reference internal" href="../environment/"><span class="std std-doc">Environment Variables</span></a>. Export is the exception: it always runs in processes and recycles each worker after 25 tasks, on every interpreter, because the imaging C libraries leak and a thread has no process to recycle. That bounds any growth inside an export worker to 25 tasks, and it is why <code class="docutils literal notranslate"><span class="pre">ISOCENTER_FORCE_THREADS</span></code> does not reach <code class="docutils literal notranslate"><span class="pre">export()</span></code>.</p>
+<p>Pixel redaction loads full arrays and is the most memory-intensive step. It runs through a pool of half the CPUs, at most eight. That limit is a memory ceiling, not a throughput choice. Each worker loads the instance’s pixels, applies the zones, writes the result, and returns.</p>
+<p>On a free-threaded interpreter, the same dispatcher uses threads instead, because there is no GIL to escape. On a <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> store it always uses threads, because a process cannot share an in-memory database. The worker count, chunk size, and strategy are set by the environment variables in <a class="reference internal" href="../environment/"><span class="std std-doc">Environment Variables</span></a>.</p>
+<p>Export is the exception. It always runs in processes and recycles each worker after 25 tasks, on every interpreter. The reason is that the imaging C libraries leak, and a thread has no process to recycle. That bounds any growth inside an export worker to 25 tasks, and it is why <code class="docutils literal notranslate"><span class="pre">ISOCENTER_FORCE_THREADS</span></code> does not reach <code class="docutils literal notranslate"><span class="pre">export()</span></code>.</p>
 </section>
 <section id="ingest-streams-results-into-the-index">
 <h3>Ingest streams results into the index<a class="headerlink" href="#ingest-streams-results-into-the-index" title="Link to this heading">#</a></h3>
-<p>Files are scanned by workers and their results are written to the index as they arrive rather than collected and written at the end, so ingest memory does not grow with the number of files scanned. The <code class="docutils literal notranslate"><span class="pre">ISOCENTER_CHUNKSIZE</span></code> variable trades per-task overhead against how many results are in flight at once.</p>
+<p>Workers scan the files. Their results are written to the index as they arrive, rather than collected and written at the end. As a result, ingest memory does not grow with the number of files scanned. The <code class="docutils literal notranslate"><span class="pre">ISOCENTER_CHUNKSIZE</span></code> variable trades per-task overhead against how many results are in flight at once.</p>
 </section>
 <section id="metadata-is-loaded-in-one-pass">
 <h3>Metadata is loaded in one pass<a class="headerlink" href="#metadata-is-loaded-in-one-pass" title="Link to this heading">#</a></h3>
-<p>Standard tags are stored as one JSON document per instance and read back whole; private tags live in a sparse table. Reopening a session loads metadata for the cohort from the index in one pass rather than one file at a time, and pixels stay in the sidecar until asked for.</p>
+<p>Standard tags are stored as one JSON document per instance and read back whole. Private tags live in a sparse table. Reopening a session loads metadata for the cohort from the index in one pass, rather than one file at a time. Pixels stay in the sidecar until asked for.</p>
 </section>
 </section>
 <section id="sizing-guidance">
 <h2>Sizing guidance<a class="headerlink" href="#sizing-guidance" title="Link to this heading">#</a></h2>
 <ul class="simple">
 <li><p><strong>Memory</strong>: 2 GB RAM per vCPU as a floor. 8 GB per vCPU for heavy multi-frame JPEG 2000 export, which holds a decoded and an encoded copy of a frame at once.</p></li>
-<li><p><strong>Concurrency</strong>: one worker per CPU by default for ingest, audit and export; <code class="docutils literal notranslate"><span class="pre">redact()</span></code> defaults to half the CPUs and at most eight. Set <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_WORKERS</span></code> to limit both if a worker is killed for memory.</p></li>
+<li><p><strong>Concurrency</strong>: one worker per CPU by default for ingest, audit and export. <code class="docutils literal notranslate"><span class="pre">redact()</span></code> defaults to half the CPUs and at most eight. Set <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_WORKERS</span></code> to limit both if a worker is killed for memory.</p></li>
 <li><p><strong>Disk</strong>: the sidecar holds the cohort’s pixels, so budget roughly the raw data size for it plus the export.</p></li>
 </ul>
 </section>
 <section id="running-it-yourself">
 <h2>Running it yourself<a class="headerlink" href="#running-it-yourself" title="Link to this heading">#</a></h2>
-<p>The harness is not part of the installed package. From a clone of the repository, with the development dependencies installed (see <a class="reference internal" href="../developer_guide/"><span class="std std-doc">Contributing</span></a>):</p>
+<p>The harness is not part of the installed package. Run these commands from a clone of the repository, with the development dependencies installed (see <a class="reference internal" href="../developer_guide/"><span class="std std-doc">Contributing</span></a>):</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.generate_dataset<span class="w"> </span>--output<span class="w"> </span>&lt;dicom-dir&gt;<span class="w"> </span>--frames<span class="w"> </span><span class="m">1</span>-100
 python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_stress_test<span class="w"> </span>--input<span class="w"> </span>&lt;dicom-dir&gt;<span class="w"> </span>--output<span class="w"> </span>&lt;out-dir&gt;<span class="w"> </span>--compress
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">generate_dataset</span></code> writes a synthetic cohort (see <code class="docutils literal notranslate"><span class="pre">--help</span></code> for the count, patients and frames), and <code class="docutils literal notranslate"><span class="pre">run_stress_test</span></code> runs the pipeline against the directory you name. <code class="docutils literal notranslate"><span class="pre">--compress</span></code> exports JPEG 2000, as the recorded run did; without it the export timings are not comparable. If you run it, open an issue with the machine, the date, and the table; this page is where it belongs.</p>
+<p><code class="docutils literal notranslate"><span class="pre">generate_dataset</span></code> writes a synthetic cohort (see <code class="docutils literal notranslate"><span class="pre">--help</span></code> for the count, patients and frames). <code class="docutils literal notranslate"><span class="pre">run_stress_test</span></code> runs the pipeline against the directory you name. <code class="docutils literal notranslate"><span class="pre">--compress</span></code> exports JPEG 2000, as the recorded run did. Without it, the export timings are not comparable. If you run it, open an issue with the machine, the date, and the table. This page is where the result belongs.</p>
 </section>
 </section>
 
@@ -634,12 +637,12 @@ python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_str
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="../architecture/"
+       href="../glossary/"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Architecture</p>
+        <p class="prev-next-title">Glossary</p>
       </div>
     </a>
     <a class="right-next"

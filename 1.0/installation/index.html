@@ -478,7 +478,7 @@
                   
   <section id="installation">
 <h1>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h1>
-<p>Isocenter needs <strong>Python 3.12 or later</strong> on <strong>Linux or macOS</strong>. The storage layer’s locks use <code class="docutils literal notranslate"><span class="pre">fcntl</span></code>, so it does not import on Windows; there, use WSL or a Linux container.</p>
+<p>Isocenter needs <strong>Python 3.12 or later</strong> on <strong>Linux or macOS</strong>. The storage layer’s locks use <code class="docutils literal notranslate"><span class="pre">fcntl</span></code>, so Isocenter does not import on Windows. On Windows, use WSL or a Linux container.</p>
 <p>Install it into a virtual environment:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv
 <span class="nb">source</span><span class="w"> </span>.venv/bin/activate
@@ -499,22 +499,32 @@ pip<span class="w"> </span>install<span class="w"> </span>isocenter
 <p>Everything below is optional. Without it, the rest of Isocenter works as normal.</p>
 <section id="optical-character-recognition-ocr">
 <h3>Optical character recognition (OCR)<a class="headerlink" href="#optical-character-recognition-ocr" title="Link to this heading">#</a></h3>
-<p>To find burned-in text in pixel data, install the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the Tesseract binary, which is not a Python package:</p>
+<p>To find burned-in text in pixel data, install the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the Tesseract binary. The binary is not a Python package.</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[ocr]"</span>
 brew<span class="w"> </span>install<span class="w"> </span>tesseract<span class="w">          </span><span class="c1"># macOS</span>
 apt-get<span class="w"> </span>install<span class="w"> </span>tesseract-ocr<span class="w">   </span><span class="c1"># Debian/Ubuntu</span>
 </pre></div>
 </div>
-<p>Without the extra or the binary, the two methods that read burned-in text, <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> and <code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code>, raise <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code>, a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, naming what is missing, before they scan anything. Once the check passes, <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> lists each instance whose pixels could not be loaded or read in <code class="docutils literal notranslate"><span class="pre">report.failures</span></code> and warns with the count; <code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code> warns the same way and counts only the instances it read. Either one raises <code class="docutils literal notranslate"><span class="pre">PixelScanError</span></code>, also a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, when it could read none of the instances it tried.</p>
+<p>Two methods read burned-in text: <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> and <code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code>. Without the extra or the binary, they raise <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code> before they scan anything. <code class="docutils literal notranslate"><span class="pre">OcrUnavailableError</span></code> is a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, and it names what is missing.</p>
+<p>When the check passes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> lists in <code class="docutils literal notranslate"><span class="pre">report.failures</span></code> each instance whose pixels could not be loaded or read. It warns with the count.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">discover_redaction_zones()</span></code> warns the same way. It counts only the instances it read.</p></li>
+<li><p>Either method raises <code class="docutils literal notranslate"><span class="pre">PixelScanError</span></code>, also a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, when it could read none of the instances it tried.</p></li>
+</ul>
 <p><code class="docutils literal notranslate"><span class="pre">isocenter.pixel_analysis.HAS_OCR</span></code> is <code class="docutils literal notranslate"><span class="pre">False</span></code> when <code class="docutils literal notranslate"><span class="pre">pytesseract</span></code> did not import. It does not check the binary.</p>
 </section>
 <section id="text-detection">
 <h3>Text detection<a class="headerlink" href="#text-detection" title="Link to this heading">#</a></h3>
-<p>To find burned-in text with a text-detection model instead of tesseract (<code class="docutils literal notranslate"><span class="pre">burned_in_text:</span> <span class="pre">{detector:</span> <span class="pre">db}</span></code>), install the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra, which brings OpenCV; the model itself ships inside the package. With <code class="docutils literal notranslate"><span class="pre">target:</span> <span class="pre">any</span></code> it needs no tesseract; with a narrowed target each detected region is read by tesseract too, so the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the binary above are needed as well:</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">db</span></code> detector finds burned-in text with a text-detection model instead of tesseract (<code class="docutils literal notranslate"><span class="pre">burned_in_text:</span> <span class="pre">{detector:</span> <span class="pre">db}</span></code>). To use it, install the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra. The extra brings OpenCV. The model itself ships inside the package.</p>
+<ul class="simple">
+<li><p>With <code class="docutils literal notranslate"><span class="pre">target:</span> <span class="pre">any</span></code>, the detector needs no tesseract.</p></li>
+<li><p>With a narrowed target, tesseract also reads each detected region. So you also need the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the binary above.</p></li>
+</ul>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[textdetect]"</span>
 </pre></div>
 </div>
-<p>OpenCV publishes no free-threaded wheel, so this extra cannot be installed on Python 3.14t, and <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code> raises <code class="docutils literal notranslate"><span class="pre">TextDetectorUnavailableError</span></code> there (<a class="reference internal" href="../ocr/#detecting-text-with-a-model-detector-db"><span class="std std-ref">OCR</span></a>).</p>
+<p>OpenCV publishes no free-threaded wheel. So you cannot install this extra on Python 3.14t, and on 3.14t <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code> raises <code class="docutils literal notranslate"><span class="pre">TextDetectorUnavailableError</span></code> (<a class="reference internal" href="../ocr/#detecting-text-with-a-model-detector-db"><span class="std std-ref">OCR</span></a>).</p>
 </section>
 <section id="natural-language-processing-nlp">
 <h3>Natural language processing (NLP)<a class="headerlink" href="#natural-language-processing-nlp" title="Link to this heading">#</a></h3>
@@ -524,19 +534,24 @@ python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </
 </pre></div>
 </div>
 <p>The model download is a separate step because the model is not published on PyPI. Without the model, discovery classifies text with regular expressions.</p>
-<p>A <a class="reference internal" href="../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a> <code class="docutils literal notranslate"><span class="pre">target</span></code> naming <code class="docutils literal notranslate"><span class="pre">names</span></code> needs the extra and the model too, and has no fallback: without them <code class="docutils literal notranslate"><span class="pre">redact()</span></code> and <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> raise <code class="docutils literal notranslate"><span class="pre">NlpUnavailableError</span></code>. spaCy publishes no free-threaded wheel, so on the free-threaded build (3.14t) neither discovery’s spaCy arm nor the <code class="docutils literal notranslate"><span class="pre">names</span></code> kind can be used. No CI job installs the model.</p>
+<p>A <a class="reference internal" href="../configuration/#burned-in-text"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code></span></a> <code class="docutils literal notranslate"><span class="pre">target</span></code> that names <code class="docutils literal notranslate"><span class="pre">names</span></code> also needs the extra and the model. It has no fallback. Without them, <code class="docutils literal notranslate"><span class="pre">redact()</span></code> and <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> raise <code class="docutils literal notranslate"><span class="pre">NlpUnavailableError</span></code>. spaCy publishes no free-threaded wheel. So on the free-threaded build (3.14t), you cannot use discovery’s spaCy arm or the <code class="docutils literal notranslate"><span class="pre">names</span></code> kind. CI installs the model on every entry that is not free-threaded.</p>
 </section>
 </section>
 <section id="codecs">
 <h2>Codecs<a class="headerlink" href="#codecs" title="Link to this heading">#</a></h2>
-<p>The decoders for every compressed transfer syntax Isocenter reads install with it: <code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> and Pillow for JPEG Baseline and Extended, JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000, and pydicom itself for RLE. Where one of pydicom’s own decoding plugins is installed for a syntax, it is tried first. A decode cannot catch every damaged stream; <a class="reference internal" href="../codecs/"><span class="std std-doc">Codec support</span></a> lists what reads each syntax and the limits.</p>
+<p>The decoders for every compressed transfer syntax that Isocenter reads install with it:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">imagecodecs</span></code> and Pillow for JPEG Baseline and Extended, JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000.</p></li>
+<li><p>pydicom itself for RLE.</p></li>
+</ul>
+<p>If one of pydicom’s own decoding plugins is installed for a syntax, that plugin is tried first. A decode cannot catch every damaged stream. <a class="reference internal" href="../codecs/"><span class="std std-doc">Codec support</span></a> lists what reads each syntax, and the limits.</p>
 </section>
 <section id="system-requirements">
 <h2>System requirements<a class="headerlink" href="#system-requirements" title="Link to this heading">#</a></h2>
 <p>Heavy operations such as pixel redaction and JPEG 2000 export need memory per worker.</p>
 <ul class="simple">
-<li><p><strong>Memory</strong>: at least 2 GB RAM per vCPU; 8 GB per vCPU for large multi-frame JPEG 2000 export.</p></li>
-<li><p><strong>Concurrency</strong>: ingest, audit and export use one worker per CPU by default. <code class="docutils literal notranslate"><span class="pre">redact()</span></code>, which holds a decoded frame per worker, uses half the CPUs and at most eight. If a worker is killed for memory, set <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_WORKERS</span></code> to limit both (<a class="reference internal" href="../environment/"><span class="std std-doc">Environment Variables</span></a>).</p></li>
+<li><p><strong>Memory</strong>: at least 2 GB RAM per vCPU. For large multi-frame JPEG 2000 export, 8 GB per vCPU.</p></li>
+<li><p><strong>Concurrency</strong>: ingest, audit and export use one worker per CPU by default. <code class="docutils literal notranslate"><span class="pre">redact()</span></code> holds a decoded frame per worker. It uses half the CPUs and at most eight. If a worker is killed for memory, set <code class="docutils literal notranslate"><span class="pre">ISOCENTER_MAX_WORKERS</span></code> to limit both (<a class="reference internal" href="../environment/"><span class="std std-doc">Environment Variables</span></a>).</p></li>
 </ul>
 </section>
 <section id="next">

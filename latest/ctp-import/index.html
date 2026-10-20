@@ -485,9 +485,9 @@
   <section id="import-ctp-rules">
 <h1>Import CTP rules<a class="headerlink" href="#import-ctp-rules" title="Link to this heading">#</a></h1>
 <p>If your site already redacts burned-in text with the RSNA Clinical Trial
-Processor (CTP), its <code class="docutils literal notranslate"><span class="pre">DicomPixelAnonymizer.script</span></code> holds the pixel regions
-you trust for each machine. Isocenter can convert that script into rules you
-then copy into a configuration’s <code class="docutils literal notranslate"><span class="pre">machines:</span></code> list.</p>
+Processor (CTP), you have a <code class="docutils literal notranslate"><span class="pre">DicomPixelAnonymizer.script</span></code>. That script holds
+the pixel regions you trust for each machine. Isocenter can convert the script
+into rules. You then copy the rules into a configuration’s <code class="docutils literal notranslate"><span class="pre">machines:</span></code> list.</p>
 <section id="convert-the-script">
 <h2>Convert the script<a class="headerlink" href="#convert-the-script" title="Link to this heading">#</a></h2>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>isocenter.utils.ctp_parser<span class="w"> </span>/path/to/DicomPixelAnonymizer.script<span class="w"> </span>ctp_rules.yaml
@@ -515,28 +515,29 @@ block such as</p>
 </div>
 <p>What the converter reads:</p>
 <ul class="simple">
-<li><p><strong>One rule per block</strong> whose condition names a <code class="docutils literal notranslate"><span class="pre">Manufacturer</span></code> or a
-<code class="docutils literal notranslate"><span class="pre">ManufacturerModelName</span></code> with <code class="docutils literal notranslate"><span class="pre">containsIgnoreCase</span></code>, and which is followed by
-at least one <code class="docutils literal notranslate"><span class="pre">(x,y,w,h)</span></code> region. Any other block is skipped, so the count
-it prints can be lower than the number of blocks in the script. Other
-conditions in a block (<code class="docutils literal notranslate"><span class="pre">Rows.equals(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">CommentsOnRadiationDose...</span></code>)
-are not read; they survive only in the <code class="docutils literal notranslate"><span class="pre">comment</span></code>.</p></li>
-<li><p><strong>Coordinates are converted.</strong> CTP writes <code class="docutils literal notranslate"><span class="pre">(x,</span> <span class="pre">y,</span> <span class="pre">width,</span> <span class="pre">height)</span></code>;
-Isocenter zones are <code class="docutils literal notranslate"><span class="pre">[row_start,</span> <span class="pre">row_end,</span> <span class="pre">col_start,</span> <span class="pre">col_end]</span></code> in pixels,
-so <code class="docutils literal notranslate"><span class="pre">(x,y,w,h)</span></code> becomes <code class="docutils literal notranslate"><span class="pre">[y,</span> <span class="pre">y+h,</span> <span class="pre">x,</span> <span class="pre">x+w]</span></code>.</p></li>
-<li><p><strong>No serial number.</strong> CTP matches a manufacturer and model; the imported
+<li><p><strong>One rule per block</strong> that meets two conditions. The block’s condition
+names a <code class="docutils literal notranslate"><span class="pre">Manufacturer</span></code> or a <code class="docutils literal notranslate"><span class="pre">ManufacturerModelName</span></code> with
+<code class="docutils literal notranslate"><span class="pre">containsIgnoreCase</span></code>. At least one <code class="docutils literal notranslate"><span class="pre">(x,y,w,h)</span></code> region follows the
+condition. The converter skips any other block, so the count it prints can be lower than
+the number of blocks in the script. The converter does not read other
+conditions in a block (<code class="docutils literal notranslate"><span class="pre">Rows.equals(...)</span></code>, <code class="docutils literal notranslate"><span class="pre">CommentsOnRadiationDose...</span></code>).
+They survive only in the <code class="docutils literal notranslate"><span class="pre">comment</span></code>.</p></li>
+<li><p><strong>Coordinates are converted.</strong> CTP writes <code class="docutils literal notranslate"><span class="pre">(x,</span> <span class="pre">y,</span> <span class="pre">width,</span> <span class="pre">height)</span></code>. Isocenter
+zones are <code class="docutils literal notranslate"><span class="pre">[row_start,</span> <span class="pre">row_end,</span> <span class="pre">col_start,</span> <span class="pre">col_end]</span></code> in pixels. So
+<code class="docutils literal notranslate"><span class="pre">(x,y,w,h)</span></code> becomes <code class="docutils literal notranslate"><span class="pre">[y,</span> <span class="pre">y+h,</span> <span class="pre">x,</span> <span class="pre">x+w]</span></code>.</p></li>
+<li><p><strong>No serial number.</strong> CTP matches a manufacturer and model. The imported
 rule carries no selector. A block with a manufacturer but no model gets
-<code class="docutils literal notranslate"><span class="pre">model_name:</span> <span class="pre">Unknown</span></code>. Add a <code class="docutils literal notranslate"><span class="pre">serial_number</span></code>, or replace the labels with a
-<code class="docutils literal notranslate"><span class="pre">match:</span></code> naming the manufacturer and model exactly as the files spell
-them (CTP’s <code class="docutils literal notranslate"><span class="pre">containsIgnoreCase</span></code> is not exact).</p></li>
+<code class="docutils literal notranslate"><span class="pre">model_name:</span> <span class="pre">Unknown</span></code>. Add a <code class="docutils literal notranslate"><span class="pre">serial_number</span></code>. Or replace the labels with a
+<code class="docutils literal notranslate"><span class="pre">match:</span></code> that names the manufacturer and model exactly as the files spell
+them. CTP’s <code class="docutils literal notranslate"><span class="pre">containsIgnoreCase</span></code> is not exact.</p></li>
 </ul>
 </section>
 <section id="use-the-rules-in-a-configuration">
 <h2>Use the rules in a configuration<a class="headerlink" href="#use-the-rules-in-a-configuration" title="Link to this heading">#</a></h2>
-<p>The output is a rule list, not a configuration: <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> refuses it
+<p>The output is a rule list, not a configuration. <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> refuses it
 with <code class="docutils literal notranslate"><span class="pre">ValueError:</span> <span class="pre">...:</span> <span class="pre">unknown</span> <span class="pre">key</span> <span class="pre">'rules'</span> <span class="pre">at</span> <span class="pre">the</span> <span class="pre">top</span> <span class="pre">level</span></code>. Copy each rule
-you want into the <code class="docutils literal notranslate"><span class="pre">machines:</span></code> list of your configuration and add the
-<code class="docutils literal notranslate"><span class="pre">serial_number</span></code> of the machine it is for:</p>
+you want into the <code class="docutils literal notranslate"><span class="pre">machines:</span></code> list of your configuration. Then add the
+<code class="docutils literal notranslate"><span class="pre">serial_number</span></code> of the machine that the rule is for:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">machines</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"US12345"</span>
 <span class="w">    </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GE</span>
@@ -549,20 +550,24 @@ you want into the <code class="docutils literal notranslate"><span class="pre">m
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">640</span>
 </pre></div>
 </div>
-<p>Quote the serial number. Give one entry per machine: two scanners of the
-same model are two entries with the same zones. Then check the zones against
-your own images before you rely on them: see
+<p>Quote the serial number. Give one entry per machine. Two scanners of the same
+model are two entries with the same zones. Before you rely on the zones, check
+them against your own images. See
 <a class="reference internal" href="../configuration/#pixel-redaction-machines"><span class="std std-ref">Pixel Redaction (Machines)</span></a> and
 <a class="reference internal" href="../ocr/"><span class="std std-doc">Burned-in text (OCR)</span></a>.</p>
 </section>
 <section id="the-built-in-ctp-knowledge-base">
 <h2>The built-in CTP knowledge base<a class="headerlink" href="#the-built-in-ctp-knowledge-base" title="Link to this heading">#</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">create_config()</span></code> already knows the rules from CTP’s published script.
-For each machine in your data it looks for an exact serial number in its
-own knowledge base first, then for a CTP rule whose manufacturer and model
-are both contained in the machine’s (ignoring case), and writes the zones it
-finds into the new configuration with a comment naming the source. You need
-the converter only for a script your site has written or changed.</p>
+<p><code class="docutils literal notranslate"><span class="pre">create_config()</span></code> already knows the rules from CTP’s published script. For
+each machine in your data, it does these steps:</p>
+<ol class="arabic simple">
+<li><p>It looks for an exact serial number in its own knowledge base.</p></li>
+<li><p>Then it looks for a CTP rule whose manufacturer and model are both
+contained in the machine’s, ignoring case.</p></li>
+<li><p>It writes the zones it finds into the new configuration, with a comment
+that names the source.</p></li>
+</ol>
+<p>You need the converter only for a script that your site wrote or changed.</p>
 </section>
 </section>
 

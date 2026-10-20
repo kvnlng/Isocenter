@@ -486,9 +486,10 @@
 <p>Some studies need a way back. A collaborator finds something in patient
 <code class="docutils literal notranslate"><span class="pre">ANON_...</span></code> that the treating team must hear about, and someone has to be
 able to say who that patient is. <strong>Reversible anonymization</strong> gives you
-that: before de-identifying, Isocenter encrypts each patient’s original
-identity under a key you hold and writes it into the files.</p>
-<p>That way back travels with the data, so this tutorial also covers what
+that. Before it de-identifies, Isocenter encrypts each patient’s original
+identity under a key you hold. Then it writes the encrypted identity
+into the files.</p>
+<p>That way back travels with the data. So this tutorial also covers what
 you are handing out. It runs a real session over one CT file: lock, then
 de-identify, export and read the disclosure. It then recovers the identity
 from the pseudonym, and shows what happens without the key.</p>
@@ -504,7 +505,7 @@ copies the input file from pydicom into <code class="docutils literal notranslat
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a UID.</p></li>
@@ -556,8 +557,8 @@ shows how to change the rules and read the grade they give.</p>
 </section>
 <section id="3-lock-the-identities-then-anonymize">
 <span id="lock-the-identities-then-anonymize"></span><h2>3. Lock the identities, then anonymize<a class="headerlink" href="#3-lock-the-identities-then-anonymize" title="Link to this heading">#</a></h2>
-<p>Locking has to come <strong>before</strong> <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>: the lock copies each
-file’s original values into an encrypted token, and after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>
+<p>Locking has to come <strong>before</strong> <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>. The lock copies each
+file’s original values into an encrypted token. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>,
 there is no original value left to copy.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">enable_reversible_anonymization</span><span class="p">(</span><span class="s2">"isocenter.key"</span><span class="p">)</span>
 <span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
@@ -570,10 +571,10 @@ file. It does not create one.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">audit()</span></code></strong> scans the patients against the policy. Its report is also
 the list of patients to lock.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">lock_identities(report)</span></code></strong> writes an identity token into every
-instance of those patients: Patient’s Name, Patient ID, Birth Date, Sex
-and Accession Number, encrypted, in the Encrypted Attributes Sequence
-<code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>. The first lock that writes a token creates the key
-file, readable only by you (mode 0600).</p></li>
+instance of those patients. The token holds Patient’s Name, Patient
+ID, Birth Date, Sex and Accession Number, encrypted. It goes in the
+Encrypted Attributes Sequence <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>. The first lock that writes
+a token creates the key file. Only you can read that file (mode 0600).</p></li>
 </ul>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">len</span><span class="p">(</span><span class="n">locked</span><span class="p">)</span>
 <span class="go">1</span>
@@ -585,16 +586,16 @@ file, readable only by you (mode 0600).</p></li>
 <div class="warning admonition">
 <p class="admonition-title">Check the count: a lock after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> secures nothing</p>
 <p><code class="docutils literal notranslate"><span class="pre">len(locked)</span></code> is the number of instances that now carry a token.
-Called after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, <code class="docutils literal notranslate"><span class="pre">lock_identities(report)</span></code> does not
+If you call <code class="docutils literal notranslate"><span class="pre">lock_identities(report)</span></code> after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, it does not
 raise. It looks for the report’s patients by their original Patient
-IDs, and after <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> no patient holds them, so it logs one
-<code class="docutils literal notranslate"><span class="pre">ERROR</span></code> line saying the IDs matched no patient, and returns an empty
-result. The count is 0, and no key file is created: only a lock that
-writes a token creates one. (Passing one patient’s new <code class="docutils literal notranslate"><span class="pre">ANON_</span></code> ID
-instead raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, and creates no key file either.)</p>
+IDs. After <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, no patient holds them. So it logs one <code class="docutils literal notranslate"><span class="pre">ERROR</span></code>
+line that says the IDs matched no patient, and returns an empty result.
+The count is 0, and no key file is created. Only a lock that writes a
+token creates one. (If you pass one patient’s new <code class="docutils literal notranslate"><span class="pre">ANON_</span></code> ID instead,
+the call raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>. It creates no key file either.)</p>
 </div>
-<p>The key is a file of its own. Here it sits next to the store; step 6
-moves it where it belongs. Keep its contents to yourself: anyone who
+<p>The key is a file of its own. Here it sits next to the store. Step 6
+moves it where it belongs. Keep its contents to yourself. Anyone who
 holds it can read every locked identity. This page never prints it.</p>
 <p>Now de-identify and export as usual, with the report last:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
@@ -629,8 +630,8 @@ not depend on the JPEG 2000 encoder.</p>
 holds this file <strong>and</strong> the key can recover who the patient is. So
 <code class="docutils literal notranslate"><span class="pre">export()</span></code> says so twice.</p>
 <p><strong>First, a warning</strong>, printed to the console as the export runs and
-written to the log file. By default that is <code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code> in the
-working directory; <code class="docutils literal notranslate"><span class="pre">ISOCENTER_LOG_FILE</span></code> moves it, and
+written to the log file. By default, the log file is <code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code> in
+the working directory. <code class="docutils literal notranslate"><span class="pre">ISOCENTER_LOG_FILE</span></code> moves it.
 <code class="docutils literal notranslate"><span class="pre">ISOCENTER_LOG_LEVEL=ERROR</span></code> leaves this warning out of both
 (<a class="reference internal" href="../../environment/"><span class="std std-doc">Environment variables</span></a>):</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">logged_warning</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
@@ -644,7 +645,8 @@ working directory; <code class="docutils literal notranslate"><span class="pre">
 <span class="go">WARNING - 1 of 1 exported instances carry encrypted original identities (0400,0500). They are recoverable with the session key; treat the export as re-identifiable by any holder of it.</span>
 </pre></div>
 </div>
-<p>Each new <code class="docutils literal notranslate"><span class="pre">Session</span></code> overwrites the log file; copy it if you need it.</p>
+<p>Each new <code class="docutils literal notranslate"><span class="pre">Session</span></code> overwrites the log file. If you need the file, copy
+it.</p>
 <p><strong>Second, a <code class="docutils literal notranslate"><span class="pre">REVERSIBLE_EXPORT</span></code> row</strong> in the store’s audit log. The row
 is kept in the store for good, and the report counts it in section 2.
 These helpers print one row of section 2, and the grade:</p>
@@ -687,9 +689,9 @@ close the session:</p>
 </section>
 <section id="5-recover-the-identity">
 <span id="recover-the-identity"></span><h2>5. Recover the identity<a class="headerlink" href="#5-recover-the-identity" title="Link to this heading">#</a></h2>
-<p>Weeks later, the collaborator asks about <code class="docutils literal notranslate"><span class="pre">ANON_...</span></code>. Reopen the store,
-enable reversible anonymization with the key the data was locked with,
-and recover:</p>
+<p>Weeks later, the collaborator asks about <code class="docutils literal notranslate"><span class="pre">ANON_...</span></code>. Reopen the store.
+Enable reversible anonymization with the key that the data was locked
+with. Then recover:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"tutorial.db"</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">enable_reversible_anonymization</span><span class="p">(</span><span class="s2">"isocenter.key"</span><span class="p">)</span>
@@ -697,10 +699,10 @@ and recover:</p>
 </pre></div>
 </div>
 <p>A <code class="docutils literal notranslate"><span class="pre">Session</span></code> opened in a folder that holds a file named <code class="docutils literal notranslate"><span class="pre">isocenter.key</span></code>
-enables reversible anonymization with it on its own. Don’t rely on that:
-a key kept in the working directory sits beside the store and the
-exports, which is where it should not be. The explicit call says which
-key you mean, and it is the call you need once the key lives somewhere
+enables reversible anonymization with it on its own. Do not rely on
+that. A key kept in the working directory sits beside the store and the
+exports. That is where it should not be. The explicit call says which
+key you mean. It is also the call you need when the key is somewhere
 safer (step 6).</p>
 <p><code class="docutils literal notranslate"><span class="pre">recover_patient_identity()</span></code> returns a dict. Each key is the SOP Instance
 UID of an instance that carries a token, and each value holds what that
@@ -722,8 +724,8 @@ still carries the pseudonym:</p>
 <span class="go">True</span>
 </pre></div>
 </div>
-<p>With <code class="docutils literal notranslate"><span class="pre">restore=True</span></code> (the default) the call returns the same dict and
-also writes the original values back onto the patient in memory. A later
+<p>With <code class="docutils literal notranslate"><span class="pre">restore=True</span></code> (the default), the call returns the same dict. It
+also restores the original values on the patient, in memory. A later
 <code class="docutils literal notranslate"><span class="pre">save()</span></code> stores them. Use it when you need the identified data back in
 the store, not just the answer. The
 <a class="reference internal" href="../../quickstart/#recover-identity-optional"><span class="std std-ref">Quick Start</span></a> covers what a
@@ -754,7 +756,7 @@ in a password manager. Here, a <code class="docutils literal notranslate"><span 
 </div>
 <p>The store holds the token but not the key, so it cannot open the token.
 Recovery never creates a key, because a new key could not open a token
-locked under the old one: a mistyped path would only make a useless key.
+locked under the old one. A mistyped path would only make a useless key.
 A key file that exists but is the wrong key raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>
 instead. Either way, nothing is written.</p>
 <p>Point the session at the key’s real place, and recovery works again:</p>
@@ -788,11 +790,11 @@ separate files, and each one does a different job:</p>
 </tr>
 <tr class="row-odd"><td class="text-left"><p><strong>The store</strong>: <code class="docutils literal notranslate"><span class="pre">tutorial.db</span></code> <em>and</em> <code class="docutils literal notranslate"><span class="pre">tutorial_pixels.bin</span></code>, together</p></td>
 <td class="text-left"><p>It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export.</p></td>
-<td class="text-left"><p>Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key: ingest those files into a new store, and recover as in step 5.</p></td>
+<td class="text-left"><p>Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key. To do that, ingest those files into a new store, and recover as in step 5.</p></td>
 </tr>
 <tr class="row-even"><td class="text-left"><p><strong><code class="docutils literal notranslate"><span class="pre">config.yaml</span></code></strong>, under version control</p></td>
 <td class="text-left"><p>It is your policy. Reload it every time you reopen the store.</p></td>
-<td class="text-left"><p>Nothing you cannot write again, but a rewritten file must be the same policy. If it is not, an export before a new <code class="docutils literal notranslate"><span class="pre">audit()</span></code> writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row that stays in the store, and every later report of this store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p></td>
+<td class="text-left"><p>Nothing you cannot write again, but a rewritten file must be the same policy. If it is not, an export before a new <code class="docutils literal notranslate"><span class="pre">audit()</span></code> writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row that stays in the store. Then every later report of this store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>.</p></td>
 </tr>
 </tbody>
 </table>

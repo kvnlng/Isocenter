@@ -487,11 +487,12 @@
 <p><code class="docutils literal notranslate"><span class="pre">Session</span></code> is the entry point: <code class="docutils literal notranslate"><span class="pre">from</span> <span class="pre">isocenter</span> <span class="pre">import</span> <span class="pre">Session</span></code>. It is the
 class <code class="docutils literal notranslate"><span class="pre">isocenter.session.DicomSession</span></code>, rendered below. Its constructor
 and every method on this page are <strong>frozen at 1.0</strong>
-(<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>), and so are the attributes in its table
-except <code class="docutils literal notranslate"><span class="pre">store_backend</span></code>, which is tier 2. The methods are listed in pipeline
-order, ingest → examine → config → audit → anonymize → redact → verify →
-export → report, with <code class="docutils literal notranslate"><span class="pre">compact</span></code>, <code class="docutils literal notranslate"><span class="pre">release_memory</span></code> and <code class="docutils literal notranslate"><span class="pre">close</span></code> last. What
-the methods return and raise is on <a class="reference internal" href="../results/"><span class="std std-doc">Results and errors</span></a>.</p>
+(<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>). So are the attributes in its table,
+except <code class="docutils literal notranslate"><span class="pre">store_backend</span></code>, which is tier 2. This page lists the methods in
+pipeline order, ingest → examine → config → audit → anonymize → redact →
+verify → export → report. <code class="docutils literal notranslate"><span class="pre">compact</span></code>, <code class="docutils literal notranslate"><span class="pre">release_memory</span></code> and <code class="docutils literal notranslate"><span class="pre">close</span></code> come
+last. <a class="reference internal" href="../results/"><span class="std std-doc">Results and errors</span></a> says what the methods return and
+raise.</p>
 <!-- tests/test_frozen_surface.py asserts the nested `.. automethod::`
      lines below render every method stability.md freezes, in the
      pipeline order this page promises (a `:members:` list would be
@@ -1918,9 +1919,9 @@ the unsaved-instances WARNING.</p>
 <p><code class="docutils literal notranslate"><span class="pre">export(folder,</span> <span class="pre">format=&quot;dicom&quot;,</span> <span class="pre">**options)</span></code> takes the options below for
 the <code class="docutils literal notranslate"><span class="pre">dicom</span></code> format. Their names and defaults are frozen with <code class="docutils literal notranslate"><span class="pre">export()</span></code>
 (<a class="reference internal" href="../stability/#frozen-at-1-0"><span class="std std-ref">API stability</span></a>). An option name the format
-does not take raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, and nothing is written. The table is
-read from the format’s own method, which is private: pass the options to
-<code class="docutils literal notranslate"><span class="pre">export()</span></code>, never call that method directly.</p>
+does not take raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, and <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes nothing. The
+table comes from the format’s own method, which is private. Pass the
+options to <code class="docutils literal notranslate"><span class="pre">export()</span></code>, and never call that method directly.</p>
 <!-- `_export_dicom` is private (leading underscore) and rendered here on
      purpose (#27): its docstring is the one definition of the `dicom`
      format's options, and rendering it keeps a single copy of that text

@@ -488,14 +488,15 @@
 <p class="admonition-title">Provisional</p>
 <p>The exporter registry (<code class="docutils literal notranslate"><span class="pre">Exporter</span></code>, <code class="docutils literal notranslate"><span class="pre">register()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_exporter()</span></code>,
 <code class="docutils literal notranslate"><span class="pre">available_formats()</span></code>) is <strong>provisional until 1.1</strong>. It is documented
-but internal (see <a class="reference internal" href="../stability/#the-exporter-registry-provisional-until-1-1"><span class="std std-ref">API stability</span></a>):
-1.1 may replace these four names rather than extend them, with a
-CHANGELOG entry naming both spellings. A plugin written against 1.0
+but internal (see <a class="reference internal" href="../stability/#the-exporter-registry-provisional-until-1-1"><span class="std std-ref">API stability</span></a>).
+Version 1.1 may replace these four names rather than extend them, with a
+CHANGELOG entry that names both spellings. A plugin written against 1.0
 should pin <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>.</p>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">session.export(folder,</span> <span class="pre">format=...)</span></code> looks <code class="docutils literal notranslate"><span class="pre">format</span></code> up in this registry
-and calls the exporter it finds. The two built-in formats, <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and
-<code class="docutils literal notranslate"><span class="pre">wfdb</span></code>, register themselves when <code class="docutils literal notranslate"><span class="pre">isocenter</span></code> is imported. Anything else
+<p><code class="docutils literal notranslate"><span class="pre">session.export(folder,</span> <span class="pre">format=...)</span></code> finds the exporter registered for
+<code class="docutils literal notranslate"><span class="pre">format</span></code> in this registry, and calls it. The two built-in formats, <code class="docutils literal notranslate"><span class="pre">dicom</span></code> and
+<code class="docutils literal notranslate"><span class="pre">wfdb</span></code>, register themselves when <code class="docutils literal notranslate"><span class="pre">isocenter.exporters</span></code> is imported, which
+<code class="docutils literal notranslate"><span class="pre">session.export()</span></code> does. Anything else
 can be registered too:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">exporters</span>
 
@@ -516,57 +517,59 @@ can be registered too:</p>
 <p><strong>The session’s graph and nothing else.</strong> That graph is not what the
 built-in formats write. Every export-time gate lives inside the built-in
 formats, and some of them change pixels and sequences on the way out.
-<code class="docutils literal notranslate"><span class="pre">export()</span></code> itself only resolves the format and dispatches, so for any
+<code class="docutils literal notranslate"><span class="pre">export()</span></code> itself only resolves the format and dispatches. So for any
 exporter other than the two built-in classes, none of the following runs:</p>
 <ul class="simple">
-<li><p>the burned-in re-audit that withholds an instance still carrying an
-identifier (<code class="docutils literal notranslate"><span class="pre">check_burned_in</span></code>);</p></li>
-<li><p>the configured redaction zones. The DICOM export looks up each series’
-zones in the configuration in force and applies them to a copy of every
-frame it writes, whether or not <code class="docutils literal notranslate"><span class="pre">redact()</span></code> ran. For a plugin,
-<code class="docutils literal notranslate"><span class="pre">instance.get_pixel_data()</span></code> holds only what <code class="docutils literal notranslate"><span class="pre">redact()</span></code> changed: with
-zones configured and <code class="docutils literal notranslate"><span class="pre">redact()</span></code> not run, the pixels are unredacted;</p></li>
-<li><p>the drop of nested icons. An Icon Image
+<li><p>The burned-in re-audit that withholds an instance still carrying an
+identifier (<code class="docutils literal notranslate"><span class="pre">check_burned_in</span></code>).</p></li>
+<li><p>The configured redaction zones. The DICOM export reads each series’
+zones from the configuration in force. It applies them to a copy of
+every frame it writes, whether or not <code class="docutils literal notranslate"><span class="pre">redact()</span></code> ran. For a plugin,
+<code class="docutils literal notranslate"><span class="pre">instance.get_pixel_data()</span></code> holds only what <code class="docutils literal notranslate"><span class="pre">redact()</span></code> changed. With
+zones configured and <code class="docutils literal notranslate"><span class="pre">redact()</span></code> not run, the pixels are unredacted.</p></li>
+<li><p>The drop of nested icons. An Icon Image
 Sequence <code class="docutils literal notranslate"><span class="pre">(0088,0200)</span></code> item is a downsampled copy of a frame, and nothing
 scans or redacts one. The DICOM export drops an instance’s own icon when
-its pixels are redacted or have zones configured, and every other nested
-icon when any instance in the store is redacted or any configured zone
-matches a series in it. A plugin that copies <code class="docutils literal notranslate"><span class="pre">instance.sequences</span></code> ships a
-thumbnail of what redaction removed, <strong>even after <code class="docutils literal notranslate"><span class="pre">redact()</span></code> ran</strong>;</p></li>
-<li><p>the recoverable-identity disclosure (<code class="docutils literal notranslate"><span class="pre">check_reversibility</span></code>). After
+its pixels are redacted or have zones configured. It drops every other
+nested icon when any instance in the store is redacted, or any
+configured zone matches a series in the store. A plugin that copies
+<code class="docutils literal notranslate"><span class="pre">instance.sequences</span></code> ships a thumbnail of what redaction removed,
+<strong>even after <code class="docutils literal notranslate"><span class="pre">redact()</span></code> ran</strong>.</p></li>
+<li><p>The recoverable-identity disclosure (<code class="docutils literal notranslate"><span class="pre">check_reversibility</span></code>). After
 <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code>, the graph still carries the encrypted identity token
-at <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>;</p></li>
-<li><p>the de-identification markers <code class="docutils literal notranslate"><span class="pre">(0012,0062)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0012,0063)</span></code> and
+at <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>.</p></li>
+<li><p>The de-identification markers <code class="docutils literal notranslate"><span class="pre">(0012,0062)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0012,0063)</span></code> and
 <code class="docutils literal notranslate"><span class="pre">(0028,0303)</span></code>, which Isocenter decides per instance at export time and
-never puts in the graph;</p></li>
-<li><p>the filter on <code class="docutils literal notranslate"><span class="pre">attributes</span></code> keys. The DICOM writer writes only keys shaped
+never puts in the graph.</p></li>
+<li><p>The filter on <code class="docutils literal notranslate"><span class="pre">attributes</span></code> keys. The DICOM writer writes only keys shaped
 <code class="docutils literal notranslate"><span class="pre">gggg,eeee</span></code> and drops every <code class="docutils literal notranslate"><span class="pre">_</span></code>-prefixed bookkeeping key. One of those,
 <code class="docutils literal notranslate"><span class="pre">_ISOCENTER_SOURCE_SOP_UID</span></code> (<code class="docutils literal notranslate"><span class="pre">entities.SOURCE_SOP_UID_ATTR</span></code>), holds the
 source SOP Instance UID that UID replacement removed. A plugin that
-walks <code class="docutils literal notranslate"><span class="pre">instance.attributes</span></code> writes it;</p></li>
-<li><p>the owner stamps: <code class="docutils literal notranslate"><span class="pre">(0010,0010)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0010,0020)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0008,0020)</span></code>,
+walks <code class="docutils literal notranslate"><span class="pre">instance.attributes</span></code> writes it.</p></li>
+<li><p>The owner stamps: <code class="docutils literal notranslate"><span class="pre">(0010,0010)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0010,0020)</span></code>, <code class="docutils literal notranslate"><span class="pre">(0008,0020)</span></code>,
 <code class="docutils literal notranslate"><span class="pre">(0020,000D)</span></code> and <code class="docutils literal notranslate"><span class="pre">(0020,000E)</span></code> written from the patient, study and
-series rather than from an instance’s own copy;</p></li>
-<li><p>the rule for a subject with no Patient ID: <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code> can be
+series rather than from an instance’s own copy.</p></li>
+<li><p>The rule for a subject with no Patient ID. <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code> can be
 the synthetic key <code class="docutils literal notranslate"><span class="pre">&quot;\no-patient-id\&lt;Study</span> <span class="pre">Instance</span> <span class="pre">UID&gt;&quot;</span></code>, and
-<code class="docutils literal notranslate"><span class="pre">exported_patient_id()</span></code> is the only reader for output;</p></li>
-<li><p>the <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code>/<code class="docutils literal notranslate"><span class="pre">subset</span></code> counting and the stale-policy notice, and the
+<code class="docutils literal notranslate"><span class="pre">exported_patient_id()</span></code> is the only reader for output.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code>/<code class="docutils literal notranslate"><span class="pre">subset</span></code> counting and the stale-policy notice, and the
 <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> and export-time <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> audit rows.</p></li>
 </ul>
 </section>
 <section id="how-the-report-treats-a-third-party-export">
 <h2>How the report treats a third-party export<a class="headerlink" href="#how-the-report-treats-a-third-party-export" title="Link to this heading">#</a></h2>
 <p>Each run of an exporter that is not one of the two built-in classes writes
-one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row before the exporter is called, naming the format
-and the class and saying that its output is not attested by Isocenter. The
-row is written even when the exporter then raises.</p>
+one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row before <code class="docutils literal notranslate"><span class="pre">export()</span></code> calls the exporter. The row
+names the format and the class, and says that Isocenter does not attest
+the exporter’s output. The row is written even when the exporter then
+raises.</p>
 <p><strong>So in 1.0, no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>.</strong> A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row grades
 the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> (condition 2 in
 <a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>),
 however the plugin behaves. The same report still carries the “generated
 before any export” note, because no <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row was written.</p>
-<p>The class is what decides, not the format name or the module: a subclass
-of a built-in, or a different class registered as <code class="docutils literal notranslate"><span class="pre">dicom</span></code>, is third-party.
+<p>The class decides, not the format name or the module. A subclass of a
+built-in, or a different class registered as <code class="docutils literal notranslate"><span class="pre">dicom</span></code>, is third-party.
 <code class="docutils literal notranslate"><span class="pre">DicomFormatExporter</span></code> registered again, under any name, is not.</p>
 <p>Running the format-independent gates in <code class="docutils literal notranslate"><span class="pre">export()</span></code> before dispatch, so a
 plugin can grade <code class="docutils literal notranslate"><span class="pre">PASS</span></code>, is planned for 1.1
@@ -581,45 +584,46 @@ Nothing checks this for a third-party exporter.</p></li>
 Import it with <code class="docutils literal notranslate"><span class="pre">from</span> <span class="pre">isocenter.entities</span> <span class="pre">import</span> <span class="pre">exported_patient_id</span></code>.
 Take a patient’s, study’s or series’ identifiers from the owner object,
 not from an instance’s copy of them. Write only <code class="docutils literal notranslate"><span class="pre">gggg,eeee</span></code> keys from
-<code class="docutils literal notranslate"><span class="pre">attributes</span></code>, never a <code class="docutils literal notranslate"><span class="pre">_</span></code>-prefixed one: those are Isocenter’s
-bookkeeping, and one holds the source SOP Instance UID.</p></li>
+<code class="docutils literal notranslate"><span class="pre">attributes</span></code>, never a <code class="docutils literal notranslate"><span class="pre">_</span></code>-prefixed one. Those keys are Isocenter’s
+bookkeeping, and one of them holds the source SOP Instance UID.</p></li>
 <li><p><strong>Do not write the de-identification markers.</strong> Isocenter decides them
-per instance from the PHI statuses it recorded, and a plugin cannot
+per instance from the PHI statuses it recorded. A plugin cannot
 reproduce that decision.</p></li>
 <li><p><strong>Decide deliberately what to do with <code class="docutils literal notranslate"><span class="pre">(0400,0500)</span></code>–<code class="docutils literal notranslate"><span class="pre">(0400,0520)</span></code>.</strong>
 They hold the recoverable identity.</p></li>
 <li><p><strong>Say what you wrote.</strong> Your return value must let a caller detect that
-nothing was written: an empty list, a zero count, or a raise.</p></li>
+nothing was written. Return an empty list or a zero count, or raise.</p></li>
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">register()</span></code> checks only that the class has an <code class="docutils literal notranslate"><span class="pre">export</span></code> attribute.</strong>
-1.1 may check more.</p></li>
+Version 1.1 may check more.</p></li>
 <li><p><strong>Call <code class="docutils literal notranslate"><span class="pre">redact()</span></code> before exporting, and write no nested pixel payload.</strong>
 <code class="docutils literal notranslate"><span class="pre">export()</span></code> does not apply the configured zones for you. An Icon Image
 Sequence <code class="docutils literal notranslate"><span class="pre">(0088,0200)</span></code> item, or any other pixel data nested in a
-sequence, is never scanned or redacted, so leave it out.</p></li>
+sequence, is never scanned or redacted. Leave it out.</p></li>
 </ol>
-<p>There is no reader or codec plugin point: ingest reads through pydicom and
-Isocenter’s own codec dispatch. The transfer syntaxes it reads and the two
-it writes are in the
-<a class="reference internal" href="../../quickstart/#anonymize-redact-export"><span class="std std-ref">Quick Start</span></a>.</p>
+<p>There is no reader or codec plugin point. Ingest reads through pydicom and
+Isocenter’s own codec dispatch. The transfer syntaxes that Isocenter reads,
+and the two that it writes, are in
+<a class="reference internal" href="../../codecs/"><span class="std std-doc">Codec support</span></a>.</p>
 </section>
 <section id="writing-dicom-without-the-pipeline">
 <h2>Writing DICOM without the pipeline<a class="headerlink" href="#writing-dicom-without-the-pipeline" title="Link to this heading">#</a></h2>
 <p><code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree()</span></code> is the serializer alone. It writes a graph as
-it stands. It applies the owner stamps and the no-Patient-ID rule (both
-write paths share those), and it drops nested icons by the redaction
-already recorded on the graph:
-an instance’s own icon when that instance was redacted, and every other one
-when any instance it writes was. This half of the gate needs no
-configuration. It also runs the export’s Type 1 check, which covers
-CT, MR and PET Image Storage only, and raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> for such an instance missing one
-of those elements, or holding it empty
+it stands. It applies the owner stamps and the no-Patient-ID rule, which
+both write paths share. It also drops nested icons by the redaction
+already recorded on the graph. It drops an instance’s own icon when that
+instance was redacted, and every other icon when any instance that it
+writes was redacted. This half of the gate needs no configuration.
+<code class="docutils literal notranslate"><span class="pre">write_tree()</span></code> also runs the export’s Type 1 check, which covers CT, MR
+and PET Image Storage only. It raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> for such an
+instance that is missing one of the elements the check covers, or holds
+it empty
 (<a class="reference internal" href="../../export-output/#what-the-export-changes-on-the-way-out"><span class="std std-ref">What the export changes on the way out</span></a>).
 It applies none of the rest: no burned-in
 re-audit, no redaction zones, no <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> or <code class="docutils literal notranslate"><span class="pre">subset</span></code> selection, no
 recoverable-identity disclosure, no de-identification markers, no notices,
 and no <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row. It writes <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> rows only
 to a <code class="docutils literal notranslate"><span class="pre">store_backend</span></code> you pass. Use <code class="docutils literal notranslate"><span class="pre">session.export()</span></code> to de-identify a
-cohort; use <code class="docutils literal notranslate"><span class="pre">write_tree()</span></code> for a graph you built by hand, with no session
+cohort. Use <code class="docutils literal notranslate"><span class="pre">write_tree()</span></code> for a graph you built by hand, with no session
 behind it.</p>
 </section>
 <section id="reference">

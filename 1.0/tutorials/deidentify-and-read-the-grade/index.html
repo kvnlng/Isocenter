@@ -483,10 +483,11 @@
   <section id="de-identify-a-cohort-and-read-the-grade">
 <h1>De-identify a cohort and read the grade<a class="headerlink" href="#de-identify-a-cohort-and-read-the-grade" title="Link to this heading">#</a></h1>
 <!-- tutorial: inputs=CT_small.dcm,MR_small.dcm,rtdose.dcm -->
-<p>You have de-identified a cohort. Two questions come next: <strong>what does the
-compliance report’s grade mean</strong>, and <strong>what do you need to keep so that
-a later export matches this one</strong>? This tutorial answers both by running
-a real session over three small files and reading what it produces.</p>
+<p>You have de-identified a cohort. Two questions come next. <strong>What does the
+compliance report’s grade mean?</strong> And <strong>what do you need to keep so that
+a later export matches this one?</strong> This tutorial runs a real session over
+three small files and reads what it produces. That answers both
+questions.</p>
 <p>It follows one question end to end. For a tour of every step in the
 pipeline, read the <a class="reference internal" href="../../quickstart/"><span class="std std-doc">Quick Start</span></a> first.</p>
 <div class="tip admonition">
@@ -501,7 +502,7 @@ copies the input files from pydicom into <code class="docutils literal notransla
 <li><p>Paste the blocks into a Python prompt or a notebook. In a <code class="docutils literal notranslate"><span class="pre">.py</span></code>
 script, put them under <code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">__name__</span> <span class="pre">==</span> <span class="pre">&quot;__main__&quot;:</span></code>
 (<a class="reference internal" href="../../quickstart/#initialize-a-session"><span class="std std-ref">why</span></a>).</p></li>
-<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>; the lines
+<li><p>In a block with <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>, type what follows each <code class="docutils literal notranslate"><span class="pre">&gt;&gt;&gt;</span></code>. The lines
 under it are what Python prints. A <code class="docutils literal notranslate"><span class="pre">...</span></code> inside a printed value
 stands for a part that differs on every run, such as a pseudonym or
 a UID.</p></li>
@@ -523,8 +524,8 @@ lines as it works. They are not shown here.
 <section id="1-ingest-three-patients">
 <span id="ingest-three-patients"></span><h2>1. Ingest three patients<a class="headerlink" href="#1-ingest-three-patients" title="Link to this heading">#</a></h2>
 <p>The three files are a CT, an MR and an RT dose grid, one patient each.
-Ingest reads them into a <em>store</em>: a SQLite file plus a pixel sidecar
-beside it. The source files are never modified.</p>
+Ingest reads them into a <em>session store</em>. The store is a SQLite <code class="docutils literal notranslate"><span class="pre">.db</span></code>
+file plus a pixel sidecar beside it. The source files are never modified.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">isocenter</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
 
 <span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"tutorial.db"</span><span class="p">)</span>
@@ -599,15 +600,15 @@ findings as a table
 </div>
 <p>Two choices here are deliberate:</p>
 <ul class="simple">
-<li><p><strong><code class="docutils literal notranslate"><span class="pre">use_compression=False</span></code>.</strong> <code class="docutils literal notranslate"><span class="pre">rtdose.dcm</span></code> stores 32-bit dose values,
-and Isocenter’s JPEG 2000 encoder is exact only to 25 bits, so with
-compression on
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">use_compression=False</span></code>.</strong> <code class="docutils literal notranslate"><span class="pre">rtdose.dcm</span></code> stores 32-bit dose values.
+Isocenter’s JPEG 2000 encoder is exact only to 25 bits. So with
+compression on,
 <a class="reference internal" href="../../export-output/#compression"><span class="std std-ref">that instance is written uncompressed</span></a>
 rather than be written wrong, with an INFO note
 (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/771">#771</a>). Turning
 compression off writes every file in one transfer syntax.</p></li>
 <li><p><strong>The report comes last,</strong> after <code class="docutils literal notranslate"><span class="pre">export()</span></code>. Export writes rows of its
-own (anything it lost or could not write), and the report grades only
+own, for anything it lost or could not write. The report grades only
 the rows that exist when you call it.</p></li>
 </ul>
 <p>The report is a Markdown file. Its first table holds the grade. This
@@ -652,9 +653,9 @@ report’s layout and the wording of each Grade Basis line are not
 one. If a 1.x release changes the layout, this page goes red in
 Isocenter’s own tests and is updated with it.</p>
 </div>
-<p>The run did what it was asked. But the scan found two values your policy
-acts on, and nothing acted on them, so the report will not call the
-result clean. This is condition 7 of
+<p>The run did what it was asked. But the scan found two values that your
+policy acts on, and nothing acted on them. So the report will not call
+the result clean. This is condition 7 of
 <a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>,
 which lists every condition. The grade reads the store, not your
 intentions: holding a finding back looks, to the report, exactly like
@@ -681,7 +682,7 @@ the MR, whose Institution Name is still there, do not:</p>
 </pre></div>
 </div>
 <p><code class="docutils literal notranslate"><span class="pre">export-draft</span></code> still holds an institution’s name, so it is not an export
-to hand out. Delete it:</p>
+to share. Delete it:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
 <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="s2">"export-draft"</span><span class="p">)</span>
 </pre></div>
@@ -691,8 +692,8 @@ to hand out. Delete it:</p>
 <span id="act-on-the-held-findings-and-read-pass"></span><h2>5. Act on the held findings, and read PASS<a class="headerlink" href="#5-act-on-the-held-findings-and-read-pass" title="Link to this heading">#</a></h2>
 <p>Your protocol says Institution Name goes. Pass the held findings to
 <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code>, export again, and generate a new report. The Basic Profile
-says to replace that tag with a dummy value, and Isocenter’s dummy value
-for text is the word <code class="docutils literal notranslate"><span class="pre">ANONYMIZED</span></code>.</p>
+says to replace that tag with a dummy value. Isocenter’s dummy value for
+text is the word <code class="docutils literal notranslate"><span class="pre">ANONYMIZED</span></code>.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">(</span><span class="n">held</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export"</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report.md"</span><span class="p">)</span>
@@ -735,8 +736,8 @@ recipient can check without your report:</p>
 </div>
 <ul class="simple">
 <li><p><strong>Patient Identity Removed <code class="docutils literal notranslate"><span class="pre">(0012,0062)</span></code></strong> is written <code class="docutils literal notranslate"><span class="pre">YES</span></code> only when
-every rule of the policy was applied to that file, and it describes the
-attributes, not the pixels: a file whose Burned In Annotation says
+every rule of the policy was applied to that file. It describes the
+attributes, not the pixels. So a file whose Burned In Annotation says
 <code class="docutils literal notranslate"><span class="pre">YES</span></code> does not get it. A source file that already said <code class="docutils literal notranslate"><span class="pre">YES</span></code> keeps its
 own value.</p></li>
 <li><p><strong>De-identification Method <code class="docutils literal notranslate"><span class="pre">(0012,0063)</span></code></strong> names the release, the
@@ -776,20 +777,21 @@ perhaps for a second recipient:</p>
 <span class="n">session</span><span class="o">.</span><span class="n">generate_report</span><span class="p">(</span><span class="s2">"report-again.md"</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>Load the configuration again after reopening, before anything else. The
-store remembers which policy each finding was scanned under, and no
-configuration at all means the default floor policy, which is a
-different one. An export under a different policy writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>
-row, and like every row it stays in the store: every later report of
-this store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>
+<p>Load the configuration again after you reopen the store, before anything
+else. The store remembers which policy each finding was scanned under.
+No configuration at all means the default floor policy, which is a
+different policy.</p>
+<p>An export under a different policy writes a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row. Like every
+row, it stays in the store. So every later report of this store grades
+<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>
 (<a class="reference internal" href="../select-part-of-a-cohort/#export-with-a-mistyped-id-and-read-the-grade"><span class="std std-ref">Select part of a cohort, step 6</span></a>).
-Running <code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> afterwards stops further warnings
-but does not remove that row.</p>
+Running <code class="docutils literal notranslate"><span class="pre">audit()</span></code> and <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> afterwards stops further warnings.
+It does not remove that row.</p>
 <p>The export writes what the store holds. The store holds the
 de-identified graph because each DICOM export above saved the session
-before it wrote. (An exporter of your own does not;
+before it wrote. (An exporter of your own does not save.
 <a class="reference internal" href="../write-an-exporter/#save-before-you-close"><span class="std std-ref">Write your own export format</span></a>
-shows the <code class="docutils literal notranslate"><span class="pre">save()</span></code> it needs.) So every patient comes out as before:</p>
+shows the <code class="docutils literal notranslate"><span class="pre">save()</span></code> that it needs.) So every patient comes out as before:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">identities</span><span class="p">(</span><span class="n">folder</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">{</span><span class="n">modality</span><span class="p">:</span> <span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">PatientID</span><span class="p">,</span> <span class="n">ds</span><span class="o">.</span><span class="n">StudyDate</span><span class="p">)</span>
             <span class="k">for</span> <span class="n">modality</span><span class="p">,</span> <span class="n">ds</span> <span class="ow">in</span> <span class="n">exported</span><span class="p">(</span><span class="n">folder</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
@@ -832,14 +834,14 @@ instead of 19 January.</p>
 </pre></div>
 </div>
 <p>(<code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> with no argument audits and then acts on every finding.
-That is the shortcut when you are holding nothing back.) Do not skip
-that call for a later batch. Until a scan reads the new file the store
-holds it as ingested and an export writes it as the store holds it, and because the
-rest of this store has been scanned, the report grades
-<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> for it
-(<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">condition 9</span></a>). The second
-visit gets the first visit’s pseudonym, and its date moves by the same
-offset, so the 42 days between the two scans survive:</p>
+That is the shortcut when you are holding nothing back.)</p>
+<p>Do not skip that call for a later batch. Until a scan reads the new
+file, the store holds it as ingested. Until then, an export writes it as
+the store holds it. The rest of this store has been scanned, so the report grades
+<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> for the new file
+(<a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">condition 9</span></a>).</p>
+<p>The second visit gets the first visit’s pseudonym. Its date moves by the
+same offset, so the 42 days between the two scans survive:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">batch</span>
 <span class="go">IngestSummary(ingested=1, failures=[], declined=0, skipped=0, hidden=0)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">second_visit</span><span class="o">.</span><span class="n">PatientID</span> <span class="o">==</span> <span class="n">ct</span><span class="o">.</span><span class="n">PatientID</span>
@@ -854,8 +856,8 @@ offset, so the 42 days between the two scans survive:</p>
 </div>
 <p>This is the store’s real job. The pseudonym and the offset are not
 stored per file. They are derived from the patient’s original ID and a
-secret the store generated for itself, so any later batch of the same
-patient lands on the same values. The
+secret that the store generated for itself. So any later batch of the
+same patient lands on the same values. The
 configuration does not reproduce them. The same configuration over a
 <strong>new</strong> store, with a new secret, gives every patient a different
 pseudonym:</p>
@@ -896,7 +898,7 @@ pseudonym:</p>
 <td class="text-left"><p>It is your policy. Reload it every time you reopen the store. <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> names one fixed table in every 1.x release.</p></td>
 </tr>
 <tr class="row-odd"><td class="text-left"><p><strong>The store</strong>: <code class="docutils literal notranslate"><span class="pre">tutorial.db</span></code> <em>and</em> <code class="docutils literal notranslate"><span class="pre">tutorial_pixels.bin</span></code>, together</p></td>
-<td class="text-left"><p>It holds the project secret. Lose it and the next export of the same patients gets new pseudonyms, new offsets and new UIDs, which will not link to anything exported before. Never send it with an export: whoever holds it can undo the date shifts.</p></td>
+<td class="text-left"><p>It holds the project secret. If you lose it, the next export of the same patients gets new pseudonyms, new offsets and new UIDs. These will not link to anything exported before. Never send it with an export. Whoever holds it can undo the date shifts.</p></td>
 </tr>
 <tr class="row-even"><td class="text-left"><p><strong>The report</strong>, beside the export it describes</p></td>
 <td class="text-left"><p>It is the record of what this run did. Generate it after <code class="docutils literal notranslate"><span class="pre">export()</span></code>, and read the grade <em>and</em> its Grade Basis.</p></td>
