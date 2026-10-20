@@ -5952,7 +5952,7 @@ class DicomSession:
                               verbose: bool = True
                               ) -> Union[List["Instance"], LockingResult]:
         """
-        Lock the identities of several patients; see `lock_identities()`.
+        Lock the identities of several patients. See `lock_identities()`.
 
         Args:
             patient_ids (Union[Iterable[str], PhiReport]): The patients to
@@ -6171,7 +6171,7 @@ class DicomSession:
                                  restore: bool = True) -> Dict[str, Dict[str, Any]]:
         """
         Decrypt a patient's identity tokens and return the identity they
-        hold; with `restore=True`, also write it back onto the patient.
+        hold. With `restore=True`, also write it back onto the patient.
 
         **Which token speaks for the patient.** It is the first token of
         ours in study, series and instance order. A study without a token,
@@ -8120,7 +8120,7 @@ class DicomSession:
         Args:
             folder (str): Output directory.
             format (str): Registered format name. "dicom" (default) writes
-                cleaned DICOM files; "wfdb" writes PhysioNet WFDB records.
+                cleaned DICOM files. "wfdb" writes PhysioNet WFDB records.
             **options (dict): Passed through to the selected exporter. The
                 DICOM format's options are listed under "DICOM export
                 options" on the Session API page.
