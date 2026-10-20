@@ -3,11 +3,12 @@
 `Session` is the entry point: `from isocenter import Session`. It is the
 class `isocenter.session.DicomSession`, rendered below. Its constructor
 and every method on this page are **frozen at 1.0**
-([API stability](stability.md)), and so are the attributes in its table
-except `store_backend`, which is tier 2. The methods are listed in pipeline
-order, ingest → examine → config → audit → anonymize → redact → verify →
-export → report, with `compact`, `release_memory` and `close` last. What
-the methods return and raise is on [Results and errors](results.md).
+([API stability](stability.md)). So are the attributes in its table,
+except `store_backend`, which is tier 2. This page lists the methods in
+pipeline order, ingest → examine → config → audit → anonymize → redact →
+verify → export → report. `compact`, `release_memory` and `close` come
+last. [Results and errors](results.md) says what the methods return and
+raise.
 
 <!-- tests/test_frozen_surface.py asserts the nested `.. automethod::`
      lines below render every method stability.md freezes, in the
@@ -57,9 +58,9 @@ the methods return and raise is on [Results and errors](results.md).
 `export(folder, format="dicom", **options)` takes the options below for
 the `dicom` format. Their names and defaults are frozen with `export()`
 ([API stability](stability.md#frozen-at-10)). An option name the format
-does not take raises `TypeError`, and nothing is written. The table is
-read from the format's own method, which is private: pass the options to
-`export()`, never call that method directly.
+does not take raises `TypeError`, and `export()` writes nothing. The
+table comes from the format's own method, which is private. Pass the
+options to `export()`, and never call that method directly.
 
 <!-- `_export_dicom` is private (leading underscore) and rendered here on
      purpose (#27): its docstring is the one definition of the `dicom`

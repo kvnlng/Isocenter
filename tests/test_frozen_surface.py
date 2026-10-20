@@ -1725,20 +1725,20 @@ def test_the_stability_page_says_what_the_freeze_covers():
     assert ("`export(format='wfdb')` → `List[str]`, the paths written, empty "
             "when nothing was attempted") in frozen
     assert ("`generate_report(format=)` accepts `'markdown'` only, and "
-            "`generate_manifest(format=)` `'html'` and `'json'`; any other "
-            "spelling raises `ValueError`") in frozen
+            "`generate_manifest(format=)` accepts `'html'` and `'json'`. Any "
+            "other spelling raises `ValueError`") in frozen
     # Owner rulings Q1 and Q2 on #789, frozen here: the lock's report arm
     # (the `patient_ids` paragraph said every non-`str` element raised),
     # and the constructor's cwd key. Their behaviour is pinned in
     # `test_lock_identities_signature.py`.
-    assert ("with one exception: the two lock methods also take a "
+    assert ("with one exception. The two lock methods also take a "
             "`PhiReport`, and `PhiFinding` elements mixed with IDs, and lock "
             "the patients those findings name") in frozen
     assert ("When a file named `isocenter.key` exists in the current working "
             "directory at construction, `Session()` calls "
             "`enable_reversible_anonymization()` with it") in frozen
-    assert ("With no such file, reversible anonymization stays off and no "
-            "key is created.") in frozen
+    assert ("With no such file, reversible anonymization stays off and "
+            "`Session()` creates no key.") in frozen
     # D1 of the delta review: the third arm, pinned in behaviour by
     # `test_a_malformed_key_in_the_working_directory_makes_session_raise`.
     assert ("A malformed one makes `Session()` raise its `ValueError`."
@@ -1747,21 +1747,22 @@ def test_the_stability_page_says_what_the_freeze_covers():
     # same refusal, and the half-built session is closed before it.
     # Pinned in behaviour by `test_a_bad_key_in_the_working_directory.py`.
     assert ("So does anything at that path that is not a regular file, such "
-            "as a directory. The message names the path, and the threads the "
-            "session had started are released first.") in frozen
+            "as a directory. The message names the path. Before `Session()` "
+            "raises, it releases the threads that the session started.") in frozen
     # D2 and E1: the report arm locks the patients with a finding, not
     # every patient scanned. After `anonymize()` it names no patient whose
     # ID was replaced; an ID-less subject (#584) or a KEEP on `0010,0020`
     # is not replaced, so the sentence says only what holds for all three.
-    assert ("The report `audit()` returns locks every patient with at least "
-            "one finding, by the Patient ID the finding holds. After "
+    assert ("The report that `audit()` returns locks every patient with at "
+            "least one finding, by the Patient ID the finding holds. After "
             "`anonymize()` has replaced a patient's ID, the report no longer "
-            "names that patient; lock before `anonymize()`.") in frozen
-    assert ("except a SOP Instance UID that is none of these three: the one "
-            "the first move of the instance's UID (by `anonymize()`, "
-            "`redact()` or `Instance.regenerate_uid()`) left, which is the "
-            "ingested one unless `sop_instance_uid` was assigned before it; "
-            "that UID's `anonymize()` replacement; and the current one. A UID "
+            "names that patient. Lock before `anonymize()`.") in frozen
+    assert ("except a SOP Instance UID that is none of these three. The first "
+            "is the UID that the first move of the instance's UID (by "
+            "`anonymize()`, `redact()` or `Instance.regenerate_uid()`) left, "
+            "which is the ingested one unless `sop_instance_uid` was assigned "
+            "before it. The second is that UID's `anonymize()` replacement. "
+            "The third is the current one. A UID "
             "taken between a first redaction and a `force=True` second, or "
             "between two `Instance.regenerate_uid()` calls, is such a UID"
             ) in frozen
