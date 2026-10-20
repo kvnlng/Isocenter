@@ -6,8 +6,8 @@ Some studies need a way back. A collaborator finds something in patient
 `ANON_...` that the treating team must hear about, and someone has to be
 able to say who that patient is. **Reversible anonymization** gives you
 that. Before it de-identifies, Isocenter encrypts each patient's original
-identity under a key you hold. Then it writes that identity into the
-files.
+identity under a key you hold. Then it writes the encrypted identity
+into the files.
 
 That way back travels with the data. So this tutorial also covers what
 you are handing out. It runs a real session over one CT file: lock, then
@@ -287,8 +287,8 @@ With `restore=True` (the default), the call returns the same dict. It
 also restores the original values on the patient, in memory. A later
 `save()` stores them. Use it when you need the identified data back in
 the store, not just the answer. The
-[Quick Start](../quickstart.md#7-recover-identity-optional) covers which
-values a restore returns and which it leaves shifted.
+[Quick Start](../quickstart.md#7-recover-identity-optional) covers what a
+restore puts back and what it leaves shifted.
 
 ```python
 session.close()

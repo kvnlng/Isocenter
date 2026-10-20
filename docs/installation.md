@@ -88,7 +88,7 @@ If one of pydicom's own decoding plugins is installed for a syntax, that plugin 
 Heavy operations such as pixel redaction and JPEG 2000 export need memory per worker.
 
 - **Memory**: at least 2 GB RAM per vCPU. For large multi-frame JPEG 2000 export, 8 GB per vCPU.
-- **Concurrency**: ingest, audit and export use one worker per CPU by default. `redact()` holds a decoded frame per worker, so it uses half the CPUs and at most eight. If a worker is killed for memory, set `ISOCENTER_MAX_WORKERS` to limit both ([Environment Variables](environment.md)).
+- **Concurrency**: ingest, audit and export use one worker per CPU by default. `redact()` holds a decoded frame per worker. It uses half the CPUs and at most eight. If a worker is killed for memory, set `ISOCENTER_MAX_WORKERS` to limit both ([Environment Variables](environment.md)).
 
 ## Next
 
