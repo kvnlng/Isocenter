@@ -9,7 +9,7 @@ This page shows how to configure Isocenter to match that answer key, and why eac
 | Isocenter's default configuration | 72.51% | 68.45% |
 | **The configuration on this page** | **99.22%** | **99.23%** |
 
-**Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag `v1.0.0rc22`, commit `5b90e719`).** The scorer was the MIDI-B validation script at commit `ccc0939`. The machine was an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1). The script's own automatic check scored the pixel checks. No manual pixel review was applied. That is the measurement.
+**Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag `v1.0.0rc22`, commit `5b90e719`). The scorer was the MIDI-B validation script at commit `ccc0939`. The machine was an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1).** The script's own automatic check scored the pixel checks. No manual pixel review was applied. That is the measurement.
 
 The configuration was tuned against both sets. Neither score is therefore a held-out estimate. Each score is what this release and this configuration achieve on this data.
 
