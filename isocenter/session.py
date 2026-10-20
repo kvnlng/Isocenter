@@ -3887,9 +3887,9 @@ class DicomSession:
         Each instance is checked against the zones of every rule that
         covers it, `[y1, y2, x1, x2]` and `{"roi": [...]}` alike. These are
         the zones that `redact()` and `export()` apply. When nothing is
-        scanned, the printed line counts two groups apart: the instances of
-        machines that no rule names, and the instances whose rules hold no
-        zone.
+        scanned, the printed line counts two groups separately: the
+        instances of machines that no rule names, and the instances whose
+        rules hold no zone.
 
         Args:
             serial_number (str, optional): Scan only the machine with this
@@ -4971,8 +4971,8 @@ class DicomSession:
           none of them.
         - A re-lock would lose a value that the existing token holds.
         - The patient carries an identity token that this library wrote,
-          and the key at the path given to
-          `enable_reversible_anonymization()` does not decrypt it, or it
+          and one of these is true of the token: the key at the path given
+          to `enable_reversible_anonymization()` does not decrypt it, it
           opens to no identity record, or it is in the layout that releases
           before 1.0 wrote, which 1.x does not read.
         - A re-lock over a token that this store did not write (one that
@@ -7868,10 +7868,10 @@ class DicomSession:
         at the finding's address, and the finding declines where that
         object and `entity` differ. Any other finding is resolved against the live
         graph at its `entity_uid` and `entity_path`, and acts on the object
-        found there. This includes an instance's UID from before `redact()`,
-        and a patient's original Patient ID after the pseudonym that this
-        store minted for it. So a report kept across `close()` and a reopen
-        cleans the graph that `export()` writes.
+        found there. That `entity_uid` may be an instance's UID from before
+        `redact()`, or a patient's original Patient ID after the pseudonym
+        that this store minted for it. So a report kept across `close()` and
+        a reopen cleans the graph that `export()` writes.
 
         A finding whose address names no single object declines. A finding
         inside a sequence that a pass already removed or emptied is
@@ -8147,11 +8147,11 @@ class DicomSession:
                 PatientID. Also, on both formats, from the save that an
                 export begins with, if an instance with unsaved changes holds
                 a SOP Instance UID that is not a `str`. The message gives the
-                count, and nothing is saved or written (#721; this was
+                count, and nothing is saved or written (#721: this was
                 sqlite's `IntegrityError`). The same applies if a patient,
                 study or series holds a Patient ID, Study Instance UID or
                 Series Instance UID that is not a `str`, with a count per
-                level (#949; `None` was sqlite's `IntegrityError`, and for
+                level (#949: `None` was sqlite's `IntegrityError`, and for
                 any other type the save returned and the store lost the
                 rows).
             TypeError: For an option name that the selected exporter does
@@ -8323,11 +8323,11 @@ class DicomSession:
                 Only `None` means no filter, and an empty one selects
                 nothing. A bytes-like value, a non-iterable, or an element
                 that is not a `str` raises `TypeError` before anything is
-                scanned, flushed or written. A value can name nothing in
-                the session at any level: not itself, not the UID that this
-                store replaced it with, and, for a SOP Instance UID taken
-                before `redact()`, not the instance's redacted UID. Such a
-                value is counted by position and never named, in one
+                scanned, flushed or written. A value that names nothing in
+                the session at any level (as itself, as the UID that this
+                store replaced it with, or, for a SOP Instance UID taken
+                before `redact()`, as the instance's redacted UID) is
+                counted by position and never named, in one
                 `WARNING` log line and one `WARNING` audit row, so the
                 report grades `REVIEW_REQUIRED`. The rest is exported as
                 asked. A query cannot name anything that the session lacks,
@@ -8358,12 +8358,11 @@ class DicomSession:
 
                 **Passing True can cost a file that the default export
                 delivers.** By default, a Photometric Interpretation that
-                the written syntax does not admit is written exactly as the
+                the written syntax does not admit (`YBR_ICT` or `YBR_RCT`
+                on an uncompressed file, `YBR_PARTIAL_422`/`_420` on any
+                file that this exporter writes) is written exactly as the
                 instance declared it, with a `WARNING` audit row and a
-                `REVIEW_REQUIRED` grade. Examples are `YBR_ICT` or
-                `YBR_RCT` on an uncompressed file, and
-                `YBR_PARTIAL_422`/`_420` on any file that this exporter
-                writes. With True, that instance fails, gets an `ERROR`
+                `REVIEW_REQUIRED` grade. With True, that instance fails, gets an `ERROR`
                 row, and no file for it reaches the output folder. The
                 reason names the label, the syntax and a remedy. The check
                 does not ask whether the samples are really in the colour
