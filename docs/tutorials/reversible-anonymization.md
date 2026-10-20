@@ -5,10 +5,11 @@
 Some studies need a way back. A collaborator finds something in patient
 `ANON_...` that the treating team must hear about, and someone has to be
 able to say who that patient is. **Reversible anonymization** gives you
-that: before de-identifying, Isocenter encrypts each patient's original
-identity under a key you hold and writes it into the files.
+that. Before it de-identifies, Isocenter encrypts each patient's original
+identity under a key you hold. Then it writes that identity into the
+files.
 
-That way back travels with the data, so this tutorial also covers what
+That way back travels with the data. So this tutorial also covers what
 you are handing out. It runs a real session over one CT file: lock, then
 de-identify, export and read the disclosure. It then recovers the identity
 from the pseudonym, and shows what happens without the key.
@@ -26,7 +27,7 @@ Isocenter's test suite, and every output shown is checked.
 - Paste the blocks into a Python prompt or a notebook. In a `.py`
   script, put them under `if __name__ == "__main__":`
   ([why](../quickstart.md#1-initialize-a-session)).
-- In a block with `>>>`, type what follows each `>>>`; the lines
+- In a block with `>>>`, type what follows each `>>>`. The lines
   under it are what Python prints. A `...` inside a printed value
   stands for a part that differs on every run, such as a pseudonym or
   a UID.
@@ -84,8 +85,8 @@ shows how to change the rules and read the grade they give.
 
 ## 3. Lock the identities, then anonymize
 
-Locking has to come **before** `anonymize()`: the lock copies each
-file's original values into an encrypted token, and after `anonymize()`
+Locking has to come **before** `anonymize()`. The lock copies each
+file's original values into an encrypted token. After `anonymize()`,
 there is no original value left to copy.
 
 ```python
@@ -99,10 +100,10 @@ locked = session.lock_identities(report)
 - **`audit()`** scans the patients against the policy. Its report is also
   the list of patients to lock.
 - **`lock_identities(report)`** writes an identity token into every
-  instance of those patients: Patient's Name, Patient ID, Birth Date, Sex
-  and Accession Number, encrypted, in the Encrypted Attributes Sequence
-  `(0400,0500)`. The first lock that writes a token creates the key
-  file, readable only by you (mode 0600).
+  instance of those patients. The token holds Patient's Name, Patient
+  ID, Birth Date, Sex and Accession Number, encrypted. It goes in the
+  Encrypted Attributes Sequence `(0400,0500)`. The first lock that writes
+  a token creates the key file. Only you can read that file (mode 0600).
 
 ```python
 >>> len(locked)
@@ -116,17 +117,17 @@ True
 :class: warning
 
 `len(locked)` is the number of instances that now carry a token.
-Called after `anonymize()`, `lock_identities(report)` does not
+If you call `lock_identities(report)` after `anonymize()`, it does not
 raise. It looks for the report's patients by their original Patient
-IDs, and after `anonymize()` no patient holds them, so it logs one
-`ERROR` line saying the IDs matched no patient, and returns an empty
-result. The count is 0, and no key file is created: only a lock that
-writes a token creates one. (Passing one patient's new `ANON_` ID
-instead raises `RuntimeError`, and creates no key file either.)
+IDs. After `anonymize()`, no patient holds them. So it logs one `ERROR`
+line that says the IDs matched no patient, and returns an empty result.
+The count is 0, and no key file is created. Only a lock that writes a
+token creates one. (If you pass one patient's new `ANON_` ID instead,
+the call raises `RuntimeError`. It creates no key file either.)
 :::
 
-The key is a file of its own. Here it sits next to the store; step 6
-moves it where it belongs. Keep its contents to yourself: anyone who
+The key is a file of its own. Here it sits next to the store. Step 6
+moves it where it belongs. Keep its contents to yourself. Anyone who
 holds it can read every locked identity. This page never prints it.
 
 Now de-identify and export as usual, with the report last:
@@ -170,8 +171,8 @@ holds this file **and** the key can recover who the patient is. So
 `export()` says so twice.
 
 **First, a warning**, printed to the console as the export runs and
-written to the log file. By default that is `isocenter.log` in the
-working directory; `ISOCENTER_LOG_FILE` moves it, and
+written to the log file. By default, the log file is `isocenter.log` in
+the working directory. `ISOCENTER_LOG_FILE` moves it.
 `ISOCENTER_LOG_LEVEL=ERROR` leaves this warning out of both
 ([Environment variables](../environment.md)):
 
@@ -188,7 +189,8 @@ def logged_warning(text):
 WARNING - 1 of 1 exported instances carry encrypted original identities (0400,0500). They are recoverable with the session key; treat the export as re-identifiable by any holder of it.
 ```
 
-Each new `Session` overwrites the log file; copy it if you need it.
+Each new `Session` overwrites the log file. If you need the file, copy
+it.
 
 **Second, a `REVERSIBLE_EXPORT` row** in the store's audit log. The row
 is kept in the store for good, and the report counts it in section 2.
@@ -239,9 +241,9 @@ session.close()
 
 ## 5. Recover the identity
 
-Weeks later, the collaborator asks about `ANON_...`. Reopen the store,
-enable reversible anonymization with the key the data was locked with,
-and recover:
+Weeks later, the collaborator asks about `ANON_...`. Reopen the store.
+Enable reversible anonymization with the key that the data was locked
+with. Then recover:
 
 ```python
 session = Session("tutorial.db")
@@ -251,10 +253,10 @@ identity = session.recover_patient_identity(pseudonym, restore=False)
 ```
 
 A `Session` opened in a folder that holds a file named `isocenter.key`
-enables reversible anonymization with it on its own. Don't rely on that:
-a key kept in the working directory sits beside the store and the
-exports, which is where it should not be. The explicit call says which
-key you mean, and it is the call you need once the key lives somewhere
+enables reversible anonymization with it on its own. Do not rely on
+that. A key kept in the working directory sits beside the store and the
+exports. That is where it should not be. The explicit call says which
+key you mean. It is also the call you need when the key is somewhere
 safer (step 6).
 
 `recover_patient_identity()` returns a dict. Each key is the SOP Instance
@@ -281,12 +283,12 @@ still carries the pseudonym:
 True
 ```
 
-With `restore=True` (the default) the call returns the same dict and
-also writes the original values back onto the patient in memory. A later
+With `restore=True` (the default), the call returns the same dict. It
+also restores the original values on the patient, in memory. A later
 `save()` stores them. Use it when you need the identified data back in
 the store, not just the answer. The
-[Quick Start](../quickstart.md#7-recover-identity-optional) covers what a
-restore puts back and what it leaves shifted.
+[Quick Start](../quickstart.md#7-recover-identity-optional) covers which
+values a restore returns and which it leaves shifted.
 
 ```python
 session.close()
@@ -319,7 +321,7 @@ FileNotFoundError: no key file at ...isocenter.key; recovery needs the key the i
 
 The store holds the token but not the key, so it cannot open the token.
 Recovery never creates a key, because a new key could not open a token
-locked under the old one: a mistyped path would only make a useless key.
+locked under the old one. A mistyped path would only make a useless key.
 A key file that exists but is the wrong key raises `RuntimeError`
 instead. Either way, nothing is written.
 
@@ -347,8 +349,8 @@ separate files, and each one does a different job:
 | Keep | Because | If you lose it |
 | :--- | :--- | :--- |
 | **`isocenter.key`**, apart from the store and never with an export | It is the only thing that opens the identity tokens. | Nobody can recover any identity locked under it, and no new key helps. |
-| **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export. | Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key: ingest those files into a new store, and recover as in step 5. |
-| **`config.yaml`**, under version control | It is your policy. Reload it every time you reopen the store. | Nothing you cannot write again, but a rewritten file must be the same policy. If it is not, an export before a new `audit()` writes a `WARNING` row that stays in the store, and every later report of this store grades `REVIEW_REQUIRED`. |
+| **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export. | Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key. To do that, ingest those files into a new store, and recover as in step 5. |
+| **`config.yaml`**, under version control | It is your policy. Reload it every time you reopen the store. | Nothing you cannot write again, but a rewritten file must be the same policy. If it is not, an export before a new `audit()` writes a `WARNING` row that stays in the store. Then every later report of this store grades `REVIEW_REQUIRED`. |
 
 Keep them apart. The key opens the tokens in the exported files, so an
 export shipped with its key is not de-identified at all. The store

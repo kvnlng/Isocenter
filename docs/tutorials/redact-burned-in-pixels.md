@@ -7,8 +7,8 @@ into the image itself. That text is pixels, not an attribute, so no
 `phi_tags` rule reaches it. What reaches it is a **redaction zone**: a
 rectangle that `redact()` sets to zero in every image from a given
 machine. This tutorial writes one zone for the machine that made
-pydicom's bundled `MR_small.dcm`, redacts, exports, and reads the
-exported pixels back to show which ones changed.
+pydicom's bundled `MR_small.dcm`. Then it redacts and exports. Then it
+reads the exported pixels back to show which ones changed.
 
 :::{admonition} Run it yourself
 :class: tip
@@ -23,7 +23,7 @@ Isocenter's test suite, and every output shown is checked.
 - Paste the blocks into a Python prompt or a notebook. In a `.py`
   script, put them under `if __name__ == "__main__":`
   ([why](../quickstart.md#1-initialize-a-session)).
-- In a block with `>>>`, type what follows each `>>>`; the lines
+- In a block with `>>>`, type what follows each `>>>`. The lines
   under it are what Python prints. A `...` inside a printed value
   stands for a part that differs on every run, such as a pseudonym or
   a UID.
@@ -110,8 +110,8 @@ redacted = session.redact()
 
 It changes the pixels in the session's store, never the file in
 `input/`. The Basic Profile replaced the Device Serial Number in the
-attributes, and the rule still matched: a rule is matched on the serial
-the series was ingested with.
+attributes. The rule still matched, because a rule is matched on the
+serial that the series was ingested with.
 
 ## 4. Export and read the pixels back
 
@@ -184,32 +184,35 @@ def grade_line(path):
 session.close()
 ```
 
-`PASS` says the zones you wrote were applied. It does not say the rest
-of each image is free of text: nothing on this page read the pixels for
-text. `scan_pixel_content()` does, with OCR, over the images of every
-series a rule with zones covers (by exact serial, `""`, `"*"` or
-`match:`), and reports text no zone covers
-([Checking Zones](../ocr.md#checking-zones-verification)). Or configure
-[`burned_in_text`](../configuration.md#burned-in-text), under which
-`redact()` reads every image that holds pixels with OCR and redacts,
-reports or withholds the text it finds, serial or not, whatever the
-rules.
+`PASS` says that the zones you wrote were applied. It does not say that
+the rest of each image is free of text. Nothing on this page read the
+pixels for text. These two ways read them:
 
-A zone is applied whether or not you call `redact()`: `export()` looks up
-every matching rule and zeroes a copy of each frame it writes. Calling
-`redact()` first is what puts the redacted pixels in the store, so the
-store and the export agree. Only `redact()` writes Burned In Annotation
-`NO`: an export that applies a zone by itself zeroes the same pixels and
-leaves that attribute as the source had it.
+- `scan_pixel_content()` reads with OCR the images of every series that
+  a rule with zones covers (by exact serial, `""`, `"*"` or `match:`).
+  It reports text that no zone covers
+  ([Checking Zones](../ocr.md#checking-zones-verification)).
+- Or configure [`burned_in_text`](../configuration.md#burned-in-text).
+  Under it, `redact()` reads with OCR every image that holds pixels,
+  serial or not, whatever the rules. It redacts, reports or withholds the
+  text it finds.
+
+A zone is applied whether or not you call `redact()`. `export()` finds
+every matching rule and zeroes a copy of each frame that it writes.
+Calling `redact()` first is what puts the redacted pixels in the store.
+Then the store and the export agree. Only `redact()` writes Burned In
+Annotation `NO`. An export that applies a zone by itself zeroes the same
+pixels, and leaves that attribute as the source had it.
 
 :::{admonition} Finding the zones for a new machine
 :class: note
 
-This page wrote its zone by hand. For a machine you have not seen,
-`session.discover_redaction_zones(serial_number)` reads a sample of
-that machine's images with OCR and returns the text it found, with
-`to_zones()` to group it into zones for a rule. It needs the `ocr`
-extra and the `tesseract` program, so this page does not run it.
+This page wrote its zone by hand. For a machine that is new to you, use
+`session.discover_redaction_zones(serial_number)`. It reads a sample of
+that machine's images with OCR and returns the text it found. The
+result's `to_zones()` groups that text into zones for a rule. Discovery
+needs the `ocr` extra and the `tesseract` program, so this page does not
+run it.
 [Zone Discovery](../ocr.md#setting-up-new-machines-zone-discovery)
 shows how.
 :::
@@ -218,7 +221,7 @@ shows how.
 
 - **`serial_number`** is compared exactly with Device Serial Number
   `(0018,1000)`. `""` matches every series with no serial, and `"*"`
-  every series.
+  matches every series.
 - **`match:`** selects by `manufacturer` and/or `model_name` instead of
   a serial.
 - **Every matching rule applies.** An exact rule and a `"*"` rule both
