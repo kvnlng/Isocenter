@@ -15,7 +15,7 @@ The configuration was tuned against both sets, so neither score is a held-out es
 
 In both datasets:
 
-- Study Date is shifted by each patient's offset, the other dates the profile names are emptied or replaced, and every date check passes;
+- Study Date is shifted by each patient's offset, the other dates the profile names are emptied, replaced or removed, and every date check passes;
 - every UID is replaced, consistently across instances, and every UID check passes;
 - every Patient ID check passes;
 - 99.15% (Validation) and 97.80% (Test) of the identifiers the key expects removed are removed. Almost all of the rest are 2- or 3-letter site acronyms (see [Why not 100%](#why-not-100)).
@@ -108,9 +108,9 @@ Each rule names its private creator, not a concrete tag ([Private elements by cr
 | Element | Source | Basic Profile | This configuration |
 | :--- | :--- | :--- | :--- |
 | Acquisition Time | `094517` | emptied | `094517` |
-| Study Date | `20180913` | shifted | shifted by the patient's offset |
+| Study Date | `20180913` | emptied (the default configuration shifts it) | shifted by the patient's offset |
 
-The Basic Profile empties or replaces every time. But the dates are shifted or removed, so a time of day no longer places a study in time. Acquisition and injection times are needed for timing, decay and dose analysis. MIDI-B keeps them.
+The Basic Profile empties, replaces or removes every time. But the dates are shifted or removed, so a time of day no longer places a study in time. Acquisition and injection times are needed for timing, decay and dose analysis. MIDI-B keeps them.
 
 ### 3. Keep patient characteristics
 
@@ -122,7 +122,7 @@ The Basic Profile empties or replaces every time. But the dates are shifted or r
   0010,21c0: {action: KEEP, name: Pregnancy Status}
 ```
 
-These describe the patient without identifying them, and size and weight are needed for dose and SUV. They are the elements PS3.15's Retain Patient Characteristics Option keeps.
+These describe the patient without identifying them, and size and weight are needed for dose and SUV. They are among the elements PS3.15's Retain Patient Characteristics Option keeps.
 
 ### 4. Keep coded and technical elements
 
@@ -167,14 +167,14 @@ In most series of this data, Series Number holds an acquisition date, a quasi-id
   # comments, occupation, contrast agent
 ```
 
-The Basic Profile empties or removes descriptions, protocol names and comments whole. MIDI-B expects the clinical text kept and the injected identifier removed. `SCRUB` does that: it is PS3.15's Clean Descriptors Option as a rule ([Cleaning descriptions](configuration.md#cleaning-descriptions)). Each kind named in `target` finds one sort of identifier. Each span found is removed together with a connecting word directly before it (`for`, `at`, `by`, `per`, `from`).
+The Basic Profile empties, replaces or removes descriptions, protocol names and comments whole. MIDI-B expects the clinical text kept and the injected identifier removed. `SCRUB` does that: it is PS3.15's Clean Descriptors Option as a rule ([Cleaning descriptions](configuration.md#cleaning-descriptions)). Each kind named in `target` finds one sort of identifier. Each span found is removed together with a connecting word directly before it (`for`, `at`, `by`, `per`, `from`).
 
 | Kind | Finds | Source | Output |
 | :--- | :--- | :--- | :--- |
 | `names` | the words of the instance's own Person Names | `Standard Breast Imaging Report for Amanda Hoover`, in a file whose Patient's Name holds those two names | `Standard Breast Imaging Report` |
 | `dates` | dates | `MA SURGICAL SPECIMEN 20170707` | `MA SURGICAL SPECIMEN` |
 | `ids` | a run of 6 or more characters holding 5 or more digits | `MR BREAS UNIT for 736-69-8140` | `MR BREAS UNIT` |
-| `phones` | telephone numbers, with extensions | `PRONE : Dana Whitlock : +1-312-555-0186`, Patient's Name `WHITLOCK^DANA` (illustrative) | `PRONE` |
+| `phones` | telephone numbers, with extensions | `PRONE : Dana Whitlock : 312.555.0186 ext 204`, Patient's Name `WHITLOCK^DANA` (illustrative) | `PRONE` |
 | `addresses` | a street address with city, state and ZIP | `AP Routine : Dana Whitlock : 42 Larkspur Ct Fairhaven, OR 97000`, Patient's Name `WHITLOCK^DANA` (illustrative) | `AP Routine` |
 | `sites` | a 4 to 8 capital acronym after a lower-case `at` | `PET-CT STUDY at CHAJH` | `PET-CT STUDY` |
 | `initials` | a lower-case `by` and 1 to 3 capitals, directly after a removed span | `Ordered for 2675888487 by SS` | `Ordered` |
@@ -234,7 +234,7 @@ The score barely moves, for two reasons. Other text on the same images (a portab
 session.export("export/", use_compression=False)
 ```
 
-The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares pixel bytes, so a re-encoded image fails its pixels-unchanged check even though no pixel value changed. That costs about 0.4 points. An uncompressed export of a native little-endian source carries its Pixel Data bytes unchanged; an encapsulated or big-endian source is decoded ([Compression](export-output.md#compression)).
+The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares pixel bytes, so a re-encoded image fails its pixels-unchanged check even though no pixel value changed. That costs about 0.4 points. An uncompressed export of a native little-endian source carries its Pixel Data bytes unchanged when its samples need no decoding; an encapsulated or big-endian source is decoded ([Compression](export-output.md#compression)).
 
 ## Why not 100%
 
@@ -312,9 +312,10 @@ phi_tags:
     action: KEEP
     name: Patient's Age
   # Times of day are kept. Study Date is shifted and the profile's other dates
-  # are emptied or replaced, so a time no longer places a study in time, and
-  # acquisition and injection times are needed for timing analysis. Time
-  # (0040,A122) is the time of a structured-report content item.
+  # are emptied, replaced or removed, so a time no longer places a study in
+  # time, and acquisition and injection times are needed for timing
+  # analysis. Time (0040,A122) is the time of a structured-report content
+  # item.
   0008,0013:
     action: KEEP
     name: Instance Creation Time
@@ -356,7 +357,7 @@ phi_tags:
     name: Time
   # Patient characteristics are kept: body size and weight (needed for dose and
   # SUV), ethnic group, pregnancy and smoking status. They describe the patient
-  # without identifying them (the elements PS3.15's Retain Patient
+  # without identifying them (among the elements PS3.15's Retain Patient
   # Characteristics Option keeps).
   0010,1020:
     action: KEEP
@@ -412,7 +413,8 @@ phi_tags:
     name: Length to End
   # Series Number holds an acquisition date (2010 to 2019) in most series of
   # this data, so it is emptied; the element stays present, as the General
-  # Series Module requires (Type 2). This costs the series whose number is an ordinary number.
+  # Series Module requires (Type 2). This costs the series whose number is
+  # an ordinary number.
   # SCRUB cannot help: it applies to text elements, and this one is an
   # integer string.
   0020,0011:
@@ -424,7 +426,7 @@ phi_tags:
   # connecting word directly before it ("for", "at", "by", "per", "from"):
   #   names      the words of the instance's own Person Names
   #   dates      date shapes
-  #   ids        a run of 6 or more letters and digits holding 5 or more
+  #   ids        a run of 6 or more characters holding 5 or more
   #              digits (SSNs, MRNs, accession numbers); decimals and
   #              protocol tokens (t2_tse_tra_320_p2) are spared unless they
   #              hold an SSN shape or 7 or more digits in a row
