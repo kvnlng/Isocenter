@@ -2302,8 +2302,8 @@ class DicomSession:
         Shut the session down: the persistence-manager thread, the audit
         thread that owns the sqlite connection, and the process pool. A
         session that is never closed leaks its worker subprocesses for the
-        life of the process. The pool is broken if one of its workers ended
-        outright. In that case, a worker of the pool that is still running
+        life of the process. If the pool is broken because one of its
+        workers ended outright, a worker of the pool that is still running
         10 s after `close()` finds the pool broken is sent `SIGKILL`, and
         one `WARNING` line names that worker.
 
@@ -3149,7 +3149,7 @@ class DicomSession:
         (#745). Its `WARNING` row names the file and the instance, never a
         Patient ID. A file that carries the original ID of the patient whose
         study `anonymize()` renamed belongs to that patient, and is linked.
-        A file with no Patient ID is linked too.
+        A file with no Patient ID belongs to that patient too, and is linked.
 
         **Byte order.** A big-endian source's values in words wider than a
         byte (`OW`, `OL`, `OF`, `OD`, `OV` and the waveform samples) are
@@ -3600,8 +3600,8 @@ class DicomSession:
                 `configuration.phi_tags`) holds a rule that the pipeline
                 cannot honour. With no `config_path`, if
                 `configuration.date_jitter` is a range that the loader would
-                refuse in a file (#731). It is raised before a project
-                secret is created.
+                refuse in a file (#731). In each case, it is raised before
+                a project secret is created.
             RuntimeError: If patients that share a Patient ID were
                 de-identified under different date-offset schemes, so they
                 cannot be merged. It is raised after the policy is
@@ -4484,7 +4484,7 @@ class DicomSession:
 
         Raises:
             ValueError: For any other `format`, `'md'` and case variants
-                included. Then no file is written.
+                included. In that case, no file is written.
         """
         # The spelling first: a refused format is
         # known before a report over the whole store is built.
@@ -4870,7 +4870,7 @@ class DicomSession:
 
         Raises:
             ValueError: For any other `format`, a case variant included.
-                Then no file is written.
+                In that case, no file is written.
         """
         # The spelling first, before every instance
         # is walked.
@@ -6693,12 +6693,14 @@ class DicomSession:
 
         **The** `burned_in_text` **policy** (`configuration.burned_in_text`, #1108).
         When the configuration holds one, this call also reads every
-        instance in the policy's `scope` with OCR, serial or not, after the
-        zones its rules hold. The scope is `flagged`, `modalities` or `all`
-        (#1121). An instance out of scope is neither read nor gated at
-        export. The call records the boxes of the text that it finds at
-        `min_confidence` or above with two letters or digits, never the
-        text itself. The policy's `action` decides the rest:
+        instance in the policy's `scope`, serial or not, after the zones its
+        rules hold. It reads with OCR by tesseract, or with the text
+        detector under `detector: db`. The scope is `flagged`, `modalities`
+        or `all` (#1121). An instance out of scope is neither read nor gated
+        at export. The call records the boxes of the text that it finds at
+        `min_confidence` or above (under tesseract, with two letters or
+        digits), never the text itself. The policy's `action` decides the
+        rest:
 
         - `redact` blanks each box, padded, on its own frame, in the same
           task as the zones. The instance's UID is derived from the zones
@@ -6710,16 +6712,19 @@ class DicomSession:
 
         The record names, by a digest, the pixels that the read saw. An
         instance already read under this threshold and these zones, whose
-        pixels still match the digest, is not read again by OCR unless
+        pixels still match the digest, is not read again unless
         `force=True`. A redacted instance is read once more, which moves
         the digest to its redacted pixels. A failure of that read writes a
         `WARNING` row and leaves the instance unchecked. Text still found
         writes a `WARNING` row.
 
-        An instance that only OCR redacted carries `DERIVED` and the
-        derivation code, but keeps Burned In Annotation as the source had
-        it. Every pass writes one `REDACTION` row with its counts and the
-        tesseract version. `redact_by_machine()` does not run the policy.
+        An instance that only this policy redacted carries `DERIVED` and
+        the derivation code, but keeps Burned In Annotation as the source
+        had it. Every pass writes one `REDACTION` row with its counts and
+        what read: the tesseract version, or under `detector: db` the
+        detector model and the OpenCV version (with the tesseract version
+        too under a narrowed `target`). `redact_by_machine()` does not run
+        the policy.
 
         **Concurrency.** `compact()` on any thread of this session raises
         while a pass runs. While a `compact()` is saving or rewriting, this
@@ -6777,10 +6782,15 @@ class DicomSession:
                 that `load_config()` would refuse in a file. It is raised
                 before the drain.
             OcrUnavailableError: A `RuntimeError`. It is raised when a
-                `burned_in_text` policy is configured and the `ocr` extra
-                or the tesseract binary is unavailable. It is raised after
-                the drain, and before any task, UID, pixel or row, zones
-                included.
+                `burned_in_text` policy is configured and a reader that the
+                policy needs cannot run: tesseract (the `ocr` extra and the
+                binary) under `detector: tesseract` or a narrowed `target`,
+                the text detector under `detector: db`
+                (`TextDetectorUnavailableError`), or the names model when
+                `target` names `names` (`NlpUnavailableError`). Under
+                `detector: db` with `target: any`, tesseract is not needed.
+                It is raised after the drain, and before any task, UID,
+                pixel or row, zones included.
             RuntimeError: If the pass cannot start within 180 s because a
                 `compact()` is still saving or rewriting the sidecar. It is
                 raised before any worker is dispatched and before any UID
@@ -7870,8 +7880,9 @@ class DicomSession:
         graph at its `entity_uid` and `entity_path`, and acts on the object
         found there. That `entity_uid` may be an instance's UID from before
         `redact()`, or a patient's original Patient ID after the pseudonym
-        that this store minted for it. So a report kept across `close()` and
-        a reopen cleans the graph that `export()` writes.
+        that this store minted for it. Because the finding acts on the live
+        object, a report kept across `close()` and a reopen cleans the graph
+        that `export()` writes.
 
         A finding whose address names no single object declines. A finding
         inside a sequence that a pass already removed or emptied is
@@ -8085,7 +8096,8 @@ class DicomSession:
         each instance's record of the last `redact()` pass, and runs no
         OCR. It loads each frame once to check that the record names the
         pixels that the instance holds now. With `check_burned_in=True`, it
-        reads with OCR the pixels that it is about to write instead (see
+        reads with the policy's reader the pixels that it is about to write
+        instead (see
         `_export_dicom`). These rules apply to an instance that holds
         pixels:
 
@@ -8102,8 +8114,9 @@ class DicomSession:
 
         Either format also writes one `WARNING` audit row, and logs one
         `WARNING` line, when `patient_ids` names an ID that no patient in
-        the session holds. The row counts such IDs by position and never
-        names them, and the report then grades `REVIEW_REQUIRED`. The
+        the session holds. The row and the log line count such IDs by
+        position and never name them, and the report then grades
+        `REVIEW_REQUIRED`. The
         patients that match are exported as asked, and nothing raises. The
         `dicom` format does the same for a `subset` value that names
         nothing in the session at any level.
@@ -8164,8 +8177,14 @@ class DicomSession:
                 `dicom`, for a `subset` that is bytes-like, is not iterable,
                 or holds an element that is not a `str`.
             OcrUnavailableError: On `dicom` with `check_burned_in=True`
-                under a `burned_in_text` policy, if the `ocr` extra or the
-                tesseract binary is unavailable (#1108). It is a
+                under a `burned_in_text` policy, if a reader that the policy
+                needs cannot run (#1108): tesseract (the `ocr` extra and the
+                binary) under `detector: tesseract` or a narrowed `target`,
+                the text detector under `detector: db`
+                (`TextDetectorUnavailableError`), or the names model when
+                `target` names `names` (`NlpUnavailableError`). Under
+                `detector: db` with `target: any`, tesseract is not needed.
+                It is a
                 `RuntimeError`, raised before the tag scan, the save, any
                 row or any file.
             ExportError: From either exporter, if zero of N attempted
@@ -8269,8 +8288,10 @@ class DicomSession:
                 empty summary and does not raise, because nothing failed.
                 An instance outside `subset` is not withheld, because it
                 was never asked for. Under a `burned_in_text` policy
-                (#1108), the export also reads with OCR every planned
-                instance that holds pixels, as it is about to be written,
+                (#1108), the export also reads with the policy's reader
+                (OCR by tesseract, or the text detector under
+                `detector: db`) every planned instance that holds pixels,
+                as it is about to be written,
                 after the configured zones. That read, not the record of
                 the last `redact()`, decides the instance. An instance with
                 text found is withheld under `redact` and `withhold`, and
@@ -8280,9 +8301,14 @@ class DicomSession:
                 these writes one `WARNING` row that names the instance, the
                 count and the frames, but never the text. The read changes
                 nothing in the session. It redacts no pixel and moves no
-                UID. If the `ocr` extra or the tesseract binary is
-                unavailable, it raises `OcrUnavailableError` before the
-                scan, the save and any row.
+                UID. If a reader that the policy needs cannot run, it
+                raises `OcrUnavailableError` before the scan, the save and
+                any row. Tesseract (the `ocr` extra and the binary) is
+                needed under `detector: tesseract` or a narrowed `target`,
+                the text detector under `detector: db`
+                (`TextDetectorUnavailableError`), and the names model when
+                `target` names `names` (`NlpUnavailableError`). Under
+                `detector: db` with `target: any`, tesseract is not needed.
             check_reversibility (bool): If True (the default), warn when the
                 files that this export wrote still carry the encrypted
                 originals that `lock_identities()` embeds, and record the
@@ -8396,8 +8422,14 @@ class DicomSession:
                 is a policy that the loader would refuse in a file (#1108).
                 It is raised before the pre-export scan and the save.
             OcrUnavailableError: If `check_burned_in=True` under a
-                `burned_in_text` policy, and the `ocr` extra or the
-                tesseract binary is unavailable (#1108). It is a
+                `burned_in_text` policy, and a reader that the policy needs
+                cannot run (#1108): tesseract (the `ocr` extra and the
+                binary) under `detector: tesseract` or a narrowed `target`,
+                the text detector under `detector: db`
+                (`TextDetectorUnavailableError`), or the names model when
+                `target` names `names` (`NlpUnavailableError`). Under
+                `detector: db` with `target: any`, tesseract is not needed.
+                It is a
                 `RuntimeError`, raised before the tag scan, the save, any
                 row or any file.
             ExportError: If every planned instance failed (nothing written
@@ -9642,10 +9674,10 @@ class DicomSession:
         means that every non-null cell is a sequence whose non-null
         elements are all of one scalar family. A column that is neither
         that nor scalars of one family is written as text, each value as
-        the CSV writes it. Examples are a tag single-valued in one file
-        and multi-valued in another, or a `str` beside an `int`. Missing
-        values stay null in both formats. Other columns are written as
-        they are.
+        the CSV writes it. Examples of such a column are a tag
+        single-valued in one file and multi-valued in another, or a `str`
+        beside an `int`. Missing values stay null in both formats. Other
+        columns are written as they are.
 
         Args:
             output_path (str): The output file path (ends with .csv or

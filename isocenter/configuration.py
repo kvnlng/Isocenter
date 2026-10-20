@@ -702,7 +702,8 @@ class IsocenterConfiguration:
 
         Args:
             tag (str): The DICOM tag to target (e.g. "0010,0010"), stored
-                lowercase. A private creator's name keeps its case.
+                lowercase. A private creator's name keeps its case, and
+                its surrounding spaces are stripped.
             action (str): One of `KEEP`, `REMOVE`, `EMPTY`, `REPLACE`,
                 `SHIFT`, `JITTER` (`JITTER` is `SHIFT`) or `SCRUB`.
             value (str, optional): The value that `REPLACE` writes. It is
@@ -798,7 +799,7 @@ class IsocenterConfiguration:
         It compares the spelling exactly, and it returns the first match.
         Redaction does not use this method: `redact()` and the export apply
         every matching rule, `"*"` included. A `match:` rule (#1108) has no
-        serial, so this method does not return one, and `update_rule` and
+        serial, and this method does not return one, and `update_rule` and
         `delete_rule` do not see one either. Write a `match:` rule in the
         file, or append it to `rules`.
 
