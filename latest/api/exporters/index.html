@@ -566,8 +566,11 @@ raises.</p>
 <p><strong>So in 1.0, no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>.</strong> A <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row grades
 the report <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> (condition 2 in
 <a class="reference internal" href="../../analytics/#how-the-grade-is-decided"><span class="std std-ref">How the grade is decided</span></a>),
-however the plugin behaves. The same report still carries the “generated
-before any export” note, because no <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row was written.</p>
+however the plugin behaves. Isocenter writes no <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row for a
+third-party export. So the same report also carries the “generated
+before any export” note, unless the store already holds an <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row.
+An earlier <code class="docutils literal notranslate"><span class="pre">dicom</span></code> or <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> export on the same store, in any session,
+can have written one.</p>
 <p>The class decides, not the format name or the module. A subclass of a
 built-in, or a different class registered as <code class="docutils literal notranslate"><span class="pre">dicom</span></code>, is third-party.
 <code class="docutils literal notranslate"><span class="pre">DicomFormatExporter</span></code> registered again, under any name, is not.</p>

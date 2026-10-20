@@ -509,11 +509,12 @@ methods, are tier 2. So are <code class="docutils literal notranslate"><span cla
 <code class="docutils literal notranslate"><span class="pre">Instance</span></code>’s attribute table.</p>
 <p><strong>What <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> stores.</strong> It stores the value it is given, with one
 exception. It stores a numpy bool, integer or float (a scalar or a 0-d
-array), and a <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding one, as the Python
-number it equals. So <code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0018,1150&quot;,</span> <span class="pre">np.int64(7))</span></code> leaves the
-<code class="docutils literal notranslate"><span class="pre">int</span></code> 7 in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>, and a live export writes what a reopened session
-writes. An array of one or more dimensions is not converted. Pass
-<code class="docutils literal notranslate"><span class="pre">.tolist()</span></code> or <code class="docutils literal notranslate"><span class="pre">.tobytes()</span></code> instead. No other numpy value is converted
+array) as the Python number it equals. It stores a <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code>
+that directly holds a numpy value as a new <code class="docutils literal notranslate"><span class="pre">list</span></code>, with each numpy
+number in it replaced in the same way. So <code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0018,1150&quot;,</span> <span class="pre">np.int64(7))</span></code> leaves the <code class="docutils literal notranslate"><span class="pre">int</span></code> 7 in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">set_attr(&quot;0018,1150&quot;,</span> <span class="pre">(np.int64(7),))</span></code> leaves the <code class="docutils literal notranslate"><span class="pre">list</span></code> <code class="docutils literal notranslate"><span class="pre">[7]</span></code>. A live
+export writes what a reopened session writes. An array of one or more
+dimensions is not converted. Pass <code class="docutils literal notranslate"><span class="pre">.tolist()</span></code> or <code class="docutils literal notranslate"><span class="pre">.tobytes()</span></code> instead. No other numpy value is converted
 either. A <code class="docutils literal notranslate"><span class="pre">datetime64</span></code>, a <code class="docutils literal notranslate"><span class="pre">timedelta64</span></code>, a complex number and a masked
 value stay as given, and the save refuses them.</p>
 <p>The entity does not see a value written straight into <code class="docutils literal notranslate"><span class="pre">attributes</span></code>
@@ -522,7 +523,15 @@ when it is saved. <code class="docutils literal notranslate"><span class="pre">e
 it equals, whether or not it was saved. So the file is the same before
 and after a save and a reopen. <code class="docutils literal notranslate"><span class="pre">export()</span></code> also writes a <code class="docutils literal notranslate"><span class="pre">tuple</span></code> as the
 list it equals, and a finite <code class="docutils literal notranslate"><span class="pre">Decimal</span></code> that a float can hold as the
-<code class="docutils literal notranslate"><span class="pre">float</span></code> it equals. The save refuses a <code class="docutils literal notranslate"><span class="pre">Decimal</span></code>, and only a value written straight into
+<code class="docutils literal notranslate"><span class="pre">float</span></code> it equals. Under a standard element whose VR is <code class="docutils literal notranslate"><span class="pre">AT</span></code>, there is
+one exception. <code class="docutils literal notranslate"><span class="pre">export()</span></code> writes a <code class="docutils literal notranslate"><span class="pre">tuple</span></code> of exactly two integers, or
+of exactly two <code class="docutils literal notranslate"><span class="pre">str</span></code>, as one tag, as pydicom reads it (#1009). The pair
+must still be a <code class="docutils literal notranslate"><span class="pre">tuple</span></code> when the export reads it. After <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code>, a
+<code class="docutils literal notranslate"><span class="pre">tuple</span></code> that holds a numpy number is a <code class="docutils literal notranslate"><span class="pre">list</span></code> (above), and a <code class="docutils literal notranslate"><span class="pre">list</span></code> of
+two integers is two tags. A store that was saved and opened again also
+holds the pair as a <code class="docutils literal notranslate"><span class="pre">list</span></code>
+(<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1016">#1016</a>, open). The
+save refuses a <code class="docutils literal notranslate"><span class="pre">Decimal</span></code>, and only a value written straight into
 <code class="docutils literal notranslate"><span class="pre">attributes</span></code>, or a graph built by hand, can hold one. <code class="docutils literal notranslate"><span class="pre">export()</span></code> changes
 none of the three in <code class="docutils literal notranslate"><span class="pre">attributes</span></code>.</p>
 <p>A number under a standard element whose VR holds text
@@ -530,10 +539,12 @@ none of the three in <code class="docutils literal notranslate"><span class="pre
 without that element, under one <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row that names the tag, the
 type and the VR. Pass the text instead. The store holds <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">str</span></code>,
 <code class="docutils literal notranslate"><span class="pre">bytes</span></code>, <code class="docutils literal notranslate"><span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">int</span></code>, <code class="docutils literal notranslate"><span class="pre">float</span></code>, pydicom’s DS and IS values, and lists
-of those. <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> raises nothing for anything else. The next
-<code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code> or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> that
-names the instance, the tag and the type
-(<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>, Exceptions).</p>
+of those. <code class="docutils literal notranslate"><span class="pre">set_attr()</span></code> does not raise for a value of another type. The
+next <code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code> or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>
+that names the instance, the tag and the type
+(<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>, Exceptions). <code class="docutils literal notranslate"><span class="pre">Instance.set_attr()</span></code> can
+raise <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for an edit to a pixel descriptor, which is a
+different check (<a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>).</p>
 <p><strong>What assigning <code class="docutils literal notranslate"><span class="pre">Instance.sop_instance_uid</span></code> does.</strong> It moves the field
 and the <code class="docutils literal notranslate"><span class="pre">(0008,0018)</span></code> element together, and marks the instance edited.
 For example, <code class="docutils literal notranslate"><span class="pre">instance.sop_instance_uid</span> <span class="pre">=</span> <span class="pre">&quot;1.2.3.4&quot;</span></code> leaves <code class="docutils literal notranslate"><span class="pre">&quot;1.2.3.4&quot;</span></code>
