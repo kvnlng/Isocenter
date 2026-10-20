@@ -1,12 +1,12 @@
 # Contributing
 
-This page is for people changing Isocenter itself: setting up a development environment, the code-quality rules, running the tests, the release process, and the internals a contributor needs that a user does not.
+This page is for people who change Isocenter itself. It covers the development environment, the code-quality rules, how to run the tests, the release process, and the internals that a contributor needs and a user does not.
 
 Work is planned in [GitHub Issues](https://github.com/kvnlng/Isocenter/issues) and [milestones](https://github.com/kvnlng/Isocenter/milestones). Good places to start are the [`good first issue`](https://github.com/kvnlng/Isocenter/labels/good%20first%20issue) and [`help wanted`](https://github.com/kvnlng/Isocenter/labels/help%20wanted) labels.
 
 ## 1. Environment Setup
 
-Isocenter requires Python 3.12+. The floor is not arbitrary: `entities.py`
+Isocenter requires Python 3.12+. The floor is not arbitrary. `entities.py`
 and `privacy.py` use `@dataclass(slots=True)` (3.10+), and the declared
 dependency set resolves only on 3.12 and later.
 
@@ -19,9 +19,9 @@ cd Isocenter
 pip install -e ".[dev]"
 ```
 
-The `dev` extra is contributor tooling only -- it pulls in `tests` plus
-`pylint` and `coverage`. Somebody installing Isocenter to *use* it gets none of it;
-`pip install isocenter` never installs a linter or a test runner.
+The `dev` extra is contributor tooling only. It pulls in `tests` plus
+`pylint` and `coverage`. Somebody who installs Isocenter to *use* it gets
+none of it. `pip install isocenter` never installs a linter or a test runner.
 
 ## 2. Code Quality
 
@@ -44,7 +44,9 @@ pylint tests
 **Common Rules:**
 
 * **Imports**: All imports must be at the top-level (except for strictly necessary circular dependency breaking or rare optional heavy dependencies).
-* **Docstrings**: All public modules, classes, and methods must have docstrings, in Google style. A docstring documents the code: a summary, `Args:` (one entry per parameter), `Returns:`/`Yields:`, `Raises:` (one entry per exception the function raises) and what a caller needs to know to use it. It is rendered in the API reference. Change history belongs in `CHANGELOG.md`, and reasoning for someone editing the body belongs in a `#` comment at the line it explains. `pylint.extensions.docparams` is enabled in `pylintrc.toml` and reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with `_`. Private names (`_x`), dunders and `__init__` are not checked and need no docstring, so constructor parameters, whether documented on the class or on `__init__`, are not checked either; nor are module docstrings. Keep those complete by hand.
+* **Docstrings**: All public modules, classes, and methods must have docstrings, in Google style. A docstring documents the code. It holds a summary, `Args:` (one entry per parameter), `Returns:`/`Yields:`, `Raises:` (one entry per exception the function raises) and what a caller needs to know to use it. It is rendered in the API reference. Change history belongs in `CHANGELOG.md`. Reasoning for someone who edits the body belongs in a `#` comment at the line it explains.
+
+  `pylint.extensions.docparams` is enabled in `pylintrc.toml`. It reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with `_`. Private names (`_x`), dunders and `__init__` are not checked and need no docstring. So constructor parameters are not checked either, whether they are documented on the class or on `__init__`. Module docstrings are not checked either. Keep constructor parameters and module docstrings complete by hand.
 * **Encodings**: All `open()` calls must specify `encoding='utf-8'` to prevent cross-platform issues.
 
 ### Formatting
@@ -61,7 +63,7 @@ We use `pytest` for our test suite.
 pytest -v --changed
 ```
 
-It prints which selection it used. The whole suite (`pytest`) runs when a release is cut; `RELEASING.md` says when each is required.
+It prints which selection it used. The whole suite (`pytest`) runs when a release is cut. `RELEASING.md` says when each is required.
 
 **Run specific tests:**
 
@@ -92,20 +94,24 @@ sphinx-build -W --keep-going -b dirhtml -d /tmp/isocenter-doctrees docs /tmp/iso
 python .github/scripts/check_api_pages.py /tmp/isocenter-docs
 ```
 
-`-W` is what the deploy uses: a warning fails the build. The second command is the deploy's check of the API pages: each class's attributes table matches its docstring, `Session` is named as such, and "On this page" lists the members; it prints each problem and exits 1. Never build into the checkout's root or beside a running `pytest`, which fails on any new entry in the root. Open `/tmp/isocenter-docs/index.html` to read the result; the version switcher reads the live site's list, so it shows the published versions, not this build.
+`-W` is what the deploy uses: a warning fails the build. The third command is the deploy's check of the API pages. It checks that each class's attributes table matches its docstring, that `Session` is named as such, and that "On this page" lists the members. It prints each problem and exits 1. Never build into the checkout's root or beside a running `pytest`, because `pytest` fails on any new entry in the root. Open `/tmp/isocenter-docs/index.html` to read the result. The version switcher reads the live site's list, so it shows the published versions, not this build.
 
 ## 4. Release Process
 
-The procedure -- how changes reach `main`, how a release branch is cut,
-tagged and published, how patch releases work -- lives in
+The procedure lives in
 [`RELEASING.md`](https://github.com/kvnlng/Isocenter/blob/main/RELEASING.md)
-in the repository root, next to the code it releases. In short: `main` is
-the development branch; each minor line is cut to a frozen `release/X.Y`
-branch; a version is the tag `vX.Y.Z` on it; and nothing publishes itself.
+in the repository root, next to the code it releases. It says how changes
+reach `main`, how a release branch is cut, tagged and published, and how
+patch releases work. In short:
+
+* `main` is the development branch.
+* Each minor line is cut to a frozen `release/X.Y` branch.
+* A version is the tag `vX.Y.Z` on that branch.
+* Nothing publishes itself.
 
 Publishing is a manual run of `.github/workflows/publish.yml` against the
-tag. It uploads to PyPI by Trusted Publishing -- GitHub authenticates over
-OIDC and PyPI matches the request against a publisher pinned to this
+tag. It uploads to PyPI by Trusted Publishing. GitHub authenticates over
+OIDC, and PyPI matches the request against a publisher pinned to this
 repository, the workflow's *filename*, and its environment name. There is
 no API token in repository secrets, in CI, or on anyone's machine.
 Renaming `publish.yml` or its environments breaks publishing until PyPI's
@@ -114,48 +120,50 @@ publisher configuration is updated to match.
 Before anything is uploaded, the build job checks the run. The target must
 be exactly `pypi` or `testpypi`. The built wheel must match
 `isocenter/_version.py`, the one place the version is declared. A run to
-`pypi` must be dispatched from a `v*` tag that matches both; a TestPyPI
-rehearsal may run from the release branch, and a tag, if it runs from one,
-must match too. It then installs the
-built wheel into a clean environment *outside the source tree* and asserts
-it carries its own `resources/*.json`. That gate exists because those
-resources once shipped in no distribution at all and nothing failed --
-every loader guards on `os.path.exists` and degrades to a default, so a
-published release audited against an empty PHI policy and reported clean.
+`pypi` must be dispatched from a `v*` tag that matches both. A TestPyPI
+rehearsal may run from the release branch. If it runs from a tag, the tag
+must match too. The build job then installs the built wheel into a clean
+environment *outside the source tree*, and asserts that the wheel carries
+its own `resources/*.json`. That gate exists because those resources once
+shipped in no distribution at all, and nothing failed. Every loader
+guards on `os.path.exists` and degrades to a default. So a published
+release audited against an empty PHI policy and reported clean.
 
 **If `test-supported` (3.13, 3.14) is red, that is a decision, not a
-formality.** It only reports; it cannot block the upload. Either fix it,
-or delete that classifier from `setup.py` before releasing -- `setup.py`
-says outright that a classifier CI does not back is the same unbacked
-promise the old `python_requires=">=3.9"` was. A red job here is *more*
-likely to be a flake than a real break (v0.9.1's publish had 3.13 fail and
-pass on rerun), which is exactly what makes it dangerous: "just rerun it"
-is the reading that ships a real break. Rerun to learn whether it is
-deterministic, not to make it go away. That is why `RELEASING.md` rehearses
-on TestPyPI, from the release branch, before tagging.
+formality.** It only reports. It cannot block the upload. Either fix it,
+or delete that classifier from `setup.py` before you release. `setup.py`
+says outright that a classifier that CI does not back is the same
+unbacked promise that the old `python_requires=">=3.9"` was. A red job
+here is *more* likely to be a flake than a real break (v0.9.1's publish
+had 3.13 fail and pass on rerun). That is exactly what makes it
+dangerous: "just rerun it" is the reading that ships a real break. Rerun
+to learn whether it is deterministic, not to make it disappear. That is
+why `RELEASING.md` rehearses on TestPyPI, from the release branch, before
+tagging.
 
 ### Archiving and DOIs
 
-Once the Zenodo GitHub integration is enabled for this repository, each
-published GitHub Release is archived and issued a version DOI, under a
-concept DOI that always resolves to the latest. `.zenodo.json` supplies
-the deposit metadata and `CITATION.cff` is what GitHub's "Cite this
-repository" button reads.
+When the Zenodo GitHub integration is enabled for this repository, each
+published GitHub Release is archived and issued a version DOI. That
+version DOI sits under a concept DOI that always resolves to the latest.
+`.zenodo.json` supplies the deposit metadata, and `CITATION.cff` is what
+GitHub's "Cite this repository" button reads.
 
 Zenodo only archives releases created *after* the integration is
-switched on; it does not backfill -- its own guide says "once connected,
+switched on. It does not backfill. Its own guide says "once connected,
 new releases from the repository will be automatically ingested and
-archived". So enabling it does nothing to the releases already published:
-the first deposit comes from the next release, or from deleting and
-re-creating an existing GitHub Release. Creating a GitHub Release uploads
-nothing: publishing is a separate manual run (`RELEASING.md`), so the
-Release can be made, or re-made for Zenodo, without touching PyPI.
+archived". So enabling it does nothing to the releases already
+published. The first deposit comes from the next release, or from
+deleting and re-creating an existing GitHub Release. Creating a GitHub
+Release uploads nothing. Publishing is a separate manual run
+(`RELEASING.md`), so the Release can be made, or re-made for Zenodo,
+without touching PyPI.
 
 The integration is enabled and the first deposit exists, from v0.8.1.
-The **concept** DOI is `10.5281/zenodo.22104298` -- that is what
+The **concept** DOI is `10.5281/zenodo.22104298`. That is what
 `CITATION.cff` and the README badge carry, and it always resolves to the
 latest version. Zenodo also mints a per-version DOI for each release, one
-digit away; do not substitute it, or the citation stops following the
+digit away. Do not substitute it, or the citation stops following the
 work. `tests/test_version_contract.py` pins both the value and the
 agreement between the two files.
 
@@ -165,7 +173,7 @@ things about it are easy to get wrong and are pinned by
 
 * **`license` is a Zenodo vocabulary id, not an SPDX id**, and those are
   lowercase. `apache-2.0` resolves at
-  `zenodo.org/api/vocabularies/licenses/`; the SPDX spelling
+  `zenodo.org/api/vocabularies/licenses/`. The SPDX spelling
   `Apache-2.0` returns 404, and would have gone into the record as a
   licence Zenodo could not match. (The same held for `agpl-3.0-or-later`
   before #348 changed the licence.)
@@ -173,28 +181,30 @@ things about it are easy to get wrong and are pinned by
   release tag. Pinning it here would add a third place for the number to
   drift.
 
-Record metadata can be corrected on Zenodo after publication; the DOI
+Record metadata can be corrected on Zenodo after publication. The DOI
 itself cannot be reissued.
 
 ## Storage schema
 
-The session store is `<name>.db` (SQLite) plus `<name>_pixels.bin`, an append-only sidecar. The layout below is internal: it is not part of the frozen API, and a release may change it. [Architecture](architecture.md#4-storage) has the user's view.
+The session store is `<name>.db` (SQLite) plus `<name>_pixels.bin`, an append-only sidecar. The layout below is internal. It is not part of the frozen API, and a release may change it. [Architecture](architecture.md#4-storage) has the user's view.
 
 ### Why the split
 
-DICOM metadata comes in two shapes. Standard tags are well-defined and present on most instances; private tags are vendor-specific, sparse and numerous. One table with a column per tag is impossible, and a single entity-attribute-value table is too slow to load in bulk. So values are split by group parity and type when they are saved:
+DICOM metadata comes in two shapes. Standard tags are well-defined and present on most instances. Private tags are vendor-specific, sparse and numerous. One table with a column per tag is impossible, and a single entity-attribute-value table is too slow to load in bulk. So values are split by group parity and type when they are saved:
 
 | Where | Table / file | What | Why |
 | :--- | :--- | :--- | :--- |
 | Core attributes | `instances.attributes_json` | Every standard (even-group) tag, and every binary value that is kept, private ones included | One JSON document per instance, read back whole: no SQL reads inside it and no joins, so 10,000 instances load without 10,000 joins. |
-| Private attributes | `instance_attributes` | Private (odd-group) tags that are not binary | Sparse, vendor-specific; keeps the core document small. |
+| Private attributes | `instance_attributes` | Private (odd-group) tags that are not binary | Sparse, vendor-specific. Keeps the core document small. |
 | Pixel and waveform data | `<name>_pixels.bin`, located by `instances.pixel_offset`/`pixel_length` and `instance_blobs` | Raw frame bytes | Keeps gigabytes out of the database. |
 
-The real split for private values is whether a value serializes to text: a kept binary value is base64-encoded into `attributes_json` even when it is private, and its VR is recorded in the document's root `__vrs__`. DS and IS values are stored as tagged text (`{"__type__": "DS", "data": ...}`) because `json` writes a float or int subclass as a bare number. There is no fourth tier for large binary values: only Pixel Data and Waveform Data go to the sidecar, and any other binary value over 65534 bytes is dropped at ingest with a `DATA_LOSS` row, because an unbounded value would stay resident for the life of the session. The pixel lookup tables (`io_handlers.LUT_DATA_TAGS`: LUT Data, Gray LUT Data and the six palette data elements) are kept up to 393216 bytes instead (`LUT_RETENTION_MAX_BYTES`). A full 16-bit table is 131072 bytes, so three palettes are 384 KiB raw or about 512 KiB as base64; three segmented palettes at the cap are 1.125 MiB raw, about 1.5 MiB as base64. [Private Tags](configuration.md#private-tags) gives the reasoning users see.
+The real split for private values is whether a value serializes to text. A kept binary value is base64-encoded into `attributes_json` even when it is private, and its VR is recorded in the document's root `__vrs__`. DS and IS values are stored as tagged text (`{"__type__": "DS", "data": ...}`) because `json` writes a float or int subclass as a bare number.
+
+There is no fourth tier for large binary values. Only Pixel Data and Waveform Data go to the sidecar. Any other binary value over 65534 bytes is dropped at ingest with a `DATA_LOSS` row, because an unbounded value would stay resident for the life of the session. The pixel lookup tables (`io_handlers.LUT_DATA_TAGS`: LUT Data, Gray LUT Data and the six palette data elements) are kept up to 393216 bytes instead (`LUT_RETENTION_MAX_BYTES`). A full 16-bit table is 131072 bytes, so three palettes are 384 KiB raw or about 512 KiB as base64. Three segmented palettes at the cap are 1.125 MiB raw, about 1.5 MiB as base64. [Private Tags](configuration.md#private-tags) gives the reasoning users see.
 
 ### Tables
 
-Every table has an integer `id` primary key; the natural keys are `UNIQUE` columns.
+Every table has an integer `id` primary key. The natural keys are `UNIQUE` columns.
 
 | Table | Holds | Key columns |
 | :--- | :--- | :--- |
@@ -203,12 +213,12 @@ Every table has an integer `id` primary key; the natural keys are `UNIQUE` colum
 | `studies` | One row per study | `study_instance_uid` (UNIQUE), `patient_id_fk`, `study_date`, `date_shifted`, `shifted_study_date`, the four PHI-status columns |
 | `series` | One row per series | `series_instance_uid` (UNIQUE), `study_id_fk`, `modality`, `series_number`, `manufacturer`, `model_name`, `device_serial_number` |
 | `instances` | One row per instance (one file) | `sop_instance_uid` (UNIQUE), `series_id_fk`, `sop_class_uid`, `instance_number`, `file_path`, `source_path`, `pixel_offset`, `pixel_length`, `pixel_hash`, `compress_alg`, `attributes_json`, `shift_provenance`, the four PHI-status columns |
-| `instance_attributes` | Private, non-binary values | `instance_uid`, `group_id`, `element_id`, `atom_index`, `value_rep`, `value_text`, `value_count`; UNIQUE on the first four |
-| `instance_blobs` | Sidecar references other than the instance's own Pixel Data: waveform samples, and pixel data inside a sequence item such as an icon image | `instance_uid`, `kind` (`waveform`, or `pixels:<path>` such as `pixels:0088,0200/0/7fe0,0010`), `offset`, `length`, `hash`, `compress_alg`; UNIQUE on `(instance_uid, kind)` |
+| `instance_attributes` | Private, non-binary values | `instance_uid`, `group_id`, `element_id`, `atom_index`, `value_rep`, `value_text`, `value_count`. UNIQUE on the first four. |
+| `instance_blobs` | Sidecar references other than the instance's own Pixel Data: waveform samples, and pixel data inside a sequence item such as an icon image | `instance_uid`, `kind` (`waveform`, or `pixels:<path>` such as `pixels:0088,0200/0/7fe0,0010`), `offset`, `length`, `hash`, `compress_alg`. UNIQUE on `(instance_uid, kind)`. |
 | `audit_log` | Every action the pipeline records, read by the compliance report | `timestamp`, `action_type`, `entity_uid`, `details`, `loss_scope` (DATA_LOSS rows), `element_tag` (SCAN_GAP rows) |
 | `phi_findings` | Findings saved by `save_analysis()` | `entity_uid`, `entity_type`, `field_name`, `value`, `reason`, `patient_id`, `remediation_action`, `remediation_value`, `details_json` |
 
-`persistence.py` holds the `CREATE TABLE` statements and the `ALTER TABLE` steps that add a column to a store created without it. Nothing is back-filled: a column added later is NULL in older rows, and the loader reads NULL as "not recorded".
+`persistence.py` holds the `CREATE TABLE` statements and the `ALTER TABLE` steps that add a column to a store created without it. Nothing is back-filled. A column added later is NULL in older rows, and the loader reads NULL as "not recorded".
 
 ```{mermaid}
 erDiagram
@@ -271,7 +281,7 @@ erDiagram
 
 Several numbers in [Environment Variables](environment.md) are pinned by tests, so the page and the code cannot drift apart silently:
 
-- `tests/test_documented_env_vars.py` fails when the package reads an `ISOCENTER_*` variable that has no row in the table: a table row whose first cell is the variable's name in bold code.
+- `tests/test_documented_env_vars.py` fails when the package reads an `ISOCENTER_*` variable that has no row in the table. Such a row is a table row whose first cell is the variable's name in bold code.
 - `tests/test_parallel_contract.py` holds the default worker count (one per CPU), the order the threads-or-processes levers resolve in, and the rule that only the literal `1` switches a flag on.
 - `tests/test_redaction_worker_count.py` holds `redact()`'s own default (half the CPUs, capped at eight) at fixed CPU counts, so the cap is exercised on any machine.
 - `tests/test_shared_executor_lifecycle.py` holds the `WARNING`s `ingest()` logs when `ISOCENTER_FORCE_THREADS` or `ISOCENTER_MAX_TASKS_PER_CHILD` is set.
@@ -280,7 +290,7 @@ Change the page and the test together.
 
 ## Measuring coverage in worker processes
 
-`ingest()` and `export()` always run in worker processes, so a debugger or a plain `coverage run` in the calling process does not see them. `.coveragerc` measures the spawned workers too; its comments say why each setting is there:
+`ingest()` and `export()` always run in worker processes, so a debugger or a plain `coverage run` in the calling process does not see them. `.coveragerc` measures the spawned workers too. Its comments say why each setting is there:
 
 ```bash
 coverage run -m pytest tests/ && coverage combine && coverage report
@@ -288,43 +298,55 @@ coverage run -m pytest tests/ && coverage combine && coverage report
 
 Coverage is not run in CI and has no threshold.
 
-`ISOCENTER_WORKER_FAULTHANDLER=1` makes every worker process dump its threads' tracebacks to stderr if it is still alive after 240 s. The test workflow (`.github/workflows/tests.yml`) sets it, so a stall inside a pool child shows up as a stack trace rather than a silent hang.
+`ISOCENTER_WORKER_FAULTHANDLER=1` makes every worker process dump its threads' tracebacks to stderr if it is still alive after 240 s. The test workflow (`.github/workflows/tests.yml`) sets it, so a stall inside a pool child appears as a stack trace rather than a silent hang.
 
 ## Dependency and codec notes
 
 ### Dependencies
 
-Dependencies are declared in one place, `setup.py`. There is deliberately no `requirements.txt`: two lists drift apart, and only `install_requires` is consulted when you `pip install`. `.[tests]` is enough to run the suite; `.[dev]` adds pylint and coverage.
+Dependencies are declared in one place, `setup.py`. There is deliberately no `requirements.txt`. Two lists drift apart, and only `install_requires` is consulted when you `pip install`. `.[tests]` is enough to run the suite. `.[dev]` adds pylint and coverage.
 
 ### `pylibjpeg-libjpeg` on the free-threaded build
 
-Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CPython 3.14t, `pip install` builds it from the sdist, and the build either fails or produces a wheel with no extension module in it, depending on the compiler pip picks. The second was measured here: the install reported success and `import libjpeg` then failed with `ModuleNotFoundError: No module named '_libjpeg'`. Built from the sdist by hand it imports, with `RuntimeWarning: The global interpreter lock (GIL) has been enabled to load module '_libjpeg', which has not declared that it can run safely without the GIL`, so a 3.14t process that imports it runs with the GIL back on unless `PYTHON_GIL=0` is set. [Codec support](codecs.md) carries the user-facing summary.
+Measured with `pylibjpeg-libjpeg` 2.4.0, which has no free-threaded wheel. On CPython 3.14t, `pip install` builds it from the sdist. Depending on the compiler that pip picks, the build either fails or produces a wheel with no extension module in it. The second was measured here. The install reported success, and `import libjpeg` then failed with `ModuleNotFoundError: No module named '_libjpeg'`. Built from the sdist by hand, it imports, with `RuntimeWarning: The global interpreter lock (GIL) has been enabled to load module '_libjpeg', which has not declared that it can run safely without the GIL`. So a 3.14t process that imports it runs with the GIL back on, unless `PYTHON_GIL=0` is set. [Codec support](codecs.md) carries the user-facing summary.
 
 ### Decode limits: the evidence
 
 [Codec support](codecs.md#decode-limits) states each limit. The measurements behind the precision limits:
 
 - A precision-12 JPEG Lossless stream under BitsStored 16 reads `0..4970` through `imagecodecs` (lj92) and `0..4095` through pydicom with `pylibjpeg-libjpeg`, which saturates.
-- A JPEG 2000 codestream written by `imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K", bitspersample=12)` over unsigned samples up to 4970 declares precision 12 and holds 4970: with the SIZ segment's precision byte (`Ssiz`) changed from 0x0b to 0x0f, 16 bits, `imagecodecs.jpeg2k_decode` returns the input plus 30720, the difference between the two precisions' level shifts (32768 − 2048): 35690 where the input holds 4970, and the input exactly once 30720 is subtracted. As written it reads `0..4095` through Pillow and through `imagecodecs`, the two decoders that install with Isocenter, both openjpeg, and `ingest()` of a `.90` file holding it stores `0..4095` and writes no row. Measured on imagecodecs 2026.8.16 and 2026.10.10 (openjpeg 2.5.4). Through pydicom's `pylibjpeg-openjpeg` plugin (2.6.0, also openjpeg) it reads `0..4095` as well. GDCM was not tried, and neither was any JPEG 2000 decoder that is not openjpeg (#1057).
-- No JPEG-LS stream was found that decodes beyond its declared precision (#684). For a 16-bit array holding 4970, `imagecodecs.jpegls_encode` declares precision 16; with `bitspersample=12` (2026.10.10; 2026.8.16 refuses the keyword) it declares 12 and decodes to the array masked to 12 bits, 3570 at most. DCMTK's `dcmcjpls` 3.7.0 over the same samples in a native file (BitsAllocated 16, BitsStored 12) writes the same two streams: `+pr` precision 16, decoding to the input, and `+pc` precision 12, byte for byte the `bitspersample=12` stream. Both encoders write an LSE segment stating MAXVAL 65535 into a precision-16 stream; `imagecodecs` writes none into an 8-bit one. With the SOF55 precision byte of that array's precision-16 stream (8 by 8, `0..4970`) rewritten to any value from 2 to 15, `imagecodecs.jpegls_decode` (CharLS 2.4.4) raises `JpeglsError`: `Invalid JPEG-LS stream: JPEG-LS preset parameters segment contains invalid values` while an LSE states a MAXVAL above 2^P − 1 (4096 at precision 12 is refused and 4095 is not), and, for this array, a refusal of the scan (`the encoded bit stream contains a general structural problem`, or `the decoding process is ready but the source buffer still contains encoded data`) once the LSE is taken out or states 2^P − 1. The scan's refusal depends on the samples, not on the width: a 16-bit stream of one row of 64 samples, each 4970, rewritten to precision 12 is refused with its LSE as written or stating 4096, and with the LSE out or stating 4095 it decodes, to `31..4031` with no cell equal to the source (`455..1896` at precision 11); one pixel of 65535 with the LSE out decodes to 4095, 2047 and 255 at precisions 12, 11 and 8. `_decode_pixels` on the fallback returns the row's array, the check returns None, and `ingest()` of a `.80` file holding it (BitsAllocated 16, BitsStored 12) stores `31..4031` and writes no row (found by the review of #1099). Over 400 arrays (8-bit and 16-bit, one and three samples per pixel), each encoded lossless and near-lossless and rewritten to every lower precision in five ways, none of 28,000 rewritten 16-bit streams decoded (a near-lossless stream rewritten to precision 2 is refused for its NEAR value instead); of the 2,400 rewritten 8-bit streams of each way, 781 decoded with no LSE and 781 with an LSE stating 2^P − 1, each to samples inside the rewritten precision, and none with an LSE stating more. One 8-bit stream of samples up to 245, rewritten to precision 7, decodes to `0..127` with 1 cell of 64 equal to the source; `_decode_pixels` returns that array, the check returns None, and `ingest()` of a `.80` file holding it stores `0..127` and writes no row. Identical on imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t. `tests/test_a_stream_narrower_than_its_own_samples_is_said.py` holds the `+pc` stream as bytes, runs the rewrites of the 8 by 8 array, and holds the two streams that decode.
-- pydicom's JPEG-LS plugins on the same rewritten streams, 3.12.14 only (`pylibjpeg` 2.1.0 with `pylibjpeg-libjpeg` 2.4.0, and `pyjpegls` 1.5.1; pydicom 3.0.2 registers `pylibjpeg`, `pyjpegls` and `gdcm` for JPEG-LS and takes `pylibjpeg` first). 29 streams: the 8 by 8 array's and the row's at precisions 12 and 11, the pixel's at 12, 11 and 8, each with the LSE as written, out, stating 2^P − 1 and stating 2^P, and the 8-bit stream at precision 7. `libjpeg.decode` decodes all 29, none beyond its precision: the 8 by 8 array's at precision 12 reads `0..4095` with the LSE as written, equal to the source clamped to 4095 in all 64 cells, and `0..4029` with the LSE out; CharLS refuses both. `jpeg_ls.decode` (CharLS) refuses and decodes as `imagecodecs` does, in the same words and to the same ranges, except that it refuses the one-pixel streams `imagecodecs` decodes. With the plugins importable, `_decode_pixels` returns a decode for each of the 29, with `libjpeg.decode`'s range, and the check returns None; `ingest()` of four `.80` files (the 8 by 8 array's at precision 12 with the LSE as written and out, the row's with the LSE out, the 8-bit stream at 7) stores `0..4095`, `0..4029`, `31..4031` and `0..127` and writes no row. GDCM was not tried, and neither was any other JPEG-LS decoder; the plugins were not tried on 3.14t, where `pylibjpeg-libjpeg` has no wheel.
+- A JPEG 2000 codestream written by `imagecodecs.jpeg2k_encode(a, level=0, codecformat="J2K", bitspersample=12)` over unsigned samples up to 4970 declares precision 12 and holds 4970. With the SIZ segment's precision byte (`Ssiz`) changed from 0x0b to 0x0f, 16 bits, `imagecodecs.jpeg2k_decode` returns the input plus 30720. That is the difference between the two precisions' level shifts (32768 − 2048): 35690 where the input holds 4970, and the input exactly once 30720 is subtracted. As written, the codestream reads `0..4095` through Pillow and through `imagecodecs`, the two decoders that install with Isocenter, both openjpeg. `ingest()` of a `.90` file that holds it stores `0..4095` and writes no row. Measured on imagecodecs 2026.8.16 and 2026.10.10 (openjpeg 2.5.4). Through pydicom's `pylibjpeg-openjpeg` plugin (2.6.0, also openjpeg) it reads `0..4095` as well. GDCM was not tried, and neither was any JPEG 2000 decoder that is not openjpeg (#1057).
+- No JPEG-LS stream was found that decodes beyond its declared precision (#684). For a 16-bit array holding 4970, `imagecodecs.jpegls_encode` declares precision 16. With `bitspersample=12` (2026.10.10, while 2026.8.16 refuses the keyword), it declares 12 and decodes to the array masked to 12 bits, 3570 at most. DCMTK's `dcmcjpls` 3.7.0 over the same samples in a native file (BitsAllocated 16, BitsStored 12) writes the same two streams. `+pr` writes precision 16, which decodes to the input. `+pc` writes precision 12, byte for byte the `bitspersample=12` stream. Both encoders write an LSE segment stating MAXVAL 65535 into a precision-16 stream. `imagecodecs` writes none into an 8-bit one.
+
+  When the SOF55 precision byte of that array's precision-16 stream (8 by 8, `0..4970`) is rewritten to any value from 2 to 15, `imagecodecs.jpegls_decode` (CharLS 2.4.4) raises `JpeglsError`. While an LSE states a MAXVAL above 2^P − 1, the error is `Invalid JPEG-LS stream: JPEG-LS preset parameters segment contains invalid values` (4096 at precision 12 is refused and 4095 is not). Once the LSE is taken out or states 2^P − 1, the error is, for this array, a refusal of the scan (`the encoded bit stream contains a general structural problem`, or `the decoding process is ready but the source buffer still contains encoded data`).
+
+  The scan's refusal depends on the samples, not on the width. A 16-bit stream of one row of 64 samples, each 4970, rewritten to precision 12, is refused with its LSE as written or stating 4096. With the LSE out or stating 4095, it decodes to `31..4031`, with no cell equal to the source (`455..1896` at precision 11). One pixel of 65535 with the LSE out decodes to 4095, 2047 and 255 at precisions 12, 11 and 8. `_decode_pixels` on the fallback returns the row's array, and the check returns None. `ingest()` of a `.80` file that holds it (BitsAllocated 16, BitsStored 12) stores `31..4031` and writes no row (found by the review of #1099).
+
+  Over 400 arrays were tried (8-bit and 16-bit, one and three samples per pixel). Each was encoded lossless and near-lossless, and rewritten to every lower precision in five ways. None of 28,000 rewritten 16-bit streams decoded. (A near-lossless stream rewritten to precision 2 is refused for its NEAR value instead.) Of the 2,400 rewritten 8-bit streams of each way, 781 decoded with no LSE and 781 with an LSE stating 2^P − 1, each to samples inside the rewritten precision. None decoded with an LSE stating more. One 8-bit stream of samples up to 245, rewritten to precision 7, decodes to `0..127` with 1 cell of 64 equal to the source. `_decode_pixels` returns that array, and the check returns None. `ingest()` of a `.80` file that holds it stores `0..127` and writes no row. The results are identical on imagecodecs 2026.8.16 and 2026.10.10, 3.12.14 and 3.14.7t. `tests/test_a_stream_narrower_than_its_own_samples_is_said.py` holds the `+pc` stream as bytes, runs the rewrites of the 8 by 8 array, and holds the two streams that decode.
+- pydicom's JPEG-LS plugins were run on the same rewritten streams, on 3.12.14 only. The plugins were `pylibjpeg` 2.1.0 with `pylibjpeg-libjpeg` 2.4.0, and `pyjpegls` 1.5.1. pydicom 3.0.2 registers `pylibjpeg`, `pyjpegls` and `gdcm` for JPEG-LS, and takes `pylibjpeg` first.
+
+  There were 29 streams. They were the 8 by 8 array's and the row's at precisions 12 and 11, and the pixel's at 12, 11 and 8, each with the LSE as written, out, stating 2^P − 1 and stating 2^P. The set also held the 8-bit stream at precision 7.
+
+  `libjpeg.decode` decodes all 29, none beyond its precision. The 8 by 8 array's stream at precision 12 reads `0..4095` with the LSE as written, equal to the source clamped to 4095 in all 64 cells. It reads `0..4029` with the LSE out. CharLS refuses both. `jpeg_ls.decode` (CharLS) refuses and decodes as `imagecodecs` does, in the same words and to the same ranges, except that it refuses the one-pixel streams `imagecodecs` decodes.
+
+  With the plugins importable, `_decode_pixels` returns a decode for each of the 29, with `libjpeg.decode`'s range, and the check returns None. `ingest()` of four `.80` files (the 8 by 8 array's at precision 12 with the LSE as written and out, the row's with the LSE out, the 8-bit stream at 7) stores `0..4095`, `0..4029`, `31..4031` and `0..127` and writes no row. GDCM was not tried, and neither was any other JPEG-LS decoder. The plugins were not tried on 3.14t, where `pylibjpeg-libjpeg` has no wheel.
 - The signed arm is measured unreachable for JPEG Baseline and Extended (`.50`/`.51`), whose decode is not sign-extended at all.
 - `693_J2KR.dcm` from pydicom's test data (a signed JPEG 2000 codestream) reads `int16 [-2000, 2492]` identically through Pillow and through `imagecodecs`, and writes no row.
-- An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision; measured at BitsStored 12, 13 and 16, it reads `int16 [-1996, 1470]` on both routes, with no row.
+- An unsigned JPEG 2000 codestream under PixelRepresentation 1 is sign-extended at the codestream's own precision. Measured at BitsStored 12, 13 and 16, it reads `int16 [-1996, 1470]` on both routes, with no row.
 - 12-bit JPEG Extended decodes through `imagecodecs.jpeg_decode` value for value as DCMTK decodes pydicom's `JPEG-lossy.dcm`.
 
 ### `DicomExporter.write_tree()` and `session.export()`
 
-The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and so does Study Time: neither path writes `Study.study_time`, and an instance with no Study Time of its own is written with an empty one (#953). Both paths run the same Type 1 check (`IODValidator`, CT, MR and PET Image Storage only): `session.export()` withholds a failing instance with an `ERROR` row, and `write_tree()` raises `RuntimeError`. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers); it is the serializer the fixture generators in `scripts/` use.
+The patient, study and series tags written over each instance's own are the same on both write paths. Equipment comes from the instance, which is what `anonymize()` edits, and so does Study Time. Neither path writes `Study.study_time`, and an instance with no Study Time of its own is written with an empty one (#953). Both paths run the same Type 1 check (`IODValidator`, CT, MR and PET Image Storage only). `session.export()` withholds a failing instance with an `ERROR` row, and `write_tree()` raises `RuntimeError`. `write_tree()` applies none of the export's gates (redaction zones, the nested-icon drop, the de-identification markers). It is the serializer that the fixture generators in `scripts/` use.
 
 ## Configuration and storage internals
 
-The user guides describe behaviour; the names behind it are here.
+The user guides describe behaviour. The names behind it are here.
 
-- **Profiles.** `basic@2026c` is `profiles.BASIC_PROFILE` (649 rules, frozen for 1.x; `tests/test_profile_editions.py` pins its digest). The floor is `profiles.FLOOR_POLICY`, the same table with the three research defaults `create_config()` writes. Resolution of a file's `privacy_profile` lives in `config_manager._resolved_policy`, not in `profiles.py`.
-- **The 65534-byte limit** on held binary values is `io_handlers.BINARY_RETENTION_MAX_BYTES`, the largest value an explicit-VR 16-bit length field can carry. `io_handlers._retention_limit_for(tag)` reads it at the two retention gates and in the drop row (the odd-group `SCAN_GAP` size test and the #692 `UN`-decode pre-check, which never decodes a LUT tag, read the constant directly): it returns `LUT_RETENTION_MAX_BYTES` (393216) for the pixel lookup tables in `LUT_DATA_TAGS` (#902) and the 65534 limit for everything else.
-- **Why large private values are not stored.** Holding a megabyte vendor blob in `attributes` makes it permanently resident, and memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default; the cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation the EAV table does not have, plus a lazy loader and an export re-merge path. `session.compact()` rewrites the sidecar and rewires every offset it knows about, so a class of offset it does not know about is silent corruption after the first compaction. It also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too, and it refuses outright while a `redact()` or `ingest()` pass is open. That is design work, not a flag (#125).
-- **Data-loss rows** are read with `session.store_backend.get_audit_losses()`; the compliance report's section 3.1 is the user-facing view.
+- **Profiles.** `basic@2026c` is `profiles.BASIC_PROFILE` (649 rules, frozen for 1.x, and `tests/test_profile_editions.py` pins its digest). The floor is `profiles.FLOOR_POLICY`, the same table with the three research defaults `create_config()` writes. Resolution of a file's `privacy_profile` lives in `config_manager._resolved_policy`, not in `profiles.py`.
+- **The 65534-byte limit** on held binary values is `io_handlers.BINARY_RETENTION_MAX_BYTES`, the largest value an explicit-VR 16-bit length field can carry. `io_handlers._retention_limit_for(tag)` reads it at the two retention gates and in the drop row. It returns `LUT_RETENTION_MAX_BYTES` (393216) for the pixel lookup tables in `LUT_DATA_TAGS` (#902), and the 65534 limit for everything else. Two other readers read the constant directly: the odd-group `SCAN_GAP` size test, and the #692 `UN`-decode pre-check, which never decodes a LUT tag.
+- **Why large private values are not stored.** Holding a megabyte vendor blob in `attributes` makes it permanently resident. Memory scaling on 100GB+ datasets depends on heavy arrays never being resident by default. The cap bounds what retention can cost per element. Routing large values to the sidecar instead means giving private tags an offset/length representation that the EAV table does not have, plus a lazy loader and an export re-merge path. `session.compact()` rewrites the sidecar and rewires every offset it knows about. So a class of offset it does not know about is silent corruption after the first compaction. `compact()` also holds the sidecar gate for the whole rewrite, so any writer of such an offset would have to take that gate too. And `compact()` refuses outright while a `redact()` or `ingest()` pass is open. That is design work, not a flag (#125).
+- **Data-loss rows** are read with `session.store_backend.get_audit_losses()`. The compliance report's section 3.1 is the user-facing view.
 
 ## Mechanisms behind the API
 
@@ -333,33 +355,33 @@ four of those descriptions are here.
 
 **`ingest()` and a worker that dies.** When a worker process ends while
 reading a file (the out-of-memory killer, a decoder crash, `SIGKILL`),
-the results already returned are kept, and the files not yet returned
-are read again one at a time on a fresh one-worker process pool. A file
-is rejected only when a fresh worker ends on it as the first file it was
-given, with the reason "An ingest worker process ended before this file
+the results already returned are kept. The files not yet returned are
+read again one at a time on a fresh one-worker process pool. A file is
+rejected only when a fresh worker ends on it as the first file it was
+given. The reason is "An ingest worker process ended before this file
 was returned, and a fresh worker process given this file alone, as its
 first file, ended while reading it". The rest are read at full width,
 the call saves as usual, and the session's pool is replaced. A death
-that does not recur costs no file and writes no row; a `WARNING` log
+that does not recur costs no file and writes no row. A `WARNING` log
 line records it. If two fresh workers in a row cannot run a trivial
 task, every file left is rejected as "Not read" and the call returns. A
 worker that ends on a later file had read others first, so that file is
-not blamed: reading starts again from it on another fresh worker. Each
-worker death costs a fresh pool, a few tenths of a second; a fatal file
-costs two or three, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read
-one at a time.
+not blamed. Reading starts again from that file on another fresh worker.
+Each worker death costs a fresh pool, a few tenths of a second. A fatal
+file costs two or three, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files
+read one at a time.
 
 **`compact()`, `ingest()` and `redact()` locks.** Every frame writer, and
 `compact()` for the whole rewrite, holds the sidecar lock
-(`<sidecar>.lock`, a cross-process `fcntl.flock`); a writer that cannot
+(`<sidecar>.lock`, a cross-process `fcntl.flock`). A writer that cannot
 take it within 180 s raises `RuntimeError` naming the lock file. An
 ingest or a redaction pass holds the pass-lock (`<sidecar>.pass.lock`)
-shared for the whole pass, and `compact()` takes it exclusively and
-without waiting, which is how it refuses while a pass is open. Neither
-file name is frozen.
+shared for the whole pass. `compact()` takes the pass-lock exclusively
+and without waiting, which is how `compact()` refuses while a pass is
+open. Neither file name is frozen.
 
 **`redact(force=)`.** An instance is skipped as already redacted when its
-`_ISOCENTER_REDACTION_HASH` attribute matches the configuration's zones;
+`_ISOCENTER_REDACTION_HASH` attribute matches the configuration's zones.
 `force=True` ignores the match. A failed instance gets no hash.
 
 **`Instance.unload_waveform_data()`.** It unloads only when the instance
