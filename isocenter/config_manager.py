@@ -251,8 +251,8 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
     # file loaded here would be applied this library's way under its own
     # number, and `save()` would then rewrite it as ours. Minors compare as
     # integers, so "2.10" is newer than "2.9". Decided in 1.0.0: had 1.0
-    # loaded a newer minor, no 1.x could refuse one (stability.md's "a file
-    # 1.0 loads, every 1.x loads").
+    # loaded a newer minor, no 1.x could refuse one (stability.md: "Every
+    # 1.x loads, unchanged, a configuration file that 1.0 loads.").
     if int(version.split(".")[1]) > int(ours.split(".")[1]):
         raise ValueError(
             f"{source}: version {version!r} is newer than this isocenter's "
