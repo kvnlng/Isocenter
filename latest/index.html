@@ -167,8 +167,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -317,8 +317,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -526,12 +526,12 @@
 </div>
 <p><a class="reference internal" href="installation/"><span class="std std-doc">Installation</span></a> covers the optional OCR and NLP extras. Then the <a class="reference internal" href="quickstart/"><span class="std std-doc">Quick Start</span></a> walks the pipeline end to end: ingest, examine, configure, audit, anonymize, redact, export, report. The <a class="reference internal" href="configuration/"><span class="std std-doc">Configuration</span></a> guide is where your protocol becomes a profile.</p>
 <p>The <strong>Tutorials</strong> each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with <a class="reference internal" href="tutorials/deidentify-and-read-the-grade/"><span class="std std-doc">De-identify a cohort and read the grade</span></a>: what <code class="docutils literal notranslate"><span class="pre">PASS</span></code> and <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code> mean, and what to keep so a later export matches this one.</p>
-<p>If you used Isocenter 0.9.x, <a class="reference internal" href="migration/"><span class="std std-doc">Upgrading from 0.9.x</span></a> says what 1.0 does with your stores, configurations and identity tokens.</p>
+<p>How Isocenter scores on a public de-identification benchmark, and the configuration that gets there, is on the <a class="reference internal" href="midi-b/"><span class="std std-doc">MIDI-B benchmark</span></a> page: 99.22% of the Validation set’s checks and 99.23% of the Test set’s, with every setting explained.</p>
 <p>If you are evaluating Isocenter for an institution rather than running it, <a class="reference internal" href="for-institutions/"><span class="std std-doc">For institutions</span></a> is the page to read: the license, the citation, and what the report gives a reviewer.</p>
 </section>
 <section id="measured-not-promised">
 <h1>Measured, not promised<a class="headerlink" href="#measured-not-promised" title="Link to this heading">#</a></h1>
-<p>One benchmark has a recorded run behind it: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026. The numbers and the machine are on the <a class="reference internal" href="performance/"><span class="std std-doc">Performance</span></a> page, and larger runs will appear there when they exist.</p>
+<p>Two benchmarks have a recorded run behind them. For speed: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026; the numbers and the machine are on the <a class="reference internal" href="performance/"><span class="std std-doc">Performance</span></a> page, and larger runs will appear there when they exist. For de-identification: TCIA’s MIDI-B datasets, scored with the benchmark’s own validation script, October 2026, on the <a class="reference internal" href="midi-b/"><span class="std std-doc">MIDI-B benchmark</span></a> page.</p>
 </section>
 <section id="license-and-citation">
 <h1>License and citation<a class="headerlink" href="#license-and-citation" title="Link to this heading">#</a></h1>
@@ -601,7 +601,7 @@
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
   </p>
 </div>
       

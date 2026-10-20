@@ -1,0 +1,1580 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="light">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>MIDI-B benchmark &#8212; Isocenter</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "light";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=18bd87630a240e9c25be" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="stylesheet" type="text/css" href="../_static/ledger.css?v=b7d448bb" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=18bd87630a240e9c25be"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
+
+    <script src="../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=ccdb6887"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'midi-b';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.23.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://kvnlng.github.io/Isocenter/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '1.0';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            true;
+        </script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="../genindex/" />
+    <link rel="search" title="Search" href="../search/" />
+    <link rel="next" title="API Reference" href="../api/" />
+    <link rel="prev" title="Environment Variables" href="../environment/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="light dark"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="1.0.0rc22" />
+  
+    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="light">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search/"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button type="button" class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">Isocenter</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
+    Get started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
+    Tutorials
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../guides/">
+    Guides
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#" aria-current="page">
+    MIDI-B benchmark
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../about/">
+    About
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button type="button" class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button type="button" class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../get-started/">
+    Get started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../tutorials/">
+    Tutorials
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../guides/">
+    Guides
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#" aria-current="page">
+    MIDI-B benchmark
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../api/">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../about/">
+    About
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/kvnlng/Isocenter" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="mailto:support@isocenter.net" title="Email support@isocenter.net" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-solid fa-paper-plane fa-lg" aria-hidden="true"></i><span class="visually-hidden">Email support@isocenter.net</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button type="button" id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar">
+  <svg class="pst-icon" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"></div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">MIDI-B benchmark</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="midi-b-benchmark">
+<h1>MIDI-B benchmark<a class="headerlink" href="#midi-b-benchmark" title="Link to this heading">#</a></h1>
+<p><a class="reference external" href="https://www.cancerimagingarchive.net/collection/midi-b-test-midi-b-validation/">MIDI-B</a> is a de-identification benchmark from The Cancer Imaging Archive (TCIA). It provides two synthetic DICOM datasets seeded with realistic identifiers, and an answer key that says what a correct de-identification does to every element of every instance. A <a class="reference external" href="https://github.com/CBIIT/MIDI_validation_script">validation script</a> scores an output against the key.</p>
+<p>This page shows how to configure Isocenter to match that answer key, and why each setting is there. The whole configuration is one YAML file, given in full in the <a class="reference internal" href="#appendix-the-configuration">appendix</a>. Every setting is a configuration rule except one, an export flag.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p></p></th>
+<th class="head text-left"><p>Validation</p></th>
+<th class="head text-left"><p>Test</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Isocenter’s default configuration</p></td>
+<td class="text-left"><p>72.51%</p></td>
+<td class="text-left"><p>68.45%</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>The configuration on this page</strong></p></td>
+<td class="text-left"><p><strong>99.22%</strong></p></td>
+<td class="text-left"><p><strong>99.23%</strong></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag <code class="docutils literal notranslate"><span class="pre">v1.0.0rc22</span></code>, commit <code class="docutils literal notranslate"><span class="pre">5b90e719</span></code>) and the MIDI-B validation script at commit <code class="docutils literal notranslate"><span class="pre">ccc0939</span></code>, on an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1).</strong> Pixel checks were scored by the script’s own automatic check; no manual pixel review was applied. That is the measurement.</p>
+<p>The configuration was tuned against both sets, so neither score is a held-out estimate: it is what this release and this configuration achieve on this data.</p>
+<p>In both datasets:</p>
+<ul class="simple">
+<li><p>Study Date is shifted by each patient’s offset, the other dates the profile names are emptied, replaced or removed, and every date check passes;</p></li>
+<li><p>every UID is replaced, consistently across instances, and every UID check passes;</p></li>
+<li><p>every Patient ID check passes;</p></li>
+<li><p>99.15% (Validation) and 97.80% (Test) of the identifiers the key expects removed are removed. Almost all of the rest are 2- or 3-letter site acronyms (see <a class="reference internal" href="#why-not-100">Why not 100%</a>).</p></li>
+</ul>
+<p>The configuration follows MIDI-B’s answer key, which is one de-identification policy among several. Where the key leaves identifying text in place, or removes more than a study might want, the section says so, and <a class="reference internal" href="#choices-a-site-may-want-to-change">Choices a site may want to change</a> collects them.</p>
+<p>Example values on this page are synthetic. Some are MIDI-B’s own synthetic values, already quoted in this project’s public issues; the rest are invented values of the same shape.</p>
+<section id="how-midi-b-scores">
+<h2>How MIDI-B scores<a class="headerlink" href="#how-midi-b-scores" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Set</p></th>
+<th class="head text-left"><p>Patients</p></th>
+<th class="head text-left"><p>Series</p></th>
+<th class="head text-left"><p>Instances</p></th>
+<th class="head text-left"><p>Checks</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Validation</p></td>
+<td class="text-left"><p>216</p></td>
+<td class="text-left"><p>280</p></td>
+<td class="text-left"><p>23,921</p></td>
+<td class="text-left"><p>6,173,204</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Test</p></td>
+<td class="text-left"><p>322</p></td>
+<td class="text-left"><p>428</p></td>
+<td class="text-left"><p>29,660</p></td>
+<td class="text-left"><p>8,035,948</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Each check is one expectation about one element of one instance:</p>
+<ul class="simple">
+<li><p>an identifier must be gone;</p></li>
+<li><p>a date must be shifted;</p></li>
+<li><p>a UID must be replaced, and consistently;</p></li>
+<li><p>an element must be kept as written;</p></li>
+<li><p>the pixels must be unchanged, or burned-in text hidden.</p></li>
+</ul>
+<p>The score is checks passed divided by all checks. A check fails either way: an identifier left in, or a useful element removed. Most of what the default configuration loses is the second kind. The DICOM Basic Profile removes, as a precaution, much that the key wants kept.</p>
+<p>Free text is checked twice. Take a description, in a file whose Patient’s Name is <code class="docutils literal notranslate"><span class="pre">WHITLOCK^DANA</span></code> (an illustrative example):</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p></p></th>
+<th class="head text-left"><p>Value</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Source</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PET-CT</span> <span class="pre">STUDY</span> <span class="pre">for</span> <span class="pre">Dana</span> <span class="pre">Whitlock</span></code></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Check 1: identifier gone</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Dana</span> <span class="pre">Whitlock</span></code> must not appear</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>Check 2: clinical text kept</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PET-CT</span> <span class="pre">STUDY</span></code> must appear, as written</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Basic Profile (empty or remove the element)</p></td>
+<td class="text-left"><p>passes 1, fails 2</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>This configuration (scrub the element)</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PET-CT</span> <span class="pre">STUDY</span></code>: passes both</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="what-each-part-of-the-configuration-is-worth">
+<h2>What each part of the configuration is worth<a class="headerlink" href="#what-each-part-of-the-configuration-is-worth" title="Link to this heading">#</a></h2>
+<p>Each part below overrides the default for one group of elements. The table shows the checks each part wins, measured against a run of the default configuration:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Part</p></th>
+<th class="head text-left"><p>Validation</p></th>
+<th class="head text-left"><p>Test</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Start: Isocenter’s default configuration</p></td>
+<td class="text-left"><p>72.51%</p></td>
+<td class="text-left"><p>68.45%</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><a class="reference internal" href="#keep-private-elements-remove-the-identifying-ones">1. Keep private elements, remove the identifying ones</a></p></td>
+<td class="text-left"><p>+21.53</p></td>
+<td class="text-left"><p>+25.36</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><a class="reference internal" href="#keep-times-of-day">2. Keep times of day</a></p></td>
+<td class="text-left"><p>+2.17</p></td>
+<td class="text-left"><p>+2.09</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><a class="reference internal" href="#keep-free-text-scrub-the-identifiers-out-of-it">6. Keep free text, scrub the identifiers out of it</a></p></td>
+<td class="text-left"><p>+0.95</p></td>
+<td class="text-left"><p>+0.98</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><a class="reference internal" href="#keep-structured-report-content-scrub-its-text">7. Keep structured report content, scrub its text</a></p></td>
+<td class="text-left"><p>+0.67</p></td>
+<td class="text-left"><p>+0.80</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><a class="reference internal" href="#keep-patient-characteristics">3. Keep patient characteristics</a></p></td>
+<td class="text-left"><p>+0.61</p></td>
+<td class="text-left"><p>+0.55</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><a class="reference internal" href="#keep-coded-and-technical-elements">4. Keep coded and technical elements</a></p></td>
+<td class="text-left"><p>+0.47</p></td>
+<td class="text-left"><p>+0.71</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><a class="reference internal" href="#empty-series-number">5. Empty Series Number</a></p></td>
+<td class="text-left"><p>+0.30</p></td>
+<td class="text-left"><p>+0.28</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><a class="reference internal" href="#replace-registry-uids">8. Replace registry UIDs</a></p></td>
+<td class="text-left"><p>+0.00</p></td>
+<td class="text-left"><p>+0.00</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><a class="reference internal" href="#remove-burned-in-text">9. Remove burned-in text</a></p></td>
+<td class="text-left"><p>−0.00</p></td>
+<td class="text-left"><p>−0.00</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><strong>This configuration</strong></p></td>
+<td class="text-left"><p><strong>99.22%</strong></p></td>
+<td class="text-left"><p><strong>99.23%</strong></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Points are percentage points of all checks. Each part is credited with the checks on the elements it owns, so the parts add up (to rounding). Parts 8 and 9 are worth almost nothing to the score: part 8 is a handful of checks, and part 9 hides nearly all burned-in text but costs about as much as it wins (see part 9). Both runs export uncompressed (<a class="reference internal" href="#export-uncompressed">part 10</a>).</p>
+<p>The default configuration is what Isocenter’s scaffold writes: the DICOM PS3.15 Annex E Basic Profile (<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>, edition 2026c), with Study Date shifted per patient, sex and age kept, and every private element removed (<code class="docutils literal notranslate"><span class="pre">remove_private_tags:</span> <span class="pre">true</span></code>).</p>
+</section>
+<section id="the-configuration-part-by-part">
+<h2>The configuration, part by part<a class="headerlink" href="#the-configuration-part-by-part" title="Link to this heading">#</a></h2>
+<section id="1-keep-private-elements-remove-the-identifying-ones">
+<span id="keep-private-elements-remove-the-identifying-ones"></span><h3>1. Keep private elements, remove the identifying ones<a class="headerlink" href="#1-keep-private-elements-remove-the-identifying-ones" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">remove_private_tags</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="nt">phi_tags</span><span class="p">:</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",05'</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">REMOVE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">GEMS_PETD_01 PET patient_datetime</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",27'</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">REMOVE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">GEMS_IDEN_01 Image actual date</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="s">'0029,"SIEMENS</span><span class="nv"> </span><span class="s">MEDCOM</span><span class="nv"> </span><span class="s">HEADER",31'</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">REMOVE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">SIEMENS MEDCOM HEADER PMTF Information 1</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="c1"># ... 64 rules in all</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Private element</p></th>
+<th class="head text-left"><p>Source</p></th>
+<th class="head text-left"><p>Output</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>GE PET landmark name</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Umbilicus</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Umbilicus</span></code> (kept)</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>GE PET exam UID</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">2.5.731.4.2.5508176…</span></code></p></td>
+<td class="text-left"><p>a new UID, the same in every instance</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>GE PET patient datetime</p></td>
+<td class="text-left"><p>a date and time</p></td>
+<td class="text-left"><p>removed</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Vendor private elements carry acquisition and reconstruction parameters, such as GE PET landmarks, filters and iterations, or Siemens and Philips sequence details. MIDI-B expects them kept, and they are the largest part of the score. The 64 rules remove the private elements that hold identifiers, dates or UIDs, and keep everything else. That covers GE PET exam, scan and calibration IDs and datetimes, GE suite and equipment IDs, prescribing-series UIDs, a UCSF free-text note, and four Siemens header fields. PS3.15’s Retain Safe Private Option keeps only private attributes listed as safe; this configuration takes the inverse route: it keeps every private element and removes the ones known to hold identifiers, dates or UIDs.</p>
+<p>Each rule names its private creator, not a concrete tag (<a class="reference internal" href="../configuration/#private-elements-by-creator"><span class="std std-ref">Private elements by creator</span></a>). A vendor’s element lands in whichever block a file assigns its creator: <code class="docutils literal notranslate"><span class="pre">0029,10xx</span></code> in some files, <code class="docutils literal notranslate"><span class="pre">0029,11xx</span></code> in others. Two vendors can also use the same concrete tag for different things. A creator key matches that creator’s element wherever it is, and nothing else. It matches the creator in any case and spacing; this data writes one creator both as <code class="docutils literal notranslate"><span class="pre">UCSF</span> <span class="pre">BIRP</span> <span class="pre">PRIVATE</span> <span class="pre">CREATOR</span> <span class="pre">011710XX</span></code> and as <code class="docutils literal notranslate"><span class="pre">UCSF</span> <span class="pre">BIRP</span> <span class="pre">PRIVATE</span> <span class="pre">CREATOR</span> <span class="pre">011710xx</span></code>.</p>
+</section>
+<section id="2-keep-times-of-day">
+<span id="keep-times-of-day"></span><h3>2. Keep times of day<a class="headerlink" href="#2-keep-times-of-day" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0030</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Study Time</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0032</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Acquisition Time</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a122</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Time</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="c1"># ... 13 time elements</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Element</p></th>
+<th class="head text-left"><p>Source</p></th>
+<th class="head text-left"><p>Basic Profile</p></th>
+<th class="head text-left"><p>This configuration</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Acquisition Time</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">094517</span></code></p></td>
+<td class="text-left"><p>emptied</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">094517</span></code></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Study Date</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">20180913</span></code></p></td>
+<td class="text-left"><p>emptied (the default configuration shifts it)</p></td>
+<td class="text-left"><p>shifted by the patient’s offset</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The Basic Profile empties, replaces or removes every time. But the dates are shifted or removed, so a time of day no longer places a study in time. Acquisition and injection times are needed for timing, decay and dose analysis. MIDI-B keeps them.</p>
+</section>
+<section id="3-keep-patient-characteristics">
+<span id="keep-patient-characteristics"></span><h3>3. Keep patient characteristics<a class="headerlink" href="#3-keep-patient-characteristics" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,1020</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Patient's Size</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,1030</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Patient's Weight</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,2160</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Ethnic Group</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,21a0</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Smoking Status</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,21c0</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Pregnancy Status</span><span class="p p-Indicator">}</span>
+</pre></div>
+</div>
+<p>These describe the patient without identifying them, and size and weight are needed for dose and SUV. They are among the elements PS3.15’s Retain Patient Characteristics Option keeps.</p>
+</section>
+<section id="4-keep-coded-and-technical-elements">
+<span id="keep-coded-and-technical-elements"></span><h3>4. Keep coded and technical elements<a class="headerlink" href="#4-keep-coded-and-technical-elements" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0555</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Acquisition Context Sequence</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0275</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Request Attributes Sequence</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,2111</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Derivation Description</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1010</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Secondary Capture Device ID</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1110</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Referenced Study Sequence</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="c1"># ... and the trial sponsor, other references, processing description</span>
+</pre></div>
+</div>
+<p>These carry acquisition codes, how an image was processed or derived, and references between objects. Keeping a sequence does not switch off the profile inside it:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Inside a kept sequence</p></th>
+<th class="head text-left"><p>Output</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Referenced SOP Instance UID</p></td>
+<td class="text-left"><p>replaced, consistently with the referenced instance</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Requested Procedure ID, Scheduled Procedure Step ID</p></td>
+<td class="text-left"><p>removed</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>Scheduled Procedure Step Description</p></td>
+<td class="text-left"><p>scrubbed (part 6)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="5-empty-series-number">
+<span id="empty-series-number"></span><h3>5. Empty Series Number<a class="headerlink" href="#5-empty-series-number" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0020,0011</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">EMPTY</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Series Number</span><span class="p p-Indicator">}</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Source Series Number</p></th>
+<th class="head text-left"><p>Key expects</p></th>
+<th class="head text-left"><p>Output</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">20160811</span></code> (a date)</p></td>
+<td class="text-left"><p>removed</p></td>
+<td class="text-left"><p>empty: passes</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">412</span></code> (a number)</p></td>
+<td class="text-left"><p>kept</p></td>
+<td class="text-left"><p>empty: fails</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>In most series of this data, Series Number holds an acquisition date, a quasi-identifier the key expects removed. Emptying keeps the element, which the General Series Module requires (Type 2). It costs the series whose number is an ordinary number (2,470 Validation checks). <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> cannot pick out the dates, because it applies only to text elements and Series Number is an Integer String.</p>
+</section>
+<section id="6-keep-free-text-scrub-the-identifiers-out-of-it">
+<span id="keep-free-text-scrub-the-identifiers-out-of-it"></span><h3>6. Keep free text, scrub the identifiers out of it<a class="headerlink" href="#6-keep-free-text-scrub-the-identifiers-out-of-it" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,103e</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Series Description</span>
+<span class="w">  </span><span class="c1"># ... 15 free-text elements: descriptions, protocol name, reasons,</span>
+<span class="w">  </span><span class="c1"># comments, occupation, contrast agent</span>
+</pre></div>
+</div>
+<p>The Basic Profile empties, replaces or removes descriptions, protocol names and comments whole. MIDI-B expects the clinical text kept and the injected identifier removed. <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> does that: it is PS3.15’s Clean Descriptors Option as a rule (<a class="reference internal" href="../configuration/#cleaning-descriptions"><span class="std std-ref">Cleaning descriptions</span></a>). Each kind named in <code class="docutils literal notranslate"><span class="pre">target</span></code> finds one sort of identifier. Each span found is removed together with a connecting word directly before it (<code class="docutils literal notranslate"><span class="pre">for</span></code>, <code class="docutils literal notranslate"><span class="pre">at</span></code>, <code class="docutils literal notranslate"><span class="pre">by</span></code>, <code class="docutils literal notranslate"><span class="pre">per</span></code>, <code class="docutils literal notranslate"><span class="pre">from</span></code>).</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Kind</p></th>
+<th class="head text-left"><p>Finds</p></th>
+<th class="head text-left"><p>Source</p></th>
+<th class="head text-left"><p>Output</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">names</span></code></p></td>
+<td class="text-left"><p>the words of the instance’s own Person Names</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Standard</span> <span class="pre">Breast</span> <span class="pre">Imaging</span> <span class="pre">Report</span> <span class="pre">for</span> <span class="pre">Amanda</span> <span class="pre">Hoover</span></code>, in a file whose Patient’s Name holds those two names</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Standard</span> <span class="pre">Breast</span> <span class="pre">Imaging</span> <span class="pre">Report</span></code></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">dates</span></code></p></td>
+<td class="text-left"><p>dates</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MA</span> <span class="pre">SURGICAL</span> <span class="pre">SPECIMEN</span> <span class="pre">20170707</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MA</span> <span class="pre">SURGICAL</span> <span class="pre">SPECIMEN</span></code></p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">ids</span></code></p></td>
+<td class="text-left"><p>a run of 6 or more characters holding 5 or more digits</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MR</span> <span class="pre">BREAS</span> <span class="pre">UNIT</span> <span class="pre">for</span> <span class="pre">736-69-8140</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">MR</span> <span class="pre">BREAS</span> <span class="pre">UNIT</span></code></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">phones</span></code></p></td>
+<td class="text-left"><p>telephone numbers, with extensions</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PRONE</span> <span class="pre">:</span> <span class="pre">Dana</span> <span class="pre">Whitlock</span> <span class="pre">:</span> <span class="pre">312.555.0186</span> <span class="pre">ext</span> <span class="pre">204</span></code>, Patient’s Name <code class="docutils literal notranslate"><span class="pre">WHITLOCK^DANA</span></code> (illustrative)</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PRONE</span></code></p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">addresses</span></code></p></td>
+<td class="text-left"><p>a street address with city, state and ZIP</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">AP</span> <span class="pre">Routine</span> <span class="pre">:</span> <span class="pre">Dana</span> <span class="pre">Whitlock</span> <span class="pre">:</span> <span class="pre">42</span> <span class="pre">Larkspur</span> <span class="pre">Ct</span> <span class="pre">Fairhaven,</span> <span class="pre">OR</span> <span class="pre">97000</span></code>, Patient’s Name <code class="docutils literal notranslate"><span class="pre">WHITLOCK^DANA</span></code> (illustrative)</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">AP</span> <span class="pre">Routine</span></code></p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">sites</span></code></p></td>
+<td class="text-left"><p>a 4 to 8 capital acronym after a lower-case <code class="docutils literal notranslate"><span class="pre">at</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PET-CT</span> <span class="pre">STUDY</span> <span class="pre">at</span> <span class="pre">CHAJH</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">PET-CT</span> <span class="pre">STUDY</span></code></p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">initials</span></code></p></td>
+<td class="text-left"><p>a lower-case <code class="docutils literal notranslate"><span class="pre">by</span></code> and 1 to 3 capitals, directly after a removed span</p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Ordered</span> <span class="pre">for</span> <span class="pre">2675888487</span> <span class="pre">by</span> <span class="pre">SS</span></code></p></td>
+<td class="text-left"><p><code class="docutils literal notranslate"><span class="pre">Ordered</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Clinical text is left as written, spacing included. Protocol tokens and decimals are not mistaken for IDs: <code class="docutils literal notranslate"><span class="pre">ep2d_diff_b50_400_800_tra_p3</span> <span class="pre">for</span> <span class="pre">310-50-9582</span></code> becomes <code class="docutils literal notranslate"><span class="pre">ep2d_diff_b50_400_800_tra_p3</span></code>. A name cut off at the element’s maximum length (<code class="docutils literal notranslate"><span class="pre">…</span> <span class="pre">for</span> <span class="pre">Christopher</span> <span class="pre">Powe</span></code>, for a patient <code class="docutils literal notranslate"><span class="pre">POWERS^CHRISTOPHER</span></code>) is still recognised.</p>
+<p><code class="docutils literal notranslate"><span class="pre">orgs</span></code>, an eighth kind, is not used. It is spaCy’s entity recogniser (the <code class="docutils literal notranslate"><span class="pre">nlp</span></code> extra). On this data it found no site acronym, and it erased clinical text: <code class="docutils literal notranslate"><span class="pre">MR</span> <span class="pre">BRAIN</span> <span class="pre">W/WO</span> <span class="pre">CONTRAST</span></code> became <code class="docutils literal notranslate"><span class="pre">MR</span></code>.</p>
+<p><strong>Additional Patient History is left to the profile, which removes it.</strong> In this data it holds facility names and addresses more often than history. A scrub cannot find facility names, so removing the element scores better on the Test set.</p>
+</section>
+<section id="7-keep-structured-report-content-scrub-its-text">
+<span id="keep-structured-report-content-scrub-its-text"></span><h3>7. Keep structured report content, scrub its text<a class="headerlink" href="#7-keep-structured-report-content-scrub-its-text" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a730</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">KEEP</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Content Sequence</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a160</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Text Value</span>
+</pre></div>
+</div>
+<p>A structured report (SR) is a tree of content items: measurements, codes, references and text. The Basic Profile removes the whole Content Sequence, because its free text could not be cleaned, and leaves a report with no content. With <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> on Text Value the tree can be kept (<a class="reference internal" href="../configuration/#keeping-a-structured-report-s-content"><span class="std std-ref">Keeping a structured report’s content</span></a>); this is not PS3.15’s Clean Structured Content Option, which cleans content items by their concept. The profile’s rules still apply inside the tree: names, dates and UIDs in content items are removed, emptied or replaced, and every such check passes.</p>
+</section>
+<section id="8-replace-registry-uids">
+<span id="replace-registry-uids"></span><h3>8. Replace registry UIDs<a class="headerlink" href="#8-replace-registry-uids" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0118</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">REPLACE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Mapping Resource UID</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,010c</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="nv">REPLACE</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">Coding Scheme UID</span><span class="p p-Indicator">}</span>
+</pre></div>
+</div>
+<p>The Basic Profile has no row for either. MIDI-B’s synthetic data gives them random values and expects them changed like any UID, and a <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> with no value on a UID replaces it as every other UID is replaced. In real data they name a template or coding registry, not a patient, and replacing them loses that meaning.</p>
+</section>
+<section id="9-remove-burned-in-text">
+<span id="remove-burned-in-text"></span><h3>9. Remove burned-in text<a class="headerlink" href="#9-remove-burned-in-text" title="Link to this heading">#</a></h3>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">burned_in_text</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span>
+<span class="w">  </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">modalities</span>
+<span class="w">  </span><span class="nt">modalities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">CR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DX</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">MG</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">detector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">db</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">any</span>
+</pre></div>
+</div>
+<p>Some radiographs in MIDI-B have text burned into the pixels. It is either a patient block (name, sex, study date, date of birth) or technologist initials on a lead side marker. CR, DX and MG are the only modalities that carry it. No file declares Burned In Annotation <code class="docutils literal notranslate"><span class="pre">YES</span></code>, so the scope is by modality (<code class="docutils literal notranslate"><span class="pre">scope:</span> <span class="pre">modalities</span></code> also reads any image flagged, and none is).</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">db</span></code> detector, a text-detection model run by OpenCV, finds text regions without reading them, so under <code class="docutils literal notranslate"><span class="pre">target:</span> <span class="pre">any</span></code> no OCR is needed. <code class="docutils literal notranslate"><span class="pre">target:</span> <span class="pre">any</span></code> redacts every region found, as MIDI-B expects of all burned-in text. Fixed redaction zones do not fit this data, because the text moves from image to image. <a class="reference internal" href="../configuration/#burned-in-text"><span class="std std-ref">Burned-in Text</span></a> describes every key.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p></p></th>
+<th class="head text-left"><p>Validation</p></th>
+<th class="head text-left"><p>Test</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>Burned-in text boxes hidden, without this part</p></td>
+<td class="text-left"><p>5 of 35</p></td>
+<td class="text-left"><p>3 of 27</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Burned-in text boxes hidden, with it</p></td>
+<td class="text-left"><p>34 of 35</p></td>
+<td class="text-left"><p>27 of 27</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The score barely moves, for two reasons. Other text on the same images (a portable marker, side markers) is removed too, which the key counts against. And the key marks a redacted image’s Image Type <code class="docutils literal notranslate"><span class="pre">DERIVED</span></code> as wrong (see <a class="reference internal" href="#why-not-100">Why not 100%</a>).</p>
+</section>
+<section id="10-export-uncompressed">
+<span id="export-uncompressed"></span><h3>10. Export uncompressed<a class="headerlink" href="#10-export-uncompressed" title="Link to this heading">#</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export/"</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares pixel bytes, so a re-encoded image fails its pixels-unchanged check even though no pixel value changed. That costs about 0.4 points. An uncompressed export of a native little-endian source carries its Pixel Data bytes unchanged when its samples need no decoding; an encapsulated or big-endian source is decoded (<a class="reference internal" href="../export-output/#compression"><span class="std std-ref">Compression</span></a>).</p>
+</section>
+</section>
+<section id="why-not-100">
+<h2>Why not 100%<a class="headerlink" href="#why-not-100" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Remaining Validation checks</p></th>
+<th class="head text-left"><p>Failed</p></th>
+<th class="head text-left"><p>Points</p></th>
+<th class="head text-left"><p>Why</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>GE PET private elements empty in the source, a number in the key</p></td>
+<td class="text-left"><p>39,338</p></td>
+<td class="text-left"><p>0.64</p></td>
+<td class="text-left"><p>answer key</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Short site acronyms left in free text (<code class="docutils literal notranslate"><span class="pre">at</span> <span class="pre">FGH</span></code>)</p></td>
+<td class="text-left"><p>2,925</p></td>
+<td class="text-left"><p>0.05</p></td>
+<td class="text-left"><p>not recognised</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>Series Number emptied where it was an ordinary number</p></td>
+<td class="text-left"><p>2,470</p></td>
+<td class="text-left"><p>0.04</p></td>
+<td class="text-left"><p>trade-off</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Elements the key expects that the source never held</p></td>
+<td class="text-left"><p>1,594</p></td>
+<td class="text-left"><p>0.03</p></td>
+<td class="text-left"><p>answer key</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>Additional Patient History removed</p></td>
+<td class="text-left"><p>1,065</p></td>
+<td class="text-left"><p>0.02</p></td>
+<td class="text-left"><p>trade-off</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>Text differing from the key, other</p></td>
+<td class="text-left"><p>759</p></td>
+<td class="text-left"><p>0.01</p></td>
+<td class="text-left"><p>mixed</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>Burned-in redaction side effects, one box not found</p></td>
+<td class="text-left"><p>66</p></td>
+<td class="text-left"><p>&lt;0.01</p></td>
+<td class="text-left"><p>answer key, detection</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p><strong>Total</strong></p></td>
+<td class="text-left"><p><strong>48,217</strong></p></td>
+<td class="text-left"><p><strong>0.78</strong></p></td>
+<td class="text-left"><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>About 85% of what is left cannot be won by any tool, because the answer key disagrees with the source files:</strong></p>
+<ul class="simple">
+<li><p><strong>GE PET private elements</strong> (reconstruction iterations, filter parameters) are empty in the source, and the key expects a number there (<code class="docutils literal notranslate"><span class="pre">0</span></code> to <code class="docutils literal notranslate"><span class="pre">4</span></code>). That is 0.64 points on Validation and 0.55 on Test.</p></li>
+<li><p><strong>Elements the source never held</strong> are expected present. These are Position Reference Indicator, Acquisition Number, and Presentation Intent Type on some DX images. On Test, the key also expects Philips private creators the source does not have.</p></li>
+<li><p><strong>Values written differently from the source.</strong> The key expects Smallest Image Pixel Value as a signed number where the source writes the same 16 bits unsigned. It expects a structured-report Numeric Value at full precision where the source writes it rounded to seven significant digits. Isocenter exports both as the source has them.</p></li>
+<li><p><strong>Image Type after redaction.</strong> The key expects burned-in text hidden and Image Type still <code class="docutils literal notranslate"><span class="pre">ORIGINAL</span></code> on the same images. DICOM marks an image whose pixels were changed <code class="docutils literal notranslate"><span class="pre">DERIVED</span></code>, and Isocenter writes <code class="docutils literal notranslate"><span class="pre">DERIVED</span></code>.</p></li>
+</ul>
+<p><strong>What a configuration could still win:</strong></p>
+<ul class="simple">
+<li><p><strong>Short site acronyms.</strong> The acronyms <code class="docutils literal notranslate"><span class="pre">sites</span></code> leaves are 2 or 3 letters (<code class="docutils literal notranslate"><span class="pre">at</span> <span class="pre">FGH</span></code>, <code class="docutils literal notranslate"><span class="pre">at</span> <span class="pre">MG</span></code>, <code class="docutils literal notranslate"><span class="pre">at</span> <span class="pre">JCH</span></code>): 2,883 Validation and 9,440 Test checks. <code class="docutils literal notranslate"><span class="pre">sites</span></code> starts at 4 so that it never takes a modality or a common word; <code class="docutils literal notranslate"><span class="pre">MG</span></code> is mammography as well as a site here. A configurable floor is proposed in <a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/1162">#1162</a>.</p></li>
+<li><p><strong>A sequence label.</strong> <code class="docutils literal notranslate"><span class="pre">P4^P114^S301^I00004,</span> <span class="pre">Gated,</span> <span class="pre">10.0%A</span></code> loses its last token, <code class="docutils literal notranslate"><span class="pre">I00004</span></code>, to <code class="docutils literal notranslate"><span class="pre">ids</span></code>.</p></li>
+<li><p><strong>Series Number.</strong> Kept, it would pass 2,470 checks and fail about 21,000.</p></li>
+</ul>
+</section>
+<section id="choices-a-site-may-want-to-change">
+<h2>Choices a site may want to change<a class="headerlink" href="#choices-a-site-may-want-to-change" title="Link to this heading">#</a></h2>
+<p>MIDI-B’s key is one policy, and this configuration follows it. Under a different protocol:</p>
+<ul class="simple">
+<li><p><strong>Free text.</strong> A scrub removes what it recognises, and leaves short site acronyms, facility names and bare initials. To leave none of it, <code class="docutils literal notranslate"><span class="pre">REMOVE</span></code> the comment elements (Image Comments, Patient Comments, Requested Procedure Comments). Then <code class="docutils literal notranslate"><span class="pre">REMOVE</span></code> the descriptions and Protocol Name, or keep them only under a protocol that retains institution identity.</p></li>
+<li><p><strong>Structured report text.</strong> Use <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> instead of <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> on Text Value <code class="docutils literal notranslate"><span class="pre">(0040,A160)</span></code> to remove all report text. That includes bare reader initials, such as a Text Value that is only <code class="docutils literal notranslate"><span class="pre">DL</span></code>. It costs a few hundred checks.</p></li>
+<li><p><strong>Registry UIDs.</strong> <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> Mapping Resource UID and Coding Scheme UID to keep their meaning.</p></li>
+<li><p><strong>Burned-in text.</strong> <code class="docutils literal notranslate"><span class="pre">target:</span> <span class="pre">[names,</span> <span class="pre">dates,</span> <span class="pre">ids]</span></code> redacts only regions whose reading looks like a name, a date or an ID. That leaves side markers and staff initials. On this data it also left some patient blocks that the detector found but OCR read poorly. A narrowed target reads each region with tesseract, so it needs the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> binary, and <code class="docutils literal notranslate"><span class="pre">names</span></code> needs the <code class="docutils literal notranslate"><span class="pre">nlp</span></code> extra and spaCy’s <code class="docutils literal notranslate"><span class="pre">en_core_web_sm</span></code> model, with no fallback.</p></li>
+</ul>
+</section>
+<section id="reproducing-these-results">
+<h2>Reproducing these results<a class="headerlink" href="#reproducing-these-results" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><strong>Software:</strong> Isocenter 1.0.0rc22 from PyPI, with the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra (<code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">&quot;isocenter[textdetect]==1.0.0rc22&quot;</span></code>), on a Python build with the GIL (3.12 to 3.14): OpenCV publishes no free-threaded wheel. This configuration needs no other extra: add <code class="docutils literal notranslate"><span class="pre">ocr</span></code> for a narrowed burned-in <code class="docutils literal notranslate"><span class="pre">target</span></code> or <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">tesseract</span></code>, and <code class="docutils literal notranslate"><span class="pre">nlp</span></code> if a <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> target names <code class="docutils literal notranslate"><span class="pre">orgs</span></code> or a burned-in target names <code class="docutils literal notranslate"><span class="pre">names</span></code>. Scoring uses the MIDI-B validation script at commit <code class="docutils literal notranslate"><span class="pre">ccc0939</span></code>.</p></li>
+<li><p><strong>Run:</strong></p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">isocenter</span>
+
+<span class="k">with</span> <span class="n">isocenter</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="s2">"midi-b.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"isocenter.yaml"</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"MIDI-B-Synthetic-Validation/"</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">redact</span><span class="p">()</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"export/"</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">generate_manifest</span><span class="p">(</span><span class="s2">"manifest.json"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"json"</span><span class="p">)</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>Scoring:</strong> score <code class="docutils literal notranslate"><span class="pre">export/</span></code> with the validation script. The script also needs mapping files that link each source UID and Patient ID to its replacement. The Study, Series and SOP Instance UIDs and the Patient ID come from the manifest above; every other UID is found by comparing source and exported headers. The manifest maps source files to exported UIDs, so it is kept with the store, never with an export.</p></li>
+<li><p><strong>Time:</strong> de-identifying the Validation set (23,921 instances) took about 12 minutes on the machine above, and scoring it about 5 more.</p></li>
+</ul>
+</section>
+<section id="appendix-the-configuration">
+<h2>Appendix: the configuration<a class="headerlink" href="#appendix-the-configuration" title="Link to this heading">#</a></h2>
+<p>The complete policy section. The scaffold also writes a <code class="docutils literal notranslate"><span class="pre">machines:</span></code> list of the devices found in the dataset, with no zones; it is omitted here.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s">'2.0'</span>
+<span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">basic@2026c</span>
+<span class="nt">phi_tags</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># Research defaults (what Isocenter's scaffold writes): Study Date is</span>
+<span class="w">  </span><span class="c1"># shifted by the per-patient offset, and sex and age are kept because</span>
+<span class="w">  </span><span class="c1"># analyses stratify on them.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0020</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">JITTER</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Study Date</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,0040</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Patient's Sex</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,1010</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Patient's Age</span>
+<span class="w">  </span><span class="c1"># Times of day are kept. Study Date is shifted and the profile's other dates</span>
+<span class="w">  </span><span class="c1"># are emptied, replaced or removed, so a time no longer places a study in</span>
+<span class="w">  </span><span class="c1"># time, and acquisition and injection times are needed for timing</span>
+<span class="w">  </span><span class="c1"># analysis. Time (0040,A122) is the time of a structured-report content</span>
+<span class="w">  </span><span class="c1"># item.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0013</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Instance Creation Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0030</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Study Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0031</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Series Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0032</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Acquisition Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0033</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Content Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1014</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Time of Secondary Capture</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1072</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Radiopharmaceutical Start Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1073</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Radiopharmaceutical Stop Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1201</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Time of Last Calibration</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,700e</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Time of Last Detector Calibration</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0245</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Performed Procedure Step Start Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0251</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Performed Procedure Step End Time</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a122</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Time</span>
+<span class="w">  </span><span class="c1"># Patient characteristics are kept: body size and weight (needed for dose and</span>
+<span class="w">  </span><span class="c1"># SUV), ethnic group, pregnancy and smoking status. They describe the patient</span>
+<span class="w">  </span><span class="c1"># without identifying them (among the elements PS3.15's Retain Patient</span>
+<span class="w">  </span><span class="c1"># Characteristics Option keeps).</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,1020</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Patient's Size</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,1030</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Patient's Weight</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,2160</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Ethnic Group</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,21c0</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pregnancy Status</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,21a0</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Smoking Status</span>
+<span class="w">  </span><span class="c1"># Coded and technical elements are kept: acquisition context codes, how an</span>
+<span class="w">  </span><span class="c1"># image was derived and processed, the device that made a secondary capture,</span>
+<span class="w">  </span><span class="c1"># the trial sponsor, the request attributes, and the study, procedure-step</span>
+<span class="w">  </span><span class="c1"># and patient references.</span>
+<span class="w">  </span><span class="c1"># The profile's rows still apply inside them: their UIDs are replaced,</span>
+<span class="w">  </span><span class="c1"># consistently with the rest of the data, and the procedure IDs in the</span>
+<span class="w">  </span><span class="c1"># request attributes are removed.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1110</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Referenced Study Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1111</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Referenced Performed Procedure Step Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0012,0010</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Clinical Trial Sponsor Name</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0555</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Acquisition Context Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,2111</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Derivation Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0275</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Request Attributes Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1120</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Referenced Patient Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1010</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Secondary Capture Device ID</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1400</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Acquisition Device Processing Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0001</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Length to End</span>
+<span class="w">  </span><span class="c1"># Series Number holds an acquisition date (2010 to 2019) in most series of</span>
+<span class="w">  </span><span class="c1"># this data, so it is emptied; the element stays present, as the General</span>
+<span class="w">  </span><span class="c1"># Series Module requires (Type 2). This costs the series whose number is</span>
+<span class="w">  </span><span class="c1"># an ordinary number.</span>
+<span class="w">  </span><span class="c1"># SCRUB cannot help: it applies to text elements, and this one is an</span>
+<span class="w">  </span><span class="c1"># integer string.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0020,0011</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMPTY</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Series Number</span>
+<span class="w">  </span><span class="c1"># Free text is kept and the identifiers inside it are removed (SCRUB, PS3.15</span>
+<span class="w">  </span><span class="c1"># Clean Descriptors Option). MIDI-B expects the clinical text kept and the</span>
+<span class="w">  </span><span class="c1"># injected identifier removed. Each kind removes its span together with a</span>
+<span class="w">  </span><span class="c1"># connecting word directly before it ("for", "at", "by", "per", "from"):</span>
+<span class="w">  </span><span class="c1">#   names      the words of the instance's own Person Names</span>
+<span class="w">  </span><span class="c1">#   dates      date shapes</span>
+<span class="w">  </span><span class="c1">#   ids        a run of 6 or more characters holding 5 or more</span>
+<span class="w">  </span><span class="c1">#              digits (SSNs, MRNs, accession numbers); decimals and</span>
+<span class="w">  </span><span class="c1">#              protocol tokens (t2_tse_tra_320_p2) are spared unless they</span>
+<span class="w">  </span><span class="c1">#              hold an SSN shape or 7 or more digits in a row</span>
+<span class="w">  </span><span class="c1">#   phones     telephone numbers, with extensions</span>
+<span class="w">  </span><span class="c1">#   addresses  street addresses with city, state and ZIP</span>
+<span class="w">  </span><span class="c1">#   sites      a 4-8 capital acronym after a lower-case "at" ("at CHAJH")</span>
+<span class="w">  </span><span class="c1">#   initials   "by SS" directly after another removed span</span>
+<span class="w">  </span><span class="c1"># What no kind finds stays: 2-3 letter site acronyms ("at FGH"), facility</span>
+<span class="w">  </span><span class="c1"># names ("Admitted to ... Memorial") and bare initials. Additional Patient</span>
+<span class="w">  </span><span class="c1"># History is left to the profile, which removes it: in this data it holds</span>
+<span class="w">  </span><span class="c1"># facility names and addresses more often than history, and removing it</span>
+<span class="w">  </span><span class="c1"># scores better on the Test set. A site whose protocol does not allow what</span>
+<span class="w">  </span><span class="c1"># a scrub leaves should REMOVE the comment elements.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1030</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Study Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,103e</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Series Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,1030</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Protocol Name</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0032,1060</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Requested Procedure Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0007</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Scheduled Procedure Step Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0254</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Performed Procedure Step Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,1400</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Requested Procedure Comments</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,1002</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reason for the Requested Procedure</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0032,1030</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reason for Study</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,1080</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Admitting Diagnoses Description</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,4000</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Patient Comments</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0010,2180</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Occupation</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0020,4000</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Image Comments</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,0310</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Comments on Radiation Dose</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0018,0010</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Contrast/Bolus Agent</span>
+<span class="w">  </span><span class="c1"># Structured reports keep their content tree (measurements, codes,</span>
+<span class="w">  </span><span class="c1"># references) and their free text is scrubbed. This is not PS3.15's Clean</span>
+<span class="w">  </span><span class="c1"># Structured Content Option, which cleans content items by their concept.</span>
+<span class="w">  </span><span class="c1"># The Basic Profile removes the whole Content Sequence; the rows for names,</span>
+<span class="w">  </span><span class="c1"># dates and UIDs nested in content items still apply. A</span>
+<span class="w">  </span><span class="c1"># scrub leaves reader initials in a few Text Values; REPLACE removes all</span>
+<span class="w">  </span><span class="c1"># report text instead, at the cost of algorithm names and versions.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a730</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">KEEP</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Content Sequence</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0040,a160</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SCRUB</span>
+<span class="w">    </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">names</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dates</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ids</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">phones</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">addresses</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sites</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">initials</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Text Value</span>
+<span class="w">  </span><span class="c1"># Registry UIDs in structured-report templates and code sequences are</span>
+<span class="w">  </span><span class="c1"># replaced like any other UID. MIDI-B's synthetic data gives them random</span>
+<span class="w">  </span><span class="c1"># values and expects them changed; in real data they name a template or</span>
+<span class="w">  </span><span class="c1"># coding registry, and a site may prefer to KEEP them.</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,0118</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REPLACE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Mapping Resource UID</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">0008,010c</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REPLACE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Coding Scheme UID</span>
+<span class="w">  </span><span class="c1"># Private elements are kept (remove_private_tags: false, below), because</span>
+<span class="w">  </span><span class="c1"># vendor private data carries acquisition and reconstruction parameters</span>
+<span class="w">  </span><span class="c1"># research needs, and the ones that hold identifiers, dates or UIDs are</span>
+<span class="w">  </span><span class="c1"># removed. Each rule names its private creator, so it matches that creator's</span>
+<span class="w">  </span><span class="c1"># element in whichever block a file assigns it, and never another vendor's</span>
+<span class="w">  </span><span class="c1"># element at the same tag. A creator key matches the creator in any case</span>
+<span class="w">  </span><span class="c1"># and spacing (the UCSF creator is written 011710XX and 011710xx here).</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",02'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Suite id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",05'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET patient_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",07'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET exam_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",0a'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET scan_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",0d'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET scan_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",0e'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET scan_ready</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",13'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET for_identifier</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",30'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Service id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",37'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET batch_description</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",39'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET meas_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",3b'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET admin_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",3d'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET post_inj_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",56'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET normal_cal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",57'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET normal_2d_cal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",59'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET wc_cal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",5c'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET frame_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",5d'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET scan_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",5e'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET exam_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",68'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET landmark_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",6c'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET acq_start</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",7b'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET is_datetime</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",97'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET trans_scan_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",98'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET norm_cal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",ad'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET trans_frame_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",e3'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Equipment UID</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",e9'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Actual series data time stamp</span>
+<span class="w">  </span><span class="s">'0017,"GEMS_PETD_01",04'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET cal_datetime</span>
+<span class="w">  </span><span class="s">'0019,"GEMS_PETD_01",04'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET cal_datetime</span>
+<span class="w">  </span><span class="s">'0019,"GEMS_ACQU_01",9d'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_ACQU_01 Pulse Sequence Date</span>
+<span class="w">  </span><span class="s">'0021,"GEMS_RELA_01",03'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_RELA_01 Series from which Prescribed</span>
+<span class="w">  </span><span class="s">'0021,"GEMS_RELA_01",35'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_RELA_01 Series from which prescribed</span>
+<span class="w">  </span><span class="s">'0029,"SIEMENS</span><span class="nv"> </span><span class="s">MEDCOM</span><span class="nv"> </span><span class="s">HEADER",31'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SIEMENS MEDCOM HEADER PMTF Information 1</span>
+<span class="w">  </span><span class="s">'0029,"SIEMENS</span><span class="nv"> </span><span class="s">MEDCOM</span><span class="nv"> </span><span class="s">HEADER",34'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SIEMENS MEDCOM HEADER PMTF Information 4</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",05'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 Img is original or unoriginal</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",29'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 Histogram tables</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",60'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 Slop_int_10...slop_int_17</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",80'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 Coil ID Data</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",88'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 PURE Acquisition Calibration Series UID</span>
+<span class="w">  </span><span class="s">'0043,"GEMS_PARM_01",98'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PARM_01 ASSET Acquisition Calibration Series UID</span>
+<span class="w">  </span><span class="s">'0045,"GEMS_SENO_02",50'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_SENO_02 SC Instance UID</span>
+<span class="w">  </span><span class="s">'0045,"GEMS_SENO_02",51'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_SENO_02 SC series UID</span>
+<span class="w">  </span><span class="s">'0117,"UCSF</span><span class="nv"> </span><span class="s">BIRP</span><span class="nv"> </span><span class="s">PRIVATE</span><span class="nv"> </span><span class="s">CREATOR</span><span class="nv"> </span><span class="s">011710XX",c4'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UCSF BIRP Private tag data</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",06'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET type</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",27'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Image actual date</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",31'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Mobile location number</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",62'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET where_is_frame</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",63'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET frame_size</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",64'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET file_exists</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",71'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET total_prompts</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",72'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET total_delays</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",96'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET wellcountercal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",99'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET blnk_cal_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",9c'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET emiss_sub_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",ae'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 PET tpluse_frame_id</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",e4'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 Recon Protocol</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_IDEN_01",e7'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IDEN_01 Exam Record checksum</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",ea'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 3D Filter flag</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",eb'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 3D Filter cutoff</span>
+<span class="w">  </span><span class="s">'0009,"GEMS_PETD_01",ec'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_PETD_01 3D Filter order</span>
+<span class="w">  </span><span class="s">'0019,"GEMS_ACQU_01",10'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_ACQU_01 Private tag data</span>
+<span class="w">  </span><span class="s">'0023,"GEMS_STDY_01",70'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_STDY_01 Start time(secs) in first axial</span>
+<span class="w">  </span><span class="s">'0027,"GEMS_IMAG_01",06'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GEMS_IMAG_01 Image archive flag</span>
+<span class="w">  </span><span class="s">'0029,"SIEMENS</span><span class="nv"> </span><span class="s">MEDCOM</span><span class="nv"> </span><span class="s">HEADER",32'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SIEMENS MEDCOM HEADER PMTF Information 2</span>
+<span class="w">  </span><span class="s">'0029,"SIEMENS</span><span class="nv"> </span><span class="s">MEDCOM</span><span class="nv"> </span><span class="s">HEADER",33'</span><span class="p p-Indicator">:</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REMOVE</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SIEMENS MEDCOM HEADER PMTF Information 3</span>
+<span class="nt">date_jitter</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">min_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-365</span>
+<span class="w">  </span><span class="nt">max_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-1</span>
+<span class="nt">remove_private_tags</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="c1"># Burned-in text: CR, DX and MG are the only modalities that carry it here.</span>
+<span class="c1"># The DB text detector finds it, and every region found is redacted, as</span>
+<span class="c1"># MIDI-B expects of all burned-in text.</span>
+<span class="nt">burned_in_text</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">redact</span>
+<span class="w">  </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">modalities</span>
+<span class="w">  </span><span class="nt">modalities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">CR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DX</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">MG</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">detector</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">db</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">any</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="../environment/"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Environment Variables</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../api/"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">API Reference</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#how-midi-b-scores">How MIDI-B scores</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-each-part-of-the-configuration-is-worth">What each part of the configuration is worth</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-configuration-part-by-part">The configuration, part by part</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-private-elements-remove-the-identifying-ones">1. Keep private elements, remove the identifying ones</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-times-of-day">2. Keep times of day</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-patient-characteristics">3. Keep patient characteristics</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-coded-and-technical-elements">4. Keep coded and technical elements</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#empty-series-number">5. Empty Series Number</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-free-text-scrub-the-identifiers-out-of-it">6. Keep free text, scrub the identifiers out of it</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keep-structured-report-content-scrub-its-text">7. Keep structured report content, scrub its text</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#replace-registry-uids">8. Replace registry UIDs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#remove-burned-in-text">9. Remove burned-in text</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#export-uncompressed">10. Export uncompressed</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-not-100">Why not 100%</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#choices-a-site-may-want-to-change">Choices a site may want to change</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#reproducing-these-results">Reproducing these results</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#appendix-the-configuration">Appendix: the configuration</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  
+  <div class="tocsection editthispage">
+    <a href="https://github.com/kvnlng/Isocenter/edit/main/docs/midi-b.md">
+      <i class="fa-solid fa-pencil"></i>
+      
+      
+        
+          Edit on GitHub
+        
+      
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026 Kevin Long.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.23.0.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>

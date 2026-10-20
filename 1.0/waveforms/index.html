@@ -168,8 +168,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="../migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="../midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -320,8 +320,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="../migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="../midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -846,8 +846,7 @@ by any export format or API. What is written is a conformant single-group
 record. The discard is announced: a warning naming the number of groups
 dropped, plus a <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> entry in the audit log. Multi-group support is
 not yet available (<a class="reference external" href="https://github.com/kvnlng/Isocenter/issues/277">#277</a>).
-A store written before 0.9.1 can still hold the discarded groups’ items;
-see <a class="reference internal" href="../migration/#hollow-waveform-multiplex-items"><span class="std std-ref">Upgrading from 0.9.x</span></a>.</p>
+A store written before 0.9.1 can still hold the discarded groups’ items.</p>
 <p>That entry is scoped <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code>, and it <strong>does</strong> move Validation Status:
 a session that discarded a multiplex group grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>,
 not <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. The tag is standard – Waveform Sequence <code class="docutils literal notranslate"><span class="pre">(5400,0100)</span></code> is an
@@ -1013,7 +1012,7 @@ for a graph that never passed through ingest.</p>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
   </p>
 </div>
       

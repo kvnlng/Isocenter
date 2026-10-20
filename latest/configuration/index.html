@@ -168,8 +168,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="../migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="../midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -320,8 +320,8 @@
 
 
 <li class="nav-item ">
-  <a class="nav-link nav-internal" href="../migration/">
-    Upgrading from 0.9.x
+  <a class="nav-link nav-internal" href="../midi-b/">
+    MIDI-B benchmark
   </a>
 </li>
 
@@ -622,8 +622,7 @@
 type is listed below; <strong>an unknown key, a value of the wrong type, or a
 <code class="docutils literal notranslate"><span class="pre">version</span></code> this library does not read makes <code class="docutils literal notranslate"><span class="pre">load_config()</span></code> and
 <code class="docutils literal notranslate"><span class="pre">audit(config_path=...)</span></code> raise <code class="docutils literal notranslate"><span class="pre">ValueError</span></code></strong>, naming the key, before
-anything is assigned. A file written for 0.9.x may need small changes:
-see <a class="reference internal" href="../migration/#configuration-files"><span class="std std-ref">Configuration files</span></a> on the upgrade page.</p>
+anything is assigned. A file written for 0.9.x may need small changes.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
 <tr class="row-odd"><th class="head text-left"><p>Level</p></th>
@@ -852,7 +851,7 @@ report of that store grades <code class="docutils literal notranslate"><span cla
 </ul>
 <p>The table removes, empties or replaces attributes research often wants: Patient’s Weight and Size (PET SUV), Patient’s Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them <code class="docutils literal notranslate"><span class="pre">action:</span> <span class="pre">&quot;KEEP&quot;</span></code> to retain it.</p>
 <p>What <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> contains is frozen for every 1.x: the rules 1.0 ships under it, which are the table, this mapping and these departures. The one exception is a row the published 2026c standard shows was transcribed wrongly, which a 1.x may correct as a <strong>Breaking</strong> changelog entry quoting the standard’s row; anything else is a new name.</p>
-<p>A PHI status records the policy it was recorded under. An <code class="docutils literal notranslate"><span class="pre">export()</span></code> that writes instances whose statuses were recorded under another policy writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row naming the policies, and the row stays: every later report of the store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. After reopening a store, load the configuration it was anonymized under before anything else. A store anonymized by a 0.9.x release has statuses of this kind; see <a class="reference internal" href="../migration/"><span class="std std-doc">Upgrading from 0.9.x</span></a>.</p>
+<p>A PHI status records the policy it was recorded under. An <code class="docutils literal notranslate"><span class="pre">export()</span></code> that writes instances whose statuses were recorded under another policy writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row naming the policies, and the row stays: every later report of the store grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. After reopening a store, load the configuration it was anonymized under before anything else. A store anonymized by a 0.9.x release has statuses of this kind.</p>
 </section>
 <section id="keeping-uids">
 <h4>Keeping UIDs<a class="headerlink" href="#keeping-uids" title="Link to this heading">#</a></h4>
@@ -970,7 +969,7 @@ report of that store grades <code class="docutils literal notranslate"><span cla
 <p>Sets the range of the per-patient date shift. <strong>Default:</strong> <code class="docutils literal notranslate"><span class="pre">{min_days:</span> <span class="pre">-365,</span> <span class="pre">max_days:</span> <span class="pre">-1}</span></code>.</p>
 <p>The shift applies only to tags whose rule is <code class="docutils literal notranslate"><span class="pre">SHIFT</span></code> or <code class="docutils literal notranslate"><span class="pre">JITTER</span></code>, and to Study Date when it has no rule or <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> with no value. <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> has no <code class="docutils literal notranslate"><span class="pre">SHIFT</span></code> or <code class="docutils literal notranslate"><span class="pre">JITTER</span></code> rule: it <em>removes or empties</em> the dates Table E.1-1 names (Study, Series, Acquisition, Content, Instance Creation and the rest), so under <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> alone <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code> moves nothing. The floor and the file <code class="docutils literal notranslate"><span class="pre">create_config()</span></code> writes give Study Date <code class="docutils literal notranslate"><span class="pre">JITTER</span></code>. To shift another date, give it <code class="docutils literal notranslate"><span class="pre">action:</span> <span class="pre">&quot;JITTER&quot;</span></code>. A date tag no rule names is exported as ingested: under <code class="docutils literal notranslate"><span class="pre">basic</span></code> or the floor that is a date the table does not name, and under <code class="docutils literal notranslate"><span class="pre">privacy_profile:</span> <span class="pre">none</span></code> it is every date your <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> leave out, so add a rule for any such date that must not leave the site.</p>
 <ul>
-<li><p><strong>Logic</strong>: Isocenter derives each patient’s offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, a UID the configuration keeps carries any date it embeds, and a whole-day shift keeps the weekday. The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. The log file (<code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code>) records neither original Patient IDs nor offsets. Offsets and pseudonyms belong to the store, and a secret cannot be carried to another one; see <a class="reference internal" href="#what-to-keep">What to keep</a>. Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient’s studies when <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> gives it the same pseudonym, and its dates land on the same offset. A store de-identified by a release before 0.9.7 used an offset that can be computed from an exported file; see <a class="reference internal" href="../migration/"><span class="std std-doc">Upgrading from 0.9.x</span></a>.</p></li>
+<li><p><strong>Logic</strong>: Isocenter derives each patient’s offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, a UID the configuration keeps carries any date it embeds, and a whole-day shift keeps the weekday. The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. The log file (<code class="docutils literal notranslate"><span class="pre">isocenter.log</span></code>) records neither original Patient IDs nor offsets. Offsets and pseudonyms belong to the store, and a secret cannot be carried to another one; see <a class="reference internal" href="#what-to-keep">What to keep</a>. Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient’s studies when <code class="docutils literal notranslate"><span class="pre">anonymize()</span></code> gives it the same pseudonym, and its dates land on the same offset. A store de-identified by a release before 0.9.7 used an offset that can be computed from an exported file (advisory GHSA-phg9-vcvc-j4r7).</p></li>
 <li><p><strong>Config</strong>:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">date_jitter</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">min_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-10</span>
@@ -1809,7 +1808,7 @@ and tuning the grouping.</p>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
   </p>
 </div>
       
