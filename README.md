@@ -8,7 +8,7 @@
 
 Isocenter is a Python library for indexing, de-identifying, and exporting DICOM datasets at cohort scale. It builds a SQLite metadata index and a pixel/waveform sidecar beside a read-only source tree. It applies your de-identification profile and pixel redaction rules to an in-memory object graph. It grades its own output and writes clean copies to a new directory, as DICOM or PhysioNet WFDB.
 
-You have a cohort of studies and a protocol an IRB approved. You need to hand a de-identified copy to a collaborator, a registry, or a model. You also need to hand your compliance reviewer a record: what was removed, what stayed because the protocol allowed it, and anything the run lost on the way. Isocenter is the library your script imports to do that. There is no command-line tool: the Python API is the whole interface.
+You have a cohort of studies and a protocol an IRB approved. You need to hand a de-identified copy to a collaborator, a registry, or a model. You also need to hand your compliance reviewer a record. The record shows what was removed, what stayed because the protocol allowed it, and anything the run lost on the way. Isocenter is the library your script imports to do that. There is no command-line tool: the Python API is the whole interface.
 
 **Documentation: <https://kvnlng.github.io/Isocenter/>**
 
@@ -151,7 +151,7 @@ Releases up to and including 0.9.2 were published under the GNU Affero General P
 
 Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues). They are answered there, in public, for free. Never post patient data, or anything taken from it, in an issue. If an export still carries something it should have removed or replaced, report it privately. Do the same if an export lets someone recover an identity or a real date. The [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes how.
 
-Help beyond bug reports and questions is available as paid consulting:
+Help beyond bug reports and questions is available as paid consulting. Examples:
 
 - configuring a de-identification profile for a protocol
 - integrating Isocenter into a pipeline
