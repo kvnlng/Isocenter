@@ -49,7 +49,7 @@ def _match_key(match):
 
 class ConfigAutomator:
     """
-    Analyzes OCR findings and generates suggestions to update the redaction configuration.
+    Reads OCR findings and suggests changes to the redaction configuration.
     """
 
     @staticmethod
@@ -57,36 +57,40 @@ class ConfigAutomator:
         """Generates a list of suggested configuration changes.
 
         A `NEW_LEAK` finding suggests its text box as a new zone on the
-        machine's exact rule; when only a `"*"` rule covers the machine
-        (`rule_serial` is `"*"`), it suggests a new exact rule for the
-        machine's serial instead (`ADD_RULE`), never a zone on `"*"`,
-        which every machine reads. A `PARTIAL_LEAK` finding suggests
-        growing its best-matching zone to cover the text, on the rule
-        that holds it; when that rule is `"*"`, it suggests a new exact
-        rule carrying the grown zone instead (`ADD_RULE`), and `"*"` is
-        never widened. Which rule a NEW_LEAK's zone goes to is decided
-        narrowest first by the verifier (owner ruling on #1108): exact
-        serial, then `match:`, then `""`, then `"*"`; a serial-less
-        machine only `"*"` covers gets an `ADD_RULE` for
-        `serial_number: ""`. A `match:` rule is named by `rule_match`
-        and its suggestions carry `match` with `serial` None. A finding
-        with neither `rule_serial` nor `rule_match` in its metadata gets
-        no suggestion. Zones are in config space, (y1, y2, x1, x2),
-        the order every consumer of ``redaction_zones`` reads; OCR boxes
-        arrive as (x, y, w, h) and are converted.
+        machine's exact rule. When only a `"*"` rule covers the machine
+        (`rule_serial` is `"*"`), the finding suggests a new exact rule for
+        the machine's serial instead (`ADD_RULE`). It never suggests a zone
+        on `"*"`, which every machine reads.
+
+        A `PARTIAL_LEAK` finding suggests growing its best-matching zone to
+        cover the text, on the rule that holds that zone. When that rule is
+        `"*"`, the finding suggests a new exact rule that carries the grown
+        zone instead (`ADD_RULE`), and `"*"` is never widened.
+
+        The verifier decides which rule gets a NEW_LEAK's zone, narrowest
+        first (owner ruling on #1108): exact serial, then `match:`, then
+        `""`, then `"*"`. A machine with no serial that only `"*"` covers
+        gets an `ADD_RULE` for `serial_number: ""`. The finding names a
+        `match:` rule by `rule_match`, and its suggestions carry `match`
+        with `serial` None. A finding with neither `rule_serial` nor
+        `rule_match` in its metadata gets no suggestion.
+
+        Zones are in config space, (y1, y2, x1, x2), the order that every
+        consumer of ``redaction_zones`` reads. OCR boxes arrive as
+        (x, y, w, h), and this method converts them.
 
         Args:
-            report (PhiReport): Findings from a pixel scan, each carrying
-                `leak_type`, `text_box`, `best_zone` and `rule_serial` in
-                its metadata, and `machine_serial`, `manufacturer` and
-                `model_name` for an `ADD_RULE`.
+            report (PhiReport): Findings from a pixel scan. Each finding
+                carries `leak_type`, `text_box`, `best_zone` and
+                `rule_serial` in its metadata, and `machine_serial`,
+                `manufacturer` and `model_name` for an `ADD_RULE`.
 
         Returns:
             List[Dict[str, Any]]: One dict per suggestion, with `serial`,
-            `action` and `reason`; an `ADD_ZONE` suggestion carries
-            `zone`, an `EXPAND_ZONE` one `original_zone` and
-            `new_zone`, each `[y1, y2, x1, x2]`. An `ADD_RULE`
-            suggestion carries `zone`, `manufacturer` and
+            `action` and `reason`. An `ADD_ZONE` suggestion carries
+            `zone`. An `EXPAND_ZONE` suggestion carries `original_zone`
+            and `new_zone`. Each of these zones is `[y1, y2, x1, x2]`. An
+            `ADD_RULE` suggestion carries `zone`, `manufacturer` and
             `model_name`, and its `serial` is the machine's.
         """
         suggestions = []
