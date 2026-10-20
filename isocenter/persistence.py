@@ -2044,8 +2044,8 @@ class SqliteStore:
         call is included.
 
         Returns:
-            List[tuple]: `(timestamp, action_type, details)` per row; empty
-            if the query fails.
+            List[tuple]: `(timestamp, action_type, details)` per row. It is
+            empty if the query fails.
         """
         self.flush_audit_queue()
         try:
