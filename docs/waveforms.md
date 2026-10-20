@@ -161,9 +161,9 @@ again, and no row says so. (The `basic` profile has no such rule.) No
 other code's name depends on its Code Meaning, and nothing from the Code
 Meaning is written.
 
-**Two signals of one record do not share a lead name.** Names are
-compared ignoring case. When two or more signals of a record would carry
-the same name, each one that got its name from the table above is
+**Two signals of one record do not share a lead name.** When two or more
+signals of a record would carry the same name (compared ignoring case),
+each one that got its name from the table above is
 written as its Code Value instead. This applies in the `.hea` file and in
 `annotations.json` alike. Two channels both coded `MDC 2:2` are written
 `2:2` and `2:2`, not `II` and `II`. The file says one code twice, and so
@@ -411,8 +411,8 @@ Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
 `(multiplex group, channel)` pair, and DICOM numbers both from 1. PS3.3
 C.10.10.1.1 "Referenced Channels" defines the first value of each pair as
 the ordinal of the Waveform Sequence `(5400,0100)` Item. Its worked
-example covers the entire first multiplex group plus channels 2 and 3 of
-the third, and writes that annotation as `0001 0000 0003 0002 0003 0003`.
+example writes an annotation that covers the entire first multiplex group
+plus channels 2 and 3 of the third as `0001 0000 0003 0002 0003 0003`.
 Ordinal 1 is therefore the group Isocenter keeps. (The `0000` in that
 example is the same section's rule that a channel number of 0 means every
 channel in the group. Isocenter honours that rule by emitting the mark

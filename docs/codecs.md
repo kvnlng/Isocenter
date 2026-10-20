@@ -61,7 +61,7 @@ A source in any other syntax is decoded at ingest and re-encoded into one of tho
     - JPEG 2000 and HTJ2K: "The Value of Planar Configuration (0028,0006) is irrelevant since the manner of encoding components is specified in the JPEG 2000 standard, hence it shall be set to 0."
     - JPEG: "JPEG compressed data streams are always color-by-pixel and should be specified as such (a decoder can essentially ignore this Data Element however as the value for JPEG compressed data is already known)."
 
-  Until this change, pydicom's Pillow plugin (JPEG Baseline and Extended, 8-bit JPEG 2000) read a declared 1 with its colours scrambled, and a 2 was refused. Under a native syntax, a declared 1 still means the bytes are color-by-plane and is read so, and RLE Lossless is unchanged.
+  Before #1137, pydicom's Pillow plugin (JPEG Baseline and Extended, 8-bit JPEG 2000) read a declared 1 with its colours scrambled, and a 2 was refused. Under a native syntax, a declared 1 still means the bytes are color-by-plane and is read so, and RLE Lossless is unchanged.
 - **HighBit other than BitsStored − 1 is read, and says so.** Samples are read right-aligned, by BitsStored or by the stream's own precision. Ingest writes one `WARNING` row per such instance, which grades the run `REVIEW_REQUIRED`, and an export writes HighBit as BitsStored − 1.
 
 ## Free-threaded Python and `pylibjpeg-libjpeg`

@@ -55,7 +55,7 @@ The report includes:
             - no LUT Descriptor in a LUT
             - a value the Pixel Representation names cannot hold
             - a value the unsigned default cannot hold where no Pixel Representation is declared
-        - a WFDB record in which two signals would share a lead name. Each signal named from the lead table is then written as its Code Value ([Lead names](waveforms.md#lead-names)).
+        - a WFDB record in which two signals would share a lead name. Each of those signals that got its name from the lead table is then written as its Code Value ([Lead names](waveforms.md#lead-names)).
 5. **Validation & Verification**: the **Grade Basis** comes first. It lists every reason this run is not `PASS`, one line each, or it states that nothing costs the run its `PASS`. Then the section gives:
     - how many `REMEDIATION_*` rows the audit trail holds
     - what each `scan_pixel_content()` call in this session read and could not read

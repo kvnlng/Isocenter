@@ -46,7 +46,7 @@ pylint tests
 * **Imports**: All imports must be at the top-level (except for strictly necessary circular dependency breaking or rare optional heavy dependencies).
 * **Docstrings**: All public modules, classes, and methods must have docstrings, in Google style. A docstring documents the code. It holds a summary, `Args:` (one entry per parameter), `Returns:`/`Yields:`, `Raises:` (one entry per exception the function raises) and what a caller needs to know to use it. It is rendered in the API reference. Change history belongs in `CHANGELOG.md`. Reasoning for someone who edits the body belongs in a `#` comment at the line it explains.
 
-  `pylint.extensions.docparams` is enabled in `pylintrc.toml`. It reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with `_`. Private names (`_x`), dunders and `__init__` are not checked and need no docstring. So constructor parameters are not checked either, whether they are documented on the class or on `__init__`. Module docstrings are not checked either. Keep constructor parameters and module docstrings complete by hand.
+  `pylint.extensions.docparams` is enabled in `pylintrc.toml`. It reports a missing parameter, return, yield or raise entry in the docstring of every function and method whose name does not start with `_`. Private names (`_x`), dunders and `__init__` are not checked and need no docstring. So constructor parameters are not checked either, whether they are documented on the class or on `__init__`. Module docstrings are not checked. Keep constructor parameters and module docstrings complete by hand.
 * **Encodings**: All `open()` calls must specify `encoding='utf-8'` to prevent cross-platform issues.
 
 ### Formatting

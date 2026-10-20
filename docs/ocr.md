@@ -276,7 +276,7 @@ Each line is read left to right. A line's extent grows with each word it takes, 
 
 Each line is read for the named kinds, and a word is acted on when a match overlaps it. For example, `DOE, JANE  F  01/01/1970` under `[names, dates]` loses the name and the date, and a `PORTABLE` on the line below stays. Nothing is compared with the patient's own values, which a burned-in name may misspell. The source file is not read again.
 
-* **`names`**: what spaCy's `en_core_web_sm` reads as a person, on the line as read and title-cased (the small model misses most upper-case names), plus a word holding `^` between letters. An institution is not a name. It needs the [`nlp` extra and the model](#prerequisites). There is no fallback when they are missing, and on the free-threaded build (3.14t) it cannot be used. Once the model has loaded, Isocenter ignores two spaCy warnings, W030 and W102, for the rest of the process. Both quote the text they were given, and that text is what the image says. This also applies in `discover_redaction_zones()` and in your own use of spaCy. Every other spaCy and thinc warning reaches your application as usual. This arm is tested with a stand-in model, except for a test that CI runs with the real model on every job that is not free-threaded. The model's reading of short upper-case OCR lines was measured only on the MIDI-B crops below.
+* **`names`**: what spaCy's `en_core_web_sm` reads as a person, on the line as read and title-cased (the small model misses most upper-case names), plus a word holding `^` between letters. An institution is not a name. It needs the [`nlp` extra and the model](#prerequisites). There is no fallback when they are missing, and on the free-threaded build (3.14t) it cannot be used. Once the model has loaded, Isocenter ignores two spaCy warnings, W030 and W102, for the rest of the process, because both quote the text they were given, and that text is what the image says. This also applies in `discover_redaction_zones()` and in your own use of spaCy. Every other spaCy and thinc warning reaches your application as usual. CI runs this arm's name finder with the real model on every entry that is not free-threaded. The `redact()` and `export(check_burned_in=True)` paths through it are tested with a stand-in model. The model's reading of short upper-case OCR lines was measured only on the MIDI-B crops below.
 * **`dates`**: day, month and year with one separator, in either order or year first, with 2- or 4-digit years from 1800 to 2199. Also `YYYYMMDD`, and an English month name beside a day or a year. `O`, `I`, `l`, `|`, `S` and `B` inside a candidate are read as digits, so `0I/O2/197O` is a date. Times of day (`12:34`) are not dates, and `12.5` or `3/4` are not.
 * **`ids`**: a run of letters and digits, `-` or `_` allowed inside, of 6 or more characters holding 5 or more digits. `MRN0012345` and `00123456` are IDs. `120kV`, `5.0MHz`, `1024`, `10cm` and `L5-S1` are not.
 
@@ -291,7 +291,7 @@ What it misses:
 - an ID shorter than six characters or with fewer than five digits
 - any word that tesseract read below `min_confidence`
 
-Measured on synthetic MIDI-B Validation crops: under `[names, dates]` all 10 patient blocks were redacted, and `dates` and `ids` matched none of 52 other text boxes. It also takes text that is not what you meant:
+Measured on synthetic MIDI-B Validation crops: under `[names, dates]` all 10 patient blocks were redacted, and `dates` and `ids` matched none of 52 other text boxes. A narrowed target also takes text that is not what you meant:
 
 - three numbers on one line that read as a date (`10 12 20`, or `10 IS 2020` once `IS` is read as `15`), so a technique or measurement label can be blanked under `[dates]`
 - a matrix size such as `1024x1024` under `[ids]`
@@ -364,7 +364,7 @@ Measured before it shipped, on a synthetic MIDI-B Validation sample with OpenCV 
 - It took about 0.21 s per radiograph on one thread.
 - It also found 55 other regions on those 35 radiographs: mostly overlay text outside the answer key (`PORTABLE`, `SUPINE`, counters), 3 lone laterality markers, 7 other marker glyphs, and 5 that were not text, 2 of which score above 80.
 
-Not measured: initials on frames far larger than 5,800 pixels, and images outside the sample on which the box-size rule and the no-enlarging rule were chosen. The boxes come from floating-point inference and may differ between CPUs or OpenCV builds, as tesseract's differ between tesseract builds. Another box set takes another UID, which is right.
+Not measured: initials on frames far larger than 5,800 pixels, and images outside that sample, on which the box-size rule and the no-enlarging rule were chosen. The boxes come from floating-point inference and may differ between CPUs or OpenCV builds, as tesseract's differ between tesseract builds. Another box set takes another UID, which is right.
 
 ## Checking Zones (Verification)
 
