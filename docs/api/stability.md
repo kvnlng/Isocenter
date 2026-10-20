@@ -331,10 +331,12 @@ to any of those descriptors made since the set.
 
 On `DicomItem`: `set_attr()`. It stores the value it is given, with
 one exception. It stores a numpy bool, integer or float (a scalar or a
-0-d array), and a `list` or `tuple` directly holding one, as the Python
-number it equals (`np.int64(7)` as the `int` 7). So `attributes[tag]`
-equals what was set and is not the same object. It raises nothing for
-a value that the store cannot hold. The save raises instead
+0-d array) as the Python number it equals (`np.int64(7)` as the `int`
+7). It stores a `list` or `tuple` that directly holds a numpy value as
+a new `list`, with each numpy number in it replaced in the same way. A
+converted value is not the same object as the value set. A new `list`
+made from a `tuple` does not equal the `tuple`. `set_attr()` raises
+nothing for a value that the store cannot hold. The save raises instead
 (Exceptions, below).
 
 On `Instance`, `set_attr()` also keeps resident pixels reading as a
@@ -364,8 +366,10 @@ name the floor policy is held under is tier 2. A configuration with no
 with `privacy_profile: none` opts out of it.
 
 `set_phi_tag()` stores lowercase keys, and keeps a private creator's
-case. It stores its `value` argument as the rule's `value`, and its
-`target` argument as the rule's `target`. Only `SCRUB` takes a
+case. It stores its `value` argument as the rule's `value`. It stores no
+`value` key when `value` is `None`, an empty `str`, or another value
+that is false in Python, such as `0` or `False`. It stores its `target`
+argument as the rule's `target`. Only `SCRUB` takes a
 `target`, and `SCRUB` requires one. For an unknown action, or a rule
 that `load_config` would refuse, `set_phi_tag()` raises `ValueError`
 and leaves the policy and its file unchanged. For a machine rule that
@@ -442,12 +446,28 @@ unless its entry says otherwise.
   audit row, and `load_config()` refuses the rule (#949).
 - `audit()`, `redact()`, `lock_identities()` and `lock_identities_batch()`,
   after a `save()` without `sync=True` whose write failed: each drains
-  the queue on entry. Then it runs that save again itself, on the
-  calling thread, before it does anything else. That save writes the
-  session's patients as they stand then (`session.store.patients`, read
-  at that moment), not as they stood when `save()` was called. A patient
-  removed from the session since then, by an edit to the list or by
-  assigning `session.store.patients` a new one, is removed from the
+  the queue. Then it runs that save again itself, on the calling thread,
+  before it changes the graph or the store. `audit()` does this on entry.
+  The other three first make the checks below. A call that ends at one
+  of these checks does not drain and does not run the save:
+  - `redact()`: a `burned_in_text` policy that `load_config` would
+    refuse (`ValueError`), and no rules with no `burned_in_text` policy
+    (it returns 0).
+  - Both lock methods: reversible anonymization not enabled
+    (`RuntimeError`), a key file that is empty or is not a Fernet key
+    (`ValueError`), and no key file while the session holds an identity
+    token this library wrote (`RuntimeError`).
+  - `lock_identities()` given one Patient ID that no patient holds. It
+    returns an empty `LockingResult`.
+  - `lock_identities_batch()`, and `lock_identities()` given a list or a
+    report: a selection it does not accept (`TypeError`), and a refusal
+    of any patient (`RuntimeError`).
+
+  `lock_identities()` given one Patient ID makes its refusals after the
+  save. That save writes the session's patients as they stand then
+  (`session.store.patients`, read at that moment), not as they stood
+  when `save()` was called. A patient removed from the session since
+  then, by an edit to the list or by assigning `session.store.patients` a new one, is removed from the
   store. A patient added since then is saved. If the save now succeeds,
   the call raises nothing and says nothing. If the save fails again, the
   call raises what the save raises: the `TypeError` or `ValueError`
@@ -503,7 +523,7 @@ unless its entry says otherwise.
   unavailable to the calling process. Under `detector: db`, `redact()`
   also raises it when the `textdetect` extra (OpenCV) or the shipped
   model is unavailable (always, on the free-threaded build). `redact()`
-  raises after the entry drain and before anything is redacted, the
+  raises after its drain and before anything is redacted, the
   configured zones included. It raises the same way when the policy's
   `target` names `names` and spaCy or its model cannot load (#1121).
   `export(check_burned_in=True)` under that policy raises too, before
@@ -533,15 +553,19 @@ unless its entry says otherwise.
   `audit()` without `config_path` raises the same `ValueError` for such
   a rule in `session.configuration.phi_tags`. Both are raised before a
   project secret is created.
-- `recover_patient_identity()`: `FileNotFoundError`, without creating a
+- `recover_patient_identity()`: `RuntimeError` when reversible
+  anonymization is not enabled. `FileNotFoundError`, without creating a
   key file, when no key file exists at the path that
-  `enable_reversible_anonymization()` was given. `ValueError` when no patient holds the
-  ID. `RuntimeError` when the patient has no instances or no identity
-  token, the key does not decrypt it, or it holds no identity record
-  this library writes, or the token is in the layout releases before
-  1.0 wrote, in which case nothing on the patient is restored. It
-  prints nothing, and no message names a Patient ID. It returns the
-  identity rather than printing it.
+  `enable_reversible_anonymization()` was given. `ValueError` when that
+  key file is empty or is not a Fernet key, and when no patient holds
+  the ID. `RuntimeError` when the patient has no instances or no
+  identity token, or when the key does not decrypt a token. It raises
+  `RuntimeError` also when a token holds no identity record this library
+  writes. The same applies to a token from a later release, and to a
+  token in the layout that releases before 1.0 wrote. After each of
+  these errors, nothing on the patient is restored. It prints nothing,
+  and no message names a Patient ID. It returns the identity rather than
+  printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
   file, or for a path that is not a regular file. In both cases, no key
   file is created, and the session stays open (#791). The first
@@ -549,14 +573,23 @@ unless its entry says otherwise.
   and with mode 0600. A lock that writes no token (a refusal, or no
   patient found, or none with an instance) creates no key file (#813).
   When no key file exists and the session holds an identity token this
-  library wrote, which no new key could open, it raises `RuntimeError`
-  and creates none.
+  library wrote, which no new key could open,
+  `enable_reversible_anonymization()` does not raise. A later
+  `lock_identities()` or `lock_identities_batch()` that reaches its key
+  check raises `RuntimeError` and creates no key file.
+- `lock_identities()` and `lock_identities_batch()`: `RuntimeError`
+  when reversible anonymization is not enabled.
 - `lock_identities()` refusals name no patient. A batch refusal numbers
   each refused patient by its place among the patients found, in
-  Patient ID order. A patient is refused when any of its instances
-  holds no value in any tag that `tags_to_lock` names. A blank value is
-  a value, with one exception. A patient that holds a Patient ID (or a
-  Patient's Name) is refused when every instance's copy of `0010,0020`
+  Patient ID order. A patient with instances is refused when any of its
+  instances holds no value in any tag that `tags_to_lock` names. It is
+  also refused when `tags_to_lock` is an empty list. For `0010,0010` and
+  `0010,0020`, the lock reads the patient's value when an instance holds
+  none. For `0010,0020`, that is the Patient ID as the export writes it.
+  So under the default `tags_to_lock`, which names `0010,0020`, this
+  refusal does not occur for a patient whose Patient ID is a `str`. A
+  blank value is a value, with one exception. A patient that holds a
+  Patient ID (or a Patient's Name) is refused when every instance's copy of `0010,0020`
   (or `0010,0010`) is present and blank. The token would restore the
   patient without it (#761).
 - `lock_identities(persist=True)` and `lock_identities_batch()` raise
@@ -708,7 +741,10 @@ and the access path is not.
   report generated before any export carries a boundary note, and
   export-time `DATA_LOSS` rows are in a report generated after the
   export.
-- `audit()` and `redact()` drain the persistence manager on entry.
+- `audit()` drains the persistence manager on entry. `redact()` drains it
+  after it reads its `burned_in_text` policy, and before it changes the
+  graph or the store. With no rules and no `burned_in_text` policy,
+  `redact()` returns 0 and does not drain.
 - Until `export()`, the session writes only the store, `isocenter.log`
   and files you ask for (a configuration, a key, a report, a manifest or
   a cohort table).
