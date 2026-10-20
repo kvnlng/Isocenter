@@ -47,8 +47,8 @@ for name in ["CT_small.dcm", "MR_small.dcm", "rtdose.dcm"]:
 ## 1. Ingest three patients
 
 The three files are a CT, an MR and an RT dose grid, one patient each.
-Ingest reads them into a *session store*: a SQLite file plus a pixel sidecar
-beside it. The source files are never modified.
+Ingest reads them into a *session store*. The store is a SQLite `.db`
+file plus a pixel sidecar beside it. The source files are never modified.
 
 ```python
 from isocenter import Session
@@ -403,8 +403,8 @@ second_visit = next(
 That is the shortcut when you are holding nothing back.)
 
 Do not skip that call for a later batch. Until a scan reads the new
-file, the store holds it as ingested. An export writes it as the store
-holds it. The rest of this store has been scanned, so the report grades
+file, the store holds it as ingested. Until then, an export writes it as
+the store holds it. The rest of this store has been scanned, so the report grades
 `REVIEW_REQUIRED` for the new file
 ([condition 9](../analytics.md#how-the-grade-is-decided)).
 

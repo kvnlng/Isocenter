@@ -80,7 +80,7 @@ Machines burn identifiers into the pixels, and the same model tends to burn them
 
 ### 5b. Zone Discovery
 
-`discover_redaction_zones()` reads a random sample of one machine's instances with OCR. It returns a `DiscoveryResult` of where text was found. So you can write zones from what the data does, not from one screenshot. The scan needs the `ocr` extra (`pip install "isocenter[ocr]"`) and the `tesseract` binary. Without either, it raises `OcrUnavailableError`, and the error names what is missing.
+`discover_redaction_zones()` reads a random sample of one machine's instances with OCR. It returns a `DiscoveryResult` of where text was found. Use the result to write zones from what the data does, not from one screenshot. The scan needs the `ocr` extra (`pip install "isocenter[ocr]"`) and the `tesseract` binary. Without either, it raises `OcrUnavailableError`, and the error names what is missing.
 
 ```python
 result = session.discover_redaction_zones("SN-12345", sample_size=50, min_confidence=80.0)

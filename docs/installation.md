@@ -72,7 +72,7 @@ python -m spacy download en_core_web_sm
 
 The model download is a separate step because the model is not published on PyPI. Without the model, discovery classifies text with regular expressions.
 
-A [`burned_in_text`](configuration.md#burned-in-text) `target` that names `names` also needs the extra and the model. It has no fallback. Without them, `redact()` and `export(check_burned_in=True)` raise `NlpUnavailableError`. spaCy publishes no free-threaded wheel. So on the free-threaded build (3.14t), you cannot use discovery's spaCy arm or the `names` kind. No CI job installs the model.
+A [`burned_in_text`](configuration.md#burned-in-text) `target` that names `names` also needs the extra and the model. It has no fallback. Without them, `redact()` and `export(check_burned_in=True)` raise `NlpUnavailableError`. spaCy publishes no free-threaded wheel. So on the free-threaded build (3.14t), you cannot use discovery's spaCy arm or the `names` kind. CI installs the model on every entry that is not free-threaded.
 
 ## Codecs
 

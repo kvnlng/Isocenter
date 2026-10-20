@@ -14,7 +14,7 @@ session = Session("my_project.db")
 
 The store is the file you name, plus a sidecar beside it. With no name, the store is `$ISOCENTER_DB_PATH`, else `isocenter.db`. `Session("my_project.db")` creates these files:
 
-- `my_project.db`, the SQLite index, with its `-wal` and `-shm` files.
+- `my_project.db`, the store's SQLite file, with its `-wal` and `-shm` files.
 - `my_project_pixels.bin`, the pixel and waveform data. Two `.lock` files appear beside it at the first `ingest()`.
 - `isocenter.log` in the current directory.
 
@@ -161,7 +161,7 @@ session.export("/path/to/export_clean", check_burned_in=True)
 
 Files land at `<folder>/Subject_<PatientID>/Study_…/Series_…/<SOPInstanceUID>.dcm`. The folder names are built from the exported values. So run `anonymize()` first.
 
-`check_burned_in=True` runs `audit()` again. It withholds every instance that still carries an identifier in its tags, with a `WARNING` row for each.
+`check_burned_in=True` runs `audit()` again. The export then withholds every instance that still carries an identifier in its tags, with a `WARNING` row for each.
 
 - Without a [`burned_in_text`](configuration.md#burned-in-text) policy, it checks tags, not pixels. Redaction zones handle burned-in text, and `scan_pixel_content()` finds it.
 - With a `burned_in_text` policy, it also reads with OCR the pixels that it is about to write. It does this for every image in the policy's [`scope`](configuration.md#burned-in-text).
@@ -211,7 +211,7 @@ with Session("my_project.db") as session:
 
 No message names the Patient ID.
 
-Restore returns only the locked tags to their original values. Every other date stays shifted by the patient's offset, so intervals are intact. [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md) works through recovery and what happens without the key.
+Restore sets only the locked tags back to their original values. Every other date stays shifted by the patient's offset, so intervals are intact. [Reversible anonymization: keep a way back](tutorials/reversible-anonymization.md) works through recovery and what happens without the key.
 
 ## Next: the tutorials
 

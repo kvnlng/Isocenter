@@ -158,7 +158,7 @@ True
 ```
 
 The exported file also says what was done to it: Burned In Annotation
-`(0028,0301)` reads `NO`, because `redact()` cleared the region the rule
+`(0028,0301)` reads `NO`, because `redact()` cleared the zone the rule
 names.
 
 ```python
@@ -186,16 +186,17 @@ session.close()
 
 `PASS` says that the zones you wrote were applied. It does not say that
 the rest of each image is free of text. Nothing on this page read the
-pixels for text. These two ways read them:
+pixels for text. To read them:
 
 - `scan_pixel_content()` reads with OCR the images of every series that
   a rule with zones covers (by exact serial, `""`, `"*"` or `match:`).
   It reports text that no zone covers
   ([Checking Zones](../ocr.md#checking-zones-verification)).
 - Or configure [`burned_in_text`](../configuration.md#burned-in-text).
-  Under it, `redact()` reads with OCR every image that holds pixels,
-  serial or not, whatever the rules. It redacts, reports or withholds the
-  text it finds.
+  Under it, `redact()` reads with OCR every image in the policy's
+  [`scope`](../configuration.md#burned-in-text) that holds pixels, serial
+  or not, whatever the rules. It redacts, reports or withholds the text
+  it finds.
 
 A zone is applied whether or not you call `redact()`. `export()` finds
 every matching rule and zeroes a copy of each frame that it writes.
