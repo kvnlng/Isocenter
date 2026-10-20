@@ -28,11 +28,13 @@ methods, are tier 2. So are `pixel_array` and `waveform_array` in
 
 **What `set_attr()` stores.** It stores the value it is given, with one
 exception. It stores a numpy bool, integer or float (a scalar or a 0-d
-array), and a `list` or `tuple` directly holding one, as the Python
-number it equals. So `set_attr("0018,1150", np.int64(7))` leaves the
-`int` 7 in `attributes`, and a live export writes what a reopened session
-writes. An array of one or more dimensions is not converted. Pass
-`.tolist()` or `.tobytes()` instead. No other numpy value is converted
+array) as the Python number it equals. It stores a `list` or `tuple`
+that directly holds a numpy value as a new `list`, with each numpy
+number in it replaced in the same way. So `set_attr("0018,1150",
+np.int64(7))` leaves the `int` 7 in `attributes`, and
+`set_attr("0018,1150", (np.int64(7),))` leaves the `list` `[7]`. A live
+export writes what a reopened session writes. An array of one or more
+dimensions is not converted. Pass `.tolist()` or `.tobytes()` instead. No other numpy value is converted
 either. A `datetime64`, a `timedelta64`, a complex number and a masked
 value stay as given, and the save refuses them.
 
@@ -42,7 +44,15 @@ when it is saved. `export()` writes such a number as the Python number
 it equals, whether or not it was saved. So the file is the same before
 and after a save and a reopen. `export()` also writes a `tuple` as the
 list it equals, and a finite `Decimal` that a float can hold as the
-`float` it equals. The save refuses a `Decimal`, and only a value written straight into
+`float` it equals. Under a standard element whose VR is `AT`, there is
+one exception. `export()` writes a `tuple` of exactly two integers, or
+of exactly two `str`, as one tag, as pydicom reads it (#1009). The pair
+must still be a `tuple` when the export reads it. After `set_attr()`, a
+`tuple` that holds a numpy number is a `list` (above), and a `list` of
+two integers is two tags. A store that was saved and opened again also
+holds the pair as a `list`
+([#1016](https://github.com/kvnlng/Isocenter/issues/1016), open). The
+save refuses a `Decimal`, and only a value written straight into
 `attributes`, or a graph built by hand, can hold one. `export()` changes
 none of the three in `attributes`.
 
@@ -51,10 +61,12 @@ A number under a standard element whose VR holds text
 without that element, under one `DATA_LOSS` row that names the tag, the
 type and the VR. Pass the text instead. The store holds `None`, `str`,
 `bytes`, `bool`, `int`, `float`, pydicom's DS and IS values, and lists
-of those. `set_attr()` raises nothing for anything else. The next
-`save(sync=True)`, `export()` or `compact()` raises `TypeError` that
-names the instance, the tag and the type
-([API stability](stability.md), Exceptions).
+of those. `set_attr()` does not raise for a value of another type. The
+next `save(sync=True)`, `export()` or `compact()` raises `TypeError`
+that names the instance, the tag and the type
+([API stability](stability.md), Exceptions). `Instance.set_attr()` can
+raise `ValueError` for an edit to a pixel descriptor, which is a
+different check ([API stability](stability.md)).
 
 **What assigning `Instance.sop_instance_uid` does.** It moves the field
 and the `(0008,0018)` element together, and marks the instance edited.

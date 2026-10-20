@@ -86,8 +86,11 @@ raises.
 **So in 1.0, no third-party export grades `PASS`.** A `WARNING` row grades
 the report `REVIEW_REQUIRED` (condition 2 in
 [How the grade is decided](../analytics.md#how-the-grade-is-decided)),
-however the plugin behaves. The same report still carries the "generated
-before any export" note, because no `EXPORT` row was written.
+however the plugin behaves. Isocenter writes no `EXPORT` row for a
+third-party export. So the same report also carries the "generated
+before any export" note, unless the store already holds an `EXPORT` row.
+An earlier `dicom` or `wfdb` export on the same store, in any session,
+can have written one.
 
 The class decides, not the format name or the module. A subclass of a
 built-in, or a different class registered as `dicom`, is third-party.
