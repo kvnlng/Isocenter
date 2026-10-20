@@ -1,14 +1,14 @@
 # Architecture
 
-Isocenter is an indexing layer over your DICOM files. It never modifies them. It reads them into a session store (a SQLite index plus a pixel sidecar), changes an in-memory object graph, and writes de-identified copies to a new directory when you call `export()`.
+Isocenter is an indexing layer over your DICOM files. It never modifies them. It reads them into a session store (a SQLite index plus a pixel sidecar) and changes an in-memory object graph. When you call `export()`, it writes de-identified copies to a new directory.
 
 ## 1. The Session facade
 
 The `Session` object is your single entry point. It manages:
 
-- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes and `export()` (either built-in format) saves before it writes; otherwise call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
+- **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes, and `export()` (either built-in format) saves before it writes. Otherwise, call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
 - **Inventory**: the patients, studies, series and instances the store holds.
-- **Workers**: a process pool and two background threads. Use `with Session(...) as session:` or call `close()`, or the worker processes outlive your script.
+- **Workers**: a process pool and two background threads. If you do not use `with Session(...) as session:` or call `close()`, the worker processes outlive your script.
 
 ## 2. Object model
 
@@ -29,7 +29,7 @@ graph LR
 
 ## 3. The pipeline
 
-Ten steps, in the order the code expects them. Your source files are never written to. The session store is written from step 1 and holds the original identifiers and pixels, so treat `<name>.db` and `<name>_pixels.bin` as PHI; the de-identified copies reach disk only at step 9. The report comes last because export is where the final data-loss rows are written; a report generated before any export says so in its own text.
+Ten steps, in the order the code expects them. Your source files are never written to. The session store is written from step 1 and holds the original identifiers and pixels, so treat `<name>.db` and `<name>_pixels.bin` as PHI. The de-identified copies reach disk only at step 9. The report comes last because export is where the final data-loss rows are written. A report generated before any export says so in its own text.
 
 1. **Ingest**: read the source files into the session store.
 2. **Examine**: inventory the cohort and its equipment.
@@ -46,27 +46,27 @@ Ten steps, in the order the code expects them. Your source files are never writt
 
 The store is a SQLite index plus an append-only sidecar file. Keep `<name>.db` and `<name>_pixels.bin` together: a copy of both, under the same base name, is the same project, and either alone is incomplete.
 
-The index runs in SQLite's WAL mode and the sidecar's locks are `flock`, so the store belongs on a local disk, opened from one host at a time. `Session()` logs a `WARNING` when it recognises the store's filesystem as a network type, and opens it anyway ([Keep the store on local disk](quickstart.md#1-initialize-a-session)).
+The index runs in SQLite's WAL mode, and the sidecar's locks are `flock`. For this reason, the store belongs on a local disk, opened from one host at a time. `Session()` logs a `WARNING` when it recognises the store's filesystem as a network type, and opens it anyway ([Keep the store on local disk](quickstart.md#1-initialize-a-session)).
 
 - **Standard tags** (even groups), and every binary value small enough to keep, are stored as one JSON document per instance and read back whole. Reopening a session loads the cohort's metadata in one pass, not one file at a time.
 - **Private tags** (odd groups) other than binary values go in a separate table, because they are sparse and vendor-specific.
-- **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more. That includes the frame of a file `ingest()` refused after reading its pixels or waveform samples (`Linkage Failed`): the frame stays in the sidecar until `compact()`, which removes it, and any blob row naming it, in a store that holds at least one instance.
+- **Pixel and waveform data** go in the sidecar, referenced by offset and length, so the index stays small. `compact()` rewrites the sidecar to reclaim the space of frames no instance references any more. That includes the frame of a file `ingest()` refused after reading its pixels or waveform samples (`Linkage Failed`). The frame stays in the sidecar until `compact()`. In a store that holds at least one instance, `compact()` removes the frame and any blob row naming it.
 
-Binary values other than pixel and waveform data are kept only up to 65534 bytes, or 393216 bytes for the pixel lookup tables (LUT Data and the palette data); larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
+Binary values other than pixel and waveform data are kept only up to 65534 bytes, or 393216 bytes for the pixel lookup tables (LUT Data and the palette data). Larger ones are dropped at ingest with a `DATA_LOSS` row. [Private Tags](configuration.md#private-tags) explains the limit and what it means for `remove_private_tags: false`.
 
 The table layout is described for contributors in [Contributing](developer_guide.md#storage-schema). It is not part of the frozen API.
 
 ## 5. When a worker process dies
 
-`ingest()` reads files in worker processes. A file that ends the worker reading it (the out-of-memory killer, a decoder crash, `SIGKILL`) does not end the call, and a crashing file is retried alone and rejected only if it also crashes a fresh worker:
+`ingest()` reads files in worker processes. A file that ends the worker reading it (the out-of-memory killer, a decoder crash, `SIGKILL`) does not end the call. A crashing file is retried alone, and it is rejected only if it also crashes a fresh worker:
 
 - Results already returned are kept. The files not yet returned are read again one at a time on a fresh one-worker process pool.
 - A file is rejected only when a fresh worker ends on it as the first file it was given. Its `ERROR` audit row gives the reason "An ingest worker process ended before this file was returned, and a fresh worker process given this file alone, as its first file, ended while reading it".
-- A worker that ends on a later file had read others first, so that file is not blamed: reading starts again from it on another fresh worker.
+- A worker that ends on a later file had read others first, so that file is not blamed. Reading starts again from it on another fresh worker.
 - Once the fatal file is found, the rest are read at full width (`ISOCENTER_MAX_WORKERS`), the call saves as usual, and the session's pool is replaced.
-- A death that does not recur costs no file and writes no audit row; a `WARNING` log line records it.
-- If two fresh workers in a row cannot run a trivial task, every file left is rejected as "Not read", with a reason naming the causes that do this (a script without the `if __name__ == "__main__":` guard among them), and the call returns.
-- When a worker ends, the other workers in its pool are sent `SIGTERM`. Once `ingest()` or `close()` finds the pool broken, one still running 10 s later is ended with `SIGKILL`, and a `WARNING` log line names it, so neither waits on it for good. A worker keeps running after `SIGTERM` when something in it handles the signal: a handler your script installs at module level runs again in every spawned worker. `export()`'s pool, which replaces each worker after 25 files (and every pool under `ISOCENTER_MAX_TASKS_PER_CHILD`), is bounded the same way: once it is told to stop, because every result is in or because the call is left early, a worker still running 10 s later is sent `SIGKILL` and named in a `WARNING` log line, and the call waits at most 5 s more for the pool to finish (#860). While that pool runs, a worker that ends abnormally (the out-of-memory killer, a crash) fails the call with `BrokenProcessPool`, which `export()` reports in an `ERROR` row, rather than leaving it to wait for the lost task (#887); and a worker that cannot finish exiting after its last task is ended by its own 15 s SIGALRM bound, so the pool can replace it (#888).
+- A death that does not recur costs no file and writes no audit row. A `WARNING` log line records it.
+- If two fresh workers in a row cannot run a trivial task, every file left is rejected as "Not read", and the call returns. The rejection's reason names the causes that do this (a script without the `if __name__ == "__main__":` guard among them).
+- When a worker ends, the other workers in its pool are sent `SIGTERM`. Once `ingest()` or `close()` finds the pool broken, a worker still running 10 s later is ended with `SIGKILL`. A `WARNING` log line names it. Neither `ingest()` nor `close()` therefore waits on it for good. A worker keeps running after `SIGTERM` when something in it handles the signal. A handler your script installs at module level runs again in every spawned worker. `export()`'s pool, which replaces each worker after 25 files (and every pool under `ISOCENTER_MAX_TASKS_PER_CHILD`), is bounded the same way. Once it is told to stop, because every result is in or because the call is left early, a worker still running 10 s later is sent `SIGKILL`. A `WARNING` log line names that worker. The call waits at most 5 s more for the pool to finish (#860). While that pool runs, a worker that ends abnormally (the out-of-memory killer, a crash) fails the call with `BrokenProcessPool`. The call is not left to wait for the lost task (#887). `export()` reports that failure in an `ERROR` row. A worker that cannot finish exiting after its last task is ended by its own 15 s SIGALRM bound, so the pool can replace it (#888).
 - Any other failure of the worker pool raises.
 
 Each worker death costs a fresh pool, a few tenths of a second, so a run whose deaths do not recur can pay for several. A fatal file costs two or three pools, and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a time. The retry rounds send one file per task whatever `ISOCENTER_CHUNKSIZE` says.
@@ -78,6 +78,8 @@ Each worker death costs a fresh pool, a few tenths of a second, so a run whose d
 1. It **raises `RuntimeError`** while a `redact()` or `ingest()` pass is open on the same store. The check comes before the leading save, so a refused call has done nothing.
 2. A `redact()` or `ingest()` that starts while it is saving or rewriting **waits**, up to 180 s, and then proceeds.
 
-Every frame write, and `compact()` for the whole rewrite, holds a cross-process file lock beside the sidecar, so a frame written while compaction runs lands in the compacted file. A writer that cannot take the lock within 180 s raises `RuntimeError` naming the lock file. A background save that times out this way is logged as `Background save failed`, and its instances stay unsaved for the next save. A failed background save, from this or any other cause, is run again by the next `audit()`, `redact()` or identity lock, or a call that begins with one of them (`anonymize()` with no findings, `redact_by_machine()`, `export(check_burned_in=True)`), which raises what it raises if it still fails; a session closed with one unhealed writes an `ERROR` audit row. During `ingest()`, a result whose frame write times out is rejected like any other failed file, with an `ERROR` audit row.
+Every frame write holds a cross-process file lock beside the sidecar, and `compact()` holds it for the whole rewrite. As a result, a frame written while compaction runs lands in the compacted file. A writer that cannot take the lock within 180 s raises `RuntimeError` naming the lock file. During `ingest()`, a result whose frame write times out is rejected like any other failed file, with an `ERROR` audit row.
+
+A background save that times out this way is logged as `Background save failed`, and its instances stay unsaved for the next save. The next `audit()`, `redact()` or identity lock runs a failed background save again, whatever caused the failure. So does the next call that begins with one of them (`anonymize()` with no findings, `redact_by_machine()`, `export(check_burned_in=True)`). If the save still fails, that call raises what the save raises. A session closed while a failed save is unhealed writes an `ERROR` audit row.
 
 The rewrite holds the lock for its whole length, about 0.2 s per GB on a local SSD. A `close()` whose persistence worker is queued behind a compaction longer than 30 s reports that worker as wedged.

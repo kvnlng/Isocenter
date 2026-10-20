@@ -1,6 +1,6 @@
 # MIDI-B benchmark
 
-[MIDI-B](https://www.cancerimagingarchive.net/collection/midi-b-test-midi-b-validation/) is a de-identification benchmark from The Cancer Imaging Archive (TCIA). It provides two synthetic DICOM datasets seeded with realistic identifiers, and an answer key that says what a correct de-identification does to every element of every instance. A [validation script](https://github.com/CBIIT/MIDI_validation_script) scores an output against the key.
+[MIDI-B](https://www.cancerimagingarchive.net/collection/midi-b-test-midi-b-validation/) is a de-identification benchmark from The Cancer Imaging Archive (TCIA). It provides two synthetic DICOM datasets seeded with realistic identifiers. It also provides an answer key that says what a correct de-identification does to every element of every instance. A [validation script](https://github.com/CBIIT/MIDI_validation_script) scores an output against the key.
 
 This page shows how to configure Isocenter to match that answer key, and why each setting is there. The whole configuration is one YAML file, given in full in the [appendix](#appendix-the-configuration). Every setting is a configuration rule except one, an export flag.
 
@@ -9,20 +9,20 @@ This page shows how to configure Isocenter to match that answer key, and why eac
 | Isocenter's default configuration | 72.51% | 68.45% |
 | **The configuration on this page** | **99.22%** | **99.23%** |
 
-**Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag `v1.0.0rc22`, commit `5b90e719`) and the MIDI-B validation script at commit `ccc0939`, on an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1).** Pixel checks were scored by the script's own automatic check; no manual pixel review was applied. That is the measurement.
+**Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag `v1.0.0rc22`, commit `5b90e719`).** The scorer was the MIDI-B validation script at commit `ccc0939`. The machine was an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1). The script's own automatic check scored the pixel checks. No manual pixel review was applied. That is the measurement.
 
-The configuration was tuned against both sets, so neither score is a held-out estimate: it is what this release and this configuration achieve on this data.
+The configuration was tuned against both sets. Neither score is therefore a held-out estimate. Each score is what this release and this configuration achieve on this data.
 
 In both datasets:
 
-- Study Date is shifted by each patient's offset, the other dates the profile names are emptied, replaced or removed, and every date check passes;
-- every UID is replaced, consistently across instances, and every UID check passes;
-- every Patient ID check passes;
+- Study Date is shifted by each patient's offset, the other dates the profile names are emptied, replaced or removed, and every date check passes.
+- Every UID is replaced, consistently across instances, and every UID check passes.
+- Every Patient ID check passes.
 - 99.15% (Validation) and 97.80% (Test) of the identifiers the key expects removed are removed. Almost all of the rest are 2- or 3-letter site acronyms (see [Why not 100%](#why-not-100)).
 
-The configuration follows MIDI-B's answer key, which is one de-identification policy among several. Where the key leaves identifying text in place, or removes more than a study might want, the section says so, and [Choices a site may want to change](#choices-a-site-may-want-to-change) collects them.
+The configuration follows MIDI-B's answer key, which is one de-identification policy among several. Where the key leaves identifying text in place, or removes more than a study might want, the section says so. [Choices a site may want to change](#choices-a-site-may-want-to-change) collects these cases.
 
-Example values on this page are synthetic. Some are MIDI-B's own synthetic values, already quoted in this project's public issues; the rest are invented values of the same shape.
+Example values on this page are synthetic. Some are MIDI-B's own synthetic values, already quoted in this project's public issues. The rest are invented values of the same shape.
 
 ## How MIDI-B scores
 
@@ -33,11 +33,11 @@ Example values on this page are synthetic. Some are MIDI-B's own synthetic value
 
 Each check is one expectation about one element of one instance:
 
-- an identifier must be gone;
-- a date must be shifted;
-- a UID must be replaced, and consistently;
-- an element must be kept as written;
-- the pixels must be unchanged, or burned-in text hidden.
+- An identifier must be gone.
+- A date must be shifted.
+- A UID must be replaced, and consistently.
+- An element must be kept as written.
+- The pixels must be unchanged, or burned-in text hidden.
 
 The score is checks passed divided by all checks. A check fails either way: an identifier left in, or a useful element removed. Most of what the default configuration loses is the second kind. The DICOM Basic Profile removes, as a precaution, much that the key wants kept.
 
@@ -69,9 +69,9 @@ Each part below overrides the default for one group of elements. The table shows
 | [9. Remove burned-in text](#9-remove-burned-in-text) | −0.00 | −0.00 |
 | **This configuration** | **99.22%** | **99.23%** |
 
-Points are percentage points of all checks. Each part is credited with the checks on the elements it owns, so the parts add up (to rounding). Parts 8 and 9 are worth almost nothing to the score: part 8 is a handful of checks, and part 9 hides nearly all burned-in text but costs about as much as it wins (see part 9). Both runs export uncompressed ([part 10](#10-export-uncompressed)).
+Points are percentage points of all checks. Each part is credited with the checks on the elements it owns, so the parts add up (to rounding). Parts 8 and 9 are worth almost nothing to the score. Part 8 is a handful of checks. Part 9 hides nearly all burned-in text but costs about as much as it wins (see part 9). Both runs export uncompressed ([part 10](#10-export-uncompressed)).
 
-The default configuration is what Isocenter's scaffold writes: the DICOM PS3.15 Annex E Basic Profile (`basic@2026c`, edition 2026c), with Study Date shifted per patient, sex and age kept, and every private element removed (`remove_private_tags: true`).
+The default configuration is what Isocenter's scaffold writes. It is the DICOM PS3.15 Annex E Basic Profile (`basic@2026c`, edition 2026c), with Study Date shifted per patient, and with sex and age kept. Every private element is removed (`remove_private_tags: true`).
 
 ## The configuration, part by part
 
@@ -92,9 +92,11 @@ phi_tags:
 | GE PET exam UID | `2.5.731.4.2.5508176…` | a new UID, the same in every instance |
 | GE PET patient datetime | a date and time | removed |
 
-Vendor private elements carry acquisition and reconstruction parameters, such as GE PET landmarks, filters and iterations, or Siemens and Philips sequence details. MIDI-B expects them kept, and they are the largest part of the score. The 64 rules remove the private elements that hold identifiers, dates or UIDs, and keep everything else. That covers GE PET exam, scan and calibration IDs and datetimes, GE suite and equipment IDs, prescribing-series UIDs, a UCSF free-text note, and four Siemens header fields. PS3.15's Retain Safe Private Option keeps only private attributes listed as safe; this configuration takes the inverse route: it keeps every private element and removes the ones known to hold identifiers, dates or UIDs.
+Vendor private elements carry acquisition and reconstruction parameters, such as GE PET landmarks, filters and iterations, or Siemens and Philips sequence details. MIDI-B expects them kept, and they are the largest part of the score. The 64 rules remove the private elements that hold identifiers, dates or UIDs, and keep everything else. That covers GE PET exam, scan and calibration IDs and datetimes, and GE suite and equipment IDs. It also covers prescribing-series UIDs, a UCSF free-text note, and four Siemens header fields.
 
-Each rule names its private creator, not a concrete tag ([Private elements by creator](configuration.md#private-elements-by-creator)). A vendor's element lands in whichever block a file assigns its creator: `0029,10xx` in some files, `0029,11xx` in others. Two vendors can also use the same concrete tag for different things. A creator key matches that creator's element wherever it is, and nothing else. It matches the creator in any case and spacing; this data writes one creator both as `UCSF BIRP PRIVATE CREATOR 011710XX` and as `UCSF BIRP PRIVATE CREATOR 011710xx`.
+PS3.15's Retain Safe Private Option keeps only private attributes listed as safe. This configuration takes the inverse route. It keeps every private element and removes the ones known to hold identifiers, dates or UIDs.
+
+Each rule names its private creator, not a concrete tag ([Private elements by creator](configuration.md#private-elements-by-creator)). A vendor's element lands in whichever block a file assigns its creator: `0029,10xx` in some files, `0029,11xx` in others. Two vendors can also use the same concrete tag for different things. A creator key matches that creator's element wherever it is, and nothing else. It matches the creator in any case and spacing. This data writes one creator both as `UCSF BIRP PRIVATE CREATOR 011710XX` and as `UCSF BIRP PRIVATE CREATOR 011710xx`.
 
 ### 2. Keep times of day
 
@@ -195,7 +197,7 @@ Clinical text is left as written, spacing included. Protocol tokens and decimals
     name: Text Value
 ```
 
-A structured report (SR) is a tree of content items: measurements, codes, references and text. The Basic Profile removes the whole Content Sequence, because its free text could not be cleaned, and leaves a report with no content. With `SCRUB` on Text Value the tree can be kept ([Keeping a structured report's content](configuration.md#keeping-a-structured-reports-content)); this is not PS3.15's Clean Structured Content Option, which cleans content items by their concept. The profile's rules still apply inside the tree: names, dates and UIDs in content items are removed, emptied or replaced, and every such check passes.
+A structured report (SR) is a tree of content items: measurements, codes, references and text. The Basic Profile removes the whole Content Sequence, because its free text could not be cleaned, and leaves a report with no content. With `SCRUB` on Text Value the tree can be kept ([Keeping a structured report's content](configuration.md#keeping-a-structured-reports-content)). This is not PS3.15's Clean Structured Content Option, which cleans content items by their concept. The profile's rules still apply inside the tree: names, dates and UIDs in content items are removed, emptied or replaced, and every such check passes.
 
 ### 8. Replace registry UIDs
 
@@ -204,7 +206,7 @@ A structured report (SR) is a tree of content items: measurements, codes, refere
   0008,010c: {action: REPLACE, name: Coding Scheme UID}
 ```
 
-The Basic Profile has no row for either. MIDI-B's synthetic data gives them random values and expects them changed like any UID, and a `REPLACE` with no value on a UID replaces it as every other UID is replaced. In real data they name a template or coding registry, not a patient, and replacing them loses that meaning.
+The Basic Profile has no row for either. MIDI-B's synthetic data gives them random values and expects them changed like any UID. A `REPLACE` with no value on a UID replaces it as every other UID is replaced. In real data they name a template or coding registry, not a patient, and replacing them loses that meaning.
 
 ### 9. Remove burned-in text
 
@@ -234,7 +236,7 @@ The score barely moves, for two reasons. Other text on the same images (a portab
 session.export("export/", use_compression=False)
 ```
 
-The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares pixel bytes, so a re-encoded image fails its pixels-unchanged check even though no pixel value changed. That costs about 0.4 points. An uncompressed export of a native little-endian source carries its Pixel Data bytes unchanged when its samples need no decoding; an encapsulated or big-endian source is decoded ([Compression](export-output.md#compression)).
+The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares pixel bytes, so a re-encoded image fails its pixels-unchanged check even though no pixel value changed. That costs about 0.4 points. An uncompressed export of a native little-endian source carries its Pixel Data bytes unchanged when its samples need no decoding. An encapsulated or big-endian source is decoded ([Compression](export-output.md#compression)).
 
 ## Why not 100%
 
@@ -258,7 +260,7 @@ The default export re-encodes pixel data as lossless JPEG 2000. MIDI-B compares 
 
 **What a configuration could still win:**
 
-- **Short site acronyms.** The acronyms `sites` leaves are 2 or 3 letters (`at FGH`, `at MG`, `at JCH`): 2,883 Validation and 9,440 Test checks. `sites` starts at 4 so that it never takes a modality or a common word; `MG` is mammography as well as a site here. A configurable floor is proposed in [#1162](https://github.com/kvnlng/Isocenter/issues/1162).
+- **Short site acronyms.** The acronyms `sites` leaves are 2 or 3 letters (`at FGH`, `at MG`, `at JCH`): 2,883 Validation and 9,440 Test checks. `sites` starts at 4 so that it never takes a modality or a common word. `MG` is mammography as well as a site here. A configurable floor is proposed in [#1162](https://github.com/kvnlng/Isocenter/issues/1162).
 - **A sequence label.** `P4^P114^S301^I00004, Gated, 10.0%A` loses its last token, `I00004`, to `ids`.
 - **Series Number.** Kept, it would pass 2,470 checks and fail about 21,000.
 
@@ -269,11 +271,11 @@ MIDI-B's key is one policy, and this configuration follows it. Under a different
 - **Free text.** A scrub removes what it recognises, and leaves short site acronyms, facility names and bare initials. To leave none of it, `REMOVE` the comment elements (Image Comments, Patient Comments, Requested Procedure Comments). Then `REMOVE` the descriptions and Protocol Name, or keep them only under a protocol that retains institution identity.
 - **Structured report text.** Use `REPLACE` instead of `SCRUB` on Text Value `(0040,A160)` to remove all report text. That includes bare reader initials, such as a Text Value that is only `DL`. It costs a few hundred checks.
 - **Registry UIDs.** `KEEP` Mapping Resource UID and Coding Scheme UID to keep their meaning.
-- **Burned-in text.** `target: [names, dates, ids]` redacts only regions whose reading looks like a name, a date or an ID. That leaves side markers and staff initials. On this data it also left some patient blocks that the detector found but OCR read poorly. A narrowed target reads each region with tesseract, so it needs the `ocr` extra and the `tesseract` binary, and `names` needs the `nlp` extra and spaCy's `en_core_web_sm` model, with no fallback.
+- **Burned-in text.** `target: [names, dates, ids]` redacts only regions whose reading looks like a name, a date or an ID. That leaves side markers and staff initials. On this data it also left some patient blocks that the detector found but OCR read poorly. A narrowed target reads each region with tesseract, so it needs the `ocr` extra and the `tesseract` binary. `names` needs the `nlp` extra and spaCy's `en_core_web_sm` model, with no fallback.
 
 ## Reproducing these results
 
-- **Software:** Isocenter 1.0.0rc22 from PyPI, with the `textdetect` extra (`pip install "isocenter[textdetect]==1.0.0rc22"`), on a Python build with the GIL (3.12 to 3.14): OpenCV publishes no free-threaded wheel. This configuration needs no other extra: add `ocr` for a narrowed burned-in `target` or `detector: tesseract`, and `nlp` if a `SCRUB` target names `orgs` or a burned-in target names `names`. Scoring uses the MIDI-B validation script at commit `ccc0939`.
+- **Software:** Isocenter 1.0.0rc22 from PyPI, with the `textdetect` extra (`pip install "isocenter[textdetect]==1.0.0rc22"`). Use a Python build with the GIL (3.12 to 3.14), because OpenCV publishes no free-threaded wheel. This configuration needs no other extra. For a narrowed burned-in `target` or for `detector: tesseract`, add `ocr`. If a `SCRUB` target names `orgs` or a burned-in target names `names`, add `nlp`. Scoring uses the MIDI-B validation script at commit `ccc0939`.
 - **Run:**
 
 ```python
@@ -288,12 +290,12 @@ with isocenter.Session("midi-b.db") as session:
     session.generate_manifest("manifest.json", format="json")
 ```
 
-- **Scoring:** score `export/` with the validation script. The script also needs mapping files that link each source UID and Patient ID to its replacement. The Study, Series and SOP Instance UIDs and the Patient ID come from the manifest above; every other UID is found by comparing source and exported headers. The manifest maps source files to exported UIDs, so it is kept with the store, never with an export.
-- **Time:** de-identifying the Validation set (23,921 instances) took about 12 minutes on the machine above, and scoring it about 5 more.
+- **Scoring:** Score `export/` with the validation script. The script also needs mapping files that link each source UID and Patient ID to its replacement. The Study, Series and SOP Instance UIDs and the Patient ID come from the manifest above. Every other UID is found by comparing source and exported headers. The manifest maps source files to exported UIDs, so keep it with the store, never with an export.
+- **Time:** De-identifying the Validation set (23,921 instances) took about 12 minutes on the machine above, and scoring it about 5 more.
 
 ## Appendix: the configuration
 
-The complete policy section. The scaffold also writes a `machines:` list of the devices found in the dataset, with no zones; it is omitted here.
+The complete policy section. The scaffold also writes a `machines:` list of the devices found in the dataset, with no zones. This page omits that list.
 
 ```yaml
 version: '2.0'
