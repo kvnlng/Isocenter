@@ -379,8 +379,7 @@ by any export format or API. What is written is a conformant single-group
 record. The discard is announced: a warning naming the number of groups
 dropped, plus a `DATA_LOSS` entry in the audit log. Multi-group support is
 not yet available ([#277](https://github.com/kvnlng/Isocenter/issues/277)).
-A store written before 0.9.1 can still hold the discarded groups' items;
-see [Upgrading from 0.9.x](migration.md#hollow-waveform-multiplex-items).
+A store written before 0.9.1 can still hold the discarded groups' items.
 
 That entry is scoped `SIGNAL`, and it **does** move Validation Status:
 a session that discarded a multiplex group grades `REVIEW_REQUIRED`,
