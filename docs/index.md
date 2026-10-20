@@ -9,18 +9,18 @@
 
 ## The situation
 
-You have a cohort of studies and a protocol an IRB approved. You need to hand a de-identified copy to a collaborator, a registry, or a model. You also need to hand your compliance reviewer a record: what was removed, what stayed because the protocol allowed it, and anything the run lost on the way.
+You have a cohort of studies and a protocol an IRB approved. You need to hand a de-identified copy to a collaborator, a registry, or a model. You also need to hand your compliance reviewer a record. The record shows what was removed, what stayed because the protocol allowed it, and anything the run lost on the way.
 
-Isocenter is the Python library your script imports to do that. It builds a SQLite metadata index and a pixel/waveform sidecar beside a read-only source tree, applies your de-identification profile and pixel redaction rules to an in-memory object graph, grades its own output, and writes clean copies to a new directory as DICOM or PhysioNet WFDB.
+Isocenter is the Python library your script imports to do that. It builds a SQLite metadata index and a pixel/waveform sidecar beside a read-only source tree. It applies your de-identification profile and pixel redaction rules to an in-memory object graph. It grades its own output, and writes clean copies to a new directory as DICOM or PhysioNet WFDB.
 
-There is no command-line tool. The Python API is the whole interface, because a library that lives in your script can be paused, resumed, inspected, and audited in ways a batch command cannot.
+There is no command-line tool. The Python API is the whole interface. That is because a library that lives in your script can be paused, resumed, inspected, and audited in ways a batch command cannot.
 
 ## What it refuses to do
 
 - **Modify a source file.** Ingest reads. Anonymize and redact change an in-memory graph. Until `export()`, the session writes only the store, `isocenter.log` and files you ask for (a configuration, a key, a report, a manifest or a cohort table). `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were. The store (`<name>.db` and `<name>_pixels.bin`) holds the original identifiers and pixels, so keep it where PHI may live.
 - **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError` rather than returning quietly, in either format.
 - **Pass through pixels it could not decode.** A frame that cannot be decompressed fails its instance's export rather than being copied uninspected.
-- **Advertise a Python version it does not test.** The suite runs on all four supported versions, including the free-threaded 3.14t build, at every release, and 3.12 and 3.14t must pass before anything is uploaded. The PyPI classifiers list only those.
+- **Advertise a Python version it does not test.** The suite runs on all four supported versions at every release, including the free-threaded 3.14t build. Versions 3.12 and 3.14t must pass before anything is uploaded. The PyPI classifiers list only those.
 
 ## What it does
 
@@ -52,19 +52,21 @@ python -c "import isocenter; print(isocenter.__version__)"
 
 The **Tutorials** each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md): what `PASS` and `REVIEW_REQUIRED` mean, and what to keep so a later export matches this one.
 
-How Isocenter scores on a public de-identification benchmark, and the configuration that gets there, is on the [MIDI-B benchmark](midi-b.md) page: 99.22% of the Validation set's checks and 99.23% of the Test set's, with every setting explained.
+The [MIDI-B benchmark](midi-b.md) page shows how Isocenter scores on a public de-identification benchmark, and the configuration that gets there. The scores are 99.22% of the Validation set's checks and 99.23% of the Test set's. The page explains every setting.
 
-If you are evaluating Isocenter for an institution rather than running it, [For institutions](for-institutions.md) is the page to read: the license, the citation, and what the report gives a reviewer.
+If you are evaluating Isocenter for an institution rather than running it, read [For institutions](for-institutions.md). It covers the license, the citation, and what the report gives a reviewer.
 
 ## Measured, not promised
 
-Two benchmarks have a recorded run behind them. For speed: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026; the numbers and the machine are on the [Performance](performance.md) page, and larger runs will appear there when they exist. For de-identification: TCIA's MIDI-B datasets, scored with the benchmark's own validation script, October 2026, on the [MIDI-B benchmark](midi-b.md) page.
+Two benchmarks have a recorded run behind them. For speed: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026. The numbers and the machine are on the [Performance](performance.md) page. Larger runs will appear there when they exist. For de-identification: TCIA's MIDI-B datasets, scored with the benchmark's own validation script, October 2026, on the [MIDI-B benchmark](midi-b.md) page.
 
 ## License and citation
 
 Apache-2.0 (0.9.2 and earlier: AGPL-3.0-or-later). Each release is archived on Zenodo under the concept DOI [10.5281/zenodo.22104298](https://doi.org/10.5281/zenodo.22104298), and the repository carries a `CITATION.cff`. If Isocenter's de-identification is part of how a dataset was prepared, it belongs in the methods section.
 
-Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues), in public and for free; never post patient data, or anything taken from it, there. If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes. Help beyond bug reports and questions, such as configuring a profile for your protocol, integrating Isocenter into a pipeline, or reviewing a run's report, is available as paid consulting: write to <support@isocenter.net> with what you need, and use the same address for anything that should not be public.
+Bug reports and questions about documented behaviour go to [GitHub Issues](https://github.com/kvnlng/Isocenter/issues), in public and for free. Never post patient data, or anything taken from it, there. If an export still carries something it should have removed or replaced, or lets someone recover an identity or a real date, report it privately, as the [security policy](https://github.com/kvnlng/Isocenter/security/policy) describes.
+
+Help beyond bug reports and questions is available as paid consulting. Examples are configuring a profile for your protocol, integrating Isocenter into a pipeline, or reviewing a run's report. Write to <support@isocenter.net> with what you need. Use the same address for anything that should not be public.
 
 ```{toctree}
 :hidden:
