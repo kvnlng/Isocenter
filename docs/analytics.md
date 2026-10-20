@@ -41,7 +41,7 @@ The report includes:
         - a file declined because its SOP Instance UID is already held, or because its Study Instance UID belongs to a patient with a different Patient ID;
         - an instance `export(check_burned_in=True)` withheld because it still carries an identifier (it is not written, and nothing failed);
         - an instance OCR could not read;
-        - a store an older release de-identified, where what that release did cannot be vouched for (see [Upgrading from 0.9.x](migration.md));
+        - a store an older release de-identified, where what that release did cannot be vouched for;
         - a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim;
         - an ambiguous value representation whose deciding attribute the source omits or contradicts: no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared;
         - a WFDB record in which two signals would share a lead name, so each one named from the lead table is written as its Code Value ([Lead names](waveforms.md#lead-names)).
