@@ -8,7 +8,7 @@ The `Session` object is your single entry point. It manages:
 
 - **The store**: `<name>.db` and `<name>_pixels.bin`, created by `Session("<name>.db")`. `ingest()` saves when it finishes, and `export()` (either built-in format) saves before it writes. Otherwise, call `save()` yourself. `close()` does not save: it warns, naming the instances whose edits would be lost.
 - **Inventory**: the patients, studies, series and instances the store holds.
-- **Workers**: a process pool and two background threads. If you do not use `with Session(...) as session:` or call `close()`, the worker processes outlive your script.
+- **Workers**: a process pool and two background threads. If you use neither `with Session(...) as session:` nor `close()`, the worker processes outlive your script.
 
 ## 2. Object model
 
@@ -78,8 +78,8 @@ Each worker death costs a fresh pool, a few tenths of a second, so a run whose d
 1. It **raises `RuntimeError`** while a `redact()` or `ingest()` pass is open on the same store. The check comes before the leading save, so a refused call has done nothing.
 2. A `redact()` or `ingest()` that starts while it is saving or rewriting **waits**, up to 180 s, and then proceeds.
 
-Every frame write holds a cross-process file lock beside the sidecar, and `compact()` holds it for the whole rewrite. As a result, a frame written while compaction runs lands in the compacted file. A writer that cannot take the lock within 180 s raises `RuntimeError` naming the lock file. During `ingest()`, a result whose frame write times out is rejected like any other failed file, with an `ERROR` audit row.
+Every frame write holds a cross-process file lock beside the sidecar, and `compact()` holds it for the whole rewrite. As a result, a frame written while compaction runs lands in the compacted file. A writer that cannot take the lock within 180 s raises `RuntimeError` naming the lock file.
 
-A background save that times out this way is logged as `Background save failed`, and its instances stay unsaved for the next save. The next `audit()`, `redact()` or identity lock runs a failed background save again, whatever caused the failure. So does the next call that begins with one of them (`anonymize()` with no findings, `redact_by_machine()`, `export(check_burned_in=True)`). If the save still fails, that call raises what the save raises. A session closed while a failed save is unhealed writes an `ERROR` audit row.
+A background save that times out this way is logged as `Background save failed`, and its instances stay unsaved for the next save. The next `audit()`, `redact()` or identity lock runs a failed background save again, whatever caused the failure. So does the next call that begins with one of them (`anonymize()` with no findings, `redact_by_machine()`, `export(check_burned_in=True)`). If the save still fails, that call raises what the save raises. A session closed while a failed save is unhealed writes an `ERROR` audit row. During `ingest()`, a result whose frame write times out is rejected like any other failed file, with an `ERROR` audit row.
 
 The rewrite holds the lock for its whole length, about 0.2 s per GB on a local SSD. A `close()` whose persistence worker is queued behind a compaction longer than 30 s reports that worker as wedged.

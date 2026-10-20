@@ -71,7 +71,7 @@ Each part below overrides the default for one group of elements. The table shows
 
 Points are percentage points of all checks. Each part is credited with the checks on the elements it owns, so the parts add up (to rounding). Parts 8 and 9 are worth almost nothing to the score. Part 8 is a handful of checks. Part 9 hides nearly all burned-in text but costs about as much as it wins (see part 9). Both runs export uncompressed ([part 10](#10-export-uncompressed)).
 
-The default configuration is what Isocenter's scaffold writes. It is the DICOM PS3.15 Annex E Basic Profile (`basic@2026c`, edition 2026c), with Study Date shifted per patient, and with sex and age kept. Every private element is removed (`remove_private_tags: true`).
+The default configuration is what Isocenter's scaffold writes. It is the DICOM PS3.15 Annex E Basic Profile (`basic@2026c`, edition 2026c), with Study Date shifted per patient, and with sex and age kept. It also removes every private element (`remove_private_tags: true`).
 
 ## The configuration, part by part
 
