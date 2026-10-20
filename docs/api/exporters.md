@@ -13,7 +13,8 @@ should pin `isocenter>=1.0,<1.1`.
 
 `session.export(folder, format=...)` finds the exporter registered for
 `format` in this registry, and calls it. The two built-in formats, `dicom` and
-`wfdb`, register themselves when `isocenter` is imported. Anything else
+`wfdb`, register themselves when `isocenter.exporters` is imported, which
+`session.export()` does. Anything else
 can be registered too:
 
 ```python

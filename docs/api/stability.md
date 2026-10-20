@@ -548,10 +548,9 @@ unless its entry says otherwise.
   `lock_identities()` that writes a token creates the key, exclusively
   and with mode 0600. A lock that writes no token (a refusal, or no
   patient found, or none with an instance) creates no key file (#813).
-  When no key file exists and the session holds an identity token that
-  this library wrote, no new key could open that token. In that case,
-  `enable_reversible_anonymization()` raises `RuntimeError` and creates
-  no key file.
+  When no key file exists and the session holds an identity token this
+  library wrote, which no new key could open, it raises `RuntimeError`
+  and creates none.
 - `lock_identities()` refusals name no patient. A batch refusal numbers
   each refused patient by its place among the patients found, in
   Patient ID order. A patient is refused when any of its instances
