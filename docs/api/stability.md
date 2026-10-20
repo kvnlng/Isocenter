@@ -207,8 +207,8 @@ reach every patient.
 
 **`Session` attributes.** `store` (a `DicomStore` whose `.patients` is
 the `List[Patient]` the quickstart indexes), `configuration` (an
-`IsocenterConfiguration`), `persistence_file`. When two patients end up
-with the same Patient ID, `audit()`, `anonymize()` and
+`IsocenterConfiguration`), `persistence_file`. When two patients get the
+same Patient ID, `audit()`, `anonymize()` and
 `recover_patient_identity()` merge them into the one that was in the
 session first. They remove the other from `store.patients`. `audit()`
 runs inside `export(check_burned_in=True)`, so that call merges too.
@@ -520,15 +520,15 @@ unless its entry says otherwise.
 - `load_config(config_file)` and `audit(config_path=)`: `ValueError`
   when the file fails validation, and `FileNotFoundError` when the file
   does not exist. After either, the configuration is exactly what it
-  was. The file fails validation on any of these
-  ([Configuration](../configuration.md) lists them):
+  was. The file fails validation on any of these:
   - its extension, YAML syntax or shape
   - a `version` this library does not read
   - a key the schema does not have
   - a value of the wrong type
   - an unknown `privacy_profile` (including an edition this version does
     not ship) or `action`
-  - a rule Isocenter cannot honour
+  - a rule Isocenter cannot honour ([Configuration](../configuration.md)
+    lists them)
 
   `audit()` without `config_path` raises the same `ValueError` for such
   a rule in `session.configuration.phi_tags`. Both are raised before a
@@ -582,8 +582,9 @@ floor is reported and replaced by the default.
 - A store written by 1.0 opens under every 1.x. The sidecar and schema
   *layout* are not frozen. Their forward compatibility is frozen.
 - Every 1.x can recover a DICOM file that 1.0 exported with reversible
-  anonymization, given the file's key. Two things are frozen. The first
-  is the Encrypted Attributes Sequence `(0400,0500)`. Its item carries
+  anonymization, given the project's key file. Two things are frozen.
+  The first is the Encrypted Attributes Sequence `(0400,0500)`. Its item
+  carries
   the identity token in Encrypted Content `(0400,0520)` (OB) and
   `1.2.840.10008.1.2` in Encrypted Content Transfer Syntax UID
   `(0400,0510)` (UI), as PS3.6 lays the item out. The second is the key
@@ -747,17 +748,18 @@ spellings.
   `phi_status_policy`, `mark_modified()`, `mark_persisted()`,
   `mark_subtree_persisted()` and `record_phi_status()`. `PhiStatus` is
   tier 2 too. So is `ScanPolicy`, the policy a status was recorded
-  under, which the store keeps beside it. On `DicomItem`:
-  `add_sequence()`, `add_sequence_item()` and `record_attr_vr()`.
-  `DicomSequence` is tier 2 too. On `Instance`: `regenerate_uid()`,
-  `get_waveform_bytes()`, `unload_waveform_data()`, `pixel_array` and
-  `waveform_array`. On `Equipment`: `from_parts()`.
+  under, which the store keeps beside it. So are
+  `DicomItem.add_sequence()`, `add_sequence_item()` and
+  `record_attr_vr()`, and `DicomSequence`. So are
+  `Instance.regenerate_uid()`, `get_waveform_bytes()`,
+  `unload_waveform_data()`, `pixel_array` and `waveform_array`, and
+  `Equipment.from_parts()`.
 - **The recording helpers** that the scan, remediation and the
-  reversible lock call on an entity. On `Instance`:
-  `record_remediation()`, `remediation_vouches_for()`,
-  `record_identity_token()` and `identity_token_is_this_stores()`. On
-  `DicomItem`: `record_date_shift()`, `date_shift_vouches_for()` and
-  `clear_sequence_items()`. On `Study`: its own `record_date_shift()`
+  reversible lock call on an entity. They are
+  `Instance.record_remediation()`, `remediation_vouches_for()`,
+  `record_identity_token()` and `identity_token_is_this_stores()`. They
+  are also `DicomItem.record_date_shift()`, `date_shift_vouches_for()`
+  and `clear_sequence_items()`, and `Study`'s own `record_date_shift()`
   and `date_shift_vouches_for()`. Every other public name on a class
   that tier 1 names is listed on this page, in one tier or the other.
 - **`DicomStore`'s methods** `get_unique_equipment()`,
