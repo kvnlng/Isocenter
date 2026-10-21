@@ -116,18 +116,18 @@ def _python_value(value):
 def normalize_study_date(value):
     """The one spelling of "text that names a day becomes a `date`".
 
-    Reads the extended form `2024-01-15`, which the store writes, and the
-    DICOM basic form `20240115`, which a hand-built graph or a
-    `DicomBuilder.add_study` call supplies. `Study` applies the same rule
+    It reads the extended form `2024-01-15`, which the store writes. It
+    also reads the DICOM basic form `20240115`, which a hand-built graph or
+    a `DicomBuilder.add_study` call supplies. `Study` applies the same rule
     when `study_date` is assigned.
 
     Args:
         value (Any): A date string, a `date`, or None.
 
     Returns:
-        Any: The `date` it names; None for None; anything it cannot read
-        comes back exactly as it was given, neither invented nor
-        discarded.
+        Any: The `date` that it names, or None for None. Anything that it
+        cannot read comes back exactly as it was given, neither invented
+        nor discarded.
     """
     if value is None:
         return None
@@ -141,10 +141,10 @@ def normalize_study_date(value):
 #: was ingested under, before UID replacement or redaction first moved it
 #: (`Instance._take_sop_uid`).
 #:
-#: Assigned into `attributes` **directly**, never through `set_attr` --
+#: It is assigned into `attributes` **directly**, never through `set_attr`.
 #: `set_attr` runs the key through `_canonical_tag`, which lowercases it,
-#: and every reader spells it upper-case. `_ISOCENTER_REDACTION_HASH` is
-#: written the same way in `services.py` for the same reason.
+#: and every reader spells it upper-case. `services.py` writes
+#: `_ISOCENTER_REDACTION_HASH` the same way, for the same reason.
 SOURCE_SOP_UID_ATTR = "_ISOCENTER_SOURCE_SOP_UID"
 
 
@@ -164,23 +164,23 @@ class DicomSequence:
 class PhiStatus(Enum):
     """What the last scan concluded about an entity, and when.
 
-    A different question from `has_unsaved_changes`, which is persistence
-    bookkeeping.
+    It answers a different question from `has_unsaved_changes`, which is
+    persistence bookkeeping.
 
-    A status is only valid for the revision it was computed at. Edit the
-    entity and it reads UNSCANNED, because a conclusion about earlier content
-    says nothing about the current content.
+    A status is only valid for the revision that it was computed at. After
+    an edit to the entity, the status reads UNSCANNED, because a conclusion
+    about earlier content says nothing about the current content.
 
-    **One exception: pixel redaction.** Redaction re-records an instance's
-    REMEDIATED, CLEARED or IDENTIFIED after its own writes, when it was
-    current before them (#896). The pixels, their
-    descriptors, the new SOP Instance UID and its bookkeeping are left out
-    of the comparison; the flags it writes (ImageType, BurnedInAnnotation,
-    DerivationDescription, the Derivation Code Sequence) are accepted only
-    as they were or at exactly what redaction writes. Every other attribute
-    and nested item must be exactly as before the pass; if anything else
-    changed, the status is left UNSCANNED. So the anonymize, redact, export
-    order keeps the redacted instances' statuses.
+    **One exception: pixel redaction.** Redaction records an instance's
+    REMEDIATED, CLEARED or IDENTIFIED again after its own writes, when that
+    status was current before them (#896). The comparison leaves out the
+    pixels, their descriptors, the new SOP Instance UID and its bookkeeping.
+    It accepts the flags that redaction writes (ImageType, BurnedInAnnotation,
+    DerivationDescription, the Derivation Code Sequence) only as they were or
+    at exactly what redaction writes. Every other attribute and nested item
+    must be exactly as before the pass. If anything else changed, the status
+    is left UNSCANNED. So the anonymize, redact, export order keeps the
+    redacted instances' statuses.
 
     Attributes:
         UNSCANNED: Never inspected, or inspected before the entity's
@@ -202,9 +202,9 @@ class PhiStatus(Enum):
     #: Identifiers were found and remediation was applied.
     REMEDIATED = "remediated"
 
-    #: The scan found no identifiers. This means the configured *tag* scan
-    #: found nothing -- not that burned-in pixel text was checked, which is
-    #: a separate scan, and not that the entity is approved for release.
+    #: The scan found no identifiers. It means that the configured *tag* scan
+    #: found nothing. It does not mean that burned-in pixel text was checked,
+    #: which is a separate scan, or that the entity is approved for release.
     CLEARED = "cleared"
 
 
@@ -217,20 +217,20 @@ class ScanPolicy:
     store scanned under one configuration and exported under another says
     so.
 
-    `fingerprint` decides whether two policies are the same: `"v1:"` and
-    the sha256 of the policy's canonical form, which covers what a scan
+    `fingerprint` decides whether two policies are the same. It is `"v1:"`
+    and the sha256 of the policy's canonical form, which covers what a scan
     reads: every rule key but `name`, `remove_private_tags` and the
     configuration version. `base` is what a person reads: `basic@2026c`,
     `floor over basic@2026c`, `none`, or an external profile's path. Two
-    policies with one fingerprint and different bases scan identically (a
-    scaffold and the bare floor, say), so compare fingerprints, never
+    policies with one fingerprint and different bases scan identically (for
+    example, a scaffold and the bare floor). So compare fingerprints, never
     bases.
 
-    Frozen, so a slot holding one is replaced whole, and compared by value,
-    so each audit's fresh object equals the last one's.
+    It is frozen, so a slot that holds one is replaced whole. It is compared
+    by value, so each audit's fresh object equals the last one's.
 
     Attributes:
-        fingerprint (str): `"v1:"` and a sha256 hex digest; equal
+        fingerprint (str): `"v1:"` and a sha256 hex digest. Equal
             fingerprints scan identically.
         base (str): The profile the policy was built on, for a reader.
     """
@@ -272,11 +272,11 @@ class TrackedEntity:
     """Tracks whether an entity holds changes the session store does not have.
 
     This is persistence bookkeeping and nothing else. It says whether the
-    object in memory has been written to the session store -- not whether
-    it still carries identifiers, which is a separate question with its
-    own vocabulary (`phi_status`).
+    object in memory has been written to the session store. It does not
+    say whether the object still carries identifiers, which is a separate
+    question with its own vocabulary (`phi_status`).
 
-    State is read through `has_unsaved_changes` and moved through
+    Read the state through `has_unsaved_changes`, and move it through
     `mark_modified()` and `mark_persisted()`. There is no setter: an entity
     can be told what happened to it, but not told what it is.
     """
@@ -333,12 +333,12 @@ class TrackedEntity:
     def phi_status(self) -> 'PhiStatus':
         """What the last scan concluded, if it still applies.
 
-        UNSCANNED once the entity has changed since the scan ran: no status can
-        describe content the entity no longer holds. A status is recorded under
-        a policy, which `phi_status_policy` names; this reads the status as
-        recorded and never consults the policy in force. A nested `DicomItem`
-        takes a status from remediation only (`audit()` records none on it),
-        and the store keeps it across a reopen.
+        It reads UNSCANNED once the entity has changed since the scan ran, because no
+        status can describe content that the entity no longer holds. A status is
+        recorded under a policy, which `phi_status_policy` names. This property reads
+        the status as recorded and never consults the policy in force. A nested
+        `DicomItem` takes a status from remediation only (`audit()` records none on
+        it), and the store keeps that status across a reopen.
         """
         return self._phi_status_record()[0]
 
@@ -346,9 +346,9 @@ class TrackedEntity:
     def phi_status_policy(self) -> Optional['ScanPolicy']:
         """The `ScanPolicy` the current `phi_status` was recorded under.
 
-        None when the status is UNSCANNED, when it was recorded by a store
-        written before 1.0, and on a nested item, which is never scanned. Stale
-        exactly when the status is, by the same revision check.
+        It is None when the status is UNSCANNED, when the status was recorded
+        by a store written before 1.0, and on a nested item, which is never
+        scanned. It is stale exactly when the status is, by the same revision check.
         """
         return self._phi_status_record()[1]
 
@@ -377,29 +377,29 @@ class TrackedEntity:
     def record_phi_status(self, status: 'PhiStatus', policy=_KEEP):
         """Records what a scan concluded about this entity's current state.
 
-        Call this *after* any change the status describes: remediation modifies
-        the entity, so recording REMEDIATED first would stamp a revision the
-        entity immediately leaves behind.
+        Call this *after* any change that the status describes. Remediation
+        changes the entity, so a REMEDIATED recorded first would stamp a
+        revision that the entity leaves behind at once.
 
         A new status, or the same status under a different policy (compared
         by value), advances the revision and leaves the entity with unsaved
-        changes. Recording the status an entity already carries, under the
-        same policy, changes nothing. So an entity loaded at REMEDIATED and
-        remediated again records nothing here, and the remediation must call
-        `mark_modified()` itself for the next save to write it.
+        changes. A call with the status that the entity already carries, under
+        the same policy, changes nothing. So an entity loaded at REMEDIATED and
+        remediated again records nothing here. The remediation must then call
+        `mark_modified()` itself, so that the next save writes the entity.
 
         Args:
             status (PhiStatus): What the scan concluded.
-            policy (Optional[ScanPolicy]): The policy the status is recorded
-                under; omit to keep the policy already recorded, even when
-                that status has gone stale. `None` is a value, not an
-                omission: it records "no policy". The default is a private
-                sentinel because `None` is taken (#815). Five callers pass
-                one: a scan, hydration, the patient merge, a pass that
+            policy (Optional[ScanPolicy]): The policy that the status is
+                recorded under. Omit it to keep the policy already recorded,
+                even when that status has gone stale. `None` is a value, not
+                an omission: it records "no policy". The default is a private
+                sentinel because `None` is taken (#815). Five callers pass a
+                policy: a scan, hydration, the patient merge, a pass that
                 settles its statuses against a report carried from another
-                session, which records the report's policy, and a pass that
-                puts back the status of an entity already stale when it
-                began (`Session._keep_stale`, #752).
+                session (which records the report's policy), and a pass that
+                puts back the status of an entity that was already stale when
+                the pass began (`Session._keep_stale`, #752).
         """
         if policy is _KEEP:
             policy = self._phi_status_policy
@@ -415,10 +415,10 @@ class TrackedEntity:
     def mark_subtree_persisted(self):
         """Marks this entity and everything beneath it as stored.
 
-        For hydration only, where a whole graph comes from the store and
-        the claim is true of every node at once. After committing a single
-        row, call `mark_persisted()` instead: it speaks for one entity and
-        does not vouch for unsaved siblings.
+        Use it for hydration only, where a whole graph comes from the store
+        and the claim is true of every node at once. After you commit a
+        single row, call `mark_persisted()` instead: it speaks for one entity
+        and does not vouch for unsaved siblings.
         """
         self._persisted_revision = self._revision
 
@@ -428,7 +428,7 @@ class DicomItem(TrackedEntity):
     """
     Base class for any entity that holds DICOM attributes and sequences.
 
-    This class provides a dictionary-like interface for managing DICOM attributes.
+    This class gives a dictionary-like interface to manage DICOM attributes.
     Persistence state comes from TrackedEntity. Items nested in
     sequences are not stored separately, so the subtree form below reaches
     them.
@@ -500,9 +500,9 @@ class DicomItem(TrackedEntity):
         canonicalised as `set_attr` canonicalises it, so a record made under
         `0008,103E` vouches for `0008,103e`.
 
-        Does not call `mark_modified()`: call this immediately before the
-        `set_attr` that writes the value, which advances the revision for
-        both.
+        It does not call `mark_modified()`. Call it immediately before the
+        `set_attr` that writes the value, because that `set_attr` advances
+        the revision for both.
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
@@ -534,21 +534,21 @@ class DicomItem(TrackedEntity):
         Sets a generic attribute by its hex tag (e.g., '0010,0010').
 
         The tag is lowercased first, so `0008,103E` and `0008,103e` name
-        one attribute: ingested keys are always lowercase, and a key in
+        one attribute. Ingested keys are always lowercase, and a key in
         another casing would read as absent rather than raise.
 
-        The value is stored as the object given, with one exception: a
-        numpy bool, integer or float, and a `list` or `tuple` directly holding
-        one, is stored as the Python number it equals (`np.int64(7)` as the
-        `int` 7; a list as a new list), so a live export writes what a
-        reopened session writes. An array of one or more dimensions is not
-        converted: pass its numbers as a list, or its bytes.
+        The value is stored as the object given, with one exception. A numpy
+        bool, integer or float is stored as the Python number it equals
+        (`np.int64(7)` as the `int` 7). A `list` or `tuple` that directly holds
+        one is stored as a new list, with each such number replaced. So a live
+        export writes what a reopened session writes. An array of one or more
+        dimensions is not converted: pass its numbers as a list, or its bytes.
 
         Nothing is refused here. The store holds `None`, `str`, `bytes`,
         `bool`, `int`, `float`, pydicom's DS and IS values, and lists of
-        those; for any other value the next `save(sync=True)`, `export()`
-        or `compact()` raises `TypeError` naming the instance, the tag and
-        the type.
+        those. For any other value, the next `save(sync=True)`, `export()`
+        or `compact()` raises a `TypeError` that names the instance, the tag
+        and the type.
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
@@ -574,16 +574,16 @@ class DicomItem(TrackedEntity):
         """Remembers the Value Representation a private tag arrived with.
 
         The data dictionary has no entry for an odd-group tag, so this is
-        where the source file's VR is kept, and the DICOM export writes the
-        tag under it rather than guessing one from the value's Python type.
+        where the source file's VR is kept. The DICOM export writes the tag
+        under that VR, and does not guess one from the value's Python type.
 
         **Odd group only, and never** `UN`. An even-group tag takes its VR from
         the dictionary. `UN` is the absence of an answer, so it is not
-        recorded; an Implicit VR source, whose private elements all arrive
+        recorded. An Implicit VR source, whose private elements all arrive
         `UN`, records nothing.
 
-        Records what an existing value already was, so it does not call
-        `mark_modified()`: `set_attr` has already advanced the revision.
+        It records what an existing value already was, so it does not call
+        `mark_modified()`. `set_attr` already advanced the revision.
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
@@ -594,11 +594,11 @@ class DicomItem(TrackedEntity):
     def add_sequence(self, tag: str) -> 'DicomSequence':
         """The sequence at `tag`, created empty if it is not there yet.
 
-        A sequence with no items is kept as one: ingest and hydration call
-        this before adding items, so a zero-item `SQ` survives both.
+        A sequence with no items is kept as one. Ingest and hydration call
+        this before they add items, so a zero-item `SQ` survives both.
 
-        Calls `mark_modified()` **only when it creates** the sequence. A call on
-        a tag that already has one changes nothing the store must hold.
+        It calls `mark_modified()` **only when it creates** the sequence. A call
+        on a tag that already has one changes nothing that the store must hold.
 
         Args:
             tag (str): The DICOM tag for the sequence. Case-insensitive.
@@ -634,10 +634,10 @@ class DicomItem(TrackedEntity):
     def clear_sequence_items(self, tag: str) -> bool:
         """Empties the sequence at `tag` to zero items, keeping it present.
 
-        What an `EMPTY` rule on a sequence does: a zero-item sequence is how a
-        Type 2 sequence carries no value. Calls `mark_modified()` only when
-        items were removed, so clearing an empty or absent sequence changes
-        nothing the store must hold.
+        This is what an `EMPTY` rule on a sequence does, because a zero-item
+        sequence is how a Type 2 sequence carries no value. It calls
+        `mark_modified()` only when items were removed. So a call on an empty
+        or absent sequence changes nothing that the store must hold.
 
         Args:
             tag (str): The DICOM tag for the sequence. Case-insensitive.
@@ -682,11 +682,11 @@ class DicomItem(TrackedEntity):
     def mark_modified(self):
         """Records that this item changed, and so the instance holding it.
 
-        Advances this item's revision and the root instance's, never the
-        items between. Every mutator (`set_attr`, `add_sequence`,
-        `add_sequence_item`, `clear_sequence_items`) comes through here; a
-        status recorded on an item with `record_phi_status` does not, and
-        is not a change to its instance.
+        It advances the revision of this item and of the root instance, never
+        the revisions of the items between. Every mutator (`set_attr`,
+        `add_sequence`, `add_sequence_item`, `clear_sequence_items`) comes
+        through here. A status recorded on an item with `record_phi_status`
+        does not come through here, and is not a change to its instance.
         """
         # An item is stored inside its instance's row, and the instance's
         # status says whether a scan read it, so the root must move. The
@@ -705,7 +705,8 @@ class DicomItem(TrackedEntity):
 class Equipment:
     """
     Immutable Equipment definition.
-    Frozen=True allows hashing, enabling unique set generation.
+    It is frozen, so it can be hashed, and sets of unique equipment can be
+    built from it.
 
     Attributes:
         manufacturer (str): The manufacturer of the equipment.
@@ -723,14 +724,16 @@ class Equipment:
 
         A series has equipment if and only if it has a manufacturer, a model
         name or a Device Serial Number. A serial alone is equipment (review
-        of #1111, owner ruling of 2026-10-14): every machine rule matches on
-        the serial, and a series holding one with no equipment was reached
-        by no exact rule, and by `serial_number: ""` though it has a serial.
-        A store saved before that held such a series with no equipment and
-        wrote `""` for its serial, so it reloads as a series with no serial.
+        of #1111, owner ruling of 2026-10-14). Every `serial_number` rule
+        matches on the serial. A series that held a serial but no equipment
+        was reached by no exact rule, and was reached by `serial_number: ""`
+        although it had a serial. A store saved before that ruling held such
+        a series with no equipment and wrote `""` for its serial. So that
+        series reloads as a series with no serial.
 
-        Positional, in field order, all three required. **No normalisation:**
-        `None` stays `None`, so `from_parts("ACME", None, None)` equals
+        The arguments are positional, in field order, and all three are
+        required. **No normalisation:** `None` stays `None`, so
+        `from_parts("ACME", None, None)` equals
         `Equipment("ACME", None, None)`.
 
         Args:
@@ -753,14 +756,14 @@ class Equipment:
 def iter_item_tree(item: 'DicomItem', path: tuple = ()):
     """Yields `(item, path)` for `item` and every item nested below it.
 
-    Depth-first, and in declaration order, so two copies of the same graph
-    are walked identically. A path matches a sequence item back to the same
-    item in another copy of the graph: nested items carry no UID, so
-    position is their only identity.
+    The walk is depth-first and in declaration order, so two copies of the
+    same graph are walked identically. A path matches a sequence item back
+    to the same item in another copy of the graph. Nested items carry no
+    UID, so position is their only identity.
 
     Args:
         item (DicomItem): The root of the walk.
-        path (tuple): The root's own path; `()` for a top-level walk.
+        path (tuple): The root's own path, or `()` for a top-level walk.
 
     Yields:
         tuple: `(DicomItem, path)`, where `path` is a tuple of
@@ -777,13 +780,13 @@ def resolve_item_path(root: 'DicomItem', path: tuple) -> Optional['DicomItem']:
     """Follows a path from `iter_item_tree` back to an item, or None.
 
     The caller must treat None as "this item is gone", never as "use the
-    root instead": writing a nested tag onto the root fabricates a
+    root instead". A nested tag written onto the root fabricates a
     top-level element that was never in the file, and leaves the real value
     in place.
 
     Args:
         root (DicomItem): The item the path starts from.
-        path (tuple): `(sequence_tag, index)` steps; empty or None for the
+        path (tuple): `(sequence_tag, index)` steps. Empty or None means the
             root itself.
 
     Returns:
@@ -805,7 +808,7 @@ def clone_sequences(item: 'DicomItem', into: 'DicomItem') -> dict:
 
     Each copied item carries its attributes and its date-shift record, and
     is linked to its copied container as its parent. A worker's copy shares
-    no sequence item with the session; match items between copies by the
+    no sequence item with the session. Match items between copies by the
     `iter_item_tree` path, not by identity.
 
     Args:
@@ -1314,12 +1317,12 @@ class Instance(DicomItem):
         sop_instance_uid (str): SOP Instance UID (0008,0018). `anonymize()`
             and `redact()` can replace it.
         sop_class_uid (str): SOP Class UID (0008,0016).
-        instance_number (int): Instance Number (0020,0013). Not unique
-            within a series. 0 for an ingested file that has none, and
-            `0020,0013` is then absent from `attributes` (#870).
+        instance_number (int): Instance Number (0020,0013). It is not
+            unique within a series. It is 0 for an ingested file that has
+            none, and `0020,0013` is then absent from `attributes` (#870).
         file_path (Optional[str]): A file whose pixels match this instance
-            now, read when the store holds no frame for it. None after
-            redaction.
+            now. It is read when the store holds no frame for the instance.
+            It is None after redaction.
         source_path (Optional[str]): The file this instance was read from.
             Redaction does not change it.
         pixel_array (Optional[np.ndarray]): The pixels while resident, else
@@ -1524,8 +1527,8 @@ class Instance(DicomItem):
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
-            value (Any): The value the remediation is about to write; None
-                when it is about to remove the tag.
+            value (Any): The value that the remediation is about to write,
+                or None when it is about to remove the tag.
         """
         # Before the write, not after: a record stored without its value is
         # harmless (it is keyed on the value), while a value stored without
@@ -1589,12 +1592,13 @@ class Instance(DicomItem):
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
-            value (Any): The value the tag holds now; None when absent.
+            value (Any): The value that the tag holds now, or None when the
+                tag is absent.
 
         Returns:
             bool: For a non-blank value, whether a remediation wrote exactly
-            that value; for a blank value or None, whether one emptied
-            or removed the tag.
+            that value. For a blank value or None, whether a remediation
+            emptied or removed the tag.
         """
         tag = _canonical_tag(tag)
         recorded = self._as_recorded(value)
@@ -1631,16 +1635,19 @@ class Instance(DicomItem):
     def regenerate_uid(self, new_uid: str):
         """Gives this instance the SOP Instance UID its redacted pixels take.
 
-        Call this whenever pixel data is modified, so the changed image is never
-        mistaken for the original. `new_uid` is **required**: the redaction pass
-        derives it from the source SOP Instance UID, the redaction's zones and
-        the project secret, so the same redaction gives the same UID, and no
-        worker process holds the secret.
+        Call this whenever the pixel data changes, so that the changed image
+        is never mistaken for the original. `new_uid` is **required**. The
+        redaction pass derives it from the source SOP Instance UID, the
+        redaction's zones and the project secret. So the same redaction gives
+        the same UID, and no worker process holds the secret.
 
-        Sets the property and the `0008,0018` element together, records the
-        UID the instance held before in `SOURCE_SOP_UID_ATTR` the first time
-        its UID moves, and detaches the instance from its source file
-        (`file_path = None`), whose pixels it no longer matches.
+        This method does three things:
+
+        - It sets the property and the `0008,0018` element together.
+        - The first time the instance's UID moves, it records the UID that
+          the instance held before in `SOURCE_SOP_UID_ATTR`.
+        - It detaches the instance from its source file (`file_path = None`),
+          because the instance no longer matches that file's pixels.
 
         Args:
             new_uid (str): The derived SOP Instance UID.
@@ -1740,51 +1747,54 @@ class Instance(DicomItem):
         """
         Sets an attribute, and keeps resident pixels reading as it declares.
 
-        Every tag is written as `DicomItem.set_attr` writes it. An edit to
-        a descriptor a frame is read by (Rows, Columns, SamplesPerPixel,
-        NumberOfFrames, BitsAllocated, PixelRepresentation) while pixels
-        are resident also settles the resident array, because a save writes
-        the array's bytes and every later read takes them under the edit.
-        **The declaration wins:**
+        Every tag is written as `DicomItem.set_attr` writes it. Some
+        descriptors control how a frame is read: Rows, Columns,
+        SamplesPerPixel, NumberOfFrames, BitsAllocated and
+        PixelRepresentation. An edit to one of them while pixels are
+        resident also settles the resident array. This is because a save
+        writes the array's bytes, and every later read takes those bytes
+        under the edit. **The declaration wins:**
 
         - An edit under which the bytes read as they read now (the same
           dtype and shape) is a plain write.
-        - An array a save has written is released after the write, so the
-          next read rebuilds it from the store under the edit, or, for an
-          instance read from its source file, from the file, under the edit
-          too. Its bytes are stored; nothing is lost. A memory-only array
-          has nowhere to be reloaded from and stays, as
-          `unload_pixel_data` refuses to drop it.
+        - An array that a save wrote is released after the write. The next
+          read then rebuilds it under the edit: from the store, or from the
+          source file for an instance read from its source file. Its bytes
+          are stored, so nothing is lost. A memory-only array has nowhere to
+          be reloaded from, so it stays, as `unload_pixel_data` refuses to
+          drop it.
         - An array set through `set_pixel_data()` and not yet written is
-          republished as the edit reads its bytes: a view under the new
-          dtype, in the new shape, published together with the write, so no
-          read sees the new declaration beside the old array. It stays
-          unwritten, and `discard_pixel_data()` still restores what the set
-          replaced.
+          published again as the edit reads its bytes. That is a view under
+          the new dtype, in the new shape, published together with the
+          write, so no read sees the new declaration beside the old array.
+          The array stays unwritten, and `discard_pixel_data()` still
+          restores what the set replaced.
 
-        Each edit is judged alone. Changing a geometry in two steps whose
-        end state the bytes fit (BitsAllocated 8, then Columns 8, over a
-        4x4 uint16 set) is refused at the first step; set the array you mean
-        instead, which writes its own descriptors.
+        Each edit is judged alone. Suppose that you change a geometry in two
+        steps, and the bytes fit the end state (BitsAllocated 8, then
+        Columns 8, over a 4x4 uint16 set). Then the first step is refused.
+        Instead, set the array that you mean, which writes its own
+        descriptors.
 
         A read in flight when the edit lands is not published under the old
-        declaration: it reads again under the new descriptors.
+        declaration. It reads again under the new descriptors.
 
         Args:
             tag (str): The DICOM tag string. Case-insensitive.
             value (Any): The value to set.
 
         Raises:
-            ValueError: If the edit is to a described tag, the resident
-                array was set through `set_pixel_data()` and not written
-                since, and the edit reads its bytes as a different number
-                of bytes, or does not parse as an integer: "BitsAllocated
+            ValueError: If all of these are true: the edit is to a described
+                tag, the resident array was set through `set_pixel_data()`
+                and not written since, and the edit reads its bytes as a
+                different number of bytes or does not parse as an integer.
+                The message reads, for example: "BitsAllocated
                 would read the unsaved uint16 (4, 4) array set by
                 set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and
                 the array holds 32. Pass the array you mean to
                 set_pixel_data(), which writes its own descriptors." The
-                value is never in the message. Raised before anything is
-                written: the attribute and the revision are unchanged.
+                value is never in the message. It is raised before anything
+                is written, so the attribute and the revision are unchanged.
         """
         tag = _canonical_tag(tag)
         # Converted once, here (#926): the descriptor arm below judges the
@@ -1858,22 +1868,23 @@ class Instance(DicomItem):
         """
         Frees the cached pixel_array, but only when it can be brought back.
 
-        Two things have to be true: there must be somewhere to reload from
-        (the source file, or the store's sidecar), **and** the resident
-        array must not have been replaced through `set_pixel_data()` since
-        it was last written. Otherwise the array is the only copy of those
-        pixels, and it is kept.
+        Two things must both be true:
 
-        An array mutated **in place** is not detected. Only a writeable
-        array can be mutated in place, and a frame read from a file or from
-        the store is read-only (assigning into it raises). The reachable
-        case is a replacement a save has since written: that array is
-        writeable, so `arr = inst.get_pixel_data(); arr[...] = 0` on it
-        diverges from the stored frame, and unloading it then drops the
-        mutation.
+        - There is somewhere to reload from (the source file, or the
+          store's sidecar).
+        - The resident array was not replaced through `set_pixel_data()`
+          since it was last written.
 
-        Use `discard_pixel_data()` where dropping unsaved pixels is the
-        intent.
+        Otherwise the array is the only copy of those pixels, and it is kept.
+
+        An array changed **in place** is not detected. Only a writeable
+        array can be changed in place, and a frame read from a file or from
+        the store is read-only (an assignment into it raises). The case that
+        can occur is a replacement that a save has since written. That array
+        is writeable, so `arr = inst.get_pixel_data(); arr[...] = 0` on it
+        diverges from the stored frame, and an unload then drops the change.
+
+        Use `discard_pixel_data()` when you mean to drop unsaved pixels.
 
         Returns:
             bool: True if unloaded (or already absent), False if it was
@@ -1907,27 +1918,28 @@ class Instance(DicomItem):
         """
         Frees the cached pixel_array even if it has unwritten changes.
 
-        For a caller who means to throw the resident array away, so that
-        the next `get_pixel_data()` reloads the stored frame, read under the
+        Use it to throw the resident array away, so that the next
+        `get_pixel_data()` reloads the stored frame, read under the
         instance's current descriptors.
 
-        **It undoes the whole** `set_pixel_data()` **it discards**: the pixels,
-        and every descriptor that call wrote (Rows, Columns,
+        **It undoes the whole** `set_pixel_data()` **it discards**. The pixels
+        go back to what they were before the first unwritten replacement. So
+        does every descriptor that call wrote (Rows, Columns,
         SamplesPerPixel, NumberOfFrames, PhotometricInterpretation,
         PlanarConfiguration, BitsAllocated, PixelRepresentation and the
-        float/bool dtype carrier), go back to what they were before the
-        first unwritten replacement, absent ones included. A pixel
-        descriptor edited between the set and the discard goes back with
-        them: while the replacement is resident, that edit describes the
+        float/bool dtype carrier), absent ones included. A pixel descriptor
+        edited between the set and the discard goes back with them, because
+        while the replacement is resident, that edit describes the
         replacement. So the next read is the stored frame as it was stored.
-        Once the replacement is written (by a save or by redaction) it *is*
-        the stored frame, and there is nothing to undo: the array is
-        dropped and the descriptors, which describe it, stay. A refusal
-        (below) keeps both the array and the descriptors that describe it.
-        Dropping an unwritten replacement leaves the instance dirty, as the
-        set did.
 
-        `unload_pixel_data()` answers "free this if it is safe"; this
+        Once the replacement is written (by a save or by redaction), it *is*
+        the stored frame, and there is nothing to undo. The array is
+        dropped, and the descriptors, which describe it, stay. A refusal
+        (below) keeps both the array and the descriptors that describe it.
+        A discard of an unwritten replacement leaves the instance dirty, as
+        the set did.
+
+        `unload_pixel_data()` answers "free this if it is safe". This method
         answers "throw this away".
 
         Returns:
@@ -2006,57 +2018,62 @@ class Instance(DicomItem):
 
         1. Returns the cached `pixel_array`.
         2. Loads the frame from the store's sidecar, if it holds one.
-        3. Reads `file_path` with the decode `ingest()` uses: pydicom,
-           then imagecodecs where pydicom has no plugin. A file ingest
-           refuses is refused here, in the same words. The decoded
-           samples are read under the instance's pixel descriptors where
-           it holds them, as the sidecar's are: the file supplies the
-           samples and any descriptor the instance lacks.
+        3. Reads `file_path` with the decode that `ingest()` uses: pydicom,
+           then imagecodecs where pydicom has no plugin. A file that ingest
+           refuses is refused here, in the same words. The decoded samples
+           are read under the instance's pixel descriptors where the
+           instance holds them, as the sidecar's samples are. The file
+           supplies the samples and any descriptor that the instance lacks.
 
         A read whose decoder returns RGB from a YBR-labelled file says so.
-        An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs
-        fallback comes back converted to RGB, as `ingest()` stores it. So
-        does a JPEG 2000 `YBR_RCT`/`YBR_ICT` file, whose codec undoes the
-        colour transform, and any 8-bit YBR source pydicom decodes, which it
-        returns as RGB by default. An instance that carries a
-        PhotometricInterpretation is relabelled `RGB` to match, which
-        advances its revision. This is the one write a read makes, and it is
-        made only when the decode converted.
+        These sources come back converted to RGB:
+
+        - an 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs
+          fallback, as `ingest()` stores it
+        - a JPEG 2000 `YBR_RCT`/`YBR_ICT` file, whose codec undoes the
+          colour transform
+        - any 8-bit YBR source that pydicom decodes, which pydicom returns
+          as RGB by default
+
+        An instance that carries a PhotometricInterpretation is then
+        relabelled `RGB` to match, and that advances its revision. This is
+        the one write that a read makes, and it is made only when the decode
+        converted.
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-            when the instance carries no pixel element. From a file,
-            that is decided by the dataset alone: None when it was
-            read and holds none of Pixel Data (7FE0,0010), Float
+            when the instance carries no pixel element. From a file, the
+            dataset alone decides that. The result is None when the file
+            was read and holds none of Pixel Data (7FE0,0010), Float
             Pixel Data (7FE0,0008) and Double Float Pixel Data
-            (7FE0,0009), whatever its transfer syntax, and never
+            (7FE0,0009), whatever its transfer syntax. It is never None
             because of what a failure's message says. A frame that
-            could not be decoded is not None: it raises. So does a
-            file with no pixel element whose pixels are elsewhere,
-            where pydicom has no decoder for its transfer syntax:
-            one that holds Pixel Data Provider URL (0028,7FE0)
-            at the top level, or
-            is under a JPIP Referenced syntax.
+            could not be decoded is not None: it raises. A file with no
+            pixel element whose pixels are elsewhere also raises, when
+            pydicom has no decoder for its transfer syntax. Such a file
+            holds Pixel Data Provider URL (0028,7FE0) at the top level,
+            or is under a JPIP Referenced syntax.
 
         Raises:
-            RuntimeError: If loading fails due to transfer syntax issues,
-                missing codecs, or a pixel element the reader could not
-                decode. Also, from a file, when an encapsulated pixel
-                element's offset table names a different number of frames
-                from NumberOfFrames: `Lazy load failed for instance
+            RuntimeError: If loading fails because of transfer syntax
+                issues, missing codecs, or a pixel element that the reader
+                could not decode. Also from a file, when an encapsulated
+                pixel element's offset table names a different number of
+                frames from NumberOfFrames: `Lazy load failed for instance
                 <uid>: RuntimeError: <table> names N frames;
                 NumberOfFrames declares M`. The message names the
-                instance, never the source file. From a file ingest would
-                refuse, in ingest's words: a header pydicom's validation
-                rejects, whether or not pydicom has a plugin for its syntax
+                instance, never the source file. Also from a file that
+                ingest would refuse, in ingest's words. Such a file has a
+                header that pydicom's validation rejects, whether or not
+                pydicom has a plugin for its syntax
                 (`Missing required element: (0028,0101) 'Bits
                 Stored'`), or a 16-bit YBR_FULL frame.
-                From the sidecar, when a descriptor written since the
-                frame was stored asks for a reading the stored bytes
+                Also from the sidecar, when a descriptor written since the
+                frame was stored asks for a reading that the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
                 smaller than the stored samples): `Pixel Loader failed
                 for <uid>: Integrity Error: ...`. A reopened session
-                gives the same refusal. From a file, the same refusal for
+                gives the same refusal. A file gives the same refusal for
                 the same edit, as `Lazy load failed for instance <uid>:
                 RuntimeError: Integrity Error: frame for <uid> holds N
                 samples; geometry (R, C) needs M (one trailing pad byte is
@@ -2403,13 +2420,14 @@ class Instance(DicomItem):
     def unload_waveform_data(self) -> bool:
         """Clear cached waveform samples to free memory.
 
-        Unloads only when the store holds the samples to read them back
-        from; a source file alone is not enough, unlike for
-        `unload_pixel_data`.
+        It unloads only when the store holds the samples to read them back
+        from. Unlike for `unload_pixel_data`, a source file alone is not
+        enough.
 
         Returns:
-            bool: True if unloaded (or already absent), False if unsafe --
-            i.e. the samples are in memory only and nothing could reload them.
+            bool: True if unloaded (or already absent). False if unsafe,
+            that is, if the samples are in memory only and nothing could
+            reload them.
         """
         # Narrower than `unload_pixel_data` on purpose: `get_waveform_data`
         # has no file fallback (cached array, else loader, else None), so
@@ -2427,8 +2445,8 @@ class Instance(DicomItem):
         """Return the original Waveform Data (5400,1010) bytes, undecoded.
 
         The DICOM export writes these back verbatim, so a DICOM to DICOM round
-        trip is byte-exact. Not cached, so an instance does not hold both the
-        bytes and the decoded array.
+        trip is byte-exact. They are not cached, so an instance does not hold
+        both the bytes and the decoded array.
 
         Returns:
             Optional[bytes]: Raw sample bytes, or None when this instance
@@ -2663,12 +2681,12 @@ class Instance(DicomItem):
         """
         Sets the pixel array and updates the descriptors that describe it.
 
-        Which axis of the array means what is decided by the instance's own
-        attributes, not by the array's shape: `(frames, rows, cols)` and
-        `(rows, cols, samples)` are the same rank. How *large* each axis is
-        comes from the array.
+        The instance's own attributes decide what each axis of the array
+        means, not the array's shape, because `(frames, rows, cols)` and
+        `(rows, cols, samples)` are the same rank. The array decides how
+        *large* each axis is.
 
-        Updates tags, each only when the value actually changes:
+        It updates these tags, each only when the value actually changes:
 
         - Rows (0028,0010)
         - Columns (0028,0011)
@@ -2689,26 +2707,27 @@ class Instance(DicomItem):
         `DicomExporter.write_tree()`). The export worker refuses the same
         geometry.
 
-        The prior value, or absence, of each descriptor it can write is
+        The prior value, or absence, of each descriptor that it can write is
         recorded once, at the first replacement since the array was last
-        written; a later set keeps that first record. It is kept until the
-        array is written (by a save or by redaction), or discarded, when
+        written. A later set keeps that first record. The record is kept
+        until the array is written (by a save or by redaction), or until
         `discard_pixel_data()` puts it back. Until the array is written,
         `unload_pixel_data()` refuses to drop it.
 
         Args:
-            array (np.ndarray): The pixel data to set. Can be 1D, 2D, 3D, or 4D.
+            array (np.ndarray): The pixel data to set. It can be 1D, 2D, 3D,
+                or 4D.
 
         Raises:
-            ValueError: If `array.dtype` is one the sidecar cannot
-                round-trip. The accepted set is unsigned and signed
-                integers of 1, 2, 4 or 8 bytes, `bool`, and
-                `float16`/`float32`/`float64`; `complex64`, `object`,
-                strings, structured and void dtypes, datetimes and
-                `float128` are refused. Byte order is **normalised, not
-                refused**, so a big-endian array is accepted and stored
-                native-order. This check runs before any mutation, so a
-                caught `ValueError` leaves the instance exactly as it was.
+            ValueError: If the sidecar cannot round-trip `array.dtype`. The
+                accepted set is unsigned and signed integers of 1, 2, 4 or
+                8 bytes, `bool`, and `float16`/`float32`/`float64`.
+                `complex64`, `object`, strings, structured and void dtypes,
+                datetimes and `float128` are refused. Byte order is
+                **normalised, not refused**, so a big-endian array is
+                accepted and stored native-order. This check runs before
+                any change, so a caught `ValueError` leaves the instance
+                exactly as it was.
             ValueError: If the instance declares a SamplesPerPixel that no
                 axis of `array` can carry, or if the rank is unsupported.
                 **This one raises after** `pixel_array` **has been assigned.**
@@ -2941,12 +2960,13 @@ class Series(TrackedEntity):
         series_instance_uid (str): The unique identifier for the series.
         modality (str): The source's Modality as ingested (e.g., 'CT',
             'MR'). The export writes each instance's own `0008,0060`, after
-            the configuration's rules, not this (#869).
+            the configuration's rules, not this value (#869).
         series_number (int): The source's Series Number as ingested. The
             export writes each instance's own `0020,0011`, after the
-            configuration's rules, not this, and the folder and WFDB record
-            names read the same attribute (#869); assigning it changes no
-            file and does not mark the instances edited.
+            configuration's rules, not this value. The folder and WFDB
+            record names read the same instance attribute (#869). An
+            assignment to it changes no file and does not mark the
+            instances edited.
         equipment (Optional[Equipment]): The equipment used for this series.
         instances (List[Instance]): List of instances belonging to this series.
     """
@@ -3002,13 +3022,13 @@ class Study(TrackedEntity):
         study_date (Any): The date of the study.
         series (List[Series]): List of series belonging to this study.
         date_shifted (bool): Whether dates in this study have been shifted.
-            Whether *this* study date is one the shift produced is
-            `date_shift_vouches_for`.
-        study_time (Optional[str]): A time of the study a caller may hold
-            here. Ingest never sets it, the store has no column for it
-            (it reads None after a reopen), and no export writes it: each
-            file carries its own instance's Study Time `(0008,0030)`
-            (#953), as it does its own Series Number and Modality.
+            `date_shift_vouches_for` answers whether *this* study date is
+            one that the shift produced.
+        study_time (Optional[str]): A time of the study that a caller may
+            hold here. Ingest never sets it. The store has no column for it
+            (it reads None after a reopen). No export writes it: each file
+            carries its own instance's Study Time `(0008,0030)` (#953), as
+            it carries its own Series Number and Modality.
     """
     study_instance_uid: str
     study_date: Any
@@ -3104,10 +3124,10 @@ class Study(TrackedEntity):
     def record_date_shift(self, value) -> None:
         """Records that a `SHIFT_DATE` on this study produced `value`.
 
-        Stored as the DA string, the representation the graph compares a
-        Study's date in, so a `date` and its string cannot disagree. One
-        value and no tag, unlike `DicomItem.record_date_shift`: a `Study`
-        owns exactly one date.
+        It is stored as the DA string, which is the form in which the graph
+        compares a Study's date. So a `date` and its string cannot disagree.
+        Unlike `DicomItem.record_date_shift`, it takes one value and no tag,
+        because a `Study` owns exactly one date.
 
         Args:
             value (Any): The shifted date, as a `date` or a DA string.
@@ -3123,7 +3143,7 @@ class Study(TrackedEntity):
                 string.
 
         Returns:
-            bool: False with no record, and False as soon as `study_date`
+            bool: False with no record. Also False as soon as `study_date`
             stops holding what the shift wrote, so a new original date
             assigned to `study_date` is scanned again.
         """
@@ -3148,23 +3168,23 @@ JITTER_SCHEME_KEYED = "keyed-hmac-v1"
 JITTER_SCHEME_UNKEYED = "unkeyed-sha256"
 
 
-#: The prefix of the `patient_id` ingest gives a subject whose files carry
-#: no usable Patient ID: `NO_PATIENT_ID_PREFIX + <StudyInstanceUID>`.
+#: The prefix of the `patient_id` that ingest gives a subject whose files
+#: carry no usable Patient ID: `NO_PATIENT_ID_PREFIX + <StudyInstanceUID>`.
 #:
 #: **The backslash is the point.** It is DICOM's value delimiter, so
-#: pydicom reads a Patient ID holding one as a `MultiValue`, and ingest
-#: refuses a multi-valued Patient ID. No single-valued Patient ID read
-#: from a file can therefore equal a key built on this prefix, which no
-#: placeholder string (`UnknownPatient`, `''`) could promise: a real
-#: Patient ID `UnknownPatient` can exist, and would merge with every
-#: ID-less file.
+#: pydicom reads a Patient ID that holds one as a `MultiValue`, and ingest
+#: refuses a multi-valued Patient ID. So no single-valued Patient ID read
+#: from a file can equal a key built on this prefix. No placeholder string
+#: (`UnknownPatient`, `''`) could promise that, because a real Patient ID
+#: `UnknownPatient` can exist, and it would merge with every ID-less file.
 #:
-#: Not `ANON_`-shaped, so `_is_replacement_id` and `canonical_patient_key`
-#: treat the key as an original: its date offset is the pseudonym it would
-#: be replaced by, under the project secret, and it is never replaced.
-#: The key never leaves the store: `exported_patient_id` is what every
-#: writer reads. It embeds the **source** Study Instance UID and stays
-#: anchored there whatever a later UID replacement does to the study.
+#: The key is not `ANON_`-shaped, so `_is_replacement_id` and
+#: `canonical_patient_key` treat it as an original. Its date offset is the
+#: pseudonym it would be replaced by, under the project secret, and the key
+#: is never replaced. The key never leaves the store, because every writer
+#: reads `exported_patient_id`. It embeds the **source** Study Instance UID,
+#: and it stays anchored there whatever a later UID replacement does to the
+#: study.
 #:
 #: `is_synthetic_patient_id` is the only test for it. Do not spell the
 #: prefix anywhere else.
@@ -3186,23 +3206,23 @@ def is_synthetic_patient_id(value) -> bool:
 def exported_patient_id(patient) -> str:
     """The Patient ID a writer puts in a file for `patient`.
 
-    `''` for a subject whose files carried no Patient ID (what the source
-    had, under `KEEP` and `REPLACE` alike), and `patient.patient_id`
-    otherwise. Every output path reads the Patient ID through this: the
-    stamp, the folder name, the WFDB record name and the instance copies,
-    so the synthetic key, and the source Study Instance UID inside it, never
-    reach an exported file or path.
+    It is `''` for a subject whose files carried no Patient ID (what the
+    source had, under `KEEP` and `REPLACE` alike). Otherwise it is
+    `patient.patient_id`. Every output path reads the Patient ID through
+    this function: the stamp, the folder name, the WFDB record name and the
+    instance copies. So the synthetic key, and the source Study Instance UID
+    inside it, never reach an exported file or path.
 
     A third-party exporter (`exporters.register`) calls this too, and never
-    writes `patient.patient_id`: the built-ins' write path, which applies
-    this rule for them, does not run for a plugin. Documented but internal
-    (tier 2), like the registry it serves.
+    writes `patient.patient_id`. The built-ins' write path, which applies
+    this rule for them, does not run for a plugin. This function is
+    documented but internal (tier 2), like the registry that it serves.
 
     Args:
         patient (Patient): The patient being written.
 
     Returns:
-        str: The Patient ID to write; `''` for a synthetic key.
+        str: The Patient ID to write, or `''` for a synthetic key.
     """
     pid = patient.patient_id
     return "" if is_synthetic_patient_id(pid) else pid
