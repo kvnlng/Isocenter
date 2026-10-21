@@ -1,8 +1,8 @@
 """Export format registry.
 
-Each exporter turns a session's in-memory object graph into files on
-disk in one output format. Formats register themselves here and are
-selected by `session.export(folder, format=...)`.
+Each exporter writes a session's in-memory object graph to files on
+disk, in one output format. Each format registers itself here, and
+`session.export(folder, format=...)` selects a format by its name.
 """
 from typing import Any, Dict, List
 
@@ -12,15 +12,16 @@ _REGISTRY: Dict[str, Any] = {}
 class Exporter:
     """Interface every export format implements.
 
-    Provisional until 1.1: this interface may be replaced, not extended, in
-    1.1. A plugin written against 1.0 pins `isocenter>=1.0,<1.1`.
+    Provisional until 1.1. In 1.1, this interface may be replaced, not
+    extended. A plugin written against 1.0 pins `isocenter>=1.0,<1.1`.
 
-    Implementations must not mutate the session's object graph: export is
-    a read. For a class other than the two built-ins, `export()` applies
-    none of the built-ins' gates before or after calling it (the list is
-    under "What a third-party exporter receives" on the Exporter registry
-    page), and writes one `WARNING` audit row saying the output is not
-    attested by Isocenter.
+    An implementation must not change the session's object graph, because
+    an export only reads it. For a class other than the two built-ins,
+    `export()` applies none of the built-ins' gates before or after it
+    calls the class. The Exporter registry page lists those gates under
+    "What a third-party exporter receives". `export()` also writes one
+    `WARNING` audit row, which says that Isocenter does not attest the
+    output.
     """
 
     def export(self, session, folder: str, **options):
@@ -28,15 +29,16 @@ class Exporter:
 
         Args:
             session (DicomSession): The active session.
-            folder (str): Output directory. Created if absent.
+            folder (str): The output directory. It is created if it does
+                not exist.
             **options (dict): Format-specific options.
 
         Returns:
             Any: The format's own result object. `dicom` returns an
-            `ExportSummary`; `wfdb` returns a `List[str]`
+            `ExportSummary`, and `wfdb` returns a `List[str]`
             of paths. **Whatever the shape, it must let a caller
-            detect that nothing was written**: an empty list, a zero
-            count, a raise.
+            detect that nothing was written**, for example by an empty
+            list, a zero count or a raise.
         """
         raise NotImplementedError
 
@@ -44,15 +46,17 @@ class Exporter:
 def register(name: str, exporter_cls) -> None:
     """Register an export format under `name`.
 
-    Provisional until 1.1. It checks only that `exporter_cls` has an
-    `export` attribute; 1.1 may check more. Registering any class other than the two built-ins (a
-    subclass of one included) makes each export in that format write one
-    `WARNING` audit row, because Isocenter cannot attest what the class
-    writes.
+    Provisional until 1.1. This function checks only that `exporter_cls`
+    has an `export` attribute, and 1.1 may check more.
+
+    If you register any class other than the two built-ins, each export in
+    that format writes one `WARNING` audit row, because Isocenter cannot
+    attest what the class writes. A subclass of a built-in is such a class
+    too.
 
     Args:
-        name (str): The format name `export(format=...)` selects by.
-            Registering over an existing name replaces it.
+        name (str): The format name that `export(format=...)` selects by.
+            A registration under an existing name replaces the earlier one.
         exporter_cls (type): A class whose instances have
             `export(session, folder, **options)`.
 

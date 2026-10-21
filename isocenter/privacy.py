@@ -979,8 +979,8 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
         metadata (Dict[str, Any]): Context carried with the finding.
         entity_path (Tuple): Route from the Instance to the item this was
             raised against, as `(sequence_tag, index)` steps. Empty means
-            the Instance itself. The only way to rebind a finding to its
-            sequence item after it crosses a process boundary.
+            the Instance itself. It is the only way to rebind a finding to
+            its sequence item after the finding crosses a process boundary.
     """
     # Not split to satisfy the attribute count: it is a report line, and
     # every field is something a reader of that report needs.
@@ -1000,19 +1000,20 @@ class PhiFinding:  # pylint: disable=too-many-instance-attributes
 class PhiReport:
     """A container for PHI findings that supports analysis and export.
 
-    Iterates, indexes and measures like the list of findings it wraps
-    (`len(report)`, `report[0]`, `for finding in report`), and adds
-    DataFrame export.
+    A report works like the list of findings it wraps: you can iterate,
+    index and measure it (`len(report)`, `report[0]`,
+    `for finding in report`). It also adds DataFrame export.
 
     Attributes:
         findings (List[PhiFinding]): The findings, one per report line.
         failures (List[Tuple[str, str]]): `(entity_uid, reason)`, one per
-            instance a pixel scan could not read in full: its pixels could
-            not be loaded, or OCR raised on at least one of its frames.
-            `scan_pixel_content()` fills it; an instance that failed on
-            some frames keeps the findings of the frames that were read.
-            It is always a list, never `None`. `audit()`'s is always
-            empty: a failure in its workers raises instead.
+            instance that a pixel scan could not read in full. Either the
+            instance's pixels could not be loaded, or OCR raised on at
+            least one of its frames. `scan_pixel_content()` fills it. An
+            instance that failed on some frames keeps the findings of the
+            frames that were read. It is always a list, never `None`. The
+            list from `audit()` is always empty, because a failure in its
+            workers raises instead.
     """
 
     def __init__(self, findings: List[PhiFinding],
