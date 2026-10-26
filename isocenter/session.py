@@ -6872,9 +6872,9 @@ class DicomSession:
             show_progress=show_progress,
             desc="Redacting Pixels",
             total=None)
-        # After the drain, so `docs/api/stability.md`'s frozen "`redact()`
-        # drains it after it reads its `burned_in_text` policy" stays
-        # true verbatim of every call including a refused one -- the
+        # After the drain, so stability.md's frozen clause that `redact()`
+        # drains the persistence manager after it reads its policy is true
+        # of this refusal too, not only of the calls that pass it -- the
         # drain mutates nothing a caller can observe, is idempotent, and
         # a caller who fixes their environment and retries wants it to
         # have happened. Outside the `try` below, so a refusal is not
