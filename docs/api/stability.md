@@ -5,16 +5,17 @@ freezes the facade, not the internal seams behind it.
 
 - **Frozen (tier 1)** names keep their spelling, their parameter names,
   their return shapes and their documented behaviour for every 1.x
-  release. A 1.x release that renames or removes one of them, or a
-  keyword parameter of one, keeps the old spelling working with a
-  `DeprecationWarning` until 2.0
+  release. A 1.x release can rename or remove one of them, or a keyword
+  parameter of one. The old spelling then keeps working, with a
+  `DeprecationWarning`, until 2.0
   ([Renames and removals after 1.0](#renames-and-removals-after-10)).
   Any other change to them is a 2.0.
 - **Documented but internal (tier 2)** names are on this page. Where a
   reader needs them, the API reference renders them or a guide names
   them. They are safe to call. They may change in a minor release
-  (1.x.0), never in a patch release (1.x.y), with a `Breaking` CHANGELOG
-  entry that names the old spelling and the new one. They exist so that
+  (1.x.0), never in a patch release (1.x.y). The minor release says so
+  in a `Breaking` CHANGELOG entry that names the old spelling and the
+  new one. They exist so that
   a reader can see the seams, not so that a program can depend on them.
 - **Private (tier 3)** names — everything with a leading underscore, and
   every module not listed below — may change without notice.
