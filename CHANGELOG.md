@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-1.0.0 is the first stable release of Isocenter. These highlights are for a reader who upgrades from 0.9.x. They give the main changes of 1.0.0rc1 to 1.0.0rc22 and of this release. Each item names its issue. The full entry is in the section of the candidate that made the change, further down this file. The entries of this release follow the highlights.
+1.0.0 is the first stable release of Isocenter. These highlights are for a reader who upgrades from 0.9.x. They give the main changes of 1.0.0rc1 to 1.0.0rc22 and of this release. Each item names its issue. The full entry is in `CHANGELOG.md`, in the section of the candidate that made the change. The entries of this release follow the highlights.
 
 #### What 1.0 promises
 
@@ -58,7 +58,7 @@ Isocenter migrates nothing from 0.9.x (owner ruling on #790).
 
 #### New in 1.0
 
-- **De-identification markers.** An exported DICOM file that `anonymize()` de-identified says how (#554, #978). It holds Patient Identity Removed `(0012,0062)`, and a De-identification Method `(0012,0063)` that names the version and the policy. It also holds Longitudinal Temporal Information Modified `(0028,0303)`.
+- **De-identification markers.** An exported DICOM file that the audit found clean, or that `anonymize()` de-identified, says how (#554, #978). It holds Patient Identity Removed `(0012,0062)`, and a De-identification Method `(0012,0063)` that names the version and the policy. It also holds Longitudinal Temporal Information Modified `(0028,0303)`.
 - **Burned-in text.** A `burned_in_text` policy makes `redact()` read the images with OCR, then redact, report or withhold the text that it finds (#1108). The policy has three more settings (#1121):
   - `scope`: which images to read.
   - `target`: which kinds of text to act on (names, dates, IDs).
@@ -70,9 +70,9 @@ Isocenter migrates nothing from 0.9.x (owner ruling on #790).
 
 #### Security fixes since 0.9.x
 
-- **Export path (GHSA-2rc2-r9r5-x7hm).** Every release from 0.7.0 to 1.0.0rc15 could write a file outside the export folder when a SOP Instance UID held a path separator. Fixed in 1.0.0rc16. Its entry says which earlier exports to check.
+- **Export path (GHSA-2rc2-r9r5-x7hm).** Every release from 0.7.0 to 1.0.0rc15 could write a file outside the export folder when a SOP Instance UID held a path separator. Fixed in 1.0.0rc16. Its entry in `CHANGELOG.md` says which earlier exports to check.
 - **Free text in structured reports and presentation states.** Under `basic` and the floor, this text was exported as written. Fixed in 1.0.0rc4 and 1.0.0rc5 (#840, #848).
-- **Two redaction rules on one image.** Burned-in text inside a redaction zone could be exported unredacted when two rules covered one image. Fixed in 1.0.0rc10. Its entry says to run `redact()` again and export again (#908).
+- **Two redaction rules on one image.** Burned-in text inside a redaction zone could be exported unredacted when two rules covered one image. Fixed in 1.0.0rc10. Its entry in `CHANGELOG.md` says to run `redact()` again and export again (#908).
 
 ### Added
 
