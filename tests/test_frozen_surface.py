@@ -1858,6 +1858,7 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
         "tier-1 callable, the old keyword stays.",
         "A call that passes the old keyword emits a `DeprecationWarning` in "
         "every later 1.x release.",
+        "The callable still accepts it, and it still does what it did.",
         "2.0 removes the old keyword.",
         # What a warning does not cover.
         "A change to any of them is a 2.0.",
@@ -1871,6 +1872,10 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
         "Any release can change a private name.",
     ):
         assert sentence in section, f"the policy section lost: {sentence!r}"
+    # Once in the tier-1 bullet and once in the keyword bullet.
+    names_it = "The warning names the replacement, or says that there is none."
+    assert section.count(names_it) == 2, (
+        "each of the tier-1 and keyword rules says what the warning names")
 
     anchor = "(#renames-and-removals-after-10)"
     tiers = _flat(page.split("## What 1.0 promises", 1)[0])
@@ -1889,12 +1894,15 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
     assert "never in a patch release (1.x.y)" in tiers
     assert "a patch release (1.x.y) never does" in internal
 
-    for rel in ("docs/api/entities.md", "docs/ocr.md", "docs/api/exporters.md"):
+    tier_two_guides = ("docs/api/entities.md", "docs/ocr.md",
+                       "docs/analytics.md", "docs/api/persistence.md")
+    for rel in tier_two_guides + ("docs/api/exporters.md",):
         text = _flat((REPO / rel).read_text(encoding="utf-8"))
         assert "`Breaking`" in text, f"{rel} does not name a Breaking entry"
         assert "change in a 1.x release" not in text, rel
+        assert "1.x release may change" not in text, rel
         assert "with a CHANGELOG entry that names both" not in text, rel
-    for rel in ("docs/api/entities.md", "docs/ocr.md"):
+    for rel in tier_two_guides:
         text = _flat((REPO / rel).read_text(encoding="utf-8"))
         assert "never in a patch" in text, rel
 
