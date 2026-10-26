@@ -30,4 +30,4 @@ The following are not security problems. If they are bugs, report them in public
 
 ## Supported versions
 
-Security fixes are made on the 1.0 line: the latest 1.0 release candidate until 1.0.0 is final, then the latest 1.0.x release. The 0.9 series gets none.
+Security fixes are made on the 1.0 line, in the latest 1.0.x release. The 0.9 series gets none.

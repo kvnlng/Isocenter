@@ -121,8 +121,10 @@ file.
 
 ## Documented but internal (tier 2)
 
-These names are safe to call. They may change in a 1.x release, with a
-CHANGELOG entry that names the old spelling and the new one.
+These names are safe to call. They may change in a minor 1.x release,
+never in a patch release, with a `Breaking` CHANGELOG entry that names
+the old spelling and the new one
+([API stability](stability.md#renames-and-removals-after-10)).
 
 ```{eval-rst}
 .. autoclass:: isocenter.entities.TrackedEntity
