@@ -594,29 +594,33 @@ fixes, never features.
      On the other three a model that cannot load is a failure, so none
      skips there. A contributor's local run without the model skips the
      same 5;
-   - 1 until a final release from v1.0.0 on carries
-     `tests/test_config_behaviour_is_versioned.py`:
-     `test_no_row_the_previous_final_release_shipped_has_moved` (step 1);
+   - none since v1.0.0 for
+     `test_no_row_the_previous_final_release_shipped_has_moved` (step 1).
+     It skipped in every release run before v1.0.0's publish run,
+     because no final release carried
+     `tests/test_config_behaviour_is_versioned.py`. `v1.0.0` carries it,
+     so the test runs and passes;
    - the section being released, in
      `tests/test_released_changelog_sections_stay_as_released.py`: 2 in
      a rehearsal (no tag holds `[X.Y.Z]` yet, and neither does
      `origin/main`), 1 in step 6's run from the tag (`origin/main` still
      does not, until step 8), none in a dispatch from `main`.
 
-   That is **24 in a rehearsal, 23 in the publish run and 22 in a
-   dispatch from `main`** on 3.12, 3.13 and 3.14, and **45, 44 and 43**
+   That is **23 in a rehearsal, 22 in the publish run and 21 in a
+   dispatch from `main`** on 3.12, 3.13 and 3.14, and **44, 43 and 42**
    on 3.14t (one fewer by platform, 17 more for the detector, 5 more for
-   the spaCy model). **The first two have been seen on a runner** for
-   3.12, 3.13 and 3.14, at 1.0.0rc20, the first release after #1123: its
-   green rehearsal (run 38914679748) skipped 24 on each of 3.12, 3.13
-   and 3.14 and 40 on 3.14t, and its publish run (38917913905) 23 on
-   each and 39 on 3.14t. **The 3.14t figures 45 and 44 are derived**
-   from those by #1130's 5, until a release run shows them. The figures for 3.12, 3.13
-   and 3.14 are the ones 1.0.0rc17, the first release after #975, showed
-   (runs 38052494952 and 38053967678). **The dispatch's 22 and 43 are
+   the spaCy model). **The publish run's figures have been seen on a
+   runner:** v1.0.0's publish run (40369374755) skipped 22 on each of
+   3.12, 3.13 and 3.14 and 43 on 3.14t. Its rehearsal (run 40364118394)
+   ran before the tag existed, so the #782 test still skipped there: 24
+   on each of 3.12, 3.13 and 3.14 and 45 on 3.14t, which are the
+   figures before v1.0.0, as 1.0.0rc22's runs also showed.
+   **The rehearsal's 23 and 44 are derived** from those by the #782
+   test, until a release run shows them. **The dispatch's 21 and 42 are
    still derived**: the last dispatch read (run 37846349518) skipped 19
    on 3.12 and 18 on 3.14t, before #975 added three cases that need
-   `coverage`, #1123 the 17 and #1130 the 5. **Any other
+   `coverage`, #1123 the 17 and #1130 the 5, and before the #782 test
+   ran. **Any other
    number is a finding**: find the test (`pytest -rs` prints the reason;
    a runner's `-v` log prints only `SKIPPED`), and either it is a test
    that has stopped running, or this list is out of date and the same
