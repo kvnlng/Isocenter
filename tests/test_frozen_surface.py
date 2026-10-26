@@ -1813,6 +1813,92 @@ def test_the_plugins_pillar_says_what_the_registry_subsection_says():
     assert "`SOURCE_SOP_UID_ATTR`" in internal
 
 
+def _flat(text):
+    return " ".join(text.split())
+
+
+def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
+    """The deprecation policy after 1.0, as the owner ruled it (#892).
+
+    Rulings of 2026-10-01: a tier-1 name renamed or removed in a 1.x
+    stays, as an alias or doing what it did, with a `DeprecationWarning`,
+    through 1.x, and 2.0 removes it. A keyword parameter of a tier-1
+    callable follows the same rule. Tier 2 changes only in a minor
+    release (1.x.0), never in a patch, with a `Breaking` CHANGELOG entry
+    naming both spellings. Tier 3 has no notice.
+
+    Every other sentence on the pages that says when tier 2 may change
+    says the same: the page's tier bullets, the tier-2 section and the
+    registry subsection, and the guides that name tier-2 names.
+
+    Killing mutations: the section deleted or moved below the freeze; a
+    tier's rule dropped or softened ("a 1.x release can change them");
+    the patch exclusion or `Breaking` dropped from any of the pages.
+    """
+    page = (REPO / "docs" / "api" / "stability.md").read_text(encoding="utf-8")
+    heading = "## Renames and removals after 1.0"
+    assert heading in page.splitlines(), f"stability.md has no {heading!r}"
+    assert (page.index("## What 1.0 promises") < page.index(heading)
+            < page.index("## Frozen at 1.0")), (
+        "the policy sits between the promises and the freeze")
+    section = _flat(page.split(heading, 1)[1].split("\n## ", 1)[0])
+
+    for sentence in (
+        # Tier 1: a rename keeps an alias, a removal keeps the old name.
+        "When a 1.x release renames a tier-1 name, the old name stays as "
+        "an alias of the new name.",
+        "When a 1.x release removes a tier-1 name, the old name stays and "
+        "does what it did.",
+        "In both cases, a call to the old name emits a `DeprecationWarning`.",
+        "The old name emits the warning in every later 1.x release, and "
+        "2.0 removes the old name.",
+        "A deprecation never changes what the old name does.",
+        # Keyword parameters of a tier-1 callable: the same rule.
+        "When a 1.x release renames or removes a keyword parameter of a "
+        "tier-1 callable, the old keyword stays.",
+        "A call that passes the old keyword emits a `DeprecationWarning` in "
+        "every later 1.x release.",
+        "2.0 removes the old keyword.",
+        # What a warning does not cover.
+        "A change to any of them is a 2.0.",
+        # Tier 2: a minor release only, with a Breaking entry.
+        "A minor release (1.x.0: 1.1.0, 1.2.0, …) can rename, remove or "
+        "change a documented but internal name.",
+        "A patch release (1.x.y: 1.0.1, 1.1.2, …) never does.",
+        "This page promises no alias.",
+        "in a `Breaking` entry that names the old spelling and the new one.",
+        # Tier 3.
+        "Any release can change a private name.",
+    ):
+        assert sentence in section, f"the policy section lost: {sentence!r}"
+
+    anchor = "(#renames-and-removals-after-10)"
+    tiers = _flat(page.split("## What 1.0 promises", 1)[0])
+    internal = _flat(page.split("## Documented but internal", 1)[1]
+                     .split("\n## Private", 1)[0])
+    registry = _flat(page.split("### The exporter registry: provisional until 1.1",
+                                1)[1].split("\n## ", 1)[0])
+    assert anchor in tiers, "the tier bullets do not link the policy"
+    assert anchor in internal, "the tier-2 section does not link the policy"
+    for where, text in (("the tier bullets", tiers),
+                        ("the tier-2 section", internal),
+                        ("the registry subsection", registry)):
+        assert "`Breaking`" in text, f"{where} do not name a Breaking entry"
+        assert "1.x release can change" not in text, where
+        assert "change in a 1.x release" not in text, where
+    assert "never in a patch release (1.x.y)" in tiers
+    assert "a patch release (1.x.y) never does" in internal
+
+    for rel in ("docs/api/entities.md", "docs/ocr.md", "docs/api/exporters.md"):
+        text = _flat((REPO / rel).read_text(encoding="utf-8"))
+        assert "`Breaking`" in text, f"{rel} does not name a Breaking entry"
+        assert "change in a 1.x release" not in text, rel
+        assert "with a CHANGELOG entry that names both" not in text, rel
+    for rel in ("docs/api/entities.md", "docs/ocr.md"):
+        text = _flat((REPO / rel).read_text(encoding="utf-8"))
+        assert "never in a patch" in text, rel
+
+
 def test_the_audit_action_types_written_are_exactly_the_frozen_thirteen():
     """Pin A (#396, #411): the words the audit table is handed, by AST.
 
