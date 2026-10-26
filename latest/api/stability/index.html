@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -1080,15 +1080,21 @@ after the pass when at least one instance failed and none could be
 read. A scan that read some instances returns its report with the
 others in <code class="docutils literal notranslate"><span class="pre">failures</span></code>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">redact()</span></code>, when the configuration holds a <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code> policy:
-<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra or the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> binary is
-unavailable to the calling process. Under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code>, <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
-also raises it when the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra (OpenCV) or the shipped
-model is unavailable (always, on the free-threaded build). <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
-raises after its drain and before anything is redacted, the
-configured zones included. It raises the same way when the policy’s
-<code class="docutils literal notranslate"><span class="pre">target</span></code> names <code class="docutils literal notranslate"><span class="pre">names</span></code> and spaCy or its model cannot load (#1121).
-<code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> under that policy raises too, before
-its pre-export scan and its save. An instance that the pass cannot
+<code class="docutils literal notranslate"><span class="pre">ValueError</span></code> when <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse that policy in a file.
+<code class="docutils literal notranslate"><span class="pre">redact()</span></code> raises it before its drain.
+<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when a reader that the policy needs is unavailable to
+the calling process. Under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">tesseract</span></code>, the policy needs the
+<code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code> binary. Under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code>, it needs
+the <code class="docutils literal notranslate"><span class="pre">textdetect</span></code> extra (OpenCV) and the shipped model. OpenCV publishes
+no free-threaded wheel, so <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code> cannot run on the
+free-threaded build. Under <code class="docutils literal notranslate"><span class="pre">detector:</span> <span class="pre">db</span></code> with a <code class="docutils literal notranslate"><span class="pre">target</span></code> other than
+<code class="docutils literal notranslate"><span class="pre">any</span></code>, the policy also needs the <code class="docutils literal notranslate"><span class="pre">ocr</span></code> extra and the <code class="docutils literal notranslate"><span class="pre">tesseract</span></code>
+binary. With a <code class="docutils literal notranslate"><span class="pre">target</span></code> that names <code class="docutils literal notranslate"><span class="pre">names</span></code>, it also
+needs spaCy and its model (#1121). <code class="docutils literal notranslate"><span class="pre">redact()</span></code> raises that
+<code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> after its drain and before anything is redacted, the
+configured zones included. <code class="docutils literal notranslate"><span class="pre">export(check_burned_in=True)</span></code> under that
+policy raises the same <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code>, before its pre-export scan and
+its save. An instance that the pass cannot
 read is a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> row, not a raise.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">generate_report()</span></code> and <code class="docutils literal notranslate"><span class="pre">generate_manifest()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for a
 <code class="docutils literal notranslate"><span class="pre">format</span></code> other than the spellings above. The message names those
@@ -1125,8 +1131,11 @@ the ID. <code class="docutils literal notranslate"><span class="pre">RuntimeErro
 identity token, or when the key does not decrypt a token. It raises
 <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> also when a token holds no identity record this library
 writes. The same applies to a token from a later release, and to a
-token in the layout that releases before 1.0 wrote. After each of
-these errors, nothing on the patient is restored. It prints nothing,
+token in the layout that releases before 1.0 wrote. With
+<code class="docutils literal notranslate"><span class="pre">restore=True</span></code>, it raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> when patients that would share
+a Patient ID after the restore were de-identified under different
+date-offset schemes. It raises this before it writes anything. After
+each of these errors, nothing on the patient is restored. It prints nothing,
 and no message names a Patient ID. It returns the identity rather than
 printing it.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">enable_reversible_anonymization()</span></code>: <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for a malformed key
@@ -1574,7 +1583,7 @@ module is not.</p></li>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

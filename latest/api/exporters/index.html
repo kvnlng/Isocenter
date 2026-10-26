@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -517,8 +517,13 @@ can be registered too:</p>
 <p><strong>The session’s graph and nothing else.</strong> That graph is not what the
 built-in formats write. Every export-time gate lives inside the built-in
 formats, and some of them change pixels and sequences on the way out.
-<code class="docutils literal notranslate"><span class="pre">export()</span></code> itself only resolves the format and dispatches. So for any
-exporter other than the two built-in classes, none of the following runs:</p>
+Before it dispatches, <code class="docutils literal notranslate"><span class="pre">export()</span></code> itself runs no gate. It clears the
+counts of the last export, which the report’s <strong>Instances Written</strong> row
+reads. It finds the exporter for <code class="docutils literal notranslate"><span class="pre">format</span></code> in the registry. For an
+exporter other than the two built-in classes, it writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code>
+audit row (see the next section) and logs the same text. So for any
+exporter other than the two built-in classes, none of the following
+runs:</p>
 <ul class="simple">
 <li><p>The burned-in re-audit that withholds an instance still carrying an
 identifier (<code class="docutils literal notranslate"><span class="pre">check_burned_in</span></code>).</p></li>
@@ -632,21 +637,22 @@ behind it.</p>
 <section id="reference">
 <span id="module-isocenter.exporters"></span><h2>Reference<a class="headerlink" href="#reference" title="Link to this heading">#</a></h2>
 <p>Export format registry.</p>
-<p>Each exporter turns a session’s in-memory object graph into files on
-disk in one output format. Formats register themselves here and are
-selected by <code class="docutils literal notranslate"><span class="pre">session.export(folder,</span> <span class="pre">format=...)</span></code>.</p>
+<p>Each exporter writes a session’s in-memory object graph to files on
+disk, in one output format. Each format registers itself here, and
+<code class="docutils literal notranslate"><span class="pre">session.export(folder,</span> <span class="pre">format=...)</span></code> selects a format by its name.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="isocenter.exporters.Exporter">
 <span class="sig-name descname"><span class="pre">Exporter</span></span><a class="headerlink" href="#isocenter.exporters.Exporter" title="Link to this definition">#</a></dt>
 <dd><p>Interface every export format implements.</p>
-<p>Provisional until 1.1: this interface may be replaced, not extended, in
-1.1. A plugin written against 1.0 pins <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>.</p>
-<p>Implementations must not mutate the session’s object graph: export is
-a read. For a class other than the two built-ins, <code class="docutils literal notranslate"><span class="pre">export()</span></code> applies
-none of the built-ins’ gates before or after calling it (the list is
-under “What a third-party exporter receives” on the Exporter registry
-page), and writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row saying the output is not
-attested by Isocenter.</p>
+<p>Provisional until 1.1. In 1.1, this interface may be replaced, not
+extended. A plugin written against 1.0 pins <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>.</p>
+<p>An implementation must not change the session’s object graph, because
+an export only reads it. For a class other than the two built-ins,
+<code class="docutils literal notranslate"><span class="pre">export()</span></code> applies none of the built-ins’ gates before or after it
+calls the class. The Exporter registry page lists those gates under
+“What a third-party exporter receives”. <code class="docutils literal notranslate"><span class="pre">export()</span></code> also writes one
+<code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, which says that Isocenter does not attest the
+output.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.exporters.Exporter.export">
 <span class="sig-name descname"><span class="pre">export</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">options</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.exporters.Exporter.export" title="Link to this definition">#</a></dt>
@@ -655,16 +661,17 @@ attested by Isocenter.</p>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>session</strong> (<a class="reference internal" href="../session/#isocenter.session.DicomSession" title="isocenter.session.DicomSession"><em>DicomSession</em></a>) – The active session.</p></li>
-<li><p><strong>folder</strong> (<em>str</em>) – Output directory. Created if absent.</p></li>
+<li><p><strong>folder</strong> (<em>str</em>) – The output directory. It is created if it does
+not exist.</p></li>
 <li><p><strong>**options</strong> (<em>dict</em>) – Format-specific options.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p>The format’s own result object. <code class="docutils literal notranslate"><span class="pre">dicom</span></code> returns an
-<code class="docutils literal notranslate"><span class="pre">ExportSummary</span></code>; <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> returns a <code class="docutils literal notranslate"><span class="pre">List[str]</span></code>
+<code class="docutils literal notranslate"><span class="pre">ExportSummary</span></code>, and <code class="docutils literal notranslate"><span class="pre">wfdb</span></code> returns a <code class="docutils literal notranslate"><span class="pre">List[str]</span></code>
 of paths. <strong>Whatever the shape, it must let a caller
-detect that nothing was written</strong>: an empty list, a zero
-count, a raise.</p>
+detect that nothing was written</strong>, for example by an empty
+list, a zero count or a raise.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Any</p>
@@ -678,16 +685,17 @@ count, a raise.</p>
 <dt class="sig sig-object py" id="isocenter.exporters.register">
 <span class="sig-name descname"><span class="pre">register</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exporter_cls</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.exporters.register" title="Link to this definition">#</a></dt>
 <dd><p>Register an export format under <code class="docutils literal notranslate"><span class="pre">name</span></code>.</p>
-<p>Provisional until 1.1. It checks only that <code class="docutils literal notranslate"><span class="pre">exporter_cls</span></code> has an
-<code class="docutils literal notranslate"><span class="pre">export</span></code> attribute; 1.1 may check more. Registering any class other than the two built-ins (a
-subclass of one included) makes each export in that format write one
-<code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, because Isocenter cannot attest what the class
-writes.</p>
+<p>Provisional until 1.1. This function checks only that <code class="docutils literal notranslate"><span class="pre">exporter_cls</span></code>
+has an <code class="docutils literal notranslate"><span class="pre">export</span></code> attribute, and 1.1 may check more.</p>
+<p>If you register any class other than the two built-ins, each export in
+that format writes one <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row, because Isocenter cannot
+attest what the class writes. A subclass of a built-in is such a class
+too.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>name</strong> (<em>str</em>) – The format name <code class="docutils literal notranslate"><span class="pre">export(format=...)</span></code> selects by.
-Registering over an existing name replaces it.</p></li>
+<li><p><strong>name</strong> (<em>str</em>) – The format name that <code class="docutils literal notranslate"><span class="pre">export(format=...)</span></code> selects by.
+A registration under an existing name replaces the earlier one.</p></li>
 <li><p><strong>exporter_cls</strong> (<em>type</em>) – A class whose instances have
 <code class="docutils literal notranslate"><span class="pre">export(session,</span> <span class="pre">folder,</span> <span class="pre">**options)</span></code>.</p></li>
 </ul>
@@ -850,7 +858,7 @@ Registering over an existing name replaces it.</p></li>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

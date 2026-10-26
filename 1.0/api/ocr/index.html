@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -641,14 +641,20 @@ against configured redaction zones.</p>
 <dt class="sig sig-object py" id="isocenter.verification.RedactionVerifier.get_matching_rule">
 <span class="sig-name descname"><span class="pre">get_matching_rule</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">equipment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.verification.RedactionVerifier.get_matching_rule" title="Link to this definition">#</a></dt>
 <dd><p>Finds the first redaction rule that applies to this equipment.</p>
-<p>A rule applies when its <code class="docutils literal notranslate"><span class="pre">serial_number</span></code> is the equipment’s Device
-Serial Number, <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for equipment with none (no equipment
-included), or <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>, or when its <code class="docutils literal notranslate"><span class="pre">match:</span></code> names the equipment’s
-manufacturer and/or model, as <code class="docutils literal notranslate"><span class="pre">redact()</span></code> reads it
-(<code class="docutils literal notranslate"><span class="pre">services.rule_covers</span></code>, #1108); the first in rule order wins,
-so a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule listed before an exact one is returned. Until #808
-only an exact serial matched. The scan itself reads every applying
-rule’s zones, not this one rule’s.</p>
+<p>A rule applies in these cases, as <code class="docutils literal notranslate"><span class="pre">redact()</span></code> reads it
+(<code class="docutils literal notranslate"><span class="pre">services.rule_covers</span></code>, #1108):</p>
+<ul class="simple">
+<li><p>Its <code class="docutils literal notranslate"><span class="pre">serial_number</span></code> is the equipment’s Device Serial Number.</p></li>
+<li><p>Its <code class="docutils literal notranslate"><span class="pre">serial_number</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, and the equipment has no Device
+Serial Number. No equipment at all is such a case too.</p></li>
+<li><p>Its <code class="docutils literal notranslate"><span class="pre">serial_number</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>.</p></li>
+<li><p>Its <code class="docutils literal notranslate"><span class="pre">match:</span></code> names the equipment’s manufacturer, its model, or
+both.</p></li>
+</ul>
+<p>The first applying rule in rule order wins, so a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule listed
+before an exact rule is returned. Until #808, only an exact serial
+matched. The scan itself reads the zones of every applying rule,
+not only the zones of this rule.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>equipment</strong> (<a class="reference internal" href="../entities/#isocenter.entities.Equipment" title="isocenter.entities.Equipment"><em>Equipment</em></a>) – The instance’s equipment, or None.</p>
@@ -666,7 +672,7 @@ covers it.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.verification.RedactionVerifier.is_covered">
 <span class="sig-name descname"><span class="pre">is_covered</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">text_box</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zone_box</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.5</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#isocenter.verification.RedactionVerifier.is_covered" title="Link to this definition">#</a></dt>
-<dd><p>Checks if the text_box is significantly covered by the zone_box.</p>
+<dd><p>Checks whether the zone_box covers enough of the text_box.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -691,24 +697,29 @@ entries are stored and as redaction applies them.</p></li>
 <span class="sig-name descname"><span class="pre">verify_instance</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../entities/#isocenter.entities.Instance" title="isocenter.entities.Instance"><span class="pre">Instance</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">equipment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../results/#isocenter.privacy.PhiFinding" title="isocenter.privacy.PhiFinding"><span class="pre">PhiFinding</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.verification.RedactionVerifier.verify_instance" title="Link to this definition">#</a></dt>
 <dd><p>Runs OCR on the instance and classifies each text region.</p>
 <ul class="simple">
-<li><p>If text is fully matched (&gt;= 80% coverage): considered Safe (Ignored).</p></li>
-<li><p>If text is partially matched (&gt; 0% but &lt; 80%): Reported as PARTIAL_LEAK.</p></li>
-<li><p>If text is not matched (0%): Reported as NEW_LEAK.</p></li>
+<li><p>If the best zone covers 80% or more of the text, the region is
+safe and is ignored.</p></li>
+<li><p>If the best zone covers more than 0% but less than 80%, the
+region is reported as a PARTIAL_LEAK.</p></li>
+<li><p>If no zone covers the text (0%), the region is reported as a
+NEW_LEAK.</p></li>
 </ul>
 <p>Text of two characters or fewer is skipped as noise.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>instance</strong> (<a class="reference internal" href="../entities/#isocenter.entities.Instance" title="isocenter.entities.Instance"><em>Instance</em></a>) – The instance to read.</p></li>
-<li><p><strong>equipment</strong> (<a class="reference internal" href="../entities/#isocenter.entities.Equipment" title="isocenter.entities.Equipment"><em>Equipment</em></a><em>, </em><em>optional</em>) – Selects the redaction rule by
-serial number; with none, every region is a NEW_LEAK.</p></li>
+<li><p><strong>equipment</strong> (<a class="reference internal" href="../entities/#isocenter.entities.Equipment" title="isocenter.entities.Equipment"><em>Equipment</em></a><em>, </em><em>optional</em>) – Selects the redaction rules
+that apply (<code class="docutils literal notranslate"><span class="pre">services.rules_matching</span></code>). With None, only a
+<code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> or a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule applies. With no applying rule, every
+region is a NEW_LEAK.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>One finding per leaked region. Also <code class="docutils literal notranslate"><span class="pre">[]</span></code> when
-OCR is unavailable, which is not “nothing leaks”:
-<code class="docutils literal notranslate"><span class="pre">Session.scan_pixel_content()</span></code> checks first and refuses
-instead.</p>
+<dd class="field-even"><p>One finding per leaked region. The list is
+also <code class="docutils literal notranslate"><span class="pre">[]</span></code> when OCR is unavailable, and then <code class="docutils literal notranslate"><span class="pre">[]</span></code> does not mean
+that nothing leaks. <code class="docutils literal notranslate"><span class="pre">Session.scan_pixel_content()</span></code> checks for
+OCR first and refuses instead.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>List[<a class="reference internal" href="../results/#isocenter.privacy.PhiFinding" title="isocenter.privacy.PhiFinding">PhiFinding</a>]</p>
@@ -724,42 +735,43 @@ instead.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="isocenter.automation.ConfigAutomator">
 <span class="sig-name descname"><span class="pre">ConfigAutomator</span></span><a class="headerlink" href="#isocenter.automation.ConfigAutomator" title="Link to this definition">#</a></dt>
-<dd><p>Analyzes OCR findings and generates suggestions to update the redaction configuration.</p>
+<dd><p>Reads OCR findings and suggests changes to the redaction configuration.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.automation.ConfigAutomator.suggest_config_updates">
 <span class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">suggest_config_updates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">report</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../results/#isocenter.privacy.PhiReport" title="isocenter.privacy.PhiReport"><span class="pre">PhiReport</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.automation.ConfigAutomator.suggest_config_updates" title="Link to this definition">#</a></dt>
 <dd><p>Generates a list of suggested configuration changes.</p>
 <p>A <code class="docutils literal notranslate"><span class="pre">NEW_LEAK</span></code> finding suggests its text box as a new zone on the
-machine’s exact rule; when only a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule covers the machine
-(<code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>), it suggests a new exact rule for the
-machine’s serial instead (<code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>), never a zone on <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>,
-which every machine reads. A <code class="docutils literal notranslate"><span class="pre">PARTIAL_LEAK</span></code> finding suggests
-growing its best-matching zone to cover the text, on the rule
-that holds it; when that rule is <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>, it suggests a new exact
-rule carrying the grown zone instead (<code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>), and <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> is
-never widened. Which rule a NEW_LEAK’s zone goes to is decided
-narrowest first by the verifier (owner ruling on #1108): exact
-serial, then <code class="docutils literal notranslate"><span class="pre">match:</span></code>, then <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, then <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>; a serial-less
-machine only <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> covers gets an <code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code> for
-<code class="docutils literal notranslate"><span class="pre">serial_number:</span> <span class="pre">&quot;&quot;</span></code>. A <code class="docutils literal notranslate"><span class="pre">match:</span></code> rule is named by <code class="docutils literal notranslate"><span class="pre">rule_match</span></code>
-and its suggestions carry <code class="docutils literal notranslate"><span class="pre">match</span></code> with <code class="docutils literal notranslate"><span class="pre">serial</span></code> None. A finding
-with neither <code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> nor <code class="docutils literal notranslate"><span class="pre">rule_match</span></code> in its metadata gets
-no suggestion. Zones are in config space, (y1, y2, x1, x2),
-the order every consumer of <code class="docutils literal notranslate"><span class="pre">redaction_zones</span></code> reads; OCR boxes
-arrive as (x, y, w, h) and are converted.</p>
+machine’s exact rule. When only a <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> rule covers the machine
+(<code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> is <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>), the finding suggests a new exact rule for
+the machine’s serial instead (<code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>). It never suggests a zone
+on <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>, which every machine reads.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">PARTIAL_LEAK</span></code> finding suggests growing its best-matching zone to
+cover the text, on the rule that holds that zone. When that rule is
+<code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>, the finding suggests a new exact rule that carries the grown
+zone instead (<code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>), and <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> is never widened.</p>
+<p>The verifier decides which rule gets a NEW_LEAK’s zone, narrowest
+first (owner ruling on #1108): exact serial, then <code class="docutils literal notranslate"><span class="pre">match:</span></code>, then
+<code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, then <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code>. A machine with no serial that only <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> covers
+gets an <code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code> for <code class="docutils literal notranslate"><span class="pre">serial_number:</span> <span class="pre">&quot;&quot;</span></code>. The finding names a
+<code class="docutils literal notranslate"><span class="pre">match:</span></code> rule by <code class="docutils literal notranslate"><span class="pre">rule_match</span></code>, and its suggestions carry <code class="docutils literal notranslate"><span class="pre">match</span></code>
+with <code class="docutils literal notranslate"><span class="pre">serial</span></code> None. A finding with neither <code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> nor
+<code class="docutils literal notranslate"><span class="pre">rule_match</span></code> in its metadata gets no suggestion.</p>
+<p>Zones are in config space, (y1, y2, x1, x2), the order that every
+consumer of <code class="docutils literal notranslate"><span class="pre">redaction_zones</span></code> reads. OCR boxes arrive as
+(x, y, w, h), and this method converts them.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>report</strong> (<a class="reference internal" href="../results/#isocenter.privacy.PhiReport" title="isocenter.privacy.PhiReport"><em>PhiReport</em></a>) – Findings from a pixel scan, each carrying
-<code class="docutils literal notranslate"><span class="pre">leak_type</span></code>, <code class="docutils literal notranslate"><span class="pre">text_box</span></code>, <code class="docutils literal notranslate"><span class="pre">best_zone</span></code> and <code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> in
-its metadata, and <code class="docutils literal notranslate"><span class="pre">machine_serial</span></code>, <code class="docutils literal notranslate"><span class="pre">manufacturer</span></code> and
-<code class="docutils literal notranslate"><span class="pre">model_name</span></code> for an <code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>.</p>
+<dd class="field-odd"><p><strong>report</strong> (<a class="reference internal" href="../results/#isocenter.privacy.PhiReport" title="isocenter.privacy.PhiReport"><em>PhiReport</em></a>) – Findings from a pixel scan. Each finding
+carries <code class="docutils literal notranslate"><span class="pre">leak_type</span></code>, <code class="docutils literal notranslate"><span class="pre">text_box</span></code>, <code class="docutils literal notranslate"><span class="pre">best_zone</span></code> and
+<code class="docutils literal notranslate"><span class="pre">rule_serial</span></code> in its metadata, and <code class="docutils literal notranslate"><span class="pre">machine_serial</span></code>,
+<code class="docutils literal notranslate"><span class="pre">manufacturer</span></code> and <code class="docutils literal notranslate"><span class="pre">model_name</span></code> for an <code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p>One dict per suggestion, with <code class="docutils literal notranslate"><span class="pre">serial</span></code>,
-<code class="docutils literal notranslate"><span class="pre">action</span></code> and <code class="docutils literal notranslate"><span class="pre">reason</span></code>; an <code class="docutils literal notranslate"><span class="pre">ADD_ZONE</span></code> suggestion carries
-<code class="docutils literal notranslate"><span class="pre">zone</span></code>, an <code class="docutils literal notranslate"><span class="pre">EXPAND_ZONE</span></code> one <code class="docutils literal notranslate"><span class="pre">original_zone</span></code> and
-<code class="docutils literal notranslate"><span class="pre">new_zone</span></code>, each <code class="docutils literal notranslate"><span class="pre">[y1,</span> <span class="pre">y2,</span> <span class="pre">x1,</span> <span class="pre">x2]</span></code>. An <code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code>
-suggestion carries <code class="docutils literal notranslate"><span class="pre">zone</span></code>, <code class="docutils literal notranslate"><span class="pre">manufacturer</span></code> and
+<code class="docutils literal notranslate"><span class="pre">action</span></code> and <code class="docutils literal notranslate"><span class="pre">reason</span></code>. An <code class="docutils literal notranslate"><span class="pre">ADD_ZONE</span></code> suggestion carries
+<code class="docutils literal notranslate"><span class="pre">zone</span></code>. An <code class="docutils literal notranslate"><span class="pre">EXPAND_ZONE</span></code> suggestion carries <code class="docutils literal notranslate"><span class="pre">original_zone</span></code>
+and <code class="docutils literal notranslate"><span class="pre">new_zone</span></code>. Each of these zones is <code class="docutils literal notranslate"><span class="pre">[y1,</span> <span class="pre">y2,</span> <span class="pre">x1,</span> <span class="pre">x2]</span></code>. An
+<code class="docutils literal notranslate"><span class="pre">ADD_RULE</span></code> suggestion carries <code class="docutils literal notranslate"><span class="pre">zone</span></code>, <code class="docutils literal notranslate"><span class="pre">manufacturer</span></code> and
 <code class="docutils literal notranslate"><span class="pre">model_name</span></code>, and its <code class="docutils literal notranslate"><span class="pre">serial</span></code> is the machine’s.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
@@ -997,7 +1009,7 @@ instead, and report the failures this function only logs.</p>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

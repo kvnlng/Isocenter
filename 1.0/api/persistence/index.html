@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -500,7 +500,7 @@ background thread writes.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_audit_summary">
 <span class="sig-name descname"><span class="pre">get_audit_summary</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_audit_summary" title="Link to this definition">#</a></dt>
-<dd><p>Returns an aggregated summary of actions from the audit log.</p>
+<dd><p>Returns the number of audit rows for each action type.</p>
 <p>Reads through the <code class="docutils literal notranslate"><span class="pre">flush_audit_queue</span></code> barrier, so every row enqueued
 before the call is counted.</p>
 <dl class="field-list simple">
@@ -521,8 +521,8 @@ before the call is counted.</p>
 call is included.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
-<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">(timestamp,</span> <span class="pre">action_type,</span> <span class="pre">details)</span></code> per row; empty
-if the query fails.</p>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">(timestamp,</span> <span class="pre">action_type,</span> <span class="pre">details)</span></code> per row. It is
+empty if the query fails.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>List[tuple]</p>
@@ -533,15 +533,15 @@ if the query fails.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_audit_losses">
 <span class="sig-name descname"><span class="pre">get_audit_losses</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_audit_losses" title="Link to this definition">#</a></dt>
-<dd><p>Retrieves every <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> entry, with the scope it was
+<dd><p>Returns every <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row, with the scope that it was
 recorded under.</p>
-<p>Separate from <code class="docutils literal notranslate"><span class="pre">get_audit_errors</span></code> because the scopes grade differently:
-a loss scoped <code class="docutils literal notranslate"><span class="pre">PRIVATE</span></code> or <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code> takes <code class="docutils literal notranslate"><span class="pre">validation_status</span></code> to
-<code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>; one scoped <code class="docutils literal notranslate"><span class="pre">STANDARD</span></code> leaves it at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. Every
-loss is reported under “3.1 Data Loss”, never under “Exceptions &amp;
-Errors”.</p>
-<p>A row whose <code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> is NULL predates the column and cannot be
-graded; it is reported and left at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>.</p>
+<p>This method is separate from <code class="docutils literal notranslate"><span class="pre">get_audit_errors</span></code> because the scopes
+grade differently. A loss scoped <code class="docutils literal notranslate"><span class="pre">PRIVATE</span></code> or <code class="docutils literal notranslate"><span class="pre">SIGNAL</span></code> takes
+<code class="docutils literal notranslate"><span class="pre">validation_status</span></code> to <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. A loss scoped <code class="docutils literal notranslate"><span class="pre">STANDARD</span></code>
+leaves it at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>. Every loss is reported under “3.1 Data Loss”,
+never under “Exceptions &amp; Errors”.</p>
+<p>A row whose <code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> is NULL is older than the column and cannot
+be graded. Such a row is reported and left at <code class="docutils literal notranslate"><span class="pre">PASS</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>(timestamp, entity_uid, details, loss_scope)</p>
@@ -555,13 +555,13 @@ graded; it is reported and left at <code class="docutils literal notranslate"><s
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_audit_declines">
 <span class="sig-name descname"><span class="pre">get_audit_declines</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_audit_declines" title="Link to this definition">#</a></dt>
-<dd><p>Every <code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> entry: a value the sweep left behind.</p>
-<p>A scan gap says an element could not be <em>read</em>; this says an element was
-read, a remediation was proposed for it, and the remediation did not
-run, so the value is still in the graph and will reach the exported
-file. The reason is in <code class="docutils literal notranslate"><span class="pre">details</span></code>.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted.</p>
+<dd><p>Every <code class="docutils literal notranslate"><span class="pre">REMEDIATION_DECLINED</span></code> row: a value that the sweep left behind.</p>
+<p>A scan gap says that an element could not be <em>read</em>. A decline says
+that an element was read, that a remediation was proposed for it,
+and that the remediation did not run. So the value is still in the
+graph and will reach the exported file. The reason is in <code class="docutils literal notranslate"><span class="pre">details</span></code>.</p>
+<p>Like every other audit reader, this method flushes the queue first,
+so a row still in the queue is counted.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>(timestamp, entity_uid, details)</p>
@@ -575,17 +575,18 @@ queue is counted.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_audit_scan_gaps">
 <span class="sig-name descname"><span class="pre">get_audit_scan_gaps</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_audit_scan_gaps" title="Link to this definition">#</a></dt>
-<dd><p>Every <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code> entry: an element the PHI scan could not open.</p>
-<p>Separate from <code class="docutils literal notranslate"><span class="pre">get_audit_losses</span></code> because it is a different claim. A loss
-says an element was dropped at ingest and cannot reach the output; this
-says an element was kept whole and the scan could not read what is
-inside it.</p>
-<p>The row states ingest-time knowledge only. Whether the element reaches
-the exported file is decided later, by <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code>, and
+<dd><p>Every <code class="docutils literal notranslate"><span class="pre">SCAN_GAP</span></code> row: an element that the PHI scan could not open.</p>
+<p>This method is separate from <code class="docutils literal notranslate"><span class="pre">get_audit_losses</span></code> because a scan gap
+is a different claim. A loss says that an element was dropped at
+ingest and cannot reach the output. A scan gap says that an element
+was kept whole and the scan could not read what is inside it.</p>
+<p>The row states only what ingest knew. <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code> decides
+later whether the element reaches the exported file, and
 <code class="docutils literal notranslate"><span class="pre">generate_report</span></code> resolves that against the object graph.</p>
-<p>No <code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> column: only an odd-group tag reaches the parse gate,
-so these are private by construction. <code class="docutils literal notranslate"><span class="pre">element_tag</span></code> is selected
-instead, and is NULL for a row written before that column existed.</p>
+<p>The result has no <code class="docutils literal notranslate"><span class="pre">loss_scope</span></code> column. Only an odd-group tag reaches
+the parse gate, so these rows are private by construction. The
+method selects <code class="docutils literal notranslate"><span class="pre">element_tag</span></code> instead, which is NULL for a row
+written before that column existed.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>(timestamp, entity_uid, details, element_tag)</p>
@@ -599,12 +600,13 @@ instead, and is NULL for a row written before that column existed.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_audit_drops">
 <span class="sig-name descname"><span class="pre">get_audit_drops</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_audit_drops" title="Link to this definition">#</a></dt>
-<dd><p>How many audit rows were dropped by a failed batch write.</p>
-<p>The rows themselves are unrecoverable: a failed batch write loses them. A
-non-zero count means the audit table under-states what happened, and
-<code class="docutils literal notranslate"><span class="pre">generate_report</span></code> grades it like an exception.</p>
-<p>Flushes first, like every other audit reader, so a row still in the
-queue is counted if its write fails.</p>
+<dd><p>The number of audit rows that a failed batch write dropped.</p>
+<p>The rows themselves cannot be recovered, because a failed batch
+write loses them. A count above zero means that the audit table
+under-states what happened, and <code class="docutils literal notranslate"><span class="pre">generate_report</span></code> grades such a
+count like an exception.</p>
+<p>Like every other audit reader, this method flushes the queue first,
+so a row still in the queue is counted if its write fails.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Rows dropped over this store object’s lifetime.</p>
@@ -619,10 +621,11 @@ queue is counted if its write fails.</p>
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore.get_flattened_instances">
 <span class="sig-name descname"><span class="pre">get_flattened_instances</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">patient_ids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_uids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">page_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">500</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.persistence.SqliteStore.get_flattened_instances" title="Link to this definition">#</a></dt>
 <dd><p>An iterator of one flat dictionary per stored instance.</p>
-<p>For streaming exports or analysis without loading the entire graph
-into RAM. The rows come back one page at a time, and <strong>no database
-handle is held between pages</strong>, so an iterator left part-consumed
-holds no lock and no read snapshot. Two consequences:</p>
+<p>Use it to stream exports or analysis without loading the whole
+graph into RAM. The rows come back one page at a time, and <strong>no
+database handle is held between pages</strong>. So an iterator that is
+left part-consumed holds no lock and no read snapshot. This has two
+consequences:</p>
 <ul class="simple">
 <li><p><strong>Iteration is not one snapshot.</strong> Each page is its own query, so
 writes that land between pages are visible and rows deleted between
@@ -633,20 +636,21 @@ pages are not returned.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>patient_ids</strong> (<em>Iterable</em><em>[</em><em>str</em><em>]</em><em>, </em><em>optional</em>) – Restrict the rows to
-these Patient IDs, read as every <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> in the
-package is read. <code class="docutils literal notranslate"><span class="pre">None</span></code> means every patient in the store. An
-empty iterable matches nobody: it is a filter that selected
-nothing, not an absent filter. An iterator is read once, at the
-call. An ID no patient holds is <strong>not counted</strong> here, unlike the
-<code class="docutils literal notranslate"><span class="pre">Session</span></code> methods: the pages are separate reads, so there is no
-single moment at which an ID is or is not held.</p></li>
+these Patient IDs. They are read the same way as every
+other <code class="docutils literal notranslate"><span class="pre">patient_ids</span></code> in the package. <code class="docutils literal notranslate"><span class="pre">None</span></code> means every
+patient in the store. An empty iterable matches nobody,
+because it is a filter that selected nothing, not an absent
+filter. An iterator is read once, at the call. An ID that no
+patient holds is <strong>not counted</strong> here, unlike in the
+<code class="docutils literal notranslate"><span class="pre">Session</span></code> methods. The pages are separate reads, so there
+is no single moment at which an ID is or is not held.</p></li>
 <li><p><strong>instance_uids</strong> (<em>Iterable</em><em>[</em><em>str</em><em>]</em><em>, </em><em>optional</em>) – Restrict the rows to
-these SOP Instance UIDs. Same rules: <code class="docutils literal notranslate"><span class="pre">None</span></code> is no
-filter, an empty iterable matches nobody. Both filters
-together intersect.</p></li>
-<li><p><strong>page_size</strong> (<em>int</em><em>, </em><em>optional</em>) – Rows per page, defaulting to 500.
-Trades resident memory against the number of queries.
-Must be an <code class="docutils literal notranslate"><span class="pre">int</span></code> &gt;= 1.</p></li>
+these SOP Instance UIDs. The same rules apply: <code class="docutils literal notranslate"><span class="pre">None</span></code> is
+no filter, and an empty iterable matches nobody. When both
+filters are given, the rows are their intersection.</p></li>
+<li><p><strong>page_size</strong> (<em>int</em><em>, </em><em>optional</em>) – Rows per page. The default is 500.
+It trades resident memory against the number of queries.
+It must be an <code class="docutils literal notranslate"><span class="pre">int</span></code> &gt;= 1.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
@@ -663,12 +667,13 @@ Must be an <code class="docutils literal notranslate"><span class="pre">int</spa
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
 <dd class="field-even"><ul class="simple">
-<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">page_size</span></code> is not a whole number &gt;= 1, at the call,
-    not on the first <code class="docutils literal notranslate"><span class="pre">next()</span></code>.</p></li>
-<li><p><strong>TypeError</strong> – If either filter is a bare <code class="docutils literal notranslate"><span class="pre">str</span></code>, bytes-like, not
-    iterable, or holds an element that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code> (named
-    by position and type, never by value), at the call.
-    <code class="docutils literal notranslate"><span class="pre">page_size</span></code> is checked first.</p></li>
+<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">page_size</span></code> is not a whole number &gt;= 1. It is
+    raised at the call, not on the first <code class="docutils literal notranslate"><span class="pre">next()</span></code>.</p></li>
+<li><p><strong>TypeError</strong> – If either filter is a bare <code class="docutils literal notranslate"><span class="pre">str</span></code>, is bytes-like, is
+    not iterable, or holds an element that is not a <code class="docutils literal notranslate"><span class="pre">str</span></code>. The
+    message names such an element by position and type, never
+    by value. It is raised at the call, and <code class="docutils literal notranslate"><span class="pre">page_size</span></code> is
+    checked first.</p></li>
 </ul>
 </dd>
 </dl>
@@ -789,7 +794,7 @@ Must be an <code class="docutils literal notranslate"><span class="pre">int</spa
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

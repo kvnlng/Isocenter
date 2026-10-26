@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -494,7 +494,7 @@ its fields and these six methods are frozen at 1.0
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration">
 <span class="sig-name descname"><span class="pre">IsocenterConfiguration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">list()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">phi_tags</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">...</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">date_jitter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">...</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">remove_private_tags</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">config_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">privacy_profile</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">auto_save</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration" title="Link to this definition">#</a></dt>
 <dd><p>The configuration a session applies, reached as <code class="docutils literal notranslate"><span class="pre">session.configuration</span></code>.</p>
-<p><code class="docutils literal notranslate"><span class="pre">load_config()</span></code> fills it from a file; the methods below change it in
+<p><code class="docutils literal notranslate"><span class="pre">load_config()</span></code> fills it from a file. The methods below change it in
 memory, and <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes it.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
@@ -512,18 +512,19 @@ memory, and <code class="docutils literal notranslate"><span class="pre">save()<
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">phi_tags</span></code></p></td>
 <td><p><em>Dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em></p></td>
 <td><p>PHI tag policies, keyed by lowercase
-<code class="docutils literal notranslate"><span class="pre">&quot;gggg,eeee&quot;</span></code> tag. With none given, a copy of the floor policy
-(<code class="docutils literal notranslate"><span class="pre">profiles.FLOOR_POLICY</span></code>): the PS3.15 <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> profile
-plus three research defaults, which a session applies before
-any config is loaded (see the Configuration guide). Each
-instance holds its own copy, so one session’s <code class="docutils literal notranslate"><span class="pre">set_phi_tag</span></code>
-cannot reach another’s policy or the module table.</p></td>
+<code class="docutils literal notranslate"><span class="pre">&quot;gggg,eeee&quot;</span></code> tag. With none given, it is a copy of the floor
+policy (<code class="docutils literal notranslate"><span class="pre">profiles.FLOOR_POLICY</span></code>). The floor policy is the
+PS3.15 <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code> profile plus three research defaults, and
+a session applies it before any configuration is loaded (see
+the Configuration guide). Each instance holds its own copy, so
+one session’s <code class="docutils literal notranslate"><span class="pre">set_phi_tag</span></code> cannot reach the policy of another
+session or the module table.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">date_jitter</span></code></p></td>
 <td><p><em>Dict</em><em>[</em><em>str</em><em>, </em><em>int</em><em>]</em></p></td>
-<td><p>The range the per-patient date
-offset is derived within, in days, both ends included:
-<code class="docutils literal notranslate"><span class="pre">{&quot;min_days&quot;:</span> <span class="pre">-365,</span> <span class="pre">&quot;max_days&quot;:</span> <span class="pre">-1}</span></code> by default.</p></td>
+<td><p>The range, in days, from which the
+per-patient date offset is derived. Both ends are included.
+The default is <code class="docutils literal notranslate"><span class="pre">{&quot;min_days&quot;:</span> <span class="pre">-365,</span> <span class="pre">&quot;max_days&quot;:</span> <span class="pre">-1}</span></code>.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code></p></td>
 <td><p><em>bool</em></p></td>
@@ -531,23 +532,23 @@ offset is derived within, in days, both ends included:
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">config_path</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><em>str</em><em>]</em></p></td>
-<td><p>The file <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes. Set by
-<code class="docutils literal notranslate"><span class="pre">load_config()</span></code>, or by hand.</p></td>
+<td><p>The file that <code class="docutils literal notranslate"><span class="pre">save()</span></code> writes.
+<code class="docutils literal notranslate"><span class="pre">load_config()</span></code> sets it, or you can set it by hand.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">auto_save</span></code></p></td>
 <td><p><em>bool</em></p></td>
-<td><p>Write <code class="docutils literal notranslate"><span class="pre">config_path</span></code> after every <code class="docutils literal notranslate"><span class="pre">add_rule</span></code>,
-<code class="docutils literal notranslate"><span class="pre">update_rule</span></code>, <code class="docutils literal notranslate"><span class="pre">delete_rule</span></code> and <code class="docutils literal notranslate"><span class="pre">set_phi_tag</span></code>. False by
-default.</p></td>
+<td><p>If True, every <code class="docutils literal notranslate"><span class="pre">add_rule</span></code>, <code class="docutils literal notranslate"><span class="pre">update_rule</span></code>,
+<code class="docutils literal notranslate"><span class="pre">delete_rule</span></code> and <code class="docutils literal notranslate"><span class="pre">set_phi_tag</span></code> writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code>. The
+default is False.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><em>str</em><em>]</em></p></td>
 <td><p>The pinned name of the built-in
-profile whose rules were merged into <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> (<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>,
-also when the file said <code class="docutils literal notranslate"><span class="pre">basic</span></code>), or an external profile’s
-path, or None when no named profile was applied (the floor, or
-<code class="docutils literal notranslate"><span class="pre">privacy_profile:</span> <span class="pre">none</span></code>). Only ever set to a profile that
-resolved.</p></td>
+profile whose rules were merged into <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code>, or an external
+profile’s path, or None. The pinned name is <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>, also
+when the file said <code class="docutils literal notranslate"><span class="pre">basic</span></code>. None means that no named profile
+was applied: the floor, or <code class="docutils literal notranslate"><span class="pre">privacy_profile:</span> <span class="pre">none</span></code>. It is only
+ever set to a profile that resolved.</p></td>
 </tr>
 </tbody>
 </table>
@@ -556,28 +557,29 @@ resolved.</p></td>
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration.save">
 <span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.save" title="Link to this definition">#</a></dt>
 <dd><p>Write the configuration to <code class="docutils literal notranslate"><span class="pre">config_path</span></code> as YAML.</p>
-<p>The file names the profile rather than copying it:
+<p>The file names the profile and does not copy the profile’s rules.
 <code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> is the pinned name (<code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>), the external
-profile’s path, <code class="docutils literal notranslate"><span class="pre">none</span></code>, or no line at all for the floor, and
-<code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> holds only the rules that differ from that base’s. Then
-<code class="docutils literal notranslate"><span class="pre">date_jitter</span></code>, <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code> and every machine rule, each
-key kept (<code class="docutils literal notranslate"><span class="pre">comment:</span></code> as data). <code class="docutils literal notranslate"><span class="pre">version</span></code> is always written, as this
-library’s configuration version. A file this writes loads to the
-configuration it was written from.</p>
-<p>Comments and layout in an existing file are not kept: this writes a
-new file.</p>
+profile’s path or <code class="docutils literal notranslate"><span class="pre">none</span></code>. For the floor, the file has no
+<code class="docutils literal notranslate"><span class="pre">privacy_profile</span></code> line. <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> holds only the rules that differ
+from the rules of that base.</p>
+<p>Then the file holds <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code>, <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code> and every
+machine rule, with each key kept (<code class="docutils literal notranslate"><span class="pre">comment:</span></code> as data). <code class="docutils literal notranslate"><span class="pre">version</span></code> is
+always written, as this library’s configuration version. A file
+that this method writes loads to the configuration that it was
+written from.</p>
+<p>This method writes a new file, so it does not keep the comments
+and layout of an existing file.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Raises<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>ValueError</strong> – With no <code class="docutils literal notranslate"><span class="pre">config_path</span></code>; when <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> has no
-    rule for a tag its base supplies, because a file naming
-    that base would bring the rule back on reload; and when
-    <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code> is a range the loader would refuse (#731);
-    and when <code class="docutils literal notranslate"><span class="pre">config_path</span></code> is a file declaring a newer
-    <code class="docutils literal notranslate"><span class="pre">version</span></code> minor than this library’s (#784). Also when
-    <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code> holds a policy the loader would refuse
-    in a file (#1108). Nothing is
-    written.</p></li>
+<li><p><strong>ValueError</strong> – If there is no <code class="docutils literal notranslate"><span class="pre">config_path</span></code>. If <code class="docutils literal notranslate"><span class="pre">phi_tags</span></code> has no
+    rule for a tag that its base supplies, because a file that
+    names that base would bring the rule back on reload. If
+    <code class="docutils literal notranslate"><span class="pre">date_jitter</span></code> is a range that the loader would refuse
+    (#731). If <code class="docutils literal notranslate"><span class="pre">config_path</span></code> is a file that declares a newer
+    <code class="docutils literal notranslate"><span class="pre">version</span></code> minor than this library’s (#784). If
+    <code class="docutils literal notranslate"><span class="pre">burned_in_text</span></code> holds a policy that the loader would
+    refuse in a file (#1108). In each case, nothing is written.</p></li>
 <li><p><strong>OSError</strong> – The write’s own error, unchanged.</p></li>
 </ul>
 </dd>
@@ -588,30 +590,33 @@ new file.</p>
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration.add_rule">
 <span class="sig-name descname"><span class="pre">add_rule</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">serial_number</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">manufacturer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Unknown'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Unknown'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">redaction_zones</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.add_rule" title="Link to this definition">#</a></dt>
 <dd><p>Add a machine redaction rule.</p>
-<p>Replaces any existing rule for the same serial number. Changes
-memory; writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on. The
-keywords are spelled as the rule’s keys in a <code class="docutils literal notranslate"><span class="pre">machines:</span></code> file.</p>
+<p>It replaces any existing rule for the same serial number. It
+changes memory, and it writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>
+is on. The keywords have the same spelling as the rule’s keys in a
+<code class="docutils literal notranslate"><span class="pre">machines:</span></code> file.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>serial_number</strong> (<em>str</em>) – The device serial number.</p></li>
 <li><p><strong>manufacturer</strong> (<em>str</em><em>, </em><em>optional</em>) – Metadata for reference.</p></li>
 <li><p><strong>model_name</strong> (<em>str</em><em>, </em><em>optional</em>) – Metadata for reference.</p></li>
-<li><p><strong>redaction_zones</strong> (<em>List</em><em>[</em><em>Any</em><em>]</em><em>, </em><em>optional</em>) – The zones to set to zero,
-each <code class="docutils literal notranslate"><span class="pre">[y1,</span> <span class="pre">y2,</span> <span class="pre">x1,</span> <span class="pre">x2]</span></code> in pixels: rows <code class="docutils literal notranslate"><span class="pre">y1</span></code> up to <code class="docutils literal notranslate"><span class="pre">y2</span></code> and
-columns <code class="docutils literal notranslate"><span class="pre">x1</span></code> up to <code class="docutils literal notranslate"><span class="pre">x2</span></code>, the end excluded. A zone with no
-area (<code class="docutils literal notranslate"><span class="pre">y2</span> <span class="pre">&lt;=</span> <span class="pre">y1</span></code> or <code class="docutils literal notranslate"><span class="pre">x2</span> <span class="pre">&lt;=</span> <span class="pre">x1</span></code>) makes <code class="docutils literal notranslate"><span class="pre">redact()</span></code> fail that
-instance; one that starts past the image’s edge is skipped.</p></li>
+<li><p><strong>redaction_zones</strong> (<em>List</em><em>[</em><em>Any</em><em>]</em><em>, </em><em>optional</em>) – The zones to set to zero.
+Each zone is <code class="docutils literal notranslate"><span class="pre">[y1,</span> <span class="pre">y2,</span> <span class="pre">x1,</span> <span class="pre">x2]</span></code> in pixels: rows <code class="docutils literal notranslate"><span class="pre">y1</span></code> up to
+<code class="docutils literal notranslate"><span class="pre">y2</span></code> and columns <code class="docutils literal notranslate"><span class="pre">x1</span></code> up to <code class="docutils literal notranslate"><span class="pre">x2</span></code>, with the end excluded. A
+zone with no area (<code class="docutils literal notranslate"><span class="pre">y2</span> <span class="pre">&lt;=</span> <span class="pre">y1</span></code> or <code class="docutils literal notranslate"><span class="pre">x2</span> <span class="pre">&lt;=</span> <span class="pre">x1</span></code>) makes
+<code class="docutils literal notranslate"><span class="pre">redact()</span></code> fail that instance. A zone that starts past the
+image’s edge is skipped.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
 <dd class="field-even"><ul class="simple">
-<li><p><strong>ValueError</strong> – For a rule <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse (a serial
-    that is not a non-empty, non-blank string, a metadata field
-    that is not a string, a malformed zone), before any rule or
-    the file changes. Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, with no <code class="docutils literal notranslate"><span class="pre">config_path</span></code>,
-    or when <code class="docutils literal notranslate"><span class="pre">save()</span></code> refuses; the rules are then as they were.</p></li>
-<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails; the rules
+<li><p><strong>ValueError</strong> – For a rule that <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse (a
+    serial that is not a non-empty, non-blank string, a
+    metadata field that is not a string, a malformed zone),
+    before any rule or the file changes. Also under
+    <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, if there is no <code class="docutils literal notranslate"><span class="pre">config_path</span></code> or if <code class="docutils literal notranslate"><span class="pre">save()</span></code>
+    refuses. The rules are then as they were.</p></li>
+<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails. The rules
     are then as they were.</p></li>
 </ul>
 </dd>
@@ -622,7 +627,8 @@ instance; one that starts past the image’s edge is skipped.</p></li>
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration.update_rule">
 <span class="sig-name descname"><span class="pre">update_rule</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">serial_number</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">updates</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.update_rule" title="Link to this definition">#</a></dt>
 <dd><p>Update the rule for <code class="docutils literal notranslate"><span class="pre">serial_number</span></code>.</p>
-<p>Changes memory; writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on.</p>
+<p>It changes memory, and it writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when
+<code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -633,13 +639,13 @@ instance; one that starts past the image’s edge is skipped.</p></li>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
 <dd class="field-even"><ul class="simple">
 <li><p><strong>ValueError</strong> – If no rule is found, if the update changes the
-    serial number, or if the updated rule is one <code class="docutils literal notranslate"><span class="pre">load_config</span></code>
-    would refuse (an unknown key such as <code class="docutils literal notranslate"><span class="pre">redaction_zone</span></code>, a
-    value of the wrong type, a malformed zone). Raised before
-    the rule or the file changes. Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, with no
-    <code class="docutils literal notranslate"><span class="pre">config_path</span></code>, or when <code class="docutils literal notranslate"><span class="pre">save()</span></code> refuses; the rule is then
-    as it was.</p></li>
-<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails; the rule is
+    serial number, or if <code class="docutils literal notranslate"><span class="pre">load_config</span></code> would refuse the
+    updated rule (an unknown key such as <code class="docutils literal notranslate"><span class="pre">redaction_zone</span></code>, a
+    value of the wrong type, a malformed zone). It is raised
+    before the rule or the file changes. Also under
+    <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, if there is no <code class="docutils literal notranslate"><span class="pre">config_path</span></code> or if <code class="docutils literal notranslate"><span class="pre">save()</span></code>
+    refuses. The rule is then as it was.</p></li>
+<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails. The rule is
     then as it was.</p></li>
 </ul>
 </dd>
@@ -650,8 +656,8 @@ instance; one that starts past the image’s edge is skipped.</p></li>
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration.delete_rule">
 <span class="sig-name descname"><span class="pre">delete_rule</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">serial_number</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.delete_rule" title="Link to this definition">#</a></dt>
 <dd><p>Remove the rule for a serial number.</p>
-<p>Changes memory; writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on
-and a rule was removed.</p>
+<p>It changes memory. It writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>
+is on and a rule was removed.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>serial_number</strong> (<em>str</em>) – The serial number to remove.</p>
@@ -666,7 +672,7 @@ and a rule was removed.</p>
 <dd class="field-even"><ul class="simple">
 <li><p><strong>ValueError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> with no <code class="docutils literal notranslate"><span class="pre">config_path</span></code> (even
     when no rule matches), and when <code class="docutils literal notranslate"><span class="pre">save()</span></code> refuses.</p></li>
-<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails; the rules
+<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails. The rules
     are then as they were.</p></li>
 </ul>
 </dd>
@@ -677,28 +683,33 @@ and a rule was removed.</p>
 <dt class="sig sig-object py" id="isocenter.configuration.IsocenterConfiguration.set_phi_tag">
 <span class="sig-name descname"><span class="pre">set_phi_tag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">action</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.set_phi_tag" title="Link to this definition">#</a></dt>
 <dd><p>Set or replace the PHI rule for one tag.</p>
-<p>Changes memory; writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when <code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on.
-A private-creator key also sets the same rule on every key of the
-policy that names its element under another case or spacing of
-its creator, since both keys name one element (#1147).</p>
+<p>It changes memory, and it writes <code class="docutils literal notranslate"><span class="pre">config_path</span></code> only when
+<code class="docutils literal notranslate"><span class="pre">auto_save</span></code> is on. A private-creator key can have twins: other keys
+of the policy that name its element under another case or spacing
+of its creator. This method sets the same rule on every twin too,
+because all of these keys name one element (#1147).</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>tag</strong> (<em>str</em>) – The DICOM tag to target (e.g. “0010,0010”), stored
-lowercase.</p></li>
+lowercase. A private creator’s name keeps its case, and
+its surrounding spaces are stripped.</p></li>
 <li><p><strong>action</strong> (<em>str</em>) – One of <code class="docutils literal notranslate"><span class="pre">KEEP</span></code>, <code class="docutils literal notranslate"><span class="pre">REMOVE</span></code>, <code class="docutils literal notranslate"><span class="pre">EMPTY</span></code>, <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code>,
-<code class="docutils literal notranslate"><span class="pre">SHIFT</span></code>, <code class="docutils literal notranslate"><span class="pre">JITTER</span></code> (<code class="docutils literal notranslate"><span class="pre">JITTER</span></code> is <code class="docutils literal notranslate"><span class="pre">SHIFT</span></code>) and <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code>.</p></li>
-<li><p><strong>value</strong> (<em>str</em><em>, </em><em>optional</em>) – The value <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> writes, stored as
-the rule’s <code class="docutils literal notranslate"><span class="pre">value</span></code>, the key a file spells it with. An empty
-value is no value, on every tag: <code class="docutils literal notranslate"><span class="pre">value=&quot;&quot;</span></code> stores no
-<code class="docutils literal notranslate"><span class="pre">value</span></code> key, so on a UI tag it is the keyed replacement UID,
-although a file’s <code class="docutils literal notranslate"><span class="pre">value:</span> <span class="pre">''</span></code> on a UI tag is refused (#883).</p></li>
-<li><p><strong>target</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em><em>, </em><em>optional</em>) – The kinds <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> removes,
-stored as the rule’s <code class="docutils literal notranslate"><span class="pre">target</span></code>, the key a file spells it
-with: a list or tuple of <code class="docutils literal notranslate"><span class="pre">config_manager.SCRUB_KINDS</span></code>,
-kept in the order given, which decides how a span two kinds
-find is counted (#1130). Only <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> takes it, and <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code>
-requires it.</p></li>
+<code class="docutils literal notranslate"><span class="pre">SHIFT</span></code>, <code class="docutils literal notranslate"><span class="pre">JITTER</span></code> (<code class="docutils literal notranslate"><span class="pre">JITTER</span></code> is <code class="docutils literal notranslate"><span class="pre">SHIFT</span></code>) or <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code>.</p></li>
+<li><p><strong>value</strong> (<em>str</em><em>, </em><em>optional</em>) – The value that <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> writes. It is
+stored as the rule’s <code class="docutils literal notranslate"><span class="pre">value</span></code>, the key that a file spells it
+with. An empty value, or another value that is false in
+Python (<code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">False</span></code>), is no value, on every tag.
+<code class="docutils literal notranslate"><span class="pre">value=&quot;&quot;</span></code>
+stores no <code class="docutils literal notranslate"><span class="pre">value</span></code> key, so on a UI tag the rule writes the
+keyed replacement UID. But a file’s <code class="docutils literal notranslate"><span class="pre">value:</span> <span class="pre">''</span></code> on a UI tag
+is refused (#883).</p></li>
+<li><p><strong>target</strong> (<em>Sequence</em><em>[</em><em>str</em><em>]</em><em>, </em><em>optional</em>) – The kinds that <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code>
+removes. It is stored as the rule’s <code class="docutils literal notranslate"><span class="pre">target</span></code>, the key that a
+file spells it with. It is a list or tuple of
+<code class="docutils literal notranslate"><span class="pre">config_manager.SCRUB_KINDS</span></code>, kept in the order given. That
+order decides how a span that two kinds find is counted
+(#1130). Only <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> takes it, and <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> requires it.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
@@ -712,11 +723,11 @@ requires it.</p></li>
     tag whose VR cannot hold the value, <code class="docutils literal notranslate"><span class="pre">SCRUB</span></code> with no
     <code class="docutils literal notranslate"><span class="pre">target</span></code> or on a tag that does not hold text, and a
     <code class="docutils literal notranslate"><span class="pre">target</span></code> that is not a list of distinct kinds or is given
-    with another action. Raised before the policy or its file
-    is changed.
-    Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, also with no <code class="docutils literal notranslate"><span class="pre">config_path</span></code> and when
-    <code class="docutils literal notranslate"><span class="pre">save()</span></code> refuses; the policy is then as it was.</p></li>
-<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails; the policy
+    with another action. It is raised before the policy or its
+    file changes. Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, it is also raised if there
+    is no <code class="docutils literal notranslate"><span class="pre">config_path</span></code> or if <code class="docutils literal notranslate"><span class="pre">save()</span></code> refuses. The policy is
+    then as it was.</p></li>
+<li><p><strong>OSError</strong> – Under <code class="docutils literal notranslate"><span class="pre">auto_save</span></code>, when the write fails. The policy
     is then as it was.</p></li>
 </ul>
 </dd>
@@ -728,14 +739,15 @@ requires it.</p></li>
 <span class="sig-name descname"><span class="pre">get_rule</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">serial_number</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.configuration.IsocenterConfiguration.get_rule" title="Link to this definition">#</a></dt>
 <dd><p>Return the rule for a serial number: the rule dictionary itself,
 not a copy.</p>
-<p>Exact spelling, first match. Redaction does not use this: <code class="docutils literal notranslate"><span class="pre">redact()</span></code>
-and the export apply every matching rule, <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> included. A
-<code class="docutils literal notranslate"><span class="pre">match:</span></code> rule (#1108) has no serial, and is not returned here; nor
-do <code class="docutils literal notranslate"><span class="pre">update_rule</span></code> and <code class="docutils literal notranslate"><span class="pre">delete_rule</span></code> see one. Write it in the file,
-or append it to <code class="docutils literal notranslate"><span class="pre">rules</span></code>.</p>
+<p>It compares the spelling exactly, and it returns the first match.
+Redaction does not use this method: <code class="docutils literal notranslate"><span class="pre">redact()</span></code> and the export apply
+every matching rule, <code class="docutils literal notranslate"><span class="pre">&quot;*&quot;</span></code> included. A <code class="docutils literal notranslate"><span class="pre">match:</span></code> rule (#1108) has no
+serial, and this method does not return one, and <code class="docutils literal notranslate"><span class="pre">update_rule</span></code> and
+<code class="docutils literal notranslate"><span class="pre">delete_rule</span></code> do not see one either. Write a <code class="docutils literal notranslate"><span class="pre">match:</span></code> rule in the
+file, or append it to <code class="docutils literal notranslate"><span class="pre">rules</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>serial_number</strong> (<em>str</em>) – The serial number to find; <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> finds the
+<dd class="field-odd"><p><strong>serial_number</strong> (<em>str</em>) – The serial number to find. <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> finds the
 rule for series with no Device Serial Number.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
@@ -861,7 +873,7 @@ rule for series with no Device Serial Number.</p>
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

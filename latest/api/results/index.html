@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -538,7 +538,7 @@ page lists them as tier 2.</p>
 <span class="sig-name descname"><span class="pre">IngestSummary</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ingested</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">failures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">list()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">declined</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skipped</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hidden</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.io_handlers.IngestSummary" title="Link to this definition">#</a></dt>
 <dd><p>What <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> did with each file it found.</p>
 <p>A file takes exactly one of five routes. A declined file is not
-recorded as imported, so offering it again declines it again.</p>
+recorded as imported, so a second offer of it declines it again.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
 <thead>
@@ -555,14 +555,14 @@ recorded as imported, so offering it again declines it again.</p>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">failures</span></code></p></td>
 <td><p><em>List</em><em>[</em><em>Tuple</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em><em>]</em></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">(path,</span> <span class="pre">reason)</span></code> per rejected
-file, the same pair its <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row carries.</p></td>
+file, the same pair that its <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> audit row carries.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">declined</span></code></p></td>
 <td><p><em>int</em></p></td>
 <td><p>Files refused because the session already holds
-their SOP Instance UID (as another instance’s UID, or as a
-redacted instance’s UID before redaction), or because their
-Study Instance UID is held by a patient with a different
+their SOP Instance UID, as another instance’s UID or as a
+redacted instance’s UID before redaction. It also counts files
+whose Study Instance UID is held by a patient with a different
 Patient ID (#745). Each has a <code class="docutils literal notranslate"><span class="pre">WARNING</span></code> audit row and is not
 read into the store.</p></td>
 </tr>
@@ -572,8 +572,8 @@ read into the store.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hidden</span></code></p></td>
 <td><p><em>int</em></p></td>
-<td><p>Files found walking the directory whose name starts
-with <code class="docutils literal notranslate"><span class="pre">.</span></code> (<code class="docutils literal notranslate"><span class="pre">.DS_Store</span></code>, AppleDouble <code class="docutils literal notranslate"><span class="pre">._*</span></code>), which are not read
+<td><p>Files that the directory walk found whose name starts
+with <code class="docutils literal notranslate"><span class="pre">.</span></code> (<code class="docutils literal notranslate"><span class="pre">.DS_Store</span></code>, AppleDouble <code class="docutils literal notranslate"><span class="pre">._*</span></code>). They are not read
 (#795). A directory whose name starts with <code class="docutils literal notranslate"><span class="pre">.</span></code> is walked, and
 a file named directly is read whatever its name.</p></td>
 </tr>
@@ -587,7 +587,7 @@ a file named directly is read whatever its name.</p></td>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="isocenter.io_handlers.IngestSummary.failures">
 <span class="sig-name descname"><span class="pre">failures</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#isocenter.io_handlers.IngestSummary.failures" title="Link to this definition">#</a></dt>
-<dd><p><code class="docutils literal notranslate"><span class="pre">(path,</span> <span class="pre">reason)</span></code> per rejected file – the same pair the <code class="docutils literal notranslate"><span class="pre">ERROR</span></code>
+<dd><p><code class="docutils literal notranslate"><span class="pre">(path,</span> <span class="pre">reason)</span></code> per rejected file. It is the same pair that the <code class="docutils literal notranslate"><span class="pre">ERROR</span></code>
 audit row carries, so the summary and the trail cannot disagree.</p>
 </dd></dl>
 
@@ -615,25 +615,25 @@ audit row carries, so the summary and the trail cannot disagree.</p>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">written_uids</span></code></p></td>
 <td><p><em>List</em><em>[</em><em>str</em><em>]</em></p></td>
 <td><p>The SOP Instance UID of each instance
-that reached disk, and nothing else. An instance with no UID
-is not written and is in <code class="docutils literal notranslate"><span class="pre">failures</span></code>; so is one whose UID
-cannot name a file (<code class="docutils literal notranslate"><span class="pre">export_file_name</span></code>), under that UID. From
-<code class="docutils literal notranslate"><span class="pre">session.export()</span></code>, an instance whose file another instance’s
-write replaced, because the volume resolves their two file
-names to one file, is in <code class="docutils literal notranslate"><span class="pre">failures</span></code> too, and the instance the
-file holds is here (#1020).</p></td>
+that reached disk, and nothing else. An instance with no UID is
+not written and is in <code class="docutils literal notranslate"><span class="pre">failures</span></code>. An instance whose UID cannot
+name a file (<code class="docutils literal notranslate"><span class="pre">export_file_name</span></code>) is in <code class="docutils literal notranslate"><span class="pre">failures</span></code> too, under
+that UID. When the volume resolves two file names to one file,
+one instance’s write replaces the other’s file (#1020). From
+<code class="docutils literal notranslate"><span class="pre">session.export()</span></code>, the instance whose file was replaced is in
+<code class="docutils literal notranslate"><span class="pre">failures</span></code> too, and the instance that the file holds is here.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">failures</span></code></p></td>
 <td><p><em>List</em><em>[</em><em>Tuple</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em><em>]</em></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">details)</span></code> per
-instance that did not reach disk, each with an audit row; the
-instances of one replaced file share one row, which names
-them all.</p></td>
+instance that did not reach disk, each with an audit row. The
+instances of one replaced file share one row, which names them
+all.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">written</span></code></p></td>
 <td><p><em>int</em></p></td>
 <td><p>Files that reached disk, counted over distinct
-UIDs: two instances sharing a UID write one file.</p></td>
+UIDs. Two instances that share a UID write one file.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">failed</span></code></p></td>
 <td><p><em>int</em></p></td>
@@ -645,14 +645,9 @@ UIDs: two instances sharing a UID write one file.</p></td>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="isocenter.io_handlers.ExportSummary.written_uids">
 <span class="sig-name descname"><span class="pre">written_uids</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span><a class="headerlink" href="#isocenter.io_handlers.ExportSummary.written_uids" title="Link to this definition">#</a></dt>
-<dd><p>a write
-needs the UID for its file meta, so one without it fails and is in <code class="docutils literal notranslate"><span class="pre">failures</span></code>,
-keyed UNKNOWN. Never an output path, which names the Patient ID.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>SOP Instance UID of each instance that reached disk, and nothing else</p>
-</dd>
-</dl>
+<dd><p>SOP Instance UID of each instance that reached disk, and nothing else. A write
+needs the UID for its file meta, so an instance without one fails and is in
+<code class="docutils literal notranslate"><span class="pre">failures</span></code>, keyed UNKNOWN. It is never an output path, which names the Patient ID.</p>
 </dd></dl>
 
 <dl class="py attribute">
@@ -666,8 +661,8 @@ already audited by <code class="docutils literal notranslate"><span class="pre">
 <dt class="sig sig-object py" id="isocenter.io_handlers.ExportSummary.written">
 <span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">written</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#isocenter.io_handlers.ExportSummary.written" title="Link to this definition">#</a></dt>
 <dd><p>How many files reached disk.</p>
-<p>Counted over the de-duplicated UIDs: two instances sharing a UID
-write one file, the second overwriting the first.</p>
+<p>It counts the de-duplicated UIDs. Two instances that share a UID
+write one file, and the second write replaces the first.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>The number of distinct written UIDs.</p>
@@ -681,7 +676,7 @@ write one file, the second overwriting the first.</p>
 <dl class="py property">
 <dt class="sig sig-object py" id="isocenter.io_handlers.ExportSummary.failed">
 <span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">failed</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></span><a class="headerlink" href="#isocenter.io_handlers.ExportSummary.failed" title="Link to this definition">#</a></dt>
-<dd><p>How many instances did not.</p>
+<dd><p>How many instances did not reach disk.</p>
 </dd></dl>
 
 </dd></dl>
@@ -693,9 +688,9 @@ write one file, the second overwriting the first.</p>
 <dt class="sig sig-object py" id="isocenter.privacy.PhiReport">
 <span class="sig-name descname"><span class="pre">PhiReport</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">findings</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#isocenter.privacy.PhiFinding" title="isocenter.privacy.PhiFinding"><span class="pre">PhiFinding</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">failures</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.privacy.PhiReport" title="Link to this definition">#</a></dt>
 <dd><p>A container for PHI findings that supports analysis and export.</p>
-<p>Iterates, indexes and measures like the list of findings it wraps
-(<code class="docutils literal notranslate"><span class="pre">len(report)</span></code>, <code class="docutils literal notranslate"><span class="pre">report[0]</span></code>, <code class="docutils literal notranslate"><span class="pre">for</span> <span class="pre">finding</span> <span class="pre">in</span> <span class="pre">report</span></code>), and adds
-DataFrame export.</p>
+<p>A report works like the list of findings it wraps: you can iterate,
+index and measure it (<code class="docutils literal notranslate"><span class="pre">len(report)</span></code>, <code class="docutils literal notranslate"><span class="pre">report[0]</span></code>,
+<code class="docutils literal notranslate"><span class="pre">for</span> <span class="pre">finding</span> <span class="pre">in</span> <span class="pre">report</span></code>). It also adds DataFrame export.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
 <thead>
@@ -712,12 +707,13 @@ DataFrame export.</p>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">failures</span></code></p></td>
 <td><p><em>List</em><em>[</em><em>Tuple</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em><em>]</em></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">reason)</span></code>, one per
-instance a pixel scan could not read in full: its pixels could
-not be loaded, or OCR raised on at least one of its frames.
-<code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> fills it; an instance that failed on
-some frames keeps the findings of the frames that were read.
-It is always a list, never <code class="docutils literal notranslate"><span class="pre">None</span></code>. <code class="docutils literal notranslate"><span class="pre">audit()</span></code>’s is always
-empty: a failure in its workers raises instead.</p></td>
+instance that a pixel scan could not read in full. Either the
+instance’s pixels could not be loaded, or OCR raised on at
+least one of its frames. <code class="docutils literal notranslate"><span class="pre">scan_pixel_content()</span></code> fills it. An
+instance that failed on some frames keeps the findings of the
+frames that were read. It is always a list, never <code class="docutils literal notranslate"><span class="pre">None</span></code>. The
+list from <code class="docutils literal notranslate"><span class="pre">audit()</span></code> is always empty, because a failure in its
+workers raises instead.</p></td>
 </tr>
 </tbody>
 </table>
@@ -801,8 +797,8 @@ which <code class="docutils literal notranslate"><span class="pre">anonymize()</
 <td><p><em>Tuple</em></p></td>
 <td><p>Route from the Instance to the item this was
 raised against, as <code class="docutils literal notranslate"><span class="pre">(sequence_tag,</span> <span class="pre">index)</span></code> steps. Empty means
-the Instance itself. The only way to rebind a finding to its
-sequence item after it crosses a process boundary.</p></td>
+the Instance itself. It is the only way to rebind a finding to
+its sequence item after the finding crosses a process boundary.</p></td>
 </tr>
 </tbody>
 </table>
@@ -853,9 +849,9 @@ sequence item after it crosses a process boundary.</p></td>
 <dl class="py class">
 <dt class="sig sig-object py" id="isocenter.session.LockingResult">
 <span class="sig-name descname"><span class="pre">LockingResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">iterable</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="positional-only-separator o"><abbr title="Positional-only parameter separator (PEP 570)"><span class="pre">/</span></abbr></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.session.LockingResult" title="Link to this definition">#</a></dt>
-<dd><p>What <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> returns: a <code class="docutils literal notranslate"><span class="pre">list</span></code> of the <code class="docutils literal notranslate"><span class="pre">Instance</span></code> objects
-that received an identity token, whose repr is one line
-(<code class="docutils literal notranslate"><span class="pre">&lt;LockingResult:</span> <span class="pre">N</span> <span class="pre">instances</span> <span class="pre">secured&gt;</span></code>) rather than every instance.</p>
+<dd><p>What <code class="docutils literal notranslate"><span class="pre">lock_identities()</span></code> returns. It is a <code class="docutils literal notranslate"><span class="pre">list</span></code> of the <code class="docutils literal notranslate"><span class="pre">Instance</span></code>
+objects that received an identity token. Its repr is one line
+(<code class="docutils literal notranslate"><span class="pre">&lt;LockingResult:</span> <span class="pre">N</span> <span class="pre">instances</span> <span class="pre">secured&gt;</span></code>), not every instance.</p>
 </dd></dl>
 
 </section>
@@ -889,33 +885,33 @@ in the graph.</p>
 <dt class="sig sig-object py" id="isocenter.io_handlers.ExportError">
 <span class="sig-name descname"><span class="pre">ExportError</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">failures</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attempted</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">folder</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.io_handlers.ExportError" title="Link to this definition">#</a></dt>
 <dd><p>The export delivered nothing.</p>
-<p>Raised by <code class="docutils literal notranslate"><span class="pre">session.export()</span></code> when <strong>zero of N planned</strong> instances
-reached disk and at least one failed, in both formats: the DICOM path,
-and <code class="docutils literal notranslate"><span class="pre">WfdbExporter.export</span></code>, where N is the waveform records attempted.
-The message says “instances” in both: a WFDB record is written from
-one waveform instance, and its failure is named by that instance’s
-UID, as the DICOM one is. Not raised on a partial export.</p>
-<p>One case leaves a file behind (#1020): every planned instance was
-written under file names the volume resolved to one file, and that
-file could not be read back as any of them. None is reported as
-written, so this is raised, and the folder holds that one file; the
-<code class="docutils literal notranslate"><span class="pre">ERROR</span></code> row keyed <code class="docutils literal notranslate"><span class="pre">MULTIPLE</span></code> says so.</p>
-<p>Raised <strong>last</strong>, after every record the run produces, so a caller who
-catches this still holds a correct graph, a complete audit trail and
-a compliance report grading <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. The DICOM path raises
-after the collision report, the recoverable-identity disclosure, the
-delivery counters, the <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> audit row and <code class="docutils literal notranslate"><span class="pre">Done.</span></code>. The WFDB path
-has none of the first three; it raises after each record’s <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> or
-<code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row and its own <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row.</p>
-<p>A <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> subclass, so <code class="docutils literal notranslate"><span class="pre">except</span> <span class="pre">RuntimeError</span></code> catches it.
+<p><code class="docutils literal notranslate"><span class="pre">session.export()</span></code> raises it when <strong>zero of N planned</strong> instances
+reached disk and at least one failed. This holds in both formats: the
+DICOM path, and <code class="docutils literal notranslate"><span class="pre">WfdbExporter.export</span></code>, where N is the waveform records
+attempted. The message says “instances” in both. A WFDB record is
+written from one waveform instance, and that instance’s UID names its
+failure, as for DICOM. It is not raised on a partial export.</p>
+<p>One case leaves a file behind (#1020). In that case, every planned
+instance was written under file names that the volume resolved to one
+file, and that file could not be read back as any of them. No instance
+is reported as written, so this error is raised, and the folder holds
+that one file. The <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> row keyed <code class="docutils literal notranslate"><span class="pre">MULTIPLE</span></code> says so.</p>
+<p>It is raised <strong>last</strong>, after every record that the run produces. So a
+caller who catches it still holds a correct graph, a complete audit
+trail and a compliance report that grades <code class="docutils literal notranslate"><span class="pre">REVIEW_REQUIRED</span></code>. The DICOM
+path raises after the collision report, the recoverable-identity
+disclosure, the delivery counters, the <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> audit row and <code class="docutils literal notranslate"><span class="pre">Done.</span></code>.
+The WFDB path has none of the first three. It raises after each
+record’s <code class="docutils literal notranslate"><span class="pre">ERROR</span></code> or <code class="docutils literal notranslate"><span class="pre">DATA_LOSS</span></code> row and its own <code class="docutils literal notranslate"><span class="pre">EXPORT</span></code> row.</p>
+<p>It is a <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> subclass, so <code class="docutils literal notranslate"><span class="pre">except</span> <span class="pre">RuntimeError</span></code> catches it.
 <code class="docutils literal notranslate"><span class="pre">write_tree</span></code> raises a bare <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> instead, for “this
 serializer could not write”.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>failures</strong> (<em>list</em>) – <code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">details)</span></code> per instance that failed;
-kept as <code class="docutils literal notranslate"><span class="pre">self.failures</span></code>.</p></li>
-<li><p><strong>attempted</strong> (<em>int</em>) – How many instances were planned; kept as
+<li><p><strong>failures</strong> (<em>list</em>) – <code class="docutils literal notranslate"><span class="pre">(entity_uid,</span> <span class="pre">details)</span></code> per instance that failed.
+It is kept as <code class="docutils literal notranslate"><span class="pre">self.failures</span></code>.</p></li>
+<li><p><strong>attempted</strong> (<em>int</em>) – How many instances were planned. It is kept as
 <code class="docutils literal notranslate"><span class="pre">self.attempted</span></code>.</p></li>
 <li><p><strong>folder</strong> (<em>str</em><em>, </em><em>optional</em>) – The output folder, named in the message.</p></li>
 </ul>
@@ -1110,7 +1106,7 @@ kept as <code class="docutils literal notranslate"><span class="pre">self.failur
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       

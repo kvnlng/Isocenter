@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=18bd87630a240e9c25be" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=18bd87630a240e9c25be" />
 
-    <script src="../../_static/documentation_options.js?v=295c6f67"></script>
+    <script src="../../_static/documentation_options.js?v=3596a5a1"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light dark"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="1.0.0rc22" />
+  <meta name="docsearch:version" content="1.0.0" />
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -564,21 +564,21 @@ bookkeeping every graph entity carries.</p>
 <dl class="py data">
 <dt class="sig sig-object py" id="isocenter.entities.NO_PATIENT_ID_PREFIX">
 <span class="sig-name descname"><span class="pre">NO_PATIENT_ID_PREFIX</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'\\no-patient-id\\'</span></span><a class="headerlink" href="#isocenter.entities.NO_PATIENT_ID_PREFIX" title="Link to this definition">#</a></dt>
-<dd><p>The prefix of the <code class="docutils literal notranslate"><span class="pre">patient_id</span></code> ingest gives a subject whose files carry
-no usable Patient ID: <code class="docutils literal notranslate"><span class="pre">NO_PATIENT_ID_PREFIX</span> <span class="pre">+</span> <span class="pre">&lt;StudyInstanceUID&gt;</span></code>.</p>
+<dd><p>The prefix of the <code class="docutils literal notranslate"><span class="pre">patient_id</span></code> that ingest gives a subject whose files
+carry no usable Patient ID: <code class="docutils literal notranslate"><span class="pre">NO_PATIENT_ID_PREFIX</span> <span class="pre">+</span> <span class="pre">&lt;StudyInstanceUID&gt;</span></code>.</p>
 <p><strong>The backslash is the point.</strong> It is DICOM’s value delimiter, so
-pydicom reads a Patient ID holding one as a <code class="docutils literal notranslate"><span class="pre">MultiValue</span></code>, and ingest
-refuses a multi-valued Patient ID. No single-valued Patient ID read
-from a file can therefore equal a key built on this prefix, which no
-placeholder string (<code class="docutils literal notranslate"><span class="pre">UnknownPatient</span></code>, <code class="docutils literal notranslate"><span class="pre">''</span></code>) could promise: a real
-Patient ID <code class="docutils literal notranslate"><span class="pre">UnknownPatient</span></code> can exist, and would merge with every
-ID-less file.</p>
-<p>Not <code class="docutils literal notranslate"><span class="pre">ANON_</span></code>-shaped, so <code class="docutils literal notranslate"><span class="pre">_is_replacement_id</span></code> and <code class="docutils literal notranslate"><span class="pre">canonical_patient_key</span></code>
-treat the key as an original: its date offset is the pseudonym it would
-be replaced by, under the project secret, and it is never replaced.
-The key never leaves the store: <code class="docutils literal notranslate"><span class="pre">exported_patient_id</span></code> is what every
-writer reads. It embeds the <strong>source</strong> Study Instance UID and stays
-anchored there whatever a later UID replacement does to the study.</p>
+pydicom reads a Patient ID that holds one as a <code class="docutils literal notranslate"><span class="pre">MultiValue</span></code>, and ingest
+refuses a multi-valued Patient ID. So no single-valued Patient ID read
+from a file can equal a key built on this prefix. No placeholder string
+(<code class="docutils literal notranslate"><span class="pre">UnknownPatient</span></code>, <code class="docutils literal notranslate"><span class="pre">''</span></code>) could promise that, because a real Patient ID
+<code class="docutils literal notranslate"><span class="pre">UnknownPatient</span></code> can exist, and it would merge with every ID-less file.</p>
+<p>The key is not <code class="docutils literal notranslate"><span class="pre">ANON_</span></code>-shaped, so <code class="docutils literal notranslate"><span class="pre">_is_replacement_id</span></code> and
+<code class="docutils literal notranslate"><span class="pre">canonical_patient_key</span></code> treat it as an original. Its date offset is the
+pseudonym it would be replaced by, under the project secret, and the key
+is never replaced. The key never leaves the store, because every writer
+reads <code class="docutils literal notranslate"><span class="pre">exported_patient_id</span></code>. It embeds the <strong>source</strong> Study Instance UID,
+and it stays anchored there whatever a later UID replacement does to the
+study.</p>
 <p><code class="docutils literal notranslate"><span class="pre">is_synthetic_patient_id</span></code> is the only test for it. Do not spell the
 prefix anywhere else.</p>
 </dd></dl>
@@ -662,16 +662,16 @@ Represents a single patient visit or examination.</p>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">date_shifted</span></code></p></td>
 <td><p><em>bool</em></p></td>
 <td><p>Whether dates in this study have been shifted.
-Whether <em>this</em> study date is one the shift produced is
-<code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for</span></code>.</p></td>
+<code class="docutils literal notranslate"><span class="pre">date_shift_vouches_for</span></code> answers whether <em>this</em> study date is
+one that the shift produced.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">study_time</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><em>str</em><em>]</em></p></td>
-<td><p>A time of the study a caller may hold
-here. Ingest never sets it, the store has no column for it
-(it reads None after a reopen), and no export writes it: each
-file carries its own instance’s Study Time <code class="docutils literal notranslate"><span class="pre">(0008,0030)</span></code>
-(#953), as it does its own Series Number and Modality.</p></td>
+<td><p>A time of the study that a caller may
+hold here. Ingest never sets it. The store has no column for it
+(it reads None after a reopen). No export writes it: each file
+carries its own instance’s Study Time <code class="docutils literal notranslate"><span class="pre">(0008,0030)</span></code> (#953), as
+it carries its own Series Number and Modality.</p></td>
 </tr>
 </tbody>
 </table>
@@ -700,15 +700,16 @@ Typically represents a single scan or reconstruction.</p>
 <td><p><em>str</em></p></td>
 <td><p>The source’s Modality as ingested (e.g., ‘CT’,
 ‘MR’). The export writes each instance’s own <code class="docutils literal notranslate"><span class="pre">0008,0060</span></code>, after
-the configuration’s rules, not this (#869).</p></td>
+the configuration’s rules, not this value (#869).</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">series_number</span></code></p></td>
 <td><p><em>int</em></p></td>
 <td><p>The source’s Series Number as ingested. The
 export writes each instance’s own <code class="docutils literal notranslate"><span class="pre">0020,0011</span></code>, after the
-configuration’s rules, not this, and the folder and WFDB record
-names read the same attribute (#869); assigning it changes no
-file and does not mark the instances edited.</p></td>
+configuration’s rules, not this value. The folder and WFDB
+record names read the same instance attribute (#869). An
+assignment to it changes no file and does not mark the
+instances edited.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">equipment</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><a class="reference internal" href="#isocenter.entities.Equipment" title="isocenter.entities.Equipment"><em>Equipment</em></a><em>]</em></p></td>
@@ -749,15 +750,15 @@ and <code class="docutils literal notranslate"><span class="pre">redact()</span>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">instance_number</span></code></p></td>
 <td><p><em>int</em></p></td>
-<td><p>Instance Number (0020,0013). Not unique
-within a series. 0 for an ingested file that has none, and
-<code class="docutils literal notranslate"><span class="pre">0020,0013</span></code> is then absent from <code class="docutils literal notranslate"><span class="pre">attributes</span></code> (#870).</p></td>
+<td><p>Instance Number (0020,0013). It is not
+unique within a series. It is 0 for an ingested file that has
+none, and <code class="docutils literal notranslate"><span class="pre">0020,0013</span></code> is then absent from <code class="docutils literal notranslate"><span class="pre">attributes</span></code> (#870).</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">file_path</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><em>str</em><em>]</em></p></td>
 <td><p>A file whose pixels match this instance
-now, read when the store holds no frame for it. None after
-redaction.</p></td>
+now. It is read when the store holds no frame for the instance.
+It is None after redaction.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">source_path</span></code></p></td>
 <td><p><em>Optional</em><em>[</em><em>str</em><em>]</em></p></td>
@@ -781,15 +782,19 @@ resident, else None. Read them with <code class="docutils literal notranslate"><
 <dt class="sig sig-object py" id="isocenter.entities.Instance.regenerate_uid">
 <span class="sig-name descname"><span class="pre">regenerate_uid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">new_uid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.Instance.regenerate_uid" title="Link to this definition">#</a></dt>
 <dd><p>Gives this instance the SOP Instance UID its redacted pixels take.</p>
-<p>Call this whenever pixel data is modified, so the changed image is never
-mistaken for the original. <code class="docutils literal notranslate"><span class="pre">new_uid</span></code> is <strong>required</strong>: the redaction pass
-derives it from the source SOP Instance UID, the redaction’s zones and
-the project secret, so the same redaction gives the same UID, and no
-worker process holds the secret.</p>
-<p>Sets the property and the <code class="docutils literal notranslate"><span class="pre">0008,0018</span></code> element together, records the
-UID the instance held before in <code class="docutils literal notranslate"><span class="pre">SOURCE_SOP_UID_ATTR</span></code> the first time
-its UID moves, and detaches the instance from its source file
-(<code class="docutils literal notranslate"><span class="pre">file_path</span> <span class="pre">=</span> <span class="pre">None</span></code>), whose pixels it no longer matches.</p>
+<p>Call this whenever the pixel data changes, so that the changed image
+is never mistaken for the original. <code class="docutils literal notranslate"><span class="pre">new_uid</span></code> is <strong>required</strong>. The
+redaction pass derives it from the source SOP Instance UID, the
+redaction’s zones and the project secret. So the same redaction gives
+the same UID, and no worker process holds the secret.</p>
+<p>This method does three things:</p>
+<ul class="simple">
+<li><p>It sets the property and the <code class="docutils literal notranslate"><span class="pre">0008,0018</span></code> element together.</p></li>
+<li><p>The first time the instance’s UID moves, it records the UID that
+the instance held before in <code class="docutils literal notranslate"><span class="pre">SOURCE_SOP_UID_ATTR</span></code>.</p></li>
+<li><p>It detaches the instance from its source file (<code class="docutils literal notranslate"><span class="pre">file_path</span> <span class="pre">=</span> <span class="pre">None</span></code>),
+because the instance no longer matches that file’s pixels.</p></li>
+</ul>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>new_uid</strong> (<em>str</em>) – The derived SOP Instance UID.</p>
@@ -801,34 +806,36 @@ its UID moves, and detaches the instance from its source file
 <dt class="sig sig-object py" id="isocenter.entities.Instance.set_attr">
 <span class="sig-name descname"><span class="pre">set_attr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.Instance.set_attr" title="Link to this definition">#</a></dt>
 <dd><p>Sets an attribute, and keeps resident pixels reading as it declares.</p>
-<p>Every tag is written as <code class="docutils literal notranslate"><span class="pre">DicomItem.set_attr</span></code> writes it. An edit to
-a descriptor a frame is read by (Rows, Columns, SamplesPerPixel,
-NumberOfFrames, BitsAllocated, PixelRepresentation) while pixels
-are resident also settles the resident array, because a save writes
-the array’s bytes and every later read takes them under the edit.
-<strong>The declaration wins:</strong></p>
+<p>Every tag is written as <code class="docutils literal notranslate"><span class="pre">DicomItem.set_attr</span></code> writes it. Some
+descriptors control how a frame is read: Rows, Columns,
+SamplesPerPixel, NumberOfFrames, BitsAllocated and
+PixelRepresentation. An edit to one of them while pixels are
+resident also settles the resident array. This is because a save
+writes the array’s bytes, and every later read takes those bytes
+under the edit. <strong>The declaration wins:</strong></p>
 <ul class="simple">
 <li><p>An edit under which the bytes read as they read now (the same
 dtype and shape) is a plain write.</p></li>
-<li><p>An array a save has written is released after the write, so the
-next read rebuilds it from the store under the edit, or, for an
-instance read from its source file, from the file, under the edit
-too. Its bytes are stored; nothing is lost. A memory-only array
-has nowhere to be reloaded from and stays, as
-<code class="docutils literal notranslate"><span class="pre">unload_pixel_data</span></code> refuses to drop it.</p></li>
+<li><p>An array that a save wrote is released after the write. The next
+read then rebuilds it under the edit: from the store, or from the
+source file for an instance read from its source file. Its bytes
+are stored, so nothing is lost. A memory-only array has nowhere to
+be reloaded from, so it stays, as <code class="docutils literal notranslate"><span class="pre">unload_pixel_data</span></code> refuses to
+drop it.</p></li>
 <li><p>An array set through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> and not yet written is
-republished as the edit reads its bytes: a view under the new
-dtype, in the new shape, published together with the write, so no
-read sees the new declaration beside the old array. It stays
-unwritten, and <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> still restores what the set
-replaced.</p></li>
+published again as the edit reads its bytes. That is a view under
+the new dtype, in the new shape, published together with the
+write, so no read sees the new declaration beside the old array.
+The array stays unwritten, and <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> still
+restores what the set replaced.</p></li>
 </ul>
-<p>Each edit is judged alone. Changing a geometry in two steps whose
-end state the bytes fit (BitsAllocated 8, then Columns 8, over a
-4x4 uint16 set) is refused at the first step; set the array you mean
-instead, which writes its own descriptors.</p>
+<p>Each edit is judged alone. Suppose that you change a geometry in two
+steps, and the bytes fit the end state (BitsAllocated 8, then
+Columns 8, over a 4x4 uint16 set). Then the first step is refused.
+Instead, set the array that you mean, which writes its own
+descriptors.</p>
 <p>A read in flight when the edit lands is not published under the old
-declaration: it reads again under the new descriptors.</p>
+declaration. It reads again under the new descriptors.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -837,16 +844,17 @@ declaration: it reads again under the new descriptors.</p>
 </ul>
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
-<dd class="field-even"><p><strong>ValueError</strong> – If the edit is to a described tag, the resident
-    array was set through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> and not written
-    since, and the edit reads its bytes as a different number
-    of bytes, or does not parse as an integer: “BitsAllocated
+<dd class="field-even"><p><strong>ValueError</strong> – If all of these are true: the edit is to a described
+    tag, the resident array was set through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>
+    and not written since, and the edit reads its bytes as a
+    different number of bytes or does not parse as an integer.
+    The message reads, for example: “BitsAllocated
     would read the unsaved uint16 (4, 4) array set by
     set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and
     the array holds 32. Pass the array you mean to
     set_pixel_data(), which writes its own descriptors.” The
-    value is never in the message. Raised before anything is
-    written: the attribute and the revision are unchanged.</p>
+    value is never in the message. It is raised before anything
+    is written, so the attribute and the revision are unchanged.</p>
 </dd>
 </dl>
 </dd></dl>
@@ -855,20 +863,21 @@ declaration: it reads again under the new descriptors.</p>
 <dt class="sig sig-object py" id="isocenter.entities.Instance.unload_pixel_data">
 <span class="sig-name descname"><span class="pre">unload_pixel_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#isocenter.entities.Instance.unload_pixel_data" title="Link to this definition">#</a></dt>
 <dd><p>Frees the cached pixel_array, but only when it can be brought back.</p>
-<p>Two things have to be true: there must be somewhere to reload from
-(the source file, or the store’s sidecar), <strong>and</strong> the resident
-array must not have been replaced through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> since
-it was last written. Otherwise the array is the only copy of those
-pixels, and it is kept.</p>
-<p>An array mutated <strong>in place</strong> is not detected. Only a writeable
-array can be mutated in place, and a frame read from a file or from
-the store is read-only (assigning into it raises). The reachable
-case is a replacement a save has since written: that array is
-writeable, so <code class="docutils literal notranslate"><span class="pre">arr</span> <span class="pre">=</span> <span class="pre">inst.get_pixel_data();</span> <span class="pre">arr[...]</span> <span class="pre">=</span> <span class="pre">0</span></code> on it
-diverges from the stored frame, and unloading it then drops the
-mutation.</p>
-<p>Use <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> where dropping unsaved pixels is the
-intent.</p>
+<p>Two things must both be true:</p>
+<ul class="simple">
+<li><p>There is somewhere to reload from (the source file, or the
+store’s sidecar).</p></li>
+<li><p>The resident array was not replaced through <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code>
+since it was last written.</p></li>
+</ul>
+<p>Otherwise the array is the only copy of those pixels, and it is kept.</p>
+<p>An array changed <strong>in place</strong> is not detected. Only a writeable
+array can be changed in place, and a frame read from a file or from
+the store is read-only (an assignment into it raises). The case that
+can occur is a replacement that a save has since written. That array
+is writeable, so <code class="docutils literal notranslate"><span class="pre">arr</span> <span class="pre">=</span> <span class="pre">inst.get_pixel_data();</span> <span class="pre">arr[...]</span> <span class="pre">=</span> <span class="pre">0</span></code> on it
+diverges from the stored frame, and an unload then drops the change.</p>
+<p>Use <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> when you mean to drop unsaved pixels.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>True if unloaded (or already absent), False if it was
@@ -886,25 +895,25 @@ is stored.</p>
 <dt class="sig sig-object py" id="isocenter.entities.Instance.discard_pixel_data">
 <span class="sig-name descname"><span class="pre">discard_pixel_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#isocenter.entities.Instance.discard_pixel_data" title="Link to this definition">#</a></dt>
 <dd><p>Frees the cached pixel_array even if it has unwritten changes.</p>
-<p>For a caller who means to throw the resident array away, so that
-the next <code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reloads the stored frame, read under the
+<p>Use it to throw the resident array away, so that the next
+<code class="docutils literal notranslate"><span class="pre">get_pixel_data()</span></code> reloads the stored frame, read under the
 instance’s current descriptors.</p>
-<p><strong>It undoes the whole</strong> <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> <strong>it discards</strong>: the pixels,
-and every descriptor that call wrote (Rows, Columns,
+<p><strong>It undoes the whole</strong> <code class="docutils literal notranslate"><span class="pre">set_pixel_data()</span></code> <strong>it discards</strong>. The pixels
+go back to what they were before the first unwritten replacement. So
+does every descriptor that call wrote (Rows, Columns,
 SamplesPerPixel, NumberOfFrames, PhotometricInterpretation,
 PlanarConfiguration, BitsAllocated, PixelRepresentation and the
-float/bool dtype carrier), go back to what they were before the
-first unwritten replacement, absent ones included. A pixel
-descriptor edited between the set and the discard goes back with
-them: while the replacement is resident, that edit describes the
-replacement. So the next read is the stored frame as it was stored.
-Once the replacement is written (by a save or by redaction) it <em>is</em>
-the stored frame, and there is nothing to undo: the array is
-dropped and the descriptors, which describe it, stay. A refusal
+float/bool dtype carrier), absent ones included. A pixel descriptor
+edited between the set and the discard goes back with them, because
+while the replacement is resident, that edit describes the
+replacement. So the next read is the stored frame as it was stored.</p>
+<p>Once the replacement is written (by a save or by redaction), it <em>is</em>
+the stored frame, and there is nothing to undo. The array is
+dropped, and the descriptors, which describe it, stay. A refusal
 (below) keeps both the array and the descriptors that describe it.
-Dropping an unwritten replacement leaves the instance dirty, as the
-set did.</p>
-<p><code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> answers “free this if it is safe”; this
+A discard of an unwritten replacement leaves the instance dirty, as
+the set did.</p>
+<p><code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> answers “free this if it is safe”. This method
 answers “throw this away”.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
@@ -925,61 +934,66 @@ is nowhere to reload from at all.</p>
 <ol class="arabic simple">
 <li><p>Returns the cached <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code>.</p></li>
 <li><p>Loads the frame from the store’s sidecar, if it holds one.</p></li>
-<li><p>Reads <code class="docutils literal notranslate"><span class="pre">file_path</span></code> with the decode <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> uses: pydicom,
-then imagecodecs where pydicom has no plugin. A file ingest
-refuses is refused here, in the same words. The decoded
-samples are read under the instance’s pixel descriptors where
-it holds them, as the sidecar’s are: the file supplies the
-samples and any descriptor the instance lacks.</p></li>
+<li><p>Reads <code class="docutils literal notranslate"><span class="pre">file_path</span></code> with the decode that <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> uses: pydicom,
+then imagecodecs where pydicom has no plugin. A file that ingest
+refuses is refused here, in the same words. The decoded samples
+are read under the instance’s pixel descriptors where the
+instance holds them, as the sidecar’s samples are. The file
+supplies the samples and any descriptor that the instance lacks.</p></li>
 </ol>
 <p>A read whose decoder returns RGB from a YBR-labelled file says so.
-An 8-bit <code class="docutils literal notranslate"><span class="pre">YBR_FULL</span></code> JPEG-LS file read through the imagecodecs
-fallback comes back converted to RGB, as <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> stores it. So
-does a JPEG 2000 <code class="docutils literal notranslate"><span class="pre">YBR_RCT</span></code>/<code class="docutils literal notranslate"><span class="pre">YBR_ICT</span></code> file, whose codec undoes the
-colour transform, and any 8-bit YBR source pydicom decodes, which it
-returns as RGB by default. An instance that carries a
-PhotometricInterpretation is relabelled <code class="docutils literal notranslate"><span class="pre">RGB</span></code> to match, which
-advances its revision. This is the one write a read makes, and it is
-made only when the decode converted.</p>
+These sources come back converted to RGB:</p>
+<ul class="simple">
+<li><p>an 8-bit <code class="docutils literal notranslate"><span class="pre">YBR_FULL</span></code> JPEG-LS file read through the imagecodecs
+fallback, as <code class="docutils literal notranslate"><span class="pre">ingest()</span></code> stores it</p></li>
+<li><p>a JPEG 2000 <code class="docutils literal notranslate"><span class="pre">YBR_RCT</span></code>/<code class="docutils literal notranslate"><span class="pre">YBR_ICT</span></code> file, whose codec undoes the
+colour transform</p></li>
+<li><p>any 8-bit YBR source that pydicom decodes, which pydicom returns
+as RGB by default</p></li>
+</ul>
+<p>An instance that carries a PhotometricInterpretation is then
+relabelled <code class="docutils literal notranslate"><span class="pre">RGB</span></code> to match, and that advances its revision. This is
+the one write that a read makes, and it is made only when the decode
+converted.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>The pixel data as a numpy array, or None
-when the instance carries no pixel element. From a file,
-that is decided by the dataset alone: None when it was
-read and holds none of Pixel Data (7FE0,0010), Float
+when the instance carries no pixel element. From a file, the
+dataset alone decides that. The result is None when the file
+was read and holds none of Pixel Data (7FE0,0010), Float
 Pixel Data (7FE0,0008) and Double Float Pixel Data
-(7FE0,0009), whatever its transfer syntax, and never
+(7FE0,0009), whatever its transfer syntax. It is never None
 because of what a failure’s message says. A frame that
-could not be decoded is not None: it raises. So does a
-file with no pixel element whose pixels are elsewhere,
-where pydicom has no decoder for its transfer syntax:
-one that holds Pixel Data Provider URL (0028,7FE0)
-at the top level, or
-is under a JPIP Referenced syntax.</p>
+could not be decoded is not None: it raises. A file with no
+pixel element whose pixels are elsewhere also raises, when
+pydicom has no decoder for its transfer syntax. Such a file
+holds Pixel Data Provider URL (0028,7FE0) at the top level,
+or is under a JPIP Referenced syntax.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>Optional[np.ndarray]</p>
 </dd>
 <dt class="field-odd">Raises<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>RuntimeError</strong> – If loading fails due to transfer syntax issues,
-    missing codecs, or a pixel element the reader could not
-    decode. Also, from a file, when an encapsulated pixel
-    element’s offset table names a different number of frames
-    from NumberOfFrames: <code class="docutils literal notranslate"><span class="pre">Lazy</span> <span class="pre">load</span> <span class="pre">failed</span> <span class="pre">for</span> <span class="pre">instance</span>
+<li><p><strong>RuntimeError</strong> – If loading fails because of transfer syntax
+    issues, missing codecs, or a pixel element that the reader
+    could not decode. Also from a file, when an encapsulated
+    pixel element’s offset table names a different number of
+    frames from NumberOfFrames: <code class="docutils literal notranslate"><span class="pre">Lazy</span> <span class="pre">load</span> <span class="pre">failed</span> <span class="pre">for</span> <span class="pre">instance</span>
 &#160;&#160;&#160; <span class="pre">&lt;uid&gt;:</span> <span class="pre">RuntimeError:</span> <span class="pre">&lt;table&gt;</span> <span class="pre">names</span> <span class="pre">N</span> <span class="pre">frames;</span>
 &#160;&#160;&#160; <span class="pre">NumberOfFrames</span> <span class="pre">declares</span> <span class="pre">M</span></code>. The message names the
-    instance, never the source file. From a file ingest would
-    refuse, in ingest’s words: a header pydicom’s validation
-    rejects, whether or not pydicom has a plugin for its syntax
+    instance, never the source file. Also from a file that
+    ingest would refuse, in ingest’s words. Such a file has a
+    header that pydicom’s validation rejects, whether or not
+    pydicom has a plugin for its syntax
     (<code class="docutils literal notranslate"><span class="pre">Missing</span> <span class="pre">required</span> <span class="pre">element:</span> <span class="pre">(0028,0101)</span> <span class="pre">'Bits</span>
 &#160;&#160;&#160; <span class="pre">Stored'</span></code>), or a 16-bit YBR_FULL frame.
-    From the sidecar, when a descriptor written since the
-    frame was stored asks for a reading the stored bytes
+    Also from the sidecar, when a descriptor written since the
+    frame was stored asks for a reading that the stored bytes
     cannot satisfy (BitsAllocated 16 -&gt; 8, or Rows x Columns
     smaller than the stored samples): <code class="docutils literal notranslate"><span class="pre">Pixel</span> <span class="pre">Loader</span> <span class="pre">failed</span>
 &#160;&#160;&#160; <span class="pre">for</span> <span class="pre">&lt;uid&gt;:</span> <span class="pre">Integrity</span> <span class="pre">Error:</span> <span class="pre">...</span></code>. A reopened session
-    gives the same refusal. From a file, the same refusal for
+    gives the same refusal. A file gives the same refusal for
     the same edit, as <code class="docutils literal notranslate"><span class="pre">Lazy</span> <span class="pre">load</span> <span class="pre">failed</span> <span class="pre">for</span> <span class="pre">instance</span> <span class="pre">&lt;uid&gt;:</span>
 &#160;&#160;&#160; <span class="pre">RuntimeError:</span> <span class="pre">Integrity</span> <span class="pre">Error:</span> <span class="pre">frame</span> <span class="pre">for</span> <span class="pre">&lt;uid&gt;</span> <span class="pre">holds</span> <span class="pre">N</span>
 &#160;&#160;&#160; <span class="pre">samples;</span> <span class="pre">geometry</span> <span class="pre">(R,</span> <span class="pre">C)</span> <span class="pre">needs</span> <span class="pre">M</span> <span class="pre">(one</span> <span class="pre">trailing</span> <span class="pre">pad</span> <span class="pre">byte</span> <span class="pre">is</span>
@@ -994,13 +1008,14 @@ is under a JPIP Referenced syntax.</p>
 <dt class="sig sig-object py" id="isocenter.entities.Instance.unload_waveform_data">
 <span class="sig-name descname"><span class="pre">unload_waveform_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#isocenter.entities.Instance.unload_waveform_data" title="Link to this definition">#</a></dt>
 <dd><p>Clear cached waveform samples to free memory.</p>
-<p>Unloads only when the store holds the samples to read them back
-from; a source file alone is not enough, unlike for
-<code class="docutils literal notranslate"><span class="pre">unload_pixel_data</span></code>.</p>
+<p>It unloads only when the store holds the samples to read them back
+from. Unlike for <code class="docutils literal notranslate"><span class="pre">unload_pixel_data</span></code>, a source file alone is not
+enough.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
-<dd class="field-odd"><p>True if unloaded (or already absent), False if unsafe –
-i.e. the samples are in memory only and nothing could reload them.</p>
+<dd class="field-odd"><p>True if unloaded (or already absent). False if unsafe,
+that is, if the samples are in memory only and nothing could
+reload them.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p>bool</p>
@@ -1013,8 +1028,8 @@ i.e. the samples are in memory only and nothing could reload them.</p>
 <span class="sig-name descname"><span class="pre">get_waveform_bytes</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bytes</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.entities.Instance.get_waveform_bytes" title="Link to this definition">#</a></dt>
 <dd><p>Return the original Waveform Data (5400,1010) bytes, undecoded.</p>
 <p>The DICOM export writes these back verbatim, so a DICOM to DICOM round
-trip is byte-exact. Not cached, so an instance does not hold both the
-bytes and the decoded array.</p>
+trip is byte-exact. They are not cached, so an instance does not hold
+both the bytes and the decoded array.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Raw sample bytes, or None when this instance
@@ -1046,11 +1061,11 @@ waveform.</p>
 <dt class="sig sig-object py" id="isocenter.entities.Instance.set_pixel_data">
 <span class="sig-name descname"><span class="pre">set_pixel_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.Instance.set_pixel_data" title="Link to this definition">#</a></dt>
 <dd><p>Sets the pixel array and updates the descriptors that describe it.</p>
-<p>Which axis of the array means what is decided by the instance’s own
-attributes, not by the array’s shape: <code class="docutils literal notranslate"><span class="pre">(frames,</span> <span class="pre">rows,</span> <span class="pre">cols)</span></code> and
-<code class="docutils literal notranslate"><span class="pre">(rows,</span> <span class="pre">cols,</span> <span class="pre">samples)</span></code> are the same rank. How <em>large</em> each axis is
-comes from the array.</p>
-<p>Updates tags, each only when the value actually changes:</p>
+<p>The instance’s own attributes decide what each axis of the array
+means, not the array’s shape, because <code class="docutils literal notranslate"><span class="pre">(frames,</span> <span class="pre">rows,</span> <span class="pre">cols)</span></code> and
+<code class="docutils literal notranslate"><span class="pre">(rows,</span> <span class="pre">cols,</span> <span class="pre">samples)</span></code> are the same rank. The array decides how
+<em>large</em> each axis is.</p>
+<p>It updates these tags, each only when the value actually changes:</p>
 <ul class="simple">
 <li><p>Rows (0028,0010)</p></li>
 <li><p>Columns (0028,0011)</p></li>
@@ -1070,27 +1085,28 @@ there.</p></li>
 hand-built graph can take pixels before its attributes (for
 <code class="docutils literal notranslate"><span class="pre">DicomExporter.write_tree()</span></code>). The export worker refuses the same
 geometry.</p>
-<p>The prior value, or absence, of each descriptor it can write is
+<p>The prior value, or absence, of each descriptor that it can write is
 recorded once, at the first replacement since the array was last
-written; a later set keeps that first record. It is kept until the
-array is written (by a save or by redaction), or discarded, when
+written. A later set keeps that first record. The record is kept
+until the array is written (by a save or by redaction), or until
 <code class="docutils literal notranslate"><span class="pre">discard_pixel_data()</span></code> puts it back. Until the array is written,
 <code class="docutils literal notranslate"><span class="pre">unload_pixel_data()</span></code> refuses to drop it.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>array</strong> (<em>np.ndarray</em>) – The pixel data to set. Can be 1D, 2D, 3D, or 4D.</p>
+<dd class="field-odd"><p><strong>array</strong> (<em>np.ndarray</em>) – The pixel data to set. It can be 1D, 2D, 3D,
+or 4D.</p>
 </dd>
 <dt class="field-even">Raises<span class="colon">:</span></dt>
 <dd class="field-even"><ul class="simple">
-<li><p><strong>ValueError</strong> – If <code class="docutils literal notranslate"><span class="pre">array.dtype</span></code> is one the sidecar cannot
-    round-trip. The accepted set is unsigned and signed
-    integers of 1, 2, 4 or 8 bytes, <code class="docutils literal notranslate"><span class="pre">bool</span></code>, and
-    <code class="docutils literal notranslate"><span class="pre">float16</span></code>/<code class="docutils literal notranslate"><span class="pre">float32</span></code>/<code class="docutils literal notranslate"><span class="pre">float64</span></code>; <code class="docutils literal notranslate"><span class="pre">complex64</span></code>, <code class="docutils literal notranslate"><span class="pre">object</span></code>,
-    strings, structured and void dtypes, datetimes and
-    <code class="docutils literal notranslate"><span class="pre">float128</span></code> are refused. Byte order is <strong>normalised, not
-    refused</strong>, so a big-endian array is accepted and stored
-    native-order. This check runs before any mutation, so a
-    caught <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> leaves the instance exactly as it was.</p></li>
+<li><p><strong>ValueError</strong> – If the sidecar cannot round-trip <code class="docutils literal notranslate"><span class="pre">array.dtype</span></code>. The
+    accepted set is unsigned and signed integers of 1, 2, 4 or
+    8 bytes, <code class="docutils literal notranslate"><span class="pre">bool</span></code>, and <code class="docutils literal notranslate"><span class="pre">float16</span></code>/<code class="docutils literal notranslate"><span class="pre">float32</span></code>/<code class="docutils literal notranslate"><span class="pre">float64</span></code>.
+    <code class="docutils literal notranslate"><span class="pre">complex64</span></code>, <code class="docutils literal notranslate"><span class="pre">object</span></code>, strings, structured and void dtypes,
+    datetimes and <code class="docutils literal notranslate"><span class="pre">float128</span></code> are refused. Byte order is
+    <strong>normalised, not refused</strong>, so a big-endian array is
+    accepted and stored native-order. This check runs before
+    any change, so a caught <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> leaves the instance
+    exactly as it was.</p></li>
 <li><p><strong>ValueError</strong> – If the instance declares a SamplesPerPixel that no
     axis of <code class="docutils literal notranslate"><span class="pre">array</span></code> can carry, or if the rank is unsupported.
     <strong>This one raises after</strong> <code class="docutils literal notranslate"><span class="pre">pixel_array</span></code> <strong>has been assigned.</strong></p></li>
@@ -1105,7 +1121,7 @@ array is written (by a save or by redaction), or discarded, when
 <dt class="sig sig-object py" id="isocenter.entities.DicomItem">
 <span class="sig-name descname"><span class="pre">DicomItem</span></span><a class="headerlink" href="#isocenter.entities.DicomItem" title="Link to this definition">#</a></dt>
 <dd><p>Base class for any entity that holds DICOM attributes and sequences.</p>
-<p>This class provides a dictionary-like interface for managing DICOM attributes.
+<p>This class gives a dictionary-like interface to manage DICOM attributes.
 Persistence state comes from TrackedEntity. Items nested in
 sequences are not stored separately, so the subtree form below reaches
 them.</p>
@@ -1139,19 +1155,19 @@ private tags, where one was known.</p></td>
 <span class="sig-name descname"><span class="pre">set_attr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.DicomItem.set_attr" title="Link to this definition">#</a></dt>
 <dd><p>Sets a generic attribute by its hex tag (e.g., ‘0010,0010’).</p>
 <p>The tag is lowercased first, so <code class="docutils literal notranslate"><span class="pre">0008,103E</span></code> and <code class="docutils literal notranslate"><span class="pre">0008,103e</span></code> name
-one attribute: ingested keys are always lowercase, and a key in
+one attribute. Ingested keys are always lowercase, and a key in
 another casing would read as absent rather than raise.</p>
-<p>The value is stored as the object given, with one exception: a
-numpy bool, integer or float, and a <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> directly holding
-one, is stored as the Python number it equals (<code class="docutils literal notranslate"><span class="pre">np.int64(7)</span></code> as the
-<code class="docutils literal notranslate"><span class="pre">int</span></code> 7; a list as a new list), so a live export writes what a
-reopened session writes. An array of one or more dimensions is not
-converted: pass its numbers as a list, or its bytes.</p>
+<p>The value is stored as the object given, except that a numpy bool,
+integer or float becomes the Python number it equals (<code class="docutils literal notranslate"><span class="pre">np.int64(7)</span></code>
+becomes 7). A <code class="docutils literal notranslate"><span class="pre">list</span></code> or <code class="docutils literal notranslate"><span class="pre">tuple</span></code> that directly holds any numpy value,
+<code class="docutils literal notranslate"><span class="pre">np.str_</span></code> included, becomes a new list in which each numpy number is
+converted. So a live export writes what a reopened session writes. An
+array of one or more dimensions is not converted: pass a list or bytes.</p>
 <p>Nothing is refused here. The store holds <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">str</span></code>, <code class="docutils literal notranslate"><span class="pre">bytes</span></code>,
 <code class="docutils literal notranslate"><span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">int</span></code>, <code class="docutils literal notranslate"><span class="pre">float</span></code>, pydicom’s DS and IS values, and lists of
-those; for any other value the next <code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code>
-or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> naming the instance, the tag and
-the type.</p>
+those. For any other value, the next <code class="docutils literal notranslate"><span class="pre">save(sync=True)</span></code>, <code class="docutils literal notranslate"><span class="pre">export()</span></code>
+or <code class="docutils literal notranslate"><span class="pre">compact()</span></code> raises a <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> that names the instance, the tag
+and the type.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -1166,10 +1182,10 @@ the type.</p>
 <dt class="sig sig-object py" id="isocenter.entities.DicomItem.add_sequence">
 <span class="sig-name descname"><span class="pre">add_sequence</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tag</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#isocenter.entities.DicomSequence" title="isocenter.entities.DicomSequence"><span class="pre">DicomSequence</span></a></span></span><a class="headerlink" href="#isocenter.entities.DicomItem.add_sequence" title="Link to this definition">#</a></dt>
 <dd><p>The sequence at <code class="docutils literal notranslate"><span class="pre">tag</span></code>, created empty if it is not there yet.</p>
-<p>A sequence with no items is kept as one: ingest and hydration call
-this before adding items, so a zero-item <code class="docutils literal notranslate"><span class="pre">SQ</span></code> survives both.</p>
-<p>Calls <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code> <strong>only when it creates</strong> the sequence. A call on
-a tag that already has one changes nothing the store must hold.</p>
+<p>A sequence with no items is kept as one. Ingest and hydration call
+this before they add items, so a zero-item <code class="docutils literal notranslate"><span class="pre">SQ</span></code> survives both.</p>
+<p>It calls <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code> <strong>only when it creates</strong> the sequence. A call
+on a tag that already has one changes nothing that the store must hold.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>tag</strong> (<em>str</em>) – The DICOM tag for the sequence. Case-insensitive.</p>
@@ -1204,7 +1220,8 @@ a tag that already has one changes nothing the store must hold.</p>
 <dt class="sig sig-object py" id="isocenter.entities.Equipment">
 <span class="sig-name descname"><span class="pre">Equipment</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">manufacturer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device_serial_number</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.Equipment" title="Link to this definition">#</a></dt>
 <dd><p>Immutable Equipment definition.
-Frozen=True allows hashing, enabling unique set generation.</p>
+It is frozen, so it can be hashed, and sets of unique equipment can be
+built from it.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
 <thead>
@@ -1235,13 +1252,15 @@ Frozen=True allows hashing, enabling unique set generation.</p>
 <dd><p>Builds an <code class="docutils literal notranslate"><span class="pre">Equipment</span></code> from a file’s or a row’s three fields, or nothing.</p>
 <p>A series has equipment if and only if it has a manufacturer, a model
 name or a Device Serial Number. A serial alone is equipment (review
-of #1111, owner ruling of 2026-10-14): every machine rule matches on
-the serial, and a series holding one with no equipment was reached
-by no exact rule, and by <code class="docutils literal notranslate"><span class="pre">serial_number:</span> <span class="pre">&quot;&quot;</span></code> though it has a serial.
-A store saved before that held such a series with no equipment and
-wrote <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for its serial, so it reloads as a series with no serial.</p>
-<p>Positional, in field order, all three required. <strong>No normalisation:</strong>
-<code class="docutils literal notranslate"><span class="pre">None</span></code> stays <code class="docutils literal notranslate"><span class="pre">None</span></code>, so <code class="docutils literal notranslate"><span class="pre">from_parts(&quot;ACME&quot;,</span> <span class="pre">None,</span> <span class="pre">None)</span></code> equals
+of #1111, owner ruling of 2026-10-14). Every <code class="docutils literal notranslate"><span class="pre">serial_number</span></code> rule
+matches on the serial. A series that held a serial but no equipment
+was reached by no exact rule, and was reached by <code class="docutils literal notranslate"><span class="pre">serial_number:</span> <span class="pre">&quot;&quot;</span></code>
+although it had a serial. A store saved before that ruling held such
+a series with no equipment and wrote <code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code> for its serial. So that
+series reloads as a series with no serial.</p>
+<p>The arguments are positional, in field order, and all three are
+required. <strong>No normalisation:</strong> <code class="docutils literal notranslate"><span class="pre">None</span></code> stays <code class="docutils literal notranslate"><span class="pre">None</span></code>, so
+<code class="docutils literal notranslate"><span class="pre">from_parts(&quot;ACME&quot;,</span> <span class="pre">None,</span> <span class="pre">None)</span></code> equals
 <code class="docutils literal notranslate"><span class="pre">Equipment(&quot;ACME&quot;,</span> <span class="pre">None,</span> <span class="pre">None)</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -1274,10 +1293,10 @@ CHANGELOG entry that names the old spelling and the new one.</p>
 <span class="sig-name descname"><span class="pre">TrackedEntity</span></span><a class="headerlink" href="#isocenter.entities.TrackedEntity" title="Link to this definition">#</a></dt>
 <dd><p>Tracks whether an entity holds changes the session store does not have.</p>
 <p>This is persistence bookkeeping and nothing else. It says whether the
-object in memory has been written to the session store – not whether
-it still carries identifiers, which is a separate question with its
-own vocabulary (<code class="docutils literal notranslate"><span class="pre">phi_status</span></code>).</p>
-<p>State is read through <code class="docutils literal notranslate"><span class="pre">has_unsaved_changes</span></code> and moved through
+object in memory has been written to the session store. It does not
+say whether the object still carries identifiers, which is a separate
+question with its own vocabulary (<code class="docutils literal notranslate"><span class="pre">phi_status</span></code>).</p>
+<p>Read the state through <code class="docutils literal notranslate"><span class="pre">has_unsaved_changes</span></code>, and move it through
 <code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code> and <code class="docutils literal notranslate"><span class="pre">mark_persisted()</span></code>. There is no setter: an entity
 can be told what happened to it, but not told what it is.</p>
 <dl class="py property">
@@ -1313,50 +1332,50 @@ and pass that here.</p>
 <dt class="sig sig-object py" id="isocenter.entities.TrackedEntity.phi_status">
 <span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">phi_status</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#isocenter.entities.PhiStatus" title="isocenter.entities.PhiStatus"><span class="pre">PhiStatus</span></a></span><a class="headerlink" href="#isocenter.entities.TrackedEntity.phi_status" title="Link to this definition">#</a></dt>
 <dd><p>What the last scan concluded, if it still applies.</p>
-<p>UNSCANNED once the entity has changed since the scan ran: no status can
-describe content the entity no longer holds. A status is recorded under
-a policy, which <code class="docutils literal notranslate"><span class="pre">phi_status_policy</span></code> names; this reads the status as
-recorded and never consults the policy in force. A nested <code class="docutils literal notranslate"><span class="pre">DicomItem</span></code>
-takes a status from remediation only (<code class="docutils literal notranslate"><span class="pre">audit()</span></code> records none on it),
-and the store keeps it across a reopen.</p>
+<p>It reads UNSCANNED once the entity has changed since the scan ran, because no
+status can describe content that the entity no longer holds. A status is
+recorded under a policy, which <code class="docutils literal notranslate"><span class="pre">phi_status_policy</span></code> names. This property reads
+the status as recorded and never consults the policy in force. A nested
+<code class="docutils literal notranslate"><span class="pre">DicomItem</span></code> takes a status from remediation only (<code class="docutils literal notranslate"><span class="pre">audit()</span></code> records none on
+it), and the store keeps that status across a reopen.</p>
 </dd></dl>
 
 <dl class="py property">
 <dt class="sig sig-object py" id="isocenter.entities.TrackedEntity.phi_status_policy">
 <span class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">phi_status_policy</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#isocenter.entities.ScanPolicy" title="isocenter.entities.ScanPolicy"><span class="pre">ScanPolicy</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><a class="headerlink" href="#isocenter.entities.TrackedEntity.phi_status_policy" title="Link to this definition">#</a></dt>
 <dd><p>The <code class="docutils literal notranslate"><span class="pre">ScanPolicy</span></code> the current <code class="docutils literal notranslate"><span class="pre">phi_status</span></code> was recorded under.</p>
-<p>None when the status is UNSCANNED, when it was recorded by a store
-written before 1.0, and on a nested item, which is never scanned. Stale
-exactly when the status is, by the same revision check.</p>
+<p>It is None when the status is UNSCANNED, when the status was recorded
+by a store written before 1.0, and on a nested item, which is never
+scanned. It is stale exactly when the status is, by the same revision check.</p>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="isocenter.entities.TrackedEntity.record_phi_status">
 <span class="sig-name descname"><span class="pre">record_phi_status</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">status</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#isocenter.entities.PhiStatus" title="isocenter.entities.PhiStatus"><span class="pre">PhiStatus</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">&lt;object</span> <span class="pre">object&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.TrackedEntity.record_phi_status" title="Link to this definition">#</a></dt>
 <dd><p>Records what a scan concluded about this entity’s current state.</p>
-<p>Call this <em>after</em> any change the status describes: remediation modifies
-the entity, so recording REMEDIATED first would stamp a revision the
-entity immediately leaves behind.</p>
+<p>Call this <em>after</em> any change that the status describes. Remediation
+changes the entity, so a REMEDIATED recorded first would stamp a
+revision that the entity leaves behind at once.</p>
 <p>A new status, or the same status under a different policy (compared
 by value), advances the revision and leaves the entity with unsaved
-changes. Recording the status an entity already carries, under the
-same policy, changes nothing. So an entity loaded at REMEDIATED and
-remediated again records nothing here, and the remediation must call
-<code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code> itself for the next save to write it.</p>
+changes. A call with the status that the entity already carries, under
+the same policy, changes nothing. So an entity loaded at REMEDIATED and
+remediated again records nothing here. The remediation must then call
+<code class="docutils literal notranslate"><span class="pre">mark_modified()</span></code> itself, so that the next save writes the entity.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>status</strong> (<a class="reference internal" href="#isocenter.entities.PhiStatus" title="isocenter.entities.PhiStatus"><em>PhiStatus</em></a>) – What the scan concluded.</p></li>
-<li><p><strong>policy</strong> (<em>Optional</em><em>[</em><a class="reference internal" href="#isocenter.entities.ScanPolicy" title="isocenter.entities.ScanPolicy"><em>ScanPolicy</em></a><em>]</em>) – The policy the status is recorded
-under; omit to keep the policy already recorded, even when
-that status has gone stale. <code class="docutils literal notranslate"><span class="pre">None</span></code> is a value, not an
-omission: it records “no policy”. The default is a private
-sentinel because <code class="docutils literal notranslate"><span class="pre">None</span></code> is taken (#815). Five callers pass
-one: a scan, hydration, the patient merge, a pass that
+<li><p><strong>policy</strong> (<em>Optional</em><em>[</em><a class="reference internal" href="#isocenter.entities.ScanPolicy" title="isocenter.entities.ScanPolicy"><em>ScanPolicy</em></a><em>]</em>) – The policy that the status is
+recorded under. Omit it to keep the policy already recorded,
+even when that status has gone stale. <code class="docutils literal notranslate"><span class="pre">None</span></code> is a value, not
+an omission: it records “no policy”. The default is a private
+sentinel because <code class="docutils literal notranslate"><span class="pre">None</span></code> is taken (#815). Five callers pass a
+policy: a scan, hydration, the patient merge, a pass that
 settles its statuses against a report carried from another
-session, which records the report’s policy, and a pass that
-puts back the status of an entity already stale when it
-began (<code class="docutils literal notranslate"><span class="pre">Session._keep_stale</span></code>, #752).</p></li>
+session (which records the report’s policy), and a pass that
+puts back the status of an entity that was already stale when
+the pass began (<code class="docutils literal notranslate"><span class="pre">Session._keep_stale</span></code>, #752).</p></li>
 </ul>
 </dd>
 </dl>
@@ -1366,10 +1385,10 @@ began (<code class="docutils literal notranslate"><span class="pre">Session._kee
 <dt class="sig sig-object py" id="isocenter.entities.TrackedEntity.mark_subtree_persisted">
 <span class="sig-name descname"><span class="pre">mark_subtree_persisted</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.TrackedEntity.mark_subtree_persisted" title="Link to this definition">#</a></dt>
 <dd><p>Marks this entity and everything beneath it as stored.</p>
-<p>For hydration only, where a whole graph comes from the store and
-the claim is true of every node at once. After committing a single
-row, call <code class="docutils literal notranslate"><span class="pre">mark_persisted()</span></code> instead: it speaks for one entity and
-does not vouch for unsaved siblings.</p>
+<p>Use it for hydration only, where a whole graph comes from the store
+and the claim is true of every node at once. After you commit a
+single row, call <code class="docutils literal notranslate"><span class="pre">mark_persisted()</span></code> instead: it speaks for one entity
+and does not vouch for unsaved siblings.</p>
 </dd></dl>
 
 </dd></dl>
@@ -1378,21 +1397,21 @@ does not vouch for unsaved siblings.</p>
 <dt class="sig sig-object py" id="isocenter.entities.PhiStatus">
 <span class="sig-name descname"><span class="pre">PhiStatus</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.PhiStatus" title="Link to this definition">#</a></dt>
 <dd><p>What the last scan concluded about an entity, and when.</p>
-<p>A different question from <code class="docutils literal notranslate"><span class="pre">has_unsaved_changes</span></code>, which is persistence
-bookkeeping.</p>
-<p>A status is only valid for the revision it was computed at. Edit the
-entity and it reads UNSCANNED, because a conclusion about earlier content
-says nothing about the current content.</p>
-<p><strong>One exception: pixel redaction.</strong> Redaction re-records an instance’s
-REMEDIATED, CLEARED or IDENTIFIED after its own writes, when it was
-current before them (#896). The pixels, their
-descriptors, the new SOP Instance UID and its bookkeeping are left out
-of the comparison; the flags it writes (ImageType, BurnedInAnnotation,
-DerivationDescription, the Derivation Code Sequence) are accepted only
-as they were or at exactly what redaction writes. Every other attribute
-and nested item must be exactly as before the pass; if anything else
-changed, the status is left UNSCANNED. So the anonymize, redact, export
-order keeps the redacted instances’ statuses.</p>
+<p>It answers a different question from <code class="docutils literal notranslate"><span class="pre">has_unsaved_changes</span></code>, which is
+persistence bookkeeping.</p>
+<p>A status is only valid for the revision that it was computed at. After
+an edit to the entity, the status reads UNSCANNED, because a conclusion
+about earlier content says nothing about the current content.</p>
+<p><strong>One exception: pixel redaction.</strong> Redaction records an instance’s
+REMEDIATED, CLEARED or IDENTIFIED again after its own writes, when that
+status was current before them (#896). The comparison leaves out the
+pixels, their descriptors, the new SOP Instance UID and its bookkeeping.
+It accepts the flags that redaction writes (ImageType, BurnedInAnnotation,
+DerivationDescription, the Derivation Code Sequence) only as they were or
+at exactly what redaction writes. Every other attribute and nested item
+must be exactly as before the pass. If anything else changed, the status
+is left UNSCANNED. So the anonymize, redact, export order keeps the
+redacted instances’ statuses.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
 <thead>
@@ -1446,9 +1465,9 @@ release.</p></td>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="isocenter.entities.PhiStatus.CLEARED">
 <span class="sig-name descname"><span class="pre">CLEARED</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'cleared'</span></span><a class="headerlink" href="#isocenter.entities.PhiStatus.CLEARED" title="Link to this definition">#</a></dt>
-<dd><p>The scan found no identifiers. This means the configured <em>tag</em> scan
-found nothing – not that burned-in pixel text was checked, which is
-a separate scan, and not that the entity is approved for release.</p>
+<dd><p>The scan found no identifiers. It means that the configured <em>tag</em> scan
+found nothing. It does not mean that burned-in pixel text was checked,
+which is a separate scan, or that the entity is approved for release.</p>
 </dd></dl>
 
 </dd></dl>
@@ -1461,16 +1480,16 @@ a separate scan, and not that the entity is approved for release.</p>
 rules it ran with. The store keeps the policy beside each status, so a
 store scanned under one configuration and exported under another says
 so.</p>
-<p><code class="docutils literal notranslate"><span class="pre">fingerprint</span></code> decides whether two policies are the same: <code class="docutils literal notranslate"><span class="pre">&quot;v1:&quot;</span></code> and
-the sha256 of the policy’s canonical form, which covers what a scan
+<p><code class="docutils literal notranslate"><span class="pre">fingerprint</span></code> decides whether two policies are the same. It is <code class="docutils literal notranslate"><span class="pre">&quot;v1:&quot;</span></code>
+and the sha256 of the policy’s canonical form, which covers what a scan
 reads: every rule key but <code class="docutils literal notranslate"><span class="pre">name</span></code>, <code class="docutils literal notranslate"><span class="pre">remove_private_tags</span></code> and the
 configuration version. <code class="docutils literal notranslate"><span class="pre">base</span></code> is what a person reads: <code class="docutils literal notranslate"><span class="pre">basic&#64;2026c</span></code>,
 <code class="docutils literal notranslate"><span class="pre">floor</span> <span class="pre">over</span> <span class="pre">basic&#64;2026c</span></code>, <code class="docutils literal notranslate"><span class="pre">none</span></code>, or an external profile’s path. Two
-policies with one fingerprint and different bases scan identically (a
-scaffold and the bare floor, say), so compare fingerprints, never
+policies with one fingerprint and different bases scan identically (for
+example, a scaffold and the bare floor). So compare fingerprints, never
 bases.</p>
-<p>Frozen, so a slot holding one is replaced whole, and compared by value,
-so each audit’s fresh object equals the last one’s.</p>
+<p>It is frozen, so a slot that holds one is replaced whole. It is compared
+by value, so each audit’s fresh object equals the last one’s.</p>
 <p class="rubric">Attributes:</p>
 <div class="pst-scrollable-table-container"><table class="ledger-attributes table">
 <thead>
@@ -1482,7 +1501,7 @@ so each audit’s fresh object equals the last one’s.</p>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fingerprint</span></code></p></td>
 <td><p><em>str</em></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">&quot;v1:&quot;</span></code> and a sha256 hex digest; equal
+<td><p><code class="docutils literal notranslate"><span class="pre">&quot;v1:&quot;</span></code> and a sha256 hex digest. Equal
 fingerprints scan identically.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">base</span></code></p></td>
@@ -1526,7 +1545,7 @@ fingerprints scan identically.</p></td>
 <dd><p>Deep-copies an item’s sequences, for <code class="docutils literal notranslate"><span class="pre">into</span></code> to hold.</p>
 <p>Each copied item carries its attributes and its date-shift record, and
 is linked to its copied container as its parent. A worker’s copy shares
-no sequence item with the session; match items between copies by the
+no sequence item with the session. Match items between copies by the
 <code class="docutils literal notranslate"><span class="pre">iter_item_tree</span></code> path, not by identity.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -1549,22 +1568,22 @@ assigns the result to <code class="docutils literal notranslate"><span class="pr
 <dt class="sig sig-object py" id="isocenter.entities.exported_patient_id">
 <span class="sig-name descname"><span class="pre">exported_patient_id</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">patient</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#isocenter.entities.exported_patient_id" title="Link to this definition">#</a></dt>
 <dd><p>The Patient ID a writer puts in a file for <code class="docutils literal notranslate"><span class="pre">patient</span></code>.</p>
-<p><code class="docutils literal notranslate"><span class="pre">''</span></code> for a subject whose files carried no Patient ID (what the source
-had, under <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> and <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> alike), and <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>
-otherwise. Every output path reads the Patient ID through this: the
-stamp, the folder name, the WFDB record name and the instance copies,
-so the synthetic key, and the source Study Instance UID inside it, never
-reach an exported file or path.</p>
+<p>It is <code class="docutils literal notranslate"><span class="pre">''</span></code> for a subject whose files carried no Patient ID (what the
+source had, under <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> and <code class="docutils literal notranslate"><span class="pre">REPLACE</span></code> alike). Otherwise it is
+<code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>. Every output path reads the Patient ID through
+this function: the stamp, the folder name, the WFDB record name and the
+instance copies. So the synthetic key, and the source Study Instance UID
+inside it, never reach an exported file or path.</p>
 <p>A third-party exporter (<code class="docutils literal notranslate"><span class="pre">exporters.register</span></code>) calls this too, and never
-writes <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>: the built-ins’ write path, which applies
-this rule for them, does not run for a plugin. Documented but internal
-(tier 2), like the registry it serves.</p>
+writes <code class="docutils literal notranslate"><span class="pre">patient.patient_id</span></code>. The built-ins’ write path, which applies
+this rule for them, does not run for a plugin. This function is
+documented but internal (tier 2), like the registry that it serves.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>patient</strong> (<a class="reference internal" href="#isocenter.entities.Patient" title="isocenter.entities.Patient"><em>Patient</em></a>) – The patient being written.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The Patient ID to write; <code class="docutils literal notranslate"><span class="pre">''</span></code> for a synthetic key.</p>
+<dd class="field-even"><p>The Patient ID to write, or <code class="docutils literal notranslate"><span class="pre">''</span></code> for a synthetic key.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>str</p>
@@ -1576,15 +1595,15 @@ this rule for them, does not run for a plugin. Documented but internal
 <dt class="sig sig-object py" id="isocenter.entities.iter_item_tree">
 <span class="sig-name descname"><span class="pre">iter_item_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">item</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#isocenter.entities.DicomItem" title="isocenter.entities.DicomItem"><span class="pre">DicomItem</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.iter_item_tree" title="Link to this definition">#</a></dt>
 <dd><p>Yields <code class="docutils literal notranslate"><span class="pre">(item,</span> <span class="pre">path)</span></code> for <code class="docutils literal notranslate"><span class="pre">item</span></code> and every item nested below it.</p>
-<p>Depth-first, and in declaration order, so two copies of the same graph
-are walked identically. A path matches a sequence item back to the same
-item in another copy of the graph: nested items carry no UID, so
-position is their only identity.</p>
+<p>The walk is depth-first and in declaration order, so two copies of the
+same graph are walked identically. A path matches a sequence item back
+to the same item in another copy of the graph. Nested items carry no
+UID, so position is their only identity.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>item</strong> (<a class="reference internal" href="#isocenter.entities.DicomItem" title="isocenter.entities.DicomItem"><em>DicomItem</em></a>) – The root of the walk.</p></li>
-<li><p><strong>path</strong> (<em>tuple</em>) – The root’s own path; <code class="docutils literal notranslate"><span class="pre">()</span></code> for a top-level walk.</p></li>
+<li><p><strong>path</strong> (<em>tuple</em>) – The root’s own path, or <code class="docutils literal notranslate"><span class="pre">()</span></code> for a top-level walk.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Yields<span class="colon">:</span></dt>
@@ -1599,18 +1618,18 @@ itself.</p>
 <dt class="sig sig-object py" id="isocenter.entities.normalize_study_date">
 <span class="sig-name descname"><span class="pre">normalize_study_date</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#isocenter.entities.normalize_study_date" title="Link to this definition">#</a></dt>
 <dd><p>The one spelling of “text that names a day becomes a <code class="docutils literal notranslate"><span class="pre">date</span></code>”.</p>
-<p>Reads the extended form <code class="docutils literal notranslate"><span class="pre">2024-01-15</span></code>, which the store writes, and the
-DICOM basic form <code class="docutils literal notranslate"><span class="pre">20240115</span></code>, which a hand-built graph or a
-<code class="docutils literal notranslate"><span class="pre">DicomBuilder.add_study</span></code> call supplies. <code class="docutils literal notranslate"><span class="pre">Study</span></code> applies the same rule
+<p>It reads the extended form <code class="docutils literal notranslate"><span class="pre">2024-01-15</span></code>, which the store writes. It
+also reads the DICOM basic form <code class="docutils literal notranslate"><span class="pre">20240115</span></code>, which a hand-built graph or
+a <code class="docutils literal notranslate"><span class="pre">DicomBuilder.add_study</span></code> call supplies. <code class="docutils literal notranslate"><span class="pre">Study</span></code> applies the same rule
 when <code class="docutils literal notranslate"><span class="pre">study_date</span></code> is assigned.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>value</strong> (<em>Any</em>) – A date string, a <code class="docutils literal notranslate"><span class="pre">date</span></code>, or None.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The <code class="docutils literal notranslate"><span class="pre">date</span></code> it names; None for None; anything it cannot read
-comes back exactly as it was given, neither invented nor
-discarded.</p>
+<dd class="field-even"><p>The <code class="docutils literal notranslate"><span class="pre">date</span></code> that it names, or None for None. Anything that it
+cannot read comes back exactly as it was given, neither invented
+nor discarded.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Any</p>
@@ -1623,14 +1642,14 @@ discarded.</p>
 <span class="sig-name descname"><span class="pre">resolve_item_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#isocenter.entities.DicomItem" title="isocenter.entities.DicomItem"><span class="pre">DicomItem</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#isocenter.entities.DicomItem" title="isocenter.entities.DicomItem"><span class="pre">DicomItem</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="headerlink" href="#isocenter.entities.resolve_item_path" title="Link to this definition">#</a></dt>
 <dd><p>Follows a path from <code class="docutils literal notranslate"><span class="pre">iter_item_tree</span></code> back to an item, or None.</p>
 <p>The caller must treat None as “this item is gone”, never as “use the
-root instead”: writing a nested tag onto the root fabricates a
+root instead”. A nested tag written onto the root fabricates a
 top-level element that was never in the file, and leaves the real value
 in place.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>root</strong> (<a class="reference internal" href="#isocenter.entities.DicomItem" title="isocenter.entities.DicomItem"><em>DicomItem</em></a>) – The item the path starts from.</p></li>
-<li><p><strong>path</strong> (<em>tuple</em>) – <code class="docutils literal notranslate"><span class="pre">(sequence_tag,</span> <span class="pre">index)</span></code> steps; empty or None for the
+<li><p><strong>path</strong> (<em>tuple</em>) – <code class="docutils literal notranslate"><span class="pre">(sequence_tag,</span> <span class="pre">index)</span></code> steps. Empty or None means the
 root itself.</p></li>
 </ul>
 </dd>
@@ -1651,10 +1670,10 @@ sequence shortened).</p>
 <dd><p>Attribute key under which an instance records the SOP Instance UID it
 was ingested under, before UID replacement or redaction first moved it
 (<code class="docutils literal notranslate"><span class="pre">Instance._take_sop_uid</span></code>).</p>
-<p>Assigned into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> <strong>directly</strong>, never through <code class="docutils literal notranslate"><span class="pre">set_attr</span></code> –
+<p>It is assigned into <code class="docutils literal notranslate"><span class="pre">attributes</span></code> <strong>directly</strong>, never through <code class="docutils literal notranslate"><span class="pre">set_attr</span></code>.
 <code class="docutils literal notranslate"><span class="pre">set_attr</span></code> runs the key through <code class="docutils literal notranslate"><span class="pre">_canonical_tag</span></code>, which lowercases it,
-and every reader spells it upper-case. <code class="docutils literal notranslate"><span class="pre">_ISOCENTER_REDACTION_HASH</span></code> is
-written the same way in <code class="docutils literal notranslate"><span class="pre">services.py</span></code> for the same reason.</p>
+and every reader spells it upper-case. <code class="docutils literal notranslate"><span class="pre">services.py</span></code> writes
+<code class="docutils literal notranslate"><span class="pre">_ISOCENTER_REDACTION_HASH</span></code> the same way, for the same reason.</p>
 </dd></dl>
 
 </section>
@@ -1819,7 +1838,7 @@ written the same way in <code class="docutils literal notranslate"><span class="
         <div class="footer-item">
 
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.1.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.2.0.
   </p>
 </div>
       
