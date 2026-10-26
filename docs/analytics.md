@@ -293,7 +293,7 @@ An item's **`anonymized`** is `true` when two things are true. First, the last t
 
 `anonymized` does not mean "`anonymize()` ran": a file the scan found clean reads `true` after `audit()` alone. It says nothing about burned-in text in the pixels, which the tag scan does not read. The series is not consulted, because the scan records no status on a series. `session.phi_status_summary()` gives the same statuses as counts.
 
-`generate_manifest()` and its two formats are frozen at 1.0. The JSON keys, the meaning of `anonymized` and the HTML layout are documented but internal. A 1.x release may change them, with a CHANGELOG entry ([API stability](api/stability.md)).
+`generate_manifest()` and its two formats are frozen at 1.0. The JSON keys, the meaning of `anonymized` and the HTML layout are documented but internal. They may change in a minor 1.x release, never in a patch release. The minor release says so in a `Breaking` CHANGELOG entry ([API stability](api/stability.md#renames-and-removals-after-10)).
 
 ---
 
