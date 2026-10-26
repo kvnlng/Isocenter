@@ -36,7 +36,7 @@ Isocenter needs Python 3.12 or later on Linux or macOS. The storage layer's lock
 pip install isocenter
 ```
 
-Release candidates: `pip install --pre isocenter`.
+Check which version you have:
 
 ```bash
 python -c "import isocenter; print(isocenter.__version__)"

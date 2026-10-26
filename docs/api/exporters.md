@@ -7,7 +7,7 @@ The exporter registry (`Exporter`, `register()`, `get_exporter()`,
 `available_formats()`) is **provisional until 1.1**. It is documented
 but internal (see [API stability](stability.md#the-exporter-registry-provisional-until-11)).
 Version 1.1 may replace these four names rather than extend them, with a
-CHANGELOG entry that names both spellings. A plugin written against 1.0
+`Breaking` CHANGELOG entry that names both spellings. A plugin written against 1.0
 should pin `isocenter>=1.0,<1.1`.
 :::
 

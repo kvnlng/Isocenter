@@ -5,13 +5,18 @@ freezes the facade, not the internal seams behind it.
 
 - **Frozen (tier 1)** names keep their spelling, their parameter names,
   their return shapes and their documented behaviour for every 1.x
-  release. A change to them is a 2.0.
+  release. A 1.x release can rename or remove one of them, or a keyword
+  parameter of one. The old spelling then keeps working, with a
+  `DeprecationWarning`, until 2.0
+  ([Renames and removals after 1.0](#renames-and-removals-after-10)).
+  Any other change to them is a 2.0.
 - **Documented but internal (tier 2)** names are on this page. Where a
   reader needs them, the API reference renders them or a guide names
-  them. They are safe to call. They may change in a 1.x release, with a
-  CHANGELOG entry that names the old spelling and the new one. They
-  exist so that a reader can see the seams, not so that a program can
-  depend on them.
+  them. They are safe to call. They may change in a minor release
+  (1.x.0), never in a patch release (1.x.y). The minor release says so
+  in a `Breaking` CHANGELOG entry that names the old spelling and the
+  new one. They exist so that
+  a reader can see the seams, not so that a program can depend on them.
 - **Private (tier 3)** names — everything with a leading underscore, and
   every module not listed below — may change without notice.
 
@@ -41,6 +46,54 @@ says how a behaviour came to be.
   it. A plugin written against 1.0 should pin `isocenter>=1.0,<1.1`.
   In 1.0, no third-party export grades `PASS`
   ([The exporter registry](#the-exporter-registry-provisional-until-11)).
+
+## Renames and removals after 1.0
+
+This section states what a 1.x release can do to a name that 1.0
+published. The rule depends on the tier.
+
+- **Tier 1: the old name works until 2.0.**
+  - When a 1.x release renames a tier-1 name, the old name stays as an
+    alias of the new name. When a 1.x release removes a tier-1 name,
+    the old name stays and does what it did.
+  - In both cases, a call to the old name emits a `DeprecationWarning`.
+    If the old name is not callable, a read of it emits the warning.
+    The warning names the replacement, or says that there is none.
+  - The old name emits the warning in every later 1.x release, and 2.0
+    removes the old name.
+  - The release that deprecates a name says so in its CHANGELOG. Until
+    2.0, this page lists the deprecated name in tier 1, beside its
+    replacement. A deprecation never changes what the old name does.
+- **Keyword parameters of tier-1 callables: the same rule.**
+  - When a 1.x release renames or removes a keyword parameter of a
+    tier-1 callable, the old keyword stays. The callable still accepts
+    it, and it still does what it did.
+  - A call that passes the old keyword emits a `DeprecationWarning` in
+    every later 1.x release. The warning names the replacement, or says
+    that there is none. 2.0 removes the old keyword.
+  - The signature tables below give the current name of each
+    parameter. Until 2.0, this page names the deprecated keyword beside
+    it.
+- **What the tier-1 rule covers.** It covers the names that
+  [Frozen at 1.0](#frozen-at-10) lists. These are the package's names,
+  and the methods of `Session` and the other frozen callables, with
+  their keyword parameters. They are also the fields of the frozen
+  classes and the module-level names. A warning does not let a 1.x
+  release change the position of a parameter, a return shape or a
+  documented behaviour. A change to any of them is a 2.0.
+- **Tier 2: a minor release, with a `Breaking` entry.**
+  - A minor release (1.x.0: 1.1.0, 1.2.0, …) can rename, remove or
+    change a documented but internal name. A patch release (1.x.y:
+    1.0.1, 1.1.2, …) never does. This page promises no alias.
+  - The minor release says so in its CHANGELOG, in a `Breaking` entry
+    that names the old spelling and the new one.
+- **Tier 3: no notice.** Any release can change a private name.
+
+By default, Python shows a `DeprecationWarning` only when the warning
+comes from code that runs as `__main__`. To see a warning from a library
+call or a notebook cell, run Python with
+`-W default::DeprecationWarning`. pytest also shows these warnings by
+default.
 
 ## Frozen at 1.0
 
@@ -776,8 +829,10 @@ and the access path is not.
 
 This page lists the names below. Where a reader needs them, the API
 reference renders them or a guide names them. They are safe to call. A
-1.x release can change them, with a CHANGELOG entry that names both
-spellings.
+minor release (1.x.0) can change them, but a patch release (1.x.y) never
+does. The minor release says so in a `Breaking` CHANGELOG entry that
+names both spellings
+([Renames and removals after 1.0](#renames-and-removals-after-10)).
 
 - **`DicomSession`**, the class's own name. `isocenter.Session` is the
   frozen spelling.
@@ -862,8 +917,8 @@ spellings.
 `Exporter`, `register()`, `get_exporter()` and `available_formats()` are
 **provisional**. A real plugin API is planned for 1.1. Version 1.1 may
 replace these four names rather than extend them. As for anything in
-this section, the change will be a CHANGELOG entry that names both
-spellings. A plugin written against 1.0 should pin
+this section, the change will be a `Breaking` CHANGELOG entry that
+names both spellings. A plugin written against 1.0 should pin
 `isocenter>=1.0,<1.1`. `entities.exported_patient_id()` is documented
 but internal on the same terms. The [exporter registry](exporters.md)
 page tells plugin authors to call it.
