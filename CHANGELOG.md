@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-26
+
+### Highlights
+
+1.0.0 is the first stable release of Isocenter. These highlights are for a reader who upgrades from 0.9.x. They give the main changes of 1.0.0rc1 to 1.0.0rc22 and of this release. Each item names its issue. The full entry is in `CHANGELOG.md`, in the section of the candidate that made the change. The entries of this release follow the highlights.
+
+#### What 1.0 promises
+
+The API has three tiers. The [API stability page](https://kvnlng.github.io/Isocenter/latest/api/stability/) names each one (#26, #787).
+
+- **Frozen (tier 1).** These names keep their spelling and behaviour for every 1.x release. They are `Session`, its methods and their parameters, the shapes they return, and the other callables in the frozen tables. A change to them is a 2.0.
+- **Documented but internal (tier 2).** These names are safe to call. A 1.x release can change them, with a changelog entry that names the old spelling and the new one.
+- **Private (tier 3).** Names with a leading underscore, and every module that the page does not list, can change without notice.
+- **The output.** For the same input, configuration and project secret, a 1.x release exports what the previous release exported, or its changelog says what changed. Each release's export of a fixed cohort is fingerprinted, and a release stops on a difference that no changelog entry names (#717).
+- **The configuration.** Every 1.x release loads a file that 1.0 loads. A 1.x release that applies an unchanged file differently raises the schema's minor version (#762, #782). A privacy profile name is pinned to its PS3.15 edition: `basic` means `basic@2026c` in every 1.x release (#714).
+- **Plugins.** The exporter registry is provisional until 1.1. In 1.0, an export through a third-party exporter grades `REVIEW_REQUIRED` (#527).
+
+#### Before you upgrade from 0.9.x
+
+Isocenter migrates nothing from 0.9.x (owner ruling on #790).
+
+- **Identity tokens.** Releases before 1.0 wrote the identity token into the wrong element of the Encrypted Attributes item. 1.x refuses a token in that layout by name and does not decrypt it. To recover such an identity, use Isocenter 0.9.x and the key that locked it (#790).
+- **Stores.** A 0.9.x store opens in 1.0. On open, 1.0 adds the columns it records into, empty, and converts no value that the store holds.
+  - Its PHI statuses have no recorded policy. An export of them grades `REVIEW_REQUIRED` until you run `audit()` and `anonymize()` under your configuration, then `save()` (#555).
+  - Its instances keep their source UIDs until the next `audit()` and `anonymize()` replace them (#544). Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data do not link to them by UID.
+  - 0.9.x grouped files with no Patient ID under one patient, `''` or `UnknownPatient`. Such a store keeps that grouping, because a split would give dates already shifted a second offset. While a patient's ID in the store is still `''` or `UnknownPatient`, every open writes one `WARNING` row that gives only a count. Every report over the store then grades `REVIEW_REQUIRED`. `audit()`, `anonymize()` and `save()` do not remove a row already written. A group that `anonymize()` gave a pseudonym, in 0.9.x or in 1.0, is not counted. So a store that was anonymized before 1.0 can hold such a group with no row. To separate the subjects, ingest their source files into a new store (#584).
+  - 0.9.x does not write the new columns. A status that 0.9.x saves into a store that 1.0 opened then sits beside the policy of 1.0's last scan, and 1.0 cannot detect this. Before you open a 0.9.x store in 1.0, keep a copy of it. Do not save into the 1.0 store from 0.9.x. If you go back to 0.9.x, use the copy.
+- **Configuration files.** A file that 0.9.x's `create_config()` or auto-save wrote loads unchanged, with one exception. Before 0.9.8, `set_phi_tag(replacement=)` saved a `phi_tags` rule with a `replacement` key. The loader refuses that key. Rename it to `value` (#538).
+  - The loader refuses an unknown key, a value of the wrong type, and a `version` that this library does not read (#711, #712, #713).
+  - 0.9.x cannot load `privacy_profile: basic@2026c`, which 1.0 writes. Write `basic` in a file that both must load (#714).
+  - A change to the configuration no longer writes the file. Call `configuration.save()`, or set `configuration.auto_save` (#715).
+- **Renamed and removed names.**
+  - `start_patient(id=)` is now `patient_id=`. `add_rule(model=, zones=)` is now `model_name=` and `redaction_zones=`. `set_phi_tag(replacement=)` is now `value=`. The old keywords raise `TypeError` (#26).
+  - `write_project_secret()` and `load_project_secret()` are removed. A project secret stays in the store that made it, and a copy of the store is the same project (#716).
+  - `ConfigLoader.load_redaction_rules()`, `ConfigLoader.load_phi_config()` and the `config_path` parameter of `PhiInspector` are removed (#729).
+  - `export_dataframe()` requires its output path (#812).
+- **Selections.** A bare `str` as `patient_ids` raises `TypeError`. Write `patient_ids=["X"]` (#696). An ID or UID that names nothing is counted, and an export with one grades `REVIEW_REQUIRED` (#686, #725).
+- **A stricter grade.** A run that graded `PASS` in 0.9.x can grade `REVIEW_REQUIRED` in 1.0. The analytics page lists every condition. These are the main new ones:
+  - A finding raised under the policy that nothing acted on (#573).
+  - An exported status recorded under another policy (#555).
+  - An entity edited after its last scan (#767).
+  - An entity that no scan read, in a store that holds a recorded status (#1064).
+- **Changed output under `basic@2026c` and the floor.**
+  - Each UID that Table E.1-1 codes `U` is replaced by a UID derived from the value and the store's project secret. One UID gets one replacement everywhere in the store, so references between exported files still resolve (#544).
+  - An element that Table E.1-1 codes `D` gets a dummy value of its VR (#557).
+  - Retired curve groups, whole overlay groups, Content Sequence, Graphic Annotation Sequence and Referenced File ID are removed (#556, #840, #848, #1133).
+  - Every exported DICOM file that is not JPEG 2000 is Explicit VR Little Endian, so each element states its VR (#1107).
+- **Other changed behaviour.**
+  - At ingest, files with no Patient ID are no longer merged into one patient. Each study that they belong to is its own patient. A store that 0.9.x wrote keeps its grouping (see Stores, above) (#584).
+  - A machine rule with `serial_number: "*"` now also covers series with no Device Serial Number (#1108).
+  - A private-creator key matches its creator in any case and spacing. Two keys for one creator with different rules are refused (#1147).
+
+#### New in 1.0
+
+- **De-identification markers.** An exported DICOM file that the audit found clean, or that `anonymize()` de-identified, says how (#554, #978, #1011).
+  - Patient Identity Removed `(0012,0062)` is `YES`, unless the file says Burned In Annotation `(0028,0301)` `YES`.
+  - De-identification Method `(0012,0063)` names the version and the policy.
+  - Longitudinal Temporal Information Modified `(0028,0303)` is `MODIFIED` when this store shifted a date in the file. It is `REMOVED` when every date in the file is absent, empty or its VR's dummy. Otherwise the file keeps the source's value. But a source's `UNMODIFIED` is not kept when this store took a top-level date out of the file.
+  - A rule of any action on one of these three tags stops that stamp.
+- **Burned-in text.** A `burned_in_text` policy makes `redact()` read the images, then redact, report or withhold the text that it finds (#1108). The policy has three more settings (#1121):
+  - `scope`: which images to read.
+  - `target`: which kinds of text to act on (names, dates, IDs).
+  - `detector`: how to find text. Use tesseract, or a text-detection model that ships with Isocenter and runs under OpenCV (the `textdetect` extra).
+- **`SCRUB`.** A `SCRUB` rule removes the identifiers inside a text element and keeps the rest of the text (#1130, #1146). It removes the kinds that you name: names, dates, IDs, organizations, phone numbers, addresses, sites and initials. With `SCRUB`, you can keep a structured report's content and scrub its text values (#1131).
+- **More precise rules.** A private-element rule can name its creator, as in `'0009,"GEMS_IDEN_01",27'` (#1132). A machine rule can select the series with no Device Serial Number (`serial_number: ""`), or select by device (`match:`) (#1108).
+- **Waveforms.** A WFDB export names coded ECG leads `I`, `II`, `aVR`, `V1` and so on (#828, #832).
+- **Documentation.** The site has one folder for each minor version (#866), and it is built with Sphinx (#1155). Its tutorials run as part of the test suite (#27). A new page gives Isocenter's scores on TCIA's MIDI-B de-identification benchmark (`docs/midi-b.md`).
+
+#### Security fixes since 0.9.x
+
+- **Export path (GHSA-2rc2-r9r5-x7hm).** Every release from 0.7.0 to 1.0.0rc15 could write a file outside the export folder when a SOP Instance UID held a path separator. Fixed in 1.0.0rc16. Its entry in `CHANGELOG.md` says which earlier exports to check.
+- **Free text in structured reports and presentation states.** Under `basic` and the floor, this text was exported as written. Fixed in 1.0.0rc4 and 1.0.0rc5 (#840, #848).
+- **Two redaction rules on one image.** Burned-in text inside a redaction zone could be exported unredacted when two rules covered one image. Fixed in 1.0.0rc10. Its entry in `CHANGELOG.md` says to run `redact()` again and export again (#908).
+
 ### Added
 
 - **docs: a MIDI-B benchmark page.** `docs/midi-b.md` (`/1.0/midi-b/`) gives Isocenter 1.0.0rc22's scores on TCIA's MIDI-B de-identification benchmark, scored with the benchmark's validation script at commit `ccc0939`: 99.22% of the Validation set's checks and 99.23% of the Test set's, against 72.51% and 68.45% for the default configuration. It sets out the configuration part by part with what each part is worth, what is left and why, the choices a site may want to change, how to reproduce the run, and the whole configuration. The configuration was tuned on both sets, so neither figure is a held-out estimate. Example values are synthetic: MIDI-B's own where an issue already quotes them, invented values of the same shape otherwise. It takes the place "Upgrading from 0.9.x" held in the site's navigation and the README.
