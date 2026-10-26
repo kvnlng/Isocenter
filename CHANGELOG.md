@@ -27,11 +27,12 @@ The API has three tiers. The [API stability page](https://kvnlng.github.io/Isoce
 Isocenter migrates nothing from 0.9.x (owner ruling on #790).
 
 - **Identity tokens.** Releases before 1.0 wrote the identity token into the wrong element of the Encrypted Attributes item. 1.x refuses a token in that layout by name and does not decrypt it. To recover such an identity, use Isocenter 0.9.x and the key that locked it (#790).
-- **Stores.** A 0.9.x store opens in 1.0, and 1.0 converts nothing in it.
+- **Stores.** A 0.9.x store opens in 1.0. On open, 1.0 adds the columns it records into, empty, and converts no value that the store holds.
   - Its PHI statuses have no recorded policy. An export of them grades `REVIEW_REQUIRED` until you run `audit()` and `anonymize()` under your configuration, then `save()` (#555).
   - Its instances keep their source UIDs until the next `audit()` and `anonymize()` replace them (#544). Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data do not link to them by UID.
-  - Do not save into a 1.0 store from 0.9.x. Keep a copy of the 0.9.x store, and go back to that copy if you go back to 0.9.x.
-- **Configuration files.** A file that 0.9.x's `create_config()` or auto-save wrote loads unchanged.
+  - 0.9.x grouped files with no Patient ID under one patient, `''` or `UnknownPatient`. Such a store keeps that grouping, because a split would give dates already shifted a second offset. While the store holds such a patient, every open writes one `WARNING` row that gives only a count. Every report over the store then grades `REVIEW_REQUIRED`, and `audit()`, `anonymize()` and `save()` do not remove a row already written. To separate the subjects, ingest their source files into a new store (#584).
+  - 0.9.x does not write the new columns. A status that 0.9.x saves into a store that 1.0 opened then sits beside the policy of 1.0's last scan, and 1.0 cannot detect this. Before you open a 0.9.x store in 1.0, keep a copy of it. Do not save into the 1.0 store from 0.9.x. If you go back to 0.9.x, use the copy.
+- **Configuration files.** A file that 0.9.x's `create_config()` or auto-save wrote loads unchanged, with one exception. Before 0.9.8, `set_phi_tag(replacement=)` saved a `phi_tags` rule with a `replacement` key. The loader refuses that key. Rename it to `value` (#538).
   - The loader refuses an unknown key, a value of the wrong type, and a `version` that this library does not read (#711, #712, #713).
   - 0.9.x cannot load `privacy_profile: basic@2026c`, which 1.0 writes. Write `basic` in a file that both must load (#714).
   - A change to the configuration no longer writes the file. Call `configuration.save()`, or set `configuration.auto_save` (#715).
@@ -52,17 +53,21 @@ Isocenter migrates nothing from 0.9.x (owner ruling on #790).
   - Retired curve groups, whole overlay groups, Content Sequence, Graphic Annotation Sequence and Referenced File ID are removed (#556, #840, #848, #1133).
   - Every exported DICOM file that is not JPEG 2000 is Explicit VR Little Endian, so each element states its VR (#1107).
 - **Other changed behaviour.**
-  - Files with no Patient ID are no longer merged into one patient. Each study that they belong to is its own patient (#584).
+  - At ingest, files with no Patient ID are no longer merged into one patient. Each study that they belong to is its own patient. A store that 0.9.x wrote keeps its grouping (see Stores, above) (#584).
   - A machine rule with `serial_number: "*"` now also covers series with no Device Serial Number (#1108).
   - A private-creator key matches its creator in any case and spacing. Two keys for one creator with different rules are refused (#1147).
 
 #### New in 1.0
 
-- **De-identification markers.** An exported DICOM file that the audit found clean, or that `anonymize()` de-identified, says how (#554, #978). It holds Patient Identity Removed `(0012,0062)`, and a De-identification Method `(0012,0063)` that names the version and the policy. It also holds Longitudinal Temporal Information Modified `(0028,0303)`.
-- **Burned-in text.** A `burned_in_text` policy makes `redact()` read the images with OCR, then redact, report or withhold the text that it finds (#1108). The policy has three more settings (#1121):
+- **De-identification markers.** An exported DICOM file that the audit found clean, or that `anonymize()` de-identified, says how (#554, #978, #1011).
+  - Patient Identity Removed `(0012,0062)` is `YES`, unless the file says Burned In Annotation `(0028,0301)` `YES`.
+  - De-identification Method `(0012,0063)` names the version and the policy.
+  - Longitudinal Temporal Information Modified `(0028,0303)` is `MODIFIED` when this store shifted a date in the file, and `REMOVED` when the file holds no date. Otherwise the file keeps the source's value. But a source's `UNMODIFIED` is not kept when this store took a date out of the file.
+  - A rule of any action on one of these three tags stops that stamp.
+- **Burned-in text.** A `burned_in_text` policy makes `redact()` read the images, then redact, report or withhold the text that it finds (#1108). The policy has three more settings (#1121):
   - `scope`: which images to read.
   - `target`: which kinds of text to act on (names, dates, IDs).
-  - `detector`: how to find text, with tesseract or with a text-detection model in the `textdetect` extra.
+  - `detector`: how to find text. Use tesseract, or a text-detection model that ships with Isocenter and runs under OpenCV (the `textdetect` extra).
 - **`SCRUB`.** A `SCRUB` rule removes the identifiers inside a text element and keeps the rest of the text (#1130, #1146). It removes the kinds that you name: names, dates, IDs, organizations, phone numbers, addresses, sites and initials. With `SCRUB`, you can keep a structured report's content and scrub its text values (#1131).
 - **More precise rules.** A private-element rule can name its creator, as in `'0009,"GEMS_IDEN_01",27'` (#1132). A machine rule can select the series with no Device Serial Number (`serial_number: ""`), or select by device (`match:`) (#1108).
 - **Waveforms.** A WFDB export names coded ECG leads `I`, `II`, `aVR`, `V1` and so on (#828, #832).
