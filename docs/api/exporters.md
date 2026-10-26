@@ -37,8 +37,13 @@ print(exporters.available_formats())  # ['acme', 'dicom', 'wfdb']
 **The session's graph and nothing else.** That graph is not what the
 built-in formats write. Every export-time gate lives inside the built-in
 formats, and some of them change pixels and sequences on the way out.
-`export()` itself only resolves the format and dispatches. So for any
-exporter other than the two built-in classes, none of the following runs:
+Before it dispatches, `export()` itself runs no gate. It clears the
+counts of the last export, which the report's **Instances Written** row
+reads. It finds the exporter for `format` in the registry. For an
+exporter other than the two built-in classes, it writes one `WARNING`
+audit row (see the next section) and logs the same text. So for any
+exporter other than the two built-in classes, none of the following
+runs:
 
 - The burned-in re-audit that withholds an instance still carrying an
   identifier (`check_burned_in`).

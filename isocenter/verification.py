@@ -65,14 +65,20 @@ class RedactionVerifier:
         """
         Finds the first redaction rule that applies to this equipment.
 
-        A rule applies when its `serial_number` is the equipment's Device
-        Serial Number, `""` for equipment with none (no equipment
-        included), or `"*"`, or when its `match:` names the equipment's
-        manufacturer and/or model, as `redact()` reads it
-        (`services.rule_covers`, #1108); the first in rule order wins,
-        so a `"*"` rule listed before an exact one is returned. Until #808
-        only an exact serial matched. The scan itself reads every applying
-        rule's zones, not this one rule's.
+        A rule applies in these cases, as `redact()` reads it
+        (`services.rule_covers`, #1108):
+
+        - Its `serial_number` is the equipment's Device Serial Number.
+        - Its `serial_number` is `""`, and the equipment has no Device
+          Serial Number. No equipment at all is such a case too.
+        - Its `serial_number` is `"*"`.
+        - Its `match:` names the equipment's manufacturer, its model, or
+          both.
+
+        The first applying rule in rule order wins, so a `"*"` rule listed
+        before an exact rule is returned. Until #808, only an exact serial
+        matched. The scan itself reads the zones of every applying rule,
+        not only the zones of this rule.
 
         Args:
             equipment (Equipment): The instance's equipment, or None.
@@ -143,7 +149,7 @@ class RedactionVerifier:
         return intersection_area / text_area
 
     def is_covered(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int], threshold=0.50) -> bool:
-        """Checks if the text_box is significantly covered by the zone_box.
+        """Checks whether the zone_box covers enough of the text_box.
 
         Args:
             text_box: OCR box space (x, y, w, h).
@@ -160,22 +166,27 @@ class RedactionVerifier:
     def verify_instance(self, instance: Instance, equipment: Any = None) -> List[PhiFinding]:
         """Runs OCR on the instance and classifies each text region.
 
-        - If text is fully matched (>= 80% coverage): considered Safe (Ignored).
-        - If text is partially matched (> 0% but < 80%): Reported as PARTIAL_LEAK.
-        - If text is not matched (0%): Reported as NEW_LEAK.
+        - If the best zone covers 80% or more of the text, the region is
+          safe and is ignored.
+        - If the best zone covers more than 0% but less than 80%, the
+          region is reported as a PARTIAL_LEAK.
+        - If no zone covers the text (0%), the region is reported as a
+          NEW_LEAK.
 
         Text of two characters or fewer is skipped as noise.
 
         Args:
             instance (Instance): The instance to read.
-            equipment (Equipment, optional): Selects the redaction rule by
-                serial number; with none, every region is a NEW_LEAK.
+            equipment (Equipment, optional): Selects the redaction rules
+                that apply (`services.rules_matching`). With None, only a
+                `""` or a `"*"` rule applies. With no applying rule, every
+                region is a NEW_LEAK.
 
         Returns:
-            List[PhiFinding]: One finding per leaked region. Also `[]` when
-            OCR is unavailable, which is not "nothing leaks":
-            `Session.scan_pixel_content()` checks first and refuses
-            instead.
+            List[PhiFinding]: One finding per leaked region. The list is
+            also `[]` when OCR is unavailable, and then `[]` does not mean
+            that nothing leaks. `Session.scan_pixel_content()` checks for
+            OCR first and refuses instead.
         """
         return self._findings_for(instance, analyze_pixels(instance), equipment)
 

@@ -2013,7 +2013,7 @@ class SqliteStore:
         self._audit_wakeup.set()
 
     def get_audit_summary(self) -> Dict[str, int]:
-        """Returns an aggregated summary of actions from the audit log.
+        """Returns the number of audit rows for each action type.
 
         Reads through the `flush_audit_queue` barrier, so every row enqueued
         before the call is counted.
@@ -2044,8 +2044,8 @@ class SqliteStore:
         call is included.
 
         Returns:
-            List[tuple]: `(timestamp, action_type, details)` per row; empty
-            if the query fails.
+            List[tuple]: `(timestamp, action_type, details)` per row. It is
+            empty if the query fails.
         """
         self.flush_audit_queue()
         try:
@@ -2062,17 +2062,17 @@ class SqliteStore:
             return []
 
     def get_audit_losses(self) -> List[tuple]:
-        """Retrieves every `DATA_LOSS` entry, with the scope it was
+        """Returns every `DATA_LOSS` row, with the scope that it was
         recorded under.
 
-        Separate from `get_audit_errors` because the scopes grade differently:
-        a loss scoped `PRIVATE` or `SIGNAL` takes `validation_status` to
-        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`. Every
-        loss is reported under "3.1 Data Loss", never under "Exceptions &
-        Errors".
+        This method is separate from `get_audit_errors` because the scopes
+        grade differently. A loss scoped `PRIVATE` or `SIGNAL` takes
+        `validation_status` to `REVIEW_REQUIRED`. A loss scoped `STANDARD`
+        leaves it at `PASS`. Every loss is reported under "3.1 Data Loss",
+        never under "Exceptions & Errors".
 
-        A row whose `loss_scope` is NULL predates the column and cannot be
-        graded; it is reported and left at `PASS`.
+        A row whose `loss_scope` is NULL is older than the column and cannot
+        be graded. Such a row is reported and left at `PASS`.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details, loss_scope)
@@ -2092,20 +2092,21 @@ class SqliteStore:
             return []
 
     def get_audit_scan_gaps(self) -> List[tuple]:
-        """Every `SCAN_GAP` entry: an element the PHI scan could not open.
+        """Every `SCAN_GAP` row: an element that the PHI scan could not open.
 
-        Separate from `get_audit_losses` because it is a different claim. A loss
-        says an element was dropped at ingest and cannot reach the output; this
-        says an element was kept whole and the scan could not read what is
-        inside it.
+        This method is separate from `get_audit_losses` because a scan gap
+        is a different claim. A loss says that an element was dropped at
+        ingest and cannot reach the output. A scan gap says that an element
+        was kept whole and the scan could not read what is inside it.
 
-        The row states ingest-time knowledge only. Whether the element reaches
-        the exported file is decided later, by `remove_private_tags`, and
+        The row states only what ingest knew. `remove_private_tags` decides
+        later whether the element reaches the exported file, and
         `generate_report` resolves that against the object graph.
 
-        No `loss_scope` column: only an odd-group tag reaches the parse gate,
-        so these are private by construction. `element_tag` is selected
-        instead, and is NULL for a row written before that column existed.
+        The result has no `loss_scope` column. Only an odd-group tag reaches
+        the parse gate, so these rows are private by construction. The
+        method selects `element_tag` instead, which is NULL for a row
+        written before that column existed.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details, element_tag)
@@ -2125,15 +2126,15 @@ class SqliteStore:
             return []
 
     def get_audit_declines(self) -> List[tuple]:
-        """Every `REMEDIATION_DECLINED` entry: a value the sweep left behind.
+        """Every `REMEDIATION_DECLINED` row: a value that the sweep left behind.
 
-        A scan gap says an element could not be *read*; this says an element was
-        read, a remediation was proposed for it, and the remediation did not
-        run, so the value is still in the graph and will reach the exported
-        file. The reason is in `details`.
+        A scan gap says that an element could not be *read*. A decline says
+        that an element was read, that a remediation was proposed for it,
+        and that the remediation did not run. So the value is still in the
+        graph and will reach the exported file. The reason is in `details`.
 
-        Flushes first, like every other audit reader, so a row still in the
-        queue is counted.
+        Like every other audit reader, this method flushes the queue first,
+        so a row still in the queue is counted.
 
         Returns:
             List[tuple]: (timestamp, entity_uid, details)
@@ -2153,14 +2154,15 @@ class SqliteStore:
             return []
 
     def get_audit_drops(self) -> int:
-        """How many audit rows were dropped by a failed batch write.
+        """The number of audit rows that a failed batch write dropped.
 
-        The rows themselves are unrecoverable: a failed batch write loses them. A
-        non-zero count means the audit table under-states what happened, and
-        `generate_report` grades it like an exception.
+        The rows themselves cannot be recovered, because a failed batch
+        write loses them. A count above zero means that the audit table
+        under-states what happened, and `generate_report` grades such a
+        count like an exception.
 
-        Flushes first, like every other audit reader, so a row still in the
-        queue is counted if its write fails.
+        Like every other audit reader, this method flushes the queue first,
+        so a row still in the queue is counted if its write fails.
 
         Returns:
             int: Rows dropped over this store object's lifetime.
@@ -5155,10 +5157,11 @@ class SqliteStore:
                                 page_size: int = 500):
         """An iterator of one flat dictionary per stored instance.
 
-        For streaming exports or analysis without loading the entire graph
-        into RAM. The rows come back one page at a time, and **no database
-        handle is held between pages**, so an iterator left part-consumed
-        holds no lock and no read snapshot. Two consequences:
+        Use it to stream exports or analysis without loading the whole
+        graph into RAM. The rows come back one page at a time, and **no
+        database handle is held between pages**. So an iterator that is
+        left part-consumed holds no lock and no read snapshot. This has two
+        consequences:
 
         - **Iteration is not one snapshot.** Each page is its own query, so
           writes that land between pages are visible and rows deleted between
@@ -5167,20 +5170,21 @@ class SqliteStore:
 
         Args:
             patient_ids (Iterable[str], optional): Restrict the rows to
-                these Patient IDs, read as every `patient_ids` in the
-                package is read. ``None`` means every patient in the store. An
-                empty iterable matches nobody: it is a filter that selected
-                nothing, not an absent filter. An iterator is read once, at the
-                call. An ID no patient holds is **not counted** here, unlike the
-                `Session` methods: the pages are separate reads, so there is no
-                single moment at which an ID is or is not held.
+                these Patient IDs. They are read the same way as every
+                other `patient_ids` in the package. ``None`` means every
+                patient in the store. An empty iterable matches nobody,
+                because it is a filter that selected nothing, not an absent
+                filter. An iterator is read once, at the call. An ID that no
+                patient holds is **not counted** here, unlike in the
+                `Session` methods. The pages are separate reads, so there
+                is no single moment at which an ID is or is not held.
             instance_uids (Iterable[str], optional): Restrict the rows to
-                these SOP Instance UIDs. Same rules: ``None`` is no
-                filter, an empty iterable matches nobody. Both filters
-                together intersect.
-            page_size (int, optional): Rows per page, defaulting to 500.
-                Trades resident memory against the number of queries.
-                Must be an `int` >= 1.
+                these SOP Instance UIDs. The same rules apply: ``None`` is
+                no filter, and an empty iterable matches nobody. When both
+                filters are given, the rows are their intersection.
+            page_size (int, optional): Rows per page. The default is 500.
+                It trades resident memory against the number of queries.
+                It must be an `int` >= 1.
 
         Returns:
             Iterator[dict]: One dict per instance, keyed `patient_id`,
@@ -5192,12 +5196,13 @@ class SqliteStore:
             `attributes_json`, with the values as stored.
 
         Raises:
-            ValueError: If `page_size` is not a whole number >= 1, at the call,
-                not on the first `next()`.
-            TypeError: If either filter is a bare `str`, bytes-like, not
-                iterable, or holds an element that is not a `str` (named
-                by position and type, never by value), at the call.
-                `page_size` is checked first.
+            ValueError: If `page_size` is not a whole number >= 1. It is
+                raised at the call, not on the first `next()`.
+            TypeError: If either filter is a bare `str`, is bytes-like, is
+                not iterable, or holds an element that is not a `str`. The
+                message names such an element by position and type, never
+                by value. It is raised at the call, and `page_size` is
+                checked first.
         """
         # `bool` before `int`, and the ordering is the mechanism:
         # `isinstance(True, int)` is True and `True < 1` is False, so

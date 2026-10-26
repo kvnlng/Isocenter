@@ -5749,27 +5749,27 @@ class IngestSummary:
     """What `ingest()` did with each file it found.
 
     A file takes exactly one of five routes. A declined file is not
-    recorded as imported, so offering it again declines it again.
+    recorded as imported, so a second offer of it declines it again.
 
     Attributes:
         ingested (int): Files read into the graph.
         failures (List[Tuple[str, str]]): `(path, reason)` per rejected
-            file, the same pair its `ERROR` audit row carries.
+            file, the same pair that its `ERROR` audit row carries.
         declined (int): Files refused because the session already holds
-            their SOP Instance UID (as another instance's UID, or as a
-            redacted instance's UID before redaction), or because their
-            Study Instance UID is held by a patient with a different
+            their SOP Instance UID, as another instance's UID or as a
+            redacted instance's UID before redaction. It also counts files
+            whose Study Instance UID is held by a patient with a different
             Patient ID (#745). Each has a `WARNING` audit row and is not
             read into the store.
         skipped (int): Files already in the store, not read again.
-        hidden (int): Files found walking the directory whose name starts
-            with `.` (`.DS_Store`, AppleDouble `._*`), which are not read
+        hidden (int): Files that the directory walk found whose name starts
+            with `.` (`.DS_Store`, AppleDouble `._*`). They are not read
             (#795). A directory whose name starts with `.` is walked, and
             a file named directly is read whatever its name.
         failed (int): `len(failures)`.
     """
     ingested: int = 0
-    #: `(path, reason)` per rejected file -- the same pair the `ERROR`
+    #: `(path, reason)` per rejected file. It is the same pair that the `ERROR`
     #: audit row carries, so the summary and the trail cannot disagree.
     failures: List[Tuple[str, str]] = field(default_factory=list)
     declined: int = 0
@@ -7158,27 +7158,27 @@ class ExportSummary:
 
     Attributes:
         written_uids (List[str]): The SOP Instance UID of each instance
-            that reached disk, and nothing else. An instance with no UID
-            is not written and is in `failures`; so is one whose UID
-            cannot name a file (`export_file_name`), under that UID. From
-            `session.export()`, an instance whose file another instance's
-            write replaced, because the volume resolves their two file
-            names to one file, is in `failures` too, and the instance the
-            file holds is here (#1020).
+            that reached disk, and nothing else. An instance with no UID is
+            not written and is in `failures`. An instance whose UID cannot
+            name a file (`export_file_name`) is in `failures` too, under
+            that UID. When the volume resolves two file names to one file,
+            one instance's write replaces the other's file (#1020). From
+            `session.export()`, the instance whose file was replaced is in
+            `failures` too, and the instance that the file holds is here.
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
-            instance that did not reach disk, each with an audit row; the
-            instances of one replaced file share one row, which names
-            them all.
+            instance that did not reach disk, each with an audit row. The
+            instances of one replaced file share one row, which names them
+            all.
         written (int): Files that reached disk, counted over distinct
-            UIDs: two instances sharing a UID write one file.
+            UIDs. Two instances that share a UID write one file.
         failed (int): `len(failures)`.
     """
     # UIDs rather than a count: the count is derivable from them and the
     # identities are not, and the disclosure has to say which files went
     # out.
-    #: SOP Instance UID of each instance that reached disk, and nothing else: a write
-    #: needs the UID for its file meta, so one without it fails and is in `failures`,
-    #: keyed UNKNOWN. Never an output path, which names the Patient ID.
+    #: SOP Instance UID of each instance that reached disk, and nothing else. A write
+    #: needs the UID for its file meta, so an instance without one fails and is in
+    #: `failures`, keyed UNKNOWN. It is never an output path, which names the Patient ID.
     written_uids: List[str] = field(default_factory=list)
     #: `(entity_uid, details)` per instance that did not reach disk,
     #: already audited by `_report_export_failures`.
@@ -7188,8 +7188,8 @@ class ExportSummary:
     def written(self) -> int:
         """How many files reached disk.
 
-        Counted over the de-duplicated UIDs: two instances sharing a UID
-        write one file, the second overwriting the first.
+        It counts the de-duplicated UIDs. Two instances that share a UID
+        write one file, and the second write replaces the first.
 
         Returns:
             int: The number of distinct written UIDs.
@@ -7198,7 +7198,7 @@ class ExportSummary:
 
     @property
     def failed(self) -> int:
-        """How many instances did not."""
+        """How many instances did not reach disk."""
         return len(self.failures)
 
 
@@ -7274,35 +7274,35 @@ def _export_failure_reason(exc: BaseException) -> str:
 class ExportError(RuntimeError):
     """The export delivered nothing.
 
-    Raised by `session.export()` when **zero of N planned** instances
-    reached disk and at least one failed, in both formats: the DICOM path,
-    and `WfdbExporter.export`, where N is the waveform records attempted.
-    The message says "instances" in both: a WFDB record is written from
-    one waveform instance, and its failure is named by that instance's
-    UID, as the DICOM one is. Not raised on a partial export.
+    `session.export()` raises it when **zero of N planned** instances
+    reached disk and at least one failed. This holds in both formats: the
+    DICOM path, and `WfdbExporter.export`, where N is the waveform records
+    attempted. The message says "instances" in both. A WFDB record is
+    written from one waveform instance, and that instance's UID names its
+    failure, as for DICOM. It is not raised on a partial export.
 
-    One case leaves a file behind (#1020): every planned instance was
-    written under file names the volume resolved to one file, and that
-    file could not be read back as any of them. None is reported as
-    written, so this is raised, and the folder holds that one file; the
-    `ERROR` row keyed `MULTIPLE` says so.
+    One case leaves a file behind (#1020). In that case, every planned
+    instance was written under file names that the volume resolved to one
+    file, and that file could not be read back as any of them. No instance
+    is reported as written, so this error is raised, and the folder holds
+    that one file. The `ERROR` row keyed `MULTIPLE` says so.
 
-    Raised **last**, after every record the run produces, so a caller who
-    catches this still holds a correct graph, a complete audit trail and
-    a compliance report grading `REVIEW_REQUIRED`. The DICOM path raises
-    after the collision report, the recoverable-identity disclosure, the
-    delivery counters, the `EXPORT` audit row and `Done.`. The WFDB path
-    has none of the first three; it raises after each record's `ERROR` or
-    `DATA_LOSS` row and its own `EXPORT` row.
+    It is raised **last**, after every record that the run produces. So a
+    caller who catches it still holds a correct graph, a complete audit
+    trail and a compliance report that grades `REVIEW_REQUIRED`. The DICOM
+    path raises after the collision report, the recoverable-identity
+    disclosure, the delivery counters, the `EXPORT` audit row and `Done.`.
+    The WFDB path has none of the first three. It raises after each
+    record's `ERROR` or `DATA_LOSS` row and its own `EXPORT` row.
 
-    A `RuntimeError` subclass, so `except RuntimeError` catches it.
+    It is a `RuntimeError` subclass, so `except RuntimeError` catches it.
     `write_tree` raises a bare `RuntimeError` instead, for "this
     serializer could not write".
 
     Args:
-        failures (list): `(entity_uid, details)` per instance that failed;
-            kept as `self.failures`.
-        attempted (int): How many instances were planned; kept as
+        failures (list): `(entity_uid, details)` per instance that failed.
+            It is kept as `self.failures`.
+        attempted (int): How many instances were planned. It is kept as
             `self.attempted`.
         folder (str, optional): The output folder, named in the message.
     """
