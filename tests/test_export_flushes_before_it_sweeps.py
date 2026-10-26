@@ -25,8 +25,8 @@ save won that race"); it fixed the dtype the reload came back with and
 left the ordering alone.
 
 The fix is `save(sync=True)`: drain the manager, then `save_all` on the
-exporting thread, then the sweep. `audit()` and `redact()` already drain
-on entry; export was the third verb and did not.
+exporting thread, then the sweep. `audit()` already drains on entry and
+`redact()` before it writes; export was the third verb and did not.
 
 **What is deliberately not written here.** `save(sync=True)` inherits
 `flush()`'s never-return-early property, so a wedged worker now wedges

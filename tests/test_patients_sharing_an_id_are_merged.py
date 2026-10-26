@@ -403,8 +403,8 @@ def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
                                                          monkeypatch,
                                                          collision):
     """The restore writes onto every instance and the patient; a queued
-    save could be walking them while it does (#297, as `audit()` and
-    `redact()` drain on entry).
+    save could be walking them while it does (#297, as `audit()` drains
+    on entry and `redact()` before it writes).
 
     The merge drains too, but only on a collision and only after the
     restore has written, so it cannot stand in for this one: the first

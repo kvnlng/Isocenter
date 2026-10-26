@@ -18,7 +18,7 @@ and a session that ends with the failure unhealed writes one `ERROR` row
 
 Now `isocenter.persistence_manager` remembers the newest failed background
 save. `flush()` -- and so `audit()`, `redact()` and the identity lock,
-which drain on entry -- waits for the queue as before and then runs that
+which drain before they write -- waits for the queue and then runs that
 save on the caller's thread: a failure that has passed heals there with
 nothing said, and one that has not is raised, as the save's own exception.
 `save()` and `close()` still do not raise. A session that ends, by
