@@ -519,15 +519,21 @@ unless its entry says otherwise.
   read. A scan that read some instances returns its report with the
   others in `failures`.
 - `redact()`, when the configuration holds a `burned_in_text` policy:
-  `RuntimeError` when the `ocr` extra or the `tesseract` binary is
-  unavailable to the calling process. Under `detector: db`, `redact()`
-  also raises it when the `textdetect` extra (OpenCV) or the shipped
-  model is unavailable (always, on the free-threaded build). `redact()`
-  raises after its drain and before anything is redacted, the
-  configured zones included. It raises the same way when the policy's
-  `target` names `names` and spaCy or its model cannot load (#1121).
-  `export(check_burned_in=True)` under that policy raises too, before
-  its pre-export scan and its save. An instance that the pass cannot
+  `ValueError` when `load_config` would refuse that policy in a file.
+  `redact()` raises it before its drain.
+  `RuntimeError` when a reader that the policy needs is unavailable to
+  the calling process. Under `detector: tesseract`, the policy needs the
+  `ocr` extra and the `tesseract` binary. Under `detector: db`, it needs
+  the `textdetect` extra (OpenCV) and the shipped model. OpenCV publishes
+  no free-threaded wheel, so `detector: db` cannot run on the
+  free-threaded build. Under `detector: db` with a `target` other than
+  `any`, the policy also needs the `ocr` extra and the `tesseract`
+  binary. With a `target` that names `names`, it also
+  needs spaCy and its model (#1121). `redact()` raises that
+  `RuntimeError` after its drain and before anything is redacted, the
+  configured zones included. `export(check_burned_in=True)` under that
+  policy raises the same `RuntimeError`, before its pre-export scan and
+  its save. An instance that the pass cannot
   read is a `WARNING` row, not a raise.
 - `generate_report()` and `generate_manifest()`: `ValueError` for a
   `format` other than the spellings above. The message names those
@@ -562,8 +568,11 @@ unless its entry says otherwise.
   identity token, or when the key does not decrypt a token. It raises
   `RuntimeError` also when a token holds no identity record this library
   writes. The same applies to a token from a later release, and to a
-  token in the layout that releases before 1.0 wrote. After each of
-  these errors, nothing on the patient is restored. It prints nothing,
+  token in the layout that releases before 1.0 wrote. With
+  `restore=True`, it raises `RuntimeError` when patients that would share
+  a Patient ID after the restore were de-identified under different
+  date-offset schemes. It raises this before it writes anything. After
+  each of these errors, nothing on the patient is restored. It prints nothing,
   and no message names a Patient ID. It returns the identity rather than
   printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
