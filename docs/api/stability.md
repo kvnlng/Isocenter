@@ -524,10 +524,11 @@ unless its entry says otherwise.
   `RuntimeError` when a reader that the policy needs is unavailable to
   the calling process. Under `detector: tesseract`, the policy needs the
   `ocr` extra and the `tesseract` binary. Under `detector: db`, it needs
-  the `textdetect` extra (OpenCV) and the shipped model, and these are
-  always unavailable on the free-threaded build. Under `detector: db`
-  with a `target` other than `any`, it also needs the `ocr` extra and
-  the `tesseract` binary. With a `target` that names `names`, it also
+  the `textdetect` extra (OpenCV) and the shipped model. OpenCV publishes
+  no free-threaded wheel, so `detector: db` cannot run on the
+  free-threaded build. Under `detector: db` with a `target` other than
+  `any`, the policy also needs the `ocr` extra and the `tesseract`
+  binary. With a `target` that names `names`, it also
   needs spaCy and its model (#1121). `redact()` raises that
   `RuntimeError` after its drain and before anything is redacted, the
   configured zones included. `export(check_burned_in=True)` under that
