@@ -5093,9 +5093,9 @@ class DicomSession:
             return LockingResult([])
 
         self._key_for_locking()
-        # Drained before anything is embedded, as `audit()` and `redact()`
-        # drain on entry: a queued `save()` may be capturing these
-        # instances, and with `persist=True` the write below updates rows
+        # Drained before anything is embedded, as `audit()` drains on entry
+        # and `redact()` before it writes: a queued `save()` may be capturing
+        # these instances, and with `persist=True` the write below updates rows
         # that save has not committed yet -- it would find none, raise,
         # and leave an ERROR row saying the store held no row for
         # instances whose save the caller had already asked for. The
@@ -6376,9 +6376,9 @@ class DicomSession:
                 # ID under two schemes in the graph.
                 self.store._refuse_a_merge_across_schemes(
                     renamed=(p, restored_id))
-                # Drained before the first write, as `audit()` and
-                # `redact()` drain on entry: the loop below writes onto
-                # every instance and the patient, and a queued save could
+                # Drained before the first write, as `audit()` drains on
+                # entry and `redact()` before it writes: the loop below writes
+                # onto every instance and the patient, and a queued save could
                 # be walking them. After the refusal, so a refused
                 # restore leaves the queue as it found it. The merge's own
                 # drain cannot stand in -- it runs only on a collision,
@@ -6872,8 +6872,8 @@ class DicomSession:
             show_progress=show_progress,
             desc="Redacting Pixels",
             total=None)
-        # After the drain, so `docs/api/stability.md`'s frozen "`audit()`
-        # and `redact()` drain the persistence manager on entry" stays
+        # After the drain, so `docs/api/stability.md`'s frozen "`redact()`
+        # drains it after it reads its `burned_in_text` policy" stays
         # true verbatim of every call including a refused one -- the
         # drain mutates nothing a caller can observe, is idempotent, and
         # a caller who fixes their environment and retries wants it to
@@ -8500,9 +8500,9 @@ class DicomSession:
         # the background save has attached its `_pixel_loader`, so which
         # instances were swept would depend on which thread got there
         # first, and one whose `pixel_array` was assigned directly with
-        # no Rows/Columns would reload as an empty image. `audit()` and
-        # `redact()` drain on entry for the same reason. The price is
-        # `save()`'s documented one: a wedged worker wedges the export
+        # no Rows/Columns would reload as an empty image. `audit()` drains on
+        # entry and `redact()` before it writes, for the same reason. The price
+        # is `save()`'s documented one: a wedged worker wedges the export
         # instead of racing it.
         print("Saving pending changes to free memory...")
         self.save(sync=True)

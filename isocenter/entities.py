@@ -537,12 +537,12 @@ class DicomItem(TrackedEntity):
         one attribute. Ingested keys are always lowercase, and a key in
         another casing would read as absent rather than raise.
 
-        The value is stored as the object given, with one exception. A numpy
-        bool, integer or float is stored as the Python number it equals
-        (`np.int64(7)` as the `int` 7). A `list` or `tuple` that directly holds
-        one is stored as a new list, with each such number replaced. So a live
-        export writes what a reopened session writes. An array of one or more
-        dimensions is not converted: pass its numbers as a list, or its bytes.
+        The value is stored as the object given, except that a numpy bool,
+        integer or float becomes the Python number it equals (`np.int64(7)`
+        becomes 7). A `list` or `tuple` that directly holds any numpy value,
+        `np.str_` included, becomes a new list in which each numpy number is
+        converted. So a live export writes what a reopened session writes. An
+        array of one or more dimensions is not converted: pass a list or bytes.
 
         Nothing is refused here. The store holds `None`, `str`, `bytes`,
         `bool`, `int`, `float`, pydicom's DS and IS values, and lists of
