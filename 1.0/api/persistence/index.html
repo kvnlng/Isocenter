@@ -487,8 +487,11 @@
 <p><code class="docutils literal notranslate"><span class="pre">session.store_backend</span></code> is the session’s SQLite store. The methods below
 read its audit rows and its flattened instance table. They are
 <em>documented but internal</em> (see <a class="reference internal" href="../stability/"><span class="std std-doc">API stability</span></a>). The words
-in the rows are frozen, and the methods that return them may change in
-a 1.x release. What each <code class="docutils literal notranslate"><span class="pre">action_type</span></code> means is on
+in the rows are frozen. The methods that return them may change in a
+minor 1.x release, never in a patch release, with a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code>
+CHANGELOG entry
+(<a class="reference internal" href="../stability/#renames-and-removals-after-1-0"><span class="std std-ref">API stability</span></a>). What
+each <code class="docutils literal notranslate"><span class="pre">action_type</span></code> means is on
 <a class="reference internal" href="../../analytics/"><span class="std std-doc">Analytics &amp; Reporting</span></a>.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="isocenter.persistence.SqliteStore">

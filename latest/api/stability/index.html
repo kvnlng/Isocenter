@@ -489,13 +489,18 @@ freezes the facade, not the internal seams behind it.</p>
 <ul class="simple">
 <li><p><strong>Frozen (tier 1)</strong> names keep their spelling, their parameter names,
 their return shapes and their documented behaviour for every 1.x
-release. A change to them is a 2.0.</p></li>
+release. A 1.x release can rename or remove one of them, or a keyword
+parameter of one. The old spelling then keeps working, with a
+<code class="docutils literal notranslate"><span class="pre">DeprecationWarning</span></code>, until 2.0
+(<a class="reference internal" href="#renames-and-removals-after-1-0">Renames and removals after 1.0</a>).
+Any other change to them is a 2.0.</p></li>
 <li><p><strong>Documented but internal (tier 2)</strong> names are on this page. Where a
 reader needs them, the API reference renders them or a guide names
-them. They are safe to call. They may change in a 1.x release, with a
-CHANGELOG entry that names the old spelling and the new one. They
-exist so that a reader can see the seams, not so that a program can
-depend on them.</p></li>
+them. They are safe to call. They may change in a minor release
+(1.x.0), never in a patch release (1.x.y). The minor release says so
+in a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code> CHANGELOG entry that names the old spelling and the
+new one. They exist so that
+a reader can see the seams, not so that a program can depend on them.</p></li>
 <li><p><strong>Private (tier 3)</strong> names — everything with a leading underscore, and
 every module not listed below — may change without notice.</p></li>
 </ul>
@@ -526,6 +531,63 @@ it. A plugin written against 1.0 should pin <code class="docutils literal notran
 In 1.0, no third-party export grades <code class="docutils literal notranslate"><span class="pre">PASS</span></code>
 (<a class="reference internal" href="#the-exporter-registry-provisional-until-1-1">The exporter registry</a>).</p></li>
 </ul>
+</section>
+<section id="renames-and-removals-after-10">
+<span id="renames-and-removals-after-1-0"></span><h2>Renames and removals after 1.0<a class="headerlink" href="#renames-and-removals-after-10" title="Link to this heading">#</a></h2>
+<p>This section states what a 1.x release can do to a name that 1.0
+published. The rule depends on the tier.</p>
+<ul class="simple">
+<li><p><strong>Tier 1: the old name works until 2.0.</strong></p>
+<ul>
+<li><p>When a 1.x release renames a tier-1 name, the old name stays as an
+alias of the new name. When a 1.x release removes a tier-1 name,
+the old name stays and does what it did.</p></li>
+<li><p>In both cases, a call to the old name emits a <code class="docutils literal notranslate"><span class="pre">DeprecationWarning</span></code>.
+If the old name is not callable, a read of it emits the warning.
+The warning names the replacement, or says that there is none.</p></li>
+<li><p>The old name emits the warning in every later 1.x release, and 2.0
+removes the old name.</p></li>
+<li><p>The release that deprecates a name says so in its CHANGELOG. Until
+2.0, this page lists the deprecated name in tier 1, beside its
+replacement. A deprecation never changes what the old name does.</p></li>
+</ul>
+</li>
+<li><p><strong>Keyword parameters of tier-1 callables: the same rule.</strong></p>
+<ul>
+<li><p>When a 1.x release renames or removes a keyword parameter of a
+tier-1 callable, the old keyword stays. The callable still accepts
+it, and it still does what it did.</p></li>
+<li><p>A call that passes the old keyword emits a <code class="docutils literal notranslate"><span class="pre">DeprecationWarning</span></code> in
+every later 1.x release. The warning names the replacement, or says
+that there is none. 2.0 removes the old keyword.</p></li>
+<li><p>The signature tables below give the current name of each
+parameter. Until 2.0, this page names the deprecated keyword beside
+it.</p></li>
+</ul>
+</li>
+<li><p><strong>What the tier-1 rule covers.</strong> It covers the names that
+<a class="reference internal" href="#frozen-at-1-0">Frozen at 1.0</a> lists. These are the package’s names,
+and the methods of <code class="docutils literal notranslate"><span class="pre">Session</span></code> and the other frozen callables, with
+their keyword parameters. They are also the fields of the frozen
+classes and the module-level names. A warning does not let a 1.x
+release change the position of a parameter, a return shape or a
+documented behaviour. A change to any of them is a 2.0.</p></li>
+<li><p><strong>Tier 2: a minor release, with a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code> entry.</strong></p>
+<ul>
+<li><p>A minor release (1.x.0: 1.1.0, 1.2.0, …) can rename, remove or
+change a documented but internal name. A patch release (1.x.y:
+1.0.1, 1.1.2, …) never does. This page promises no alias.</p></li>
+<li><p>The minor release says so in its CHANGELOG, in a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code> entry
+that names the old spelling and the new one.</p></li>
+</ul>
+</li>
+<li><p><strong>Tier 3: no notice.</strong> Any release can change a private name.</p></li>
+</ul>
+<p>By default, Python shows a <code class="docutils literal notranslate"><span class="pre">DeprecationWarning</span></code> only when the warning
+comes from code that runs as <code class="docutils literal notranslate"><span class="pre">__main__</span></code>. To see a warning from a library
+call or a notebook cell, run Python with
+<code class="docutils literal notranslate"><span class="pre">-W</span> <span class="pre">default::DeprecationWarning</span></code>. pytest also shows these warnings by
+default.</p>
 </section>
 <section id="frozen-at-10">
 <span id="frozen-at-1-0"></span><h2>Frozen at 1.0<a class="headerlink" href="#frozen-at-10" title="Link to this heading">#</a></h2>
@@ -1343,8 +1405,10 @@ regenerated. Not frozen: the bound itself.</p></li>
 <h2>Documented but internal<a class="headerlink" href="#documented-but-internal" title="Link to this heading">#</a></h2>
 <p>This page lists the names below. Where a reader needs them, the API
 reference renders them or a guide names them. They are safe to call. A
-1.x release can change them, with a CHANGELOG entry that names both
-spellings.</p>
+minor release (1.x.0) can change them, but a patch release (1.x.y) never
+does. The minor release says so in a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code> CHANGELOG entry that
+names both spellings
+(<a class="reference internal" href="#renames-and-removals-after-1-0">Renames and removals after 1.0</a>).</p>
 <ul class="simple">
 <li><p><strong><code class="docutils literal notranslate"><span class="pre">DicomSession</span></code></strong>, the class’s own name. <code class="docutils literal notranslate"><span class="pre">isocenter.Session</span></code> is the
 frozen spelling.</p></li>
@@ -1428,8 +1492,8 @@ suffix, the audit table’s columns, the schema’s table names.</p></li>
 <p><code class="docutils literal notranslate"><span class="pre">Exporter</span></code>, <code class="docutils literal notranslate"><span class="pre">register()</span></code>, <code class="docutils literal notranslate"><span class="pre">get_exporter()</span></code> and <code class="docutils literal notranslate"><span class="pre">available_formats()</span></code> are
 <strong>provisional</strong>. A real plugin API is planned for 1.1. Version 1.1 may
 replace these four names rather than extend them. As for anything in
-this section, the change will be a CHANGELOG entry that names both
-spellings. A plugin written against 1.0 should pin
+this section, the change will be a <code class="docutils literal notranslate"><span class="pre">Breaking</span></code> CHANGELOG entry that
+names both spellings. A plugin written against 1.0 should pin
 <code class="docutils literal notranslate"><span class="pre">isocenter&gt;=1.0,&lt;1.1</span></code>. <code class="docutils literal notranslate"><span class="pre">entities.exported_patient_id()</span></code> is documented
 but internal on the same terms. The <a class="reference internal" href="../exporters/"><span class="std std-doc">exporter registry</span></a>
 page tells plugin authors to call it.</p>
@@ -1523,6 +1587,7 @@ module is not.</p></li>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#what-1-0-promises">What 1.0 promises</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#renames-and-removals-after-1-0">Renames and removals after 1.0</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#frozen-at-1-0">Frozen at 1.0</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#documented-but-internal">Documented but internal</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#the-exporter-registry-provisional-until-1-1">The exporter registry: provisional until 1.1</a></li>
