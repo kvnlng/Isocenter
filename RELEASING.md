@@ -609,14 +609,14 @@ fixes, never features.
    That is **23 in a rehearsal, 22 in the publish run and 21 in a
    dispatch from `main`** on 3.12, 3.13 and 3.14, and **44, 43 and 42**
    on 3.14t (one fewer by platform, 17 more for the detector, 5 more for
-   the spaCy model). **The publish run's figures have been seen on a
-   runner:** v1.0.0's publish run (40369374755) skipped 22 on each of
-   3.12, 3.13 and 3.14 and 43 on 3.14t. Its rehearsal (run 40364118394)
-   ran before the tag existed, so the #782 test still skipped there: 24
-   on each of 3.12, 3.13 and 3.14 and 45 on 3.14t, which are the
-   figures before v1.0.0, as 1.0.0rc22's runs also showed.
-   **The rehearsal's 23 and 44 are derived** from those by the #782
-   test, until a release run shows them. **The dispatch's 21 and 42 are
+   the spaCy model). **The rehearsal's and the publish run's figures
+   have been seen on a runner:** v1.0.1's rehearsal (run 40485967799)
+   skipped 23 on each of 3.12, 3.13 and 3.14 and 44 on 3.14t, and
+   v1.0.0's publish run (40369374755) and v1.0.1's (40489415774) each
+   skipped 22 and 43. v1.0.0's rehearsal (run 40364118394) ran before
+   the tag existed, so the #782 test still skipped there: 24 on each of
+   3.12, 3.13 and 3.14 and 45 on 3.14t, which are the figures before
+   v1.0.0, as 1.0.0rc22's runs also showed. **The dispatch's 21 and 42 are
    still derived**: the last dispatch read (run 37846349518) skipped 19
    on 3.12 and 18 on 3.14t, before #975 added three cases that need
    `coverage`, #1123 the 17 and #1130 the 5, and before the #782 test

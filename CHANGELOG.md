@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-27
+
 ### Added
 
 - **docs: what a 1.x release may rename or remove, by tier (`docs/api/stability.md`, "Renames and removals after 1.0").** 1.0.0 shipped without this section, which was prepared for it in #892 and left out of the cut. The section carries the owner's rulings of 2026-10-01 on #892:
