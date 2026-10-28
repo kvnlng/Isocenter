@@ -103,21 +103,21 @@ class RedactionOutcome:
 class RedactionError(RuntimeError):
     """Redaction did not remove what it was asked to remove.
 
-    Raised after the whole pass, not at the first failure: the instances
-    that could be redacted are redacted, and the failures are already in
-    the audit log, so a caller that catches this still gets a compliance
-    report that grades REVIEW_REQUIRED.
+    It is raised after the whole pass, not at the first failure. The
+    instances that could be redacted are redacted, and the failures are
+    already in the audit log. Thus a caller that catches it still gets a
+    compliance report that grades REVIEW_REQUIRED.
 
-    A `RuntimeError` subclass, so `except RuntimeError` catches it; its
-    own class tells it from the export path's bare `RuntimeError` exceptions, which
-    mean nothing was written, where this means something unsafe is still
-    in the graph.
+    It is a `RuntimeError` subclass, so `except RuntimeError` catches it.
+    Its own class makes it different from the bare `RuntimeError`
+    exceptions of the export path. Those mean that nothing was written.
+    This one means that something unsafe is still in the graph.
 
     Args:
         failures (list): `(entity_uid, details)` pairs, kept as
             `self.failures`.
-        attempted (int): How many instances the pass targeted, kept as
-            `self.attempted`.
+        attempted (int): The number of instances that the pass targeted,
+            kept as `self.attempted`.
     """
     # Must stay a `RuntimeError` subclass: subclassing `Exception` directly
     # would let every existing `except RuntimeError` miss it.
