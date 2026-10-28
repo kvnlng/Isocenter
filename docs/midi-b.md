@@ -9,7 +9,7 @@ This page shows how to configure Isocenter to match that answer key, and why eac
 | Isocenter's default configuration | 72.51% | 68.45% |
 | **The configuration on this page** | **99.22%** | **99.23%** |
 
-**Measured 2026-10-19 with Isocenter 1.0.0rc22 from PyPI (tag `v1.0.0rc22`, commit `5b90e719`). The scorer was the MIDI-B validation script at commit `ccc0939`. The machine was an Apple M5 Max (18 cores, 64 GB, macOS 27.0.1).** The script's own automatic check scored the pixel checks. No manual pixel review was applied. That is the measurement.
+**Measured 2026-10-28 with Isocenter 1.0.1 from PyPI (tag `v1.0.1`, commit `895dbb3f`). The scorer was the MIDI-B validation script at commit `ccc0939`. The machine was an Apple M5 Max (18 cores, 64 GB, macOS 27.2).** The script's own automatic check scored the pixel checks. No manual pixel review was applied. That is the measurement.
 
 The configuration was tuned against both sets. Neither score is therefore a held-out estimate. Each score is what this release and this configuration achieve on this data.
 
@@ -275,7 +275,7 @@ MIDI-B's key is one policy, and this configuration follows it. Under a different
 
 ## Reproducing these results
 
-- **Software:** Isocenter 1.0.0rc22 from PyPI, with the `textdetect` extra (`pip install "isocenter[textdetect]==1.0.0rc22"`). Use a Python build with the GIL (3.12 to 3.14), because OpenCV publishes no free-threaded wheel. This configuration needs no other extra. For a narrowed burned-in `target` or for `detector: tesseract`, add `ocr`. If a `SCRUB` target names `orgs` or a burned-in target names `names`, add `nlp`. Scoring uses the MIDI-B validation script at commit `ccc0939`.
+- **Software:** Isocenter 1.0.1 from PyPI, with the `textdetect` extra (`pip install "isocenter[textdetect]==1.0.1"`). Use a Python build with the GIL (3.12 to 3.14), because OpenCV publishes no free-threaded wheel. This configuration needs no other extra. For a narrowed burned-in `target` or for `detector: tesseract`, add `ocr`. If a `SCRUB` target names `orgs` or a burned-in target names `names`, add `nlp`. Scoring uses the MIDI-B validation script at commit `ccc0939`.
 - **Run:**
 
 ```python

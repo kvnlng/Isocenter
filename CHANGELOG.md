@@ -5,6 +5,12 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **docs: the MIDI-B page gives Isocenter 1.0.1's measurement.** `docs/midi-b.md` now names the run made on 2026-10-28 with Isocenter 1.0.1 from PyPI, in place of 1.0.0rc22's. The scores are unchanged: 99.22% of the Validation set's checks and 99.23% of the Test set's, against 72.51% and 68.45% for the default configuration. The reproduction steps install 1.0.1.
+
 ## [1.0.1] - 2026-10-27
 
 ### Added
