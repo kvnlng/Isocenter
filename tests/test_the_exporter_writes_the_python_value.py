@@ -1182,6 +1182,11 @@ _DROPPED_PAIR = ("Tag 0028,0009 not exported (data loss): OverflowError: "
                  id="numpy-bool-pair"),
     pytest.param((np.str_("0018"), np.str_("1063")), _ONE, None,
                  id="numpy-str-pair"),
+    # One `np.str_` is enough: the tuple was rebuilt as a list either way.
+    pytest.param((np.str_("0018"), "1063"), _ONE, None,
+                 id="numpy-str-mixed"),
+    pytest.param(("0018", np.str_("1063")), _ONE, None,
+                 id="numpy-str-mixed-second"),
 ])
 def test_every_numpy_pair_set_under_at_exports_as_its_tuple(
         tmp_path, pair, written, dropped):
