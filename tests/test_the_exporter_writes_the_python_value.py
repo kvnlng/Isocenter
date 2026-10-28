@@ -1161,6 +1161,72 @@ def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route, pair):
     assert result["rows"] == [] and result["grade"] == _PASS
 
 
+_DROPPED_PAIR = ("Tag 0028,0009 not exported (data loss): OverflowError: "
+                 "Unable to create an element tag from '{}': the group and "
+                 "element values are limited to a maximum of 2-bytes each")
+
+
+@pytest.mark.parametrize("pair, written, dropped", [
+    # Each was the list of its twins on `main` (#1173): two 4-byte tags
+    # `(0018,1063)` and `(0018,1064)`, with no row. As a tuple it is taken
+    # for one tag, which pydicom refuses, and the element is dropped under
+    # a STANDARD row, as the plain-int tuple already was (#1026).
+    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)), None,
+                 "(1577059, 1577060)", id="full-tags"),
+    # Dropped on `main` too, but under pydicom's `ValueError` for the `-1`
+    # alone; now the pair's `OverflowError`.
+    pytest.param((np.int64(-1), np.int64(70000)), None, "(-1, 70000)",
+                 id="out-of-range"),
+    # Two group-0000 tags on `main`, now one, as pydicom reads the pair.
+    pytest.param((np.bool_(True), 7), b"\x01\x00\x07\x00", None,
+                 id="numpy-bool-pair"),
+    pytest.param((np.str_("0018"), np.str_("1063")), _ONE, None,
+                 id="numpy-str-pair"),
+])
+def test_every_numpy_pair_set_under_at_exports_as_its_tuple(
+        tmp_path, pair, written, dropped):
+    """The other shapes whose export #1173 changed, live through
+    `set_attr()` and `export()`: a numpy pair is now the tuple it was set
+    as, and the exporter reads a 2-tuple under `AT` as one tag."""
+    result = _run(tmp_path / "live", _through_set_attr(AT_TAG, pair))
+    assert result["written"] == 1, result["written"]
+    if dropped is None:
+        assert _element(result, AT_TAG) == ("AT", written)
+        assert result["rows"] == [] and result["grade"] == _PASS
+    else:
+        assert _element(result, AT_TAG) is None
+        ((action, scope, details),) = result["rows"]
+        assert (action, scope) == ("DATA_LOSS", "STANDARD")
+        assert details.endswith(_DROPPED_PAIR.format(dropped)), details
+
+
+@pytest.mark.parametrize("pair, text", [
+    pytest.param((np.uint16(0x0018), np.uint16(0x1063)), b"24\\4195 ",
+                 id="numpy-pair"),
+    pytest.param((np.uint32(0x00181063), np.uint32(0x00181064)),
+                 b"1577059\\1577060 ", id="full-tags"),
+])
+def test_a_numpy_pair_set_under_a_private_tag_recorded_as_at_is_text(
+        tmp_path, pair, text):
+    """#1173: on `main` the list of twins was written under the recorded
+    `AT`. As a tuple it meets the gate in front of a recorded VR, which
+    refuses a tuple, and it is written as text under `LO`, as the
+    plain-int tuple already was
+    (`test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was`),
+    under the one re-VR WARNING row that names the two VRs."""
+    def source(given):
+        given[0x00111001] = pydicom.DataElement(0x00111001, "AT", 0x00181063)
+
+    result = _run(tmp_path / "live", _through_set_attr(PRIVATE, pair),
+                  source=source)
+    assert result["written"] == 1, result["written"]
+    assert _element(result, PRIVATE) == ("LO", text)
+    ((action, scope, details),) = result["rows"]
+    assert (action, scope) == ("WARNING", None)
+    assert details.startswith(
+        "Private element (0011,1001) recorded AT, written LO. "), details
+
+
 # -- An array of text under a text VR is text ---------------------------------
 
 @pytest.mark.parametrize("tag, make, written", [

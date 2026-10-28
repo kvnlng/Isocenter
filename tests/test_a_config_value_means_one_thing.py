@@ -21,7 +21,9 @@ Found in the reviews of #728 and #738, each ruled by the owner on
 `isocenter.configuration`, and `PhiInspector` through `isocenter.privacy`.
 """
 import copy
+from decimal import Decimal
 
+import numpy as np
 import pytest
 
 from isocenter import config_manager
@@ -210,6 +212,13 @@ _FALSE_VALUES = [
     pytest.param([], "list", id="empty-list"),
     pytest.param({}, "dict", id="empty-dict"),
     pytest.param((), "tuple", id="empty-tuple"),
+    # Review of #1195: not a closed list; any value false in Python.
+    pytest.param(b"", "bytes", id="empty-bytes"),
+    pytest.param(set(), "set", id="empty-set"),
+    pytest.param(0j, "complex", id="0j"),
+    pytest.param(np.int64(0), "int64", id="np.int64-0"),
+    pytest.param(np.float64(0), "float64", id="np.float64-0"),
+    pytest.param(Decimal(0), "Decimal", id="Decimal-0"),
 ]
 
 

@@ -395,8 +395,9 @@ one exception. It stores a numpy bool, integer or float (a scalar or a
 7). It stores a `list` or `tuple` that directly holds a numpy value as
 a new container of the same type, with each numpy number in it
 replaced in the same way. A `list` stays a `list`, and a `tuple` stays
-a `tuple`. A converted value is not the same object as the value set,
-but it equals the value set. `set_attr()` raises
+a `tuple`. A converted value is not the same object as the value set.
+It has the same type and length, and only its numpy numbers are
+replaced. `set_attr()` raises
 nothing for a value that the store cannot hold. The save raises instead
 (Exceptions, below).
 
