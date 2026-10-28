@@ -428,8 +428,10 @@ with `privacy_profile: none` opts out of it.
 
 `set_phi_tag()` stores lowercase keys, and keeps a private creator's
 case. It stores its `value` argument as the rule's `value`. It stores no
-`value` key when `value` is `None`, an empty `str`, or another value
-that is false in Python, such as `0` or `False`. It stores its `target`
+`value` key when `value` is `None` or an empty `str`. Any other value
+is validated. Under `REPLACE`, a value that is not a `str` (such as `0`
+or `False`) raises `ValueError`. Under any other action, a value raises
+`ValueError`. It stores its `target`
 argument as the rule's `target`. Only `SCRUB` takes a
 `target`, and `SCRUB` requires one. For an unknown action, or a rule
 that `load_config` would refuse, `set_phi_tag()` raises `ValueError`
