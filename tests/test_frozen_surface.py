@@ -1817,6 +1817,14 @@ def _flat(text):
     return " ".join(text.split())
 
 
+# The one exception to "a change to a tier-1 behaviour is a 2.0", stated
+# in the tier-1 bullet and in the policy alike (#1173, #1174).
+_CORRECTION = ("A 1.x minor release can correct a documented behaviour "
+               "that is a recorded defect.")
+_CORRECTION_ENTRY = ("Its CHANGELOG then has a `Breaking` entry that names "
+                     "what a call that worked before now raises or returns.")
+
+
 def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
     """The deprecation policy after 1.0, as the owner ruled it (#892).
 
@@ -1862,6 +1870,9 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
         "2.0 removes the old keyword.",
         # What a warning does not cover.
         "A change to any of them is a 2.0.",
+        # ...except a correction of a recorded defect (#1173, #1174).
+        _CORRECTION,
+        _CORRECTION_ENTRY,
         # Tier 2: a minor release only, with a Breaking entry.
         "A minor release (1.x.0: 1.1.0, 1.2.0, …) can rename, remove or "
         "change a documented but internal name.",
@@ -1884,6 +1895,10 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
     registry = _flat(page.split("### The exporter registry: provisional until 1.1",
                                 1)[1].split("\n## ", 1)[0])
     assert anchor in tiers, "the tier bullets do not link the policy"
+    # The tier-1 bullet says the same as the policy, so the page does not
+    # contradict itself (#1173, #1174).
+    for sentence in (_CORRECTION, _CORRECTION_ENTRY):
+        assert sentence in tiers, f"the tier-1 bullet lost: {sentence!r}"
     assert anchor in internal, "the tier-2 section does not link the policy"
     for where, text in (("the tier bullets", tiers),
                         ("the tier-2 section", internal),

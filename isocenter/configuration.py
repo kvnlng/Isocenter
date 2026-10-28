@@ -708,12 +708,13 @@ class IsocenterConfiguration:
                 `SHIFT`, `JITTER` (`JITTER` is `SHIFT`) or `SCRUB`.
             value (str, optional): The value that `REPLACE` writes. It is
                 stored as the rule's `value`, the key that a file spells it
-                with. An empty value, or another value that is false in
-                Python (`None`, `0`, `False`), is no value, on every tag.
-                `value=""`
-                stores no `value` key, so on a UI tag the rule writes the
-                keyed replacement UID. But a file's `value: ''` on a UI tag
-                is refused (#883).
+                with. `None` and `""` are no value, on every tag: they
+                store no `value` key, so on a UI tag `value=""` makes the
+                rule write the keyed replacement UID. But a file's
+                `value: ''` on a UI tag is refused (#883). Every other value
+                is validated: a value that is not a string (`0`, `False`)
+                raises `ValueError` under REPLACE, and any value raises
+                `ValueError` under another action (#1174).
             target (Sequence[str], optional): The kinds that `SCRUB`
                 removes. It is stored as the rule's `target`, the key that a
                 file spells it with. It is a list or tuple of
@@ -754,10 +755,13 @@ class IsocenterConfiguration:
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action
         }
-        # Truthiness on purpose: `""` is no value, so it stores no key and
-        # never meets the loader's #883 refusal of `value: ''` on a UI
-        # (owner ruling Q3 A).
-        if value:
+        # `None` and `""` are no value: they store no key, so `""` never
+        # meets the loader's #883 refusal of `value: ''` on a UI (owner
+        # ruling Q3 A). Not truthiness: `if value:` also dropped `0`,
+        # `False`, `0.0` and an empty list, dict or tuple, so the call
+        # stored a rule with no value and raised nothing, where `5` met the
+        # refusal (#1174). Every other value reaches the validation below.
+        if value is not None and value != "":
             val["value"] = value
         # A list or tuple is stored as a list of its own, never the caller's
         # list, so a later change to it does not change the policy; anything

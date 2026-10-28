@@ -29,13 +29,14 @@ methods, are tier 2. So are `pixel_array` and `waveform_array` in
 **What `set_attr()` stores.** It stores the value it is given, with one
 exception. It stores a numpy bool, integer or float (a scalar or a 0-d
 array) as the Python number it equals. It stores a `list` or `tuple`
-that directly holds a numpy value as a new `list`, with each numpy
-number in it replaced in the same way. So `set_attr("0018,1150",
-np.int64(7))` leaves the `int` 7 in `attributes`, and
-`set_attr("0018,1150", (np.int64(7),))` leaves the `list` `[7]`. A live
-export writes what a reopened session writes. An array of one or more
-dimensions is not converted. Pass `.tolist()` or `.tobytes()` instead. No other numpy value is converted
-either. A `datetime64`, a `timedelta64`, a complex number and a masked
+that directly holds a numpy value as a new container of the same type,
+with each numpy number in it replaced in the same way. So
+`set_attr("0018,1150", np.int64(7))` leaves the `int` 7 in
+`attributes`, and `set_attr("0018,1150", (np.int64(7),))` leaves the
+`tuple` `(7,)`. A live export writes the numbers that a reopened
+session writes. An array of one or more dimensions is not converted.
+Pass `.tolist()` or `.tobytes()` instead. No other numpy value is
+converted either. A `datetime64`, a `timedelta64`, a complex number and a masked
 value stay as given, and the save refuses them.
 
 The entity does not see a value written straight into `attributes`
@@ -48,9 +49,10 @@ list it equals, and a finite `Decimal` that a float can hold as the
 one exception. `export()` writes a `tuple` of exactly two integers, or
 of exactly two `str`, as one tag, as pydicom reads it (#1009). The pair
 must still be a `tuple` when the export reads it. After `set_attr()`, a
-`tuple` that holds a numpy number is a `list` (above), and a `list` of
-two integers is two tags. A store that was saved and opened again also
-holds the pair as a `list`
+`tuple` that holds a numpy number is still a `tuple` (above), so a pair
+of numpy integers set that way is one tag. A `list` of two integers is
+two tags. A store that was saved and opened again holds the pair as a
+`list`
 ([#1016](https://github.com/kvnlng/Isocenter/issues/1016), open). The
 save refuses a `Decimal`, and only a value written straight into
 `attributes`, or a graph built by hand, can hold one. `export()` changes

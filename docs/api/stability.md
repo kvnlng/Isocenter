@@ -9,7 +9,10 @@ freezes the facade, not the internal seams behind it.
   parameter of one. The old spelling then keeps working, with a
   `DeprecationWarning`, until 2.0
   ([Renames and removals after 1.0](#renames-and-removals-after-10)).
-  Any other change to them is a 2.0.
+  Any other change to them is a 2.0, with one exception. A 1.x minor
+  release can correct a documented behaviour that is a recorded defect.
+  Its CHANGELOG then has a `Breaking` entry that names what a call that
+  worked before now raises or returns.
 - **Documented but internal (tier 2)** names are on this page. Where a
   reader needs them, the API reference renders them or a guide names
   them. They are safe to call. They may change in a minor release
@@ -81,6 +84,10 @@ published. The rule depends on the tier.
   classes and the module-level names. A warning does not let a 1.x
   release change the position of a parameter, a return shape or a
   documented behaviour. A change to any of them is a 2.0.
+  The one exception is a correction. A 1.x minor release can correct a
+  documented behaviour that is a recorded defect. Its CHANGELOG then
+  has a `Breaking` entry that names what a call that worked before now
+  raises or returns.
 - **Tier 2: a minor release, with a `Breaking` entry.**
   - A minor release (1.x.0: 1.1.0, 1.2.0, …) can rename, remove or
     change a documented but internal name. A patch release (1.x.y:
@@ -386,9 +393,11 @@ On `DicomItem`: `set_attr()`. It stores the value it is given, with
 one exception. It stores a numpy bool, integer or float (a scalar or a
 0-d array) as the Python number it equals (`np.int64(7)` as the `int`
 7). It stores a `list` or `tuple` that directly holds a numpy value as
-a new `list`, with each numpy number in it replaced in the same way. A
-converted value is not the same object as the value set. A new `list`
-made from a `tuple` does not equal the `tuple`. `set_attr()` raises
+a new container of the same type, with each numpy number in it
+replaced in the same way. A `list` stays a `list`, and a `tuple` stays
+a `tuple`. A converted value is not the same object as the value set.
+It has the same type and length, and only its numpy numbers are
+replaced. `set_attr()` raises
 nothing for a value that the store cannot hold. The save raises instead
 (Exceptions, below).
 
@@ -420,8 +429,10 @@ with `privacy_profile: none` opts out of it.
 
 `set_phi_tag()` stores lowercase keys, and keeps a private creator's
 case. It stores its `value` argument as the rule's `value`. It stores no
-`value` key when `value` is `None`, an empty `str`, or another value
-that is false in Python, such as `0` or `False`. It stores its `target`
+`value` key when `value` is `None` or an empty `str`. Any other value
+is validated. Under `REPLACE`, a value that is not a `str` (such as `0`
+or `False`) raises `ValueError`. Under any other action, a value raises
+`ValueError`. It stores its `target`
 argument as the rule's `target`. Only `SCRUB` takes a
 `target`, and `SCRUB` requires one. For an unknown action, or a rule
 that `load_config` would refuse, `set_phi_tag()` raises `ValueError`

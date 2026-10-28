@@ -21,7 +21,9 @@ Found in the reviews of #728 and #738, each ruled by the owner on
 `isocenter.configuration`, and `PhiInspector` through `isocenter.privacy`.
 """
 import copy
+from decimal import Decimal
 
+import numpy as np
 import pytest
 
 from isocenter import config_manager
@@ -197,3 +199,73 @@ def test_set_phi_tag_takes_value_as_the_file_does():
     with pytest.raises(TypeError, match="unexpected keyword argument 'replacement'"):
         configuration.set_phi_tag(INSTITUTION, "REPLACE", replacement="SITE2")
     assert configuration.phi_tags[INSTITUTION.lower()]["value"] == "SITE"
+
+
+# #1174: `set_phi_tag` tested `if value:`, so `0` and `False` stored no
+# `value` key and raised nothing, where `5` raised. Owner ruling
+# 2026-10-20: only `None` and `""` are no value; every other value meets
+# the loader's refusal. Each message is the whole literal sentence.
+_FALSE_VALUES = [
+    pytest.param(0, "int", id="0"),
+    pytest.param(False, "bool", id="False"),
+    pytest.param(0.0, "float", id="0.0"),
+    pytest.param([], "list", id="empty-list"),
+    pytest.param({}, "dict", id="empty-dict"),
+    pytest.param((), "tuple", id="empty-tuple"),
+    # Review of #1195: not a closed list; any value false in Python.
+    pytest.param(b"", "bytes", id="empty-bytes"),
+    pytest.param(set(), "set", id="empty-set"),
+    pytest.param(0j, "complex", id="0j"),
+    pytest.param(np.int64(0), "int64", id="np.int64-0"),
+    pytest.param(np.float64(0), "float64", id="np.float64-0"),
+    pytest.param(Decimal(0), "Decimal", id="Decimal-0"),
+]
+
+
+@pytest.mark.parametrize("value, type_name", _FALSE_VALUES)
+def test_set_phi_tag_refuses_a_false_value_under_replace(value, type_name):
+    configuration = IsocenterConfiguration()
+    before = copy.deepcopy(configuration.phi_tags)
+    with pytest.raises(ValueError) as raised:
+        configuration.set_phi_tag(INSTITUTION, "REPLACE", value=value)
+    assert str(raised.value) == (
+        f"set_phi_tag: phi_tags['0008,0080'] value must be a string, "
+        f"got {type_name}")
+    assert configuration.phi_tags == before
+
+
+@pytest.mark.parametrize("action", ["REMOVE", "KEEP", "EMPTY"])
+@pytest.mark.parametrize("value, _type_name", _FALSE_VALUES)
+def test_set_phi_tag_refuses_a_false_value_under_another_action(
+        value, _type_name, action):
+    configuration = IsocenterConfiguration()
+    with pytest.raises(ValueError) as raised:
+        configuration.set_phi_tag(INSTITUTION, action, value=value)
+    assert str(raised.value) == (
+        f"set_phi_tag: phi_tags['0008,0080'] has a value under {action}; "
+        f"only REPLACE writes a value")
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["None", "empty-str"])
+def test_set_phi_tag_stores_no_value_for_none_and_the_empty_string(value):
+    """The earlier ruling (#883 Q3 A), unchanged: these two only."""
+    configuration = IsocenterConfiguration()
+    configuration.set_phi_tag(INSTITUTION, "REPLACE", value=value)
+    assert "value" not in configuration.phi_tags[INSTITUTION.lower()]
+    configuration.set_phi_tag(INSTITUTION, "REMOVE", value=value)
+    assert configuration.phi_tags[INSTITUTION.lower()] == {
+        "name": "Custom Tag", "action": "REMOVE"}
+
+
+@pytest.mark.parametrize("value", [0, False], ids=["0", "False"])
+def test_a_refused_false_value_leaves_the_saved_file_unchanged(tmp_path, value):
+    configuration = IsocenterConfiguration()
+    configuration.config_path = str(tmp_path / "saved.yaml")
+    configuration.auto_save = True
+    configuration.set_phi_tag(INSTITUTION, "KEEP")
+    before = copy.deepcopy(configuration.phi_tags)
+    saved = (tmp_path / "saved.yaml").read_bytes()
+    with pytest.raises(ValueError, match=r"value must be a string, got "):
+        configuration.set_phi_tag(INSTITUTION, "REPLACE", value=value)
+    assert configuration.phi_tags == before
+    assert (tmp_path / "saved.yaml").read_bytes() == saved
