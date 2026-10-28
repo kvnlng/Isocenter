@@ -14,15 +14,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DiscoveryCandidate:
-    """A single text region detected during discovery.
+    """One text region that discovery detected.
 
     Attributes:
-        text (str): The text OCR read.
-        confidence (float): OCR confidence, 0 to 100.
-        box (List[int]): `[x, y, w, h]` in pixels. A redaction zone is
-            spelled differently, `[y1, y2, x1, x2]`; `to_zones()` converts.
-        source_index (int): Which sampled instance it was read from,
-            counting only the instances that could be read.
+        text (str): The text that OCR read.
+        confidence (float): The OCR confidence, from 0 to 100.
+        box (List[int]): `[x, y, w, h]` in pixels. A redaction zone uses a
+            different order, `[y1, y2, x1, x2]`. `to_zones()` converts.
+        source_index (int): The index of the sampled instance that the
+            text was read from. Only the instances that could be read are
+            counted.
         classification (str): `TEXT`, `NAME_PATTERN`, `PROPER_NOUN` or
             `PROPER_NOUN_CANDIDATE`.
     """
@@ -34,8 +35,8 @@ class DiscoveryCandidate:
 
 class DiscoveryResult:
     """
-    Holds the raw results of a discovery scan and provides methods to filter
-    and group them into actionable redaction zones.
+    Holds the raw results of a discovery scan. Its methods filter the
+    results and group them into redaction zones.
     """
     def __init__(self, candidates: List[DiscoveryCandidate], n_sources: int):
         self.candidates = candidates
@@ -49,12 +50,13 @@ class DiscoveryResult:
 
     def filter(self, predicate: Union[float, Callable] = 0.0) -> 'DiscoveryResult':
         """
-        Returns a new result with filtered candidates.
+        Returns a new result that holds the filtered candidates.
 
         Args:
-            predicate: Either a float, the minimum confidence kept (default
-                0.0, which keeps every candidate), or a callable that takes a
-                `DiscoveryCandidate` and returns True to keep it.
+            predicate: A float or a callable. A float is the minimum
+                confidence that is kept. The default is 0.0, which keeps
+                every candidate. A callable takes a `DiscoveryCandidate`
+                and returns True to keep it.
 
         Returns:
             DiscoveryResult: The kept candidates, with the same source count.
@@ -213,18 +215,21 @@ class DiscoveryResult:
 
     def to_zones(self, pad_x: int = 20, pad_y: int = 10, min_occurrence: float = 0.1) -> List[Dict[str, Any]]:
         """
-        Groups candidates into suggested redaction zones.
+        Groups the candidates into suggested redaction zones.
 
         Args:
-            pad_x: Horizontal padding for merging (higher values merge words on same line).
+            pad_x: Horizontal padding for merging. A higher value merges
+                words on the same line.
             pad_y: Vertical padding.
-            min_occurrence: Fraction of valid sources (0.0-1.0) required to suggest a zone.
+            min_occurrence: The fraction of valid sources (0.0-1.0) that
+                is necessary to suggest a zone.
 
         Returns:
-            List[Dict[str, Any]]: One dict per zone: `zone` as
-            `[y1, y2, x1, x2]`, `type` (`LIKELY_NAME`, `PROPER_NOUN` or
-            `TEXT`), `occurrence`, mean `confidence`, and up to three
-            `examples`. Zones 5 pixels or less wide or tall are dropped.
+            List[Dict[str, Any]]: One dict per zone. Each dict holds `zone`
+            as `[y1, y2, x1, x2]`, `type` (`LIKELY_NAME`, `PROPER_NOUN` or
+            `TEXT`), `occurrence`, the mean `confidence`, and up to three
+            `examples`. A zone that is 5 pixels or less wide or tall is
+            dropped.
         """
         if not self.candidates:
             return []
@@ -279,7 +284,7 @@ class DiscoveryResult:
 
 class ZoneDiscoverer:
     """
-    Utilities for analyzing text regions and classifying them.
+    Utilities that analyze text regions and classify them.
     """
     _nlp_model = None
     _nlp_model_failed = False
@@ -329,14 +334,14 @@ class ZoneDiscoverer:
 
     @staticmethod
     def group_boxes(boxes: List[List[int]], padding: int = 0, pad_x: int = None, pad_y: int = None) -> List[List[int]]:
-        """Groups boxes into overlapping clusters.
+        """Groups boxes into clusters of boxes that overlap.
 
         Args:
             boxes: Boxes as `[x, y, w, h]`.
-            padding: Padding on both axes, used where `pad_x` or `pad_y` is
-                not given.
-            pad_x: Horizontal padding when testing overlap.
-            pad_y: Vertical padding when testing overlap.
+            padding: Padding on both axes. It is used where `pad_x` or
+                `pad_y` is not given.
+            pad_x: Horizontal padding for the overlap test.
+            pad_y: Vertical padding for the overlap test.
 
         Returns:
             List[List[int]]: The indexes into `boxes` of each cluster.

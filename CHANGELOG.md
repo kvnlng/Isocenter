@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **docs: the MIDI-B page gives Isocenter 1.0.1's measurement.** `docs/midi-b.md` now names the run made on 2026-10-28 with Isocenter 1.0.1 from PyPI, in place of 1.0.0rc22's. The scores are unchanged: 99.22% of the Validation set's checks and 99.23% of the Test set's, against 72.51% and 68.45% for the default configuration. The reproduction steps install 1.0.1.
 
+- **docs: the docstrings of `services.py`, `discovery.py` and `pixel_analysis.py` that the API pages render follow Simplified Technical English (ASD-STE100) (#1171).** `RedactionError`, `DiscoveryCandidate`, `DiscoveryResult` (the class, `filter` and `to_zones`), `ZoneDiscoverer` (the class and `group_boxes`), `TextRegion`, `detect_text_regions`, `analyze_pixels` and the `pixel_analysis` module docstring now split long sentences and replace semicolons with full stops, in STE-flavored form. This finishes the docstring rewrite of #1164, which left these three modules out. The `Args:`, `Returns:` and `Attributes:` items keep their shape, every hedge keeps its strength, and no code, code comment or runtime message changed. No sentence was found untrue.
+
 ## [1.0.1] - 2026-10-27
 
 ### Added

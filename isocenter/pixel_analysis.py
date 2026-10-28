@@ -1,4 +1,4 @@
-"""OCR over pixel data: find burned-in text and where it sits."""
+"""OCR over pixel data, to find burned-in text and its location."""
 import hashlib
 import re
 
@@ -233,13 +233,16 @@ def _require_ocr(operation: str) -> None:
 @dataclass
 class TextRegion:
     """
-    Represents a region of text detected within an image or frame.
+    One region of text that was detected in an image or frame.
 
     Attributes:
-        text (str): The detected text string.
-        box (Tuple[int, int, int, int]): The bounding box of the text region (x, y, w, h).
-        confidence (float): The confidence score of the detection (0-100).
-        frame_index (int): The index of the frame where the text was detected (default 0).
+        text (str): The detected text.
+        box (Tuple[int, int, int, int]): The bounding box of the text
+            region, as (x, y, w, h).
+        confidence (float): The confidence score of the detection, from 0
+            to 100.
+        frame_index (int): The index of the frame in which the text was
+            detected. The default is 0.
     """
     text: str
     box: Tuple[int, int, int, int]  # x, y, w, h
@@ -350,18 +353,19 @@ def _detect_text_regions_or_raise(pixel_data: np.ndarray,
 
 
 def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[TextRegion]:
-    """Runs OCR on the provided pixel data and returns text regions with bounding boxes.
+    """Runs OCR on the pixel data and returns text regions with bounding boxes.
 
     Args:
-        pixel_data (np.ndarray): The image data (should be 2D).
-        frame_idx (int): The frame index associated with this data.
+        pixel_data (np.ndarray): The image data, which should be 2D.
+        frame_idx (int): The frame index of this data.
 
     Returns:
-        List[TextRegion]: Detected text regions. Also `[]` when OCR is
-        unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
-        here does not mean "no text". `Session.scan_pixel_content()` and
-        `discover_redaction_zones()` check availability first and refuse
-        instead, and report the failures this function only logs.
+        List[TextRegion]: The detected text regions. The result is also
+        `[]` when OCR is unavailable, and `[]` when OCR raised (logged at
+        ERROR). Thus `[]` here does not mean "no text".
+        `Session.scan_pixel_content()` and `discover_redaction_zones()`
+        check availability first and refuse instead. They also report the
+        failures that this function only logs.
     """
     if not HAS_OCR:
         return []
@@ -582,20 +586,20 @@ def _load_and_ocr(instance: Instance, prepare=None, reader=None) -> _InstanceOcr
 def analyze_pixels(instance: Instance) -> List[TextRegion]:
     """Analyzes the pixel data of a DICOM Instance for burned-in text.
 
-    A load or OCR failure is logged at ERROR and what was read is
-    returned. A frame this call loaded is released before it returns, with
-    `unload_pixel_data()`; one that was resident before the call is left as
-    it was. A caller who wants the frame afterwards calls
-    `instance.get_pixel_data()`.
+    A load or OCR failure is logged at ERROR, and the function returns
+    what was read. If this call loaded a frame, it releases that frame
+    with `unload_pixel_data()` before it returns. A frame that was
+    resident before the call stays as it was. A caller that wants the
+    frame afterwards calls `instance.get_pixel_data()`.
 
     Args:
         instance (Instance): The instance to read.
 
     Returns:
-        List[TextRegion]: Raw findings, not filtered against any zone. Also
-        `[]` when OCR is unavailable or nothing could be read, so `[]`
-        is not "no text"; the Session methods check availability first
-        and report what this only logs.
+        List[TextRegion]: Raw findings, not filtered against any zone. The
+        result is also `[]` when OCR is unavailable or nothing could be
+        read, so `[]` is not "no text". The Session methods check
+        availability first and report what this function only logs.
     """
     # Returns a list rather than raising: it runs per instance inside
     # workers, where raising would turn one precondition into N worker
