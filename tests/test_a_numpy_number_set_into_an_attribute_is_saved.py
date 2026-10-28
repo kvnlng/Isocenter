@@ -88,6 +88,9 @@ def _typed(value):
     pass for one another."""
     if isinstance(value, list):
         return [_typed(v) for v in value]
+    # A tuple stays a tuple, so a list cannot pass for one (#1173).
+    if isinstance(value, tuple):
+        return tuple(_typed(v) for v in value)
     return (type(value), value)
 
 
@@ -114,8 +117,6 @@ VALUES = [
     pytest.param(lambda: np.array(7), (int, 7), "7", id="0-d-array"),
     pytest.param(lambda: [np.int64(1), np.int64(2)],
                  [(int, 1), (int, 2)], ["1", "2"], id="list"),
-    pytest.param(lambda: (np.int64(1), np.int64(2)),
-                 [(int, 1), (int, 2)], ["1", "2"], id="tuple"),
     pytest.param(lambda: [np.float32(0.5), 2, np.array(3)],
                  [(float, 0.5), (int, 2), (int, 3)], ["0.5", "2", "3"],
                  id="mixed-list"),
@@ -139,6 +140,51 @@ def test_each_numpy_number_becomes_its_python_twin_and_is_saved(
         assert stored == private_text
     else:
         assert _typed(stored) == held
+
+
+@pytest.mark.parametrize("where", ["standard", "nested", "private"])
+@pytest.mark.parametrize("make, held, reopened, private_text", [
+    pytest.param(lambda: (np.int64(1), np.int64(2)),
+                 ((int, 1), (int, 2)), [(int, 1), (int, 2)], ["1", "2"],
+                 id="tuple"),
+    pytest.param(lambda: (np.int64(7),), ((int, 7),), [(int, 7)], ["7"],
+                 id="one-tuple"),
+    pytest.param(lambda: (np.float32(0.5), 2, np.array(3)),
+                 ((float, 0.5), (int, 2), (int, 3)),
+                 [(float, 0.5), (int, 2), (int, 3)], ["0.5", "2", "3"],
+                 id="mixed-tuple"),
+])
+def test_a_tuple_holding_a_numpy_number_stays_a_tuple(
+        tmp_path, make, held, reopened, private_text, where):
+    """#1173: `set_attr` returned a new `list` for a tuple holding a numpy
+    number, so `attributes[tag]` did not equal what was set, and under
+    `AT` a pair was exported as two tags. The graph now holds a tuple of
+    the twins. The store has no tuple (JSON), so a reopened session holds
+    the list it equals, as it does for a tuple of plain ints (#1016)."""
+    session, inst, inner = _open(tmp_path)
+    item, tag = _place(inst, inner, where)
+    with session:
+        item.set_attr(tag, make())
+        assert _typed(item.attributes[tag]) == held
+        session.save(sync=True)
+        assert not inst.has_unsaved_changes
+    stored = _reopened(tmp_path, where)
+    if where == "private":
+        assert stored == private_text
+    else:
+        assert _typed(stored) == reopened
+
+
+def test_python_value_keeps_an_exact_tuple_a_tuple():
+    """The converter itself, for the store's callers too. A new tuple,
+    never the one given, and a list stays a list."""
+    given = (np.int64(7),)
+    converted = _python_value(given)
+    assert type(converted) is tuple and converted == (7,)
+    assert type(converted[0]) is int
+    assert converted is not given
+    listed = _python_value([np.int64(7)])
+    assert type(listed) is list and listed == [7]
 
 
 AROUND = [

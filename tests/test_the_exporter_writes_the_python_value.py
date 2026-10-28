@@ -1139,14 +1139,22 @@ def test_a_two_tuple_under_a_private_tag_recorded_as_at_is_as_it_was():
         ("LO", _typed(["24", "4195"])), [], [("AT", "LO")])
 
 
-@pytest.mark.parametrize("route", ["around", "set_attr"])
-def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route):
+@pytest.mark.parametrize("route, pair", [
+    ("around", (0x0018, 0x1063)),
+    ("set_attr", (0x0018, 0x1063)),
+    # #1173: `set_attr` turned a tuple holding a numpy number into a list,
+    # and the list of two integers was exported as two group-0000 tags,
+    # `(0000,0018)` and `(0000,1063)`, with no row.
+    ("set_attr", (np.uint16(0x0018), np.uint16(0x1063))),
+    ("set_attr", (np.int64(0x0018), 0x1063)),
+], ids=["around", "set_attr", "set_attr-numpy-pair", "set_attr-mixed-pair"])
+def test_one_tag_set_as_a_two_tuple_exports_as_one_tag(tmp_path, route, pair):
     """Through `export()`, live, by both doors. After a save and a reopen
     the store holds `[24, 4195]` and the file carries two tags: the
     store's own spelling of a tuple, measured in the PR for #938 and not
-    changed here."""
+    changed here (#1016)."""
     edit = (_around if route == "around" else _through_set_attr)(
-        AT_TAG, (0x0018, 0x1063))
+        AT_TAG, pair)
     result = _run(tmp_path / "live", edit)
     assert result["written"] == 1, result["written"]
     assert _element(result, AT_TAG) == ("AT", _ONE)

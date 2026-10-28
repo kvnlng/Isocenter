@@ -62,7 +62,8 @@ def _python_value(value):
     A numpy bool, integer or float, as a scalar (`np.int64(7)`, what
     indexing an array or `pixel_array.max()` returns) or a 0-d array,
     becomes the Python `bool`, `int` or `float` it equals. A `list` or
-    `tuple` that directly holds a numpy value becomes a new `list` with
+    `tuple` that directly holds a numpy value becomes a new container of
+    the same type (a `list` stays a `list`, a `tuple` a `tuple`) with
     each such number replaced. Everything else is returned **as the same
     object**: a masked value, a `datetime64`, a `timedelta64`, a complex
     number, `np.str_` and `np.bytes_` among them.
@@ -71,7 +72,7 @@ def _python_value(value):
         value: Any attribute value.
 
     Returns:
-        The Python twin, a new list, or `value` itself.
+        The Python twin, a new list or tuple, or `value` itself.
     """
     # #926. `set_attr` calls this so the graph holds one representation,
     # and the scan, a live export and a reopened export read one value;
@@ -100,6 +101,14 @@ def _python_value(value):
     #   this runs once per element at ingest.
     # - **A list with no numpy member is returned itself.** `set_attr`
     #   has never copied the value it is given.
+    # - **A tuple stays a tuple** (#1173, owner ruling 2026-10-20). Until
+    #   then a tuple came back as a list, so `attributes[tag]` did not
+    #   equal what was set, and under `AT` the exporter's `_one_tag`,
+    #   which reads one tag only from an exact `tuple`, saw a list of two
+    #   integers and wrote two group-0000 tags with no row. The store
+    #   still holds a list (JSON has no tuple), so under `AT` a reopened
+    #   export writes two tags where the live one writes one: #1016's
+    #   shape, the same as for a tuple of plain integers.
     if isinstance(value, np.generic) or (
             isinstance(value, np.ndarray) and value.ndim == 0):
         if (value.dtype.kind not in _NUMPY_NUMBER_KINDS
@@ -109,7 +118,8 @@ def _python_value(value):
         return twin if type(twin) in _NUMPY_TWIN_TYPES else value
     if type(value) in (list, tuple) and any(
             isinstance(member, (np.generic, np.ndarray)) for member in value):
-        return [_python_value(member) for member in value]
+        converted = [_python_value(member) for member in value]
+        return tuple(converted) if type(value) is tuple else converted
     return value
 
 
@@ -540,9 +550,12 @@ class DicomItem(TrackedEntity):
         The value is stored as the object given, except that a numpy bool,
         integer or float becomes the Python number it equals (`np.int64(7)`
         becomes 7). A `list` or `tuple` that directly holds any numpy value,
-        `np.str_` included, becomes a new list in which each numpy number is
-        converted. So a live export writes what a reopened session writes. An
-        array of one or more dimensions is not converted: pass a list or bytes.
+        `np.str_` included, becomes a new container of the same type (a
+        `list` stays a `list`, a `tuple` a `tuple`, #1173) in which each
+        numpy number is converted. So a live export writes the numbers that
+        a reopened session writes. A subclass of `list` or `tuple` is not
+        converted. An array of one or more dimensions is not converted:
+        pass a list or bytes.
 
         Nothing is refused here. The store holds `None`, `str`, `bytes`,
         `bool`, `int`, `float`, pydicom's DS and IS values, and lists of
