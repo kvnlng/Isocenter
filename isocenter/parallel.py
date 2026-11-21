@@ -1157,12 +1157,19 @@ class _SlotPool:
         self._kill_late(now, every=False)
 
     def _kill_late(self, now, every):
-        still = set(_still_running_or_all(p for p, _ in self._retiring))
-        late = [(p, at) for p, at in self._retiring if p in still
-                and (every or now - at >= _BROKEN_POOL_GRACE_S)]
-        self._retiring = [(p, at) for p, at in self._retiring
-                          if p in still and (p, at) not in late]
-        killed = _kill_each(p for p, _ in late)
+        if every:
+            # The exit's kill: `_kill_still_running`, so a Ctrl-C in its
+            # readiness check still kills every one before it goes on
+            # (review of #913).
+            late, self._retiring = self._retiring, []
+            killed = _kill_still_running(p for p, _ in late)
+        else:
+            still = set(_still_running_or_all(p for p, _ in self._retiring))
+            late = [(p, at) for p, at in self._retiring if p in still
+                    and now - at >= _BROKEN_POOL_GRACE_S]
+            self._retiring = [(p, at) for p, at in self._retiring
+                              if p in still and (p, at) not in late]
+            killed = _kill_each(p for p, _ in late)
         if killed:
             # The time measured, not the grace. A log line and no audit row,
             # as #860's ruling Q3 has for a kill: the worker had sent every
@@ -1470,8 +1477,14 @@ def _run_on_recycling_pool(func, items, strategy, ordered=False):
     pool = _SlotPool(strategy.max_workers,
                      recycle_after=strategy.maxtasksperchild,
                      disable_gc=strategy.disable_gc)
-    yield from _tracked(pool.run(func, items, strategy.chunksize, ordered),
-                        items, strategy)
+    stream = pool.run(func, items, strategy.chunksize, ordered)
+    try:
+        yield from _tracked(stream, items, strategy)
+    finally:
+        # `tqdm` does not pass `close()` on to what it wraps, so a reader
+        # that stops would leave the pool's exit to whenever the stream is
+        # collected.
+        stream.close()
 
 
 def _run_on_new_executor(func, items, strategy):

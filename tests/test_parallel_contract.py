@@ -2572,6 +2572,40 @@ def test_the_exit_bound_resets_a_sigalrm_the_worker_ignores(monkeypatch):
     assert outcome.get("value") == [1], outcome
 
 
+def test_the_slot_pools_unfinished_exit_kill_survives_a_ctrl_c(monkeypatch):
+    """U8h, for #885's pool: the unfinished exit kills every worker when a
+    Ctrl-C lands in its wait and again in the readiness check, then raises
+    it (review of #913).
+
+    Killing mutation: the exit asking `_still_running_or_all` and killing
+    inline, which raises before any `kill()`.
+    """
+    processes = [_KillRecorded(1), _KillRecorded(2)]
+    pool = parallel._SlotPool(2, recycle_after=1, disable_gc=False)
+    pool._retiring = [(p, time.monotonic()) for p in processes]
+    _every_wait_interrupted(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        pool._unfinished_exit()
+    assert [p.killed for p in processes] == [True, True]
+
+
+def test_the_slot_pools_finished_exit_kill_survives_a_ctrl_c(monkeypatch):
+    """U8h, the finished exit: workers told to leave are killed, every one,
+    when a Ctrl-C lands in the wait for them and again in the readiness
+    check, then it is raised (review of #913).
+
+    Killing mutation: the final kill asking `_still_running_or_all` and
+    killing inline.
+    """
+    processes = [_KillRecorded(1), _KillRecorded(2)]
+    pool = parallel._SlotPool(2, recycle_after=1, disable_gc=False)
+    pool._retiring = [(p, time.monotonic()) for p in processes]
+    _every_wait_interrupted(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        pool._finished_exit()
+    assert [p.killed for p in processes] == [True, True]
+
+
 def test_the_exit_bound_is_never_armed_in_the_parent():
     """R5: `_arm_exit_bound` in a process that is not a pool's child arms no
     timer and leaves SIGALRM's handler alone (#888).

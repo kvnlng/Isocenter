@@ -309,7 +309,7 @@ def test_an_ordered_slot_run_yields_in_submission_order_and_a_prefix_before_a_de
 
 
 def test_items_are_read_lazily(recorded_pools):
-    """T7: after the first result, at most W * depth + 1 items have been
+    """T7: after the first result, at most 2 * W * depth items have been
     read: `export_batch` hands an iterator.
 
     Killing mutation: `list(items)`.
@@ -327,7 +327,9 @@ def test_items_are_read_lazily(recorded_pools):
     try:
         first = _run_bounded(lambda: next(stream), 60)
         assert not first["hung"], first
-        assert len(read) <= 2 * parallel._SLOT_DEPTH + 1, len(read)
+        # Not W * depth + 1: one wake of the wait can return several
+        # finished tasks, and each is replaced. Still far below the 200.
+        assert len(read) <= 2 * 2 * parallel._SLOT_DEPTH, len(read)
     finally:
         closed = _run_bounded(stream.close, 60)
     assert not closed["hung"], closed
@@ -582,7 +584,12 @@ def test_retired_workers_give_their_threads_and_descriptors_back():
         show_progress=False), 240)
     assert not outcome["hung"], outcome
     assert sorted(outcome["value"]) == list(range(40))
+    def grown():
+        now = counts()
+        return now[0] > before[0] or now[1] > before[1]
+
     deadline = time.monotonic() + 15
-    while counts() > before and time.monotonic() < deadline:
+    while grown() and time.monotonic() < deadline:
         time.sleep(0.1)
-    assert counts() <= before, (before, counts())
+    # Each number on its own: a tuple compares by its first difference.
+    assert not grown(), (before, counts())
