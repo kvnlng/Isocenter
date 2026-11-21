@@ -81,6 +81,10 @@ breaks one is red, never skipped):
    to what it held before the page ran: a page that calls
    `exporters.register()` (T5) changes a module-global the rest of the
    test process reads, and the registry has no public way to undo it.
+   It also restores `sys.path`, and forgets every module imported from
+   the page's working directory: an exporter's class lives in a file the
+   page writes and imports (#783), and neither the path entry nor the
+   cached module may outlive the page.
 
 7. **Cost: about 30 s per page, measured on 3.14t.** One parametrised
    test per page, so `pytest --changed` or a shard can take one page.
@@ -104,9 +108,11 @@ listed under `exporters/__init__.py`, which it does import (convention
 """
 import ast
 import doctest
+import os
 import pathlib
 import re
 import shutil
+import sys
 import traceback
 
 import pydicom
@@ -406,6 +412,7 @@ def run_page(page, workdir, root=None):
     namespace = {"__name__": "__tutorial__"}
     fences = examples = 0
     registry = _registry_snapshot()
+    path_before = list(sys.path)
     try:
         for match in _FENCE.finditer(text):
             info, body = match.group(1).strip(), match.group(2)
@@ -450,6 +457,8 @@ def run_page(page, workdir, root=None):
     finally:
         _close_sessions(namespace)
         _registry_restore(registry)
+        sys.path[:] = path_before
+        _forget_modules_under(workdir)
 
     if not fences:
         return [f"{where}: holds no ```python fence, so it runs nothing"]
@@ -457,6 +466,16 @@ def run_page(page, workdir, root=None):
         return [f"{where}: holds no `>>>` example, so it shows no outcome "
                 "that is checked -- a tutorial's claims are its shown output"]
     return []
+
+
+def _forget_modules_under(workdir):
+    """Drop from `sys.modules` every module whose file is in `workdir`
+    (convention 6)."""
+    root = os.path.realpath(str(workdir))
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if path and os.path.realpath(path).startswith(root + os.sep):
+            del sys.modules[name]
 
 
 def _registry_snapshot():
@@ -596,10 +615,15 @@ def test_a_format_a_page_registers_does_not_outlive_it(tmp_path, stops):
     from isocenter import exporters
     before = exporters.available_formats()
     page = _page(tmp_path, _OK_HEADER + (
-        "```python\nfrom isocenter import exporters\n"
-        "class Toy:\n    def export(self, session, folder, **options):\n"
-        "        return []\n"
-        "exporters.register('tutorial-toy', Toy)\n```\n\n"
+        "<!-- tutorial: file=toy_exporter.py -->\n```py\n"
+        "from isocenter import exporters\n"
+        "class Toy(exporters.Exporter):\n"
+        "    def write(self, dataset, item, folder, **options):\n"
+        "        return None\n```\n\n"
+        "```python\nimport os, sys\n"
+        "sys.path.insert(0, os.getcwd())  # holds toy_exporter.py\n"
+        "from isocenter import exporters\nimport toy_exporter\n"
+        "exporters.register('tutorial-toy', toy_exporter.Toy)\n```\n\n"
         "```python\n>>> 'tutorial-toy' in exporters.available_formats()\n"
         + ("False" if stops else "True") + "\n```\n"))
     failures = run_page(page, tmp_path, root=tmp_path)

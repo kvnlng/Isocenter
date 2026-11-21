@@ -8,6 +8,7 @@ import copy
 import gc
 import bisect
 import os
+import pickle
 import re
 import json
 import contextlib
@@ -1292,14 +1293,30 @@ class _WfdbFormat:
     def plan(session, options, target_ids):
         # Every instance of every selected patient, in walk order, as the
         # walk always took them: one that holds no waveform is written
-        # nowhere and files nothing (`_write_instance`'s first arm).
-        return _ExportRun([
-            (patient, study, series, instance)
-            for patient in session.store.patients
-            if patient.patient_id in target_ids
-            for study in patient.studies
-            for series in study.series
-            for instance in series.instances])
+        # nowhere and files nothing (`_write_instance`'s first arm). The
+        # subset and the pre-export scan (#783, Q10/Q11) filter the
+        # waveform instances through `_why_excluded`, the one reading the
+        # `dicom` plan uses; only a waveform instance is withheld, with a
+        # row, because no other is ever written.
+        from .exporters.wfdb import WAVEFORM_SEQUENCE_TAG
+        walk, withheld = [], []
+        for patient in session.store.patients:
+            if patient.patient_id not in target_ids:
+                continue
+            for study in patient.studies:
+                for series in study.series:
+                    for instance in series.instances:
+                        if getattr(instance.sequences.get(
+                                WAVEFORM_SEQUENCE_TAG), "items", None):
+                            why = _why_excluded(options, patient, study,
+                                                series, instance)
+                            if why not in (None, OUTSIDE_THE_SUBSET):
+                                withheld.append(
+                                    (instance.sop_instance_uid, why))
+                            if why is not None:
+                                continue
+                        walk.append((patient, study, series, instance))
+        return _ExportRun(walk, withheld=withheld)
 
     @staticmethod
     def attempted(session, run):
@@ -1321,7 +1338,14 @@ class _WfdbFormat:
 
     @staticmethod
     def counters(run, result, held_by_policy):
-        return None
+        # Records written of the waveform instances asked for (#783, Q12),
+        # the withheld ones included, as `dicom` counts them. A waveform
+        # with no samples was asked for and is not written. None, as for
+        # an empty DICOM plan, when nothing was asked for.
+        asked = len(_WfdbFormat.attempted(None, run)) + len(run.withheld)
+        if not asked:
+            return None
+        return (len(result.value), asked)
 
     @staticmethod
     def export_row(folder, run, result, held_by_policy):
@@ -1332,11 +1356,15 @@ class _WfdbFormat:
         # is stated on every run, including a clean one, so `0 instances
         # failed` is a fact rather than an absence.
         written, failed = len(result.value), len(result.failures)
+        # The withheld clause only when something was withheld, so every
+        # row an export without `check_burned_in` writes is as it was.
+        withheld = (f"; {len(run.withheld)} more withheld by the pre-export "
+                    f"scan (check_burned_in=True)" if run.withheld else "")
         return (f"WFDB export to {folder}: wrote {written} "
                 f"{'record' if written == 1 else 'records'}, "
                 f"{failed} "
                 f"{'instance' if failed == 1 else 'instances'} "
-                f"failed.")
+                f"failed{withheld}.")
 
     @staticmethod
     def finish(result):
@@ -1353,6 +1381,74 @@ class _WfdbFormat:
         if result.failures and not result.value:
             return ExportError(result.failures, len(result.failures), folder)
         return None
+
+
+class _PluginFormat(_DicomFormat):
+    """A registered plugin's part of an export (#783).
+
+    The `dicom` format's plan and batch, with the plugin class on every
+    context: each worker builds the dataset the DICOM export would write
+    and hands it to the class's `write`. Built per export, because it
+    carries the class, the folder and the class's own options.
+    """
+    releases_memory = True
+    files_by_plan = True
+
+    def __init__(self, name, cls, folder, writer_options):
+        self.label = name
+        self.cls = cls
+        self.folder = folder
+        self.writer_options = dict(writer_options)
+
+    @property
+    def names(self):
+        """`<format> export to <folder> by <module>.<qualname>`."""
+        return (f"{self.label} export to {self.folder} by "
+                f"{self.cls.__module__}.{self.cls.__qualname__}")
+
+    @staticmethod
+    def announce(folder):
+        get_logger().info("Exporting session to: %s", folder)
+
+    def plan(self, session, options, target_ids):
+        # Never compressed and never read back: those are the DICOM
+        # serializer's, and a plugin's dataset is handed over before it.
+        run = _DicomFormat.plan(session, options._replace(
+            use_compression=False, verify_readback=False), target_ids)
+        for task in run.tasks:
+            task.writer = self.cls
+            task.writer_options = self.writer_options
+            task.export_folder = self.folder
+        return run
+
+    def write(self, session, folder, run, show_progress, format_options,
+              held_by_policy):
+        result = _DicomFormat.write(session, folder, run, show_progress,
+                                    format_options, held_by_policy)
+        if result.ran:
+            # The collision report and the disclosure read
+            # `task.output_path`; for a plugin that is the path its
+            # `write()` returned, or `""` for one it did not write.
+            paths = result.value._paths_by_position
+            for task in run.tasks:
+                task.output_path = paths.get(task.position, "")
+        return result
+
+    def export_row(self, folder, run, result, held_by_policy):
+        # `_DicomFormat`'s words, opened with the format and the class
+        # (Q7: the report says who wrote the files), and with the count of
+        # instances `write()` returned None for.
+        text = _DicomFormat.export_row(folder, run, result, held_by_policy)
+        text = self.names + text[len(f"DICOM export to {folder}"):]
+        skipped = len(result.value._skipped)
+        if skipped:
+            text = (text[:-1] + f"; {skipped} not written: the exporter "
+                    f"wrote nothing for them.")
+        return text
+
+    @staticmethod
+    def finish(result):
+        pass
 
 
 #: The formats `Session._export_pipeline` runs, by the key each door
@@ -8417,17 +8513,18 @@ class DicomSession:
         the session holds. The row and the log line count such IDs by
         position and never name them, and the report then grades
         `REVIEW_REQUIRED`. The
-        patients that match are exported as asked, and nothing raises. The
-        `dicom` format does the same for a `subset` value that names
-        nothing in the session at any level.
+        patients that match are exported as asked, and nothing raises.
+        Every format does the same for a `subset` value that names
+        nothing in the session at any level (`wfdb` since 1.1, #783).
 
-        A format served by any exporter other than the two built-in classes
-        (one registered through `exporters.register`, a subclass of a
-        built-in, or another class registered as `dicom`) writes one
-        `WARNING` audit row before it runs. The row says that its output is
-        not attested by Isocenter, so the report grades `REVIEW_REQUIRED`.
-        None of the export gates runs for it, and it writes no `EXPORT`
-        row. The registry is provisional until 1.1. See
+        A format registered through `exporters.register` is a plugin. It
+        runs behind every gate above, as `dicom` does, with the options
+        `patient_ids`, `subset`, `check_burned_in`, `check_reversibility`
+        and `show_progress`, and the options its class names. Its class's
+        `write` is called once per instance, in an export worker process,
+        with the dataset that the `dicom` format would write, before
+        compression, and never with the session. Its `EXPORT` row names
+        the class, and the export can grade `PASS` (#783). See
         :mod:`Exporter registry <isocenter.exporters>`.
 
         Args:
@@ -8440,7 +8537,7 @@ class DicomSession:
 
         Returns:
             Any: The selected format's own result object. The DICOM
-            exporter returns an
+            exporter, and a plugin, return an
             :class:`ExportSummary <isocenter.io_handlers.ExportSummary>`.
             Its `written` counts the files that reached disk, and its
             `failures` names the instances that did not. Its
@@ -8456,8 +8553,8 @@ class DicomSession:
 
         Raises:
             ValueError: If `format` is not a registered export format.
-                Also on `dicom`, before anything is written, for a `subset`
-                query that does not run, or a `subset` DataFrame with none of
+                Also, on every format that takes `subset`, before anything
+                is written, for a `subset` query that does not run, or a `subset` DataFrame with none of
                 SOPInstanceUID, SeriesInstanceUID, StudyInstanceUID and
                 PatientID. Also, on both formats, from the save that an
                 export begins with, if an instance with unsaved changes holds
@@ -8475,9 +8572,10 @@ class DicomSession:
                 dict to both must split it. Also, on both formats and before
                 anything is written, for a `patient_ids` that is a bare
                 `str` (wrap one ID in a list), is bytes-like, is not
-                iterable, or holds an element that is not a `str`. Also on
-                `dicom`, for a `subset` that is bytes-like, is not iterable,
-                or holds an element that is not a `str`.
+                iterable, or holds an element that is not a `str`. Also, on
+                every format that takes `subset`, for a `subset` that is
+                bytes-like, is not iterable, or holds an element that is not
+                a `str`.
             OcrUnavailableError: On `dicom` with `check_burned_in=True`
                 under a `burned_in_text` policy, if a reader that the policy
                 needs cannot run (#1108): tesseract (the `ocr` extra and the
@@ -8525,35 +8623,78 @@ class DicomSession:
         from . import exporters
 
         exporter = exporters.get_exporter(format)
-        # Every export gate lives inside the two built-ins, so an
-        # exporter that is neither runs behind none of them and its
-        # output is not something this report can vouch for. One
-        # `WARNING` row, so the run grades `REVIEW_REQUIRED`.
         # By class identity: `__module__` is whatever a plugin spells and
-        # a subclass inherits it, a subclass may override anything, and a
-        # format name is whatever was registered over. `is not`, never
-        # `not in (...)`: a tuple's `in` falls back to `==`, and a
-        # metaclass whose `__eq__` answers True would pass for a built-in.
-        # Before dispatch, so a plugin that raises still leaves the row.
+        # a subclass inherits it, a subclass may override anything, and
+        # `register()` refuses the two built-in names (#783, Q9). `is`,
+        # never `in (...)`: a tuple's `in` falls back to `==`, and a
+        # metaclass whose `__eq__` answers True would pass for a built-in
+        # (review of #786). Every other class is a plugin, and runs behind
+        # every export gate, handed the dataset the DICOM export would
+        # write; 1.0 wrote a "not attested" `WARNING` row here instead,
+        # because no gate ran for one (owner ruling Q7, 2026-11-20).
         cls = type(exporter)
-        if (cls is not exporters.dicom.DicomFormatExporter
-                and cls is not exporters.wfdb.WfdbExporter):
-            detail = (
-                f"Export to {folder} in format {format!r} ran "
-                f"{cls.__module__}.{cls.__qualname__}, an exporter "
-                "Isocenter does not ship: its output is not attested by "
-                "Isocenter. None of the export gates ran for it (the "
-                "burned-in re-audit, the configured redaction zones, the "
-                "drop of nested icons that may show redacted pixels, the "
-                "filter that drops the underscore bookkeeping keys, one of "
-                "which holds the source SOP Instance UID, the "
-                "recoverable-identity disclosure, the de-identification "
-                "markers, the owner stamps, the EXPORT and DATA_LOSS "
-                "rows), so this report does not know what it wrote.")
-            get_logger().warning(detail)
-            self.store_backend.log_audit(action_type="WARNING",
-                                         entity_uid=folder, details=detail)
-        return exporter.export(self, folder, **options)
+        if (cls is exporters.dicom.DicomFormatExporter
+                or cls is exporters.wfdb.WfdbExporter):
+            return exporter.export(self, folder, **options)
+        return self._export_through_plugin(format, cls, folder, options)
+
+    def _export_through_plugin(self, name, cls, folder, options):
+        """`export()` for a registered plugin class (#783).
+
+        Splits `options` into the session's and the class's own, refuses
+        any other name and any value of the class's that cannot reach a
+        worker, then runs `_export_pipeline` with the class on every
+        planned instance's context.
+
+        Args:
+            name (str): The format name the class is registered under.
+            cls (type): The plugin class.
+            folder (str): The output folder.
+            options (dict): What the caller passed.
+
+        Returns:
+            ExportSummary: As the `dicom` format returns it.
+
+        Raises:
+            TypeError: For an option name neither the session nor the
+                class takes, or a value of the class's own that does not
+                pickle. Nothing is saved or written.
+        """
+        from .exporters import _SESSION_OPTIONS
+
+        own = getattr(cls, "options", frozenset())
+        accepted = _SESSION_OPTIONS | own
+        # First, before anything is read or saved, as the two built-in
+        # doors refuse: a refusal after the save has moved the session for
+        # an export that will not happen. `sorted`, so the message is
+        # deterministic.
+        unknown = sorted(set(options) - accepted)
+        if unknown:
+            raise TypeError(
+                f"export(format={name!r}) got unexpected keyword "
+                f"argument(s) {', '.join(repr(n) for n in unknown)}; the "
+                f"{name!r} options are "
+                f"{', '.join(repr(n) for n in sorted(accepted))}.")
+        writer_options = {key: value for key, value in options.items()
+                          if key in own}
+        # Each value rides every task's context to a worker process; one
+        # that does not pickle would fail every instance there.
+        for key in sorted(writer_options):
+            try:
+                pickle.dumps(writer_options[key])
+            except Exception as exc:  # pylint: disable=broad-except
+                raise TypeError(
+                    f"export(format={name!r}): option {key!r} cannot be "
+                    f"handed to an export worker process "
+                    f"({type(exc).__name__}); pass a value that pickles."
+                ) from None
+        return self._export_pipeline(
+            _PluginFormat(name, cls, folder, writer_options), folder,
+            patient_ids=options.get("patient_ids"),
+            subset=options.get("subset"),
+            check_burned_in=options.get("check_burned_in", False),
+            check_reversibility=options.get("check_reversibility", True),
+            show_progress=options.get("show_progress", True))
 
     def _export_dicom(self, folder: str, use_compression=True,
                       check_burned_in=False, check_reversibility=True,
@@ -8784,7 +8925,8 @@ class DicomSession:
         Nothing refuses after the save, and no row is written before it.
 
         Args:
-            fmt (str): `"dicom"` or `"wfdb"`, a key of `_EXPORT_FORMATS`.
+            fmt (Union[str, _PluginFormat]): `"dicom"` or `"wfdb"`, a key
+                of `_EXPORT_FORMATS`, or a plugin's adapter.
             folder (str): The output folder.
             patient_ids (Iterable[str], optional): As `export()` takes it.
             subset (optional): As `export()` takes it.
@@ -8799,7 +8941,10 @@ class DicomSession:
             Any: The format's result: an `ExportSummary` for `dicom`, a
             `List[str]` for `wfdb`.
         """
-        fmt = _EXPORT_FORMATS[fmt]
+        # A built-in by its key; a plugin's adapter is built per call
+        # (`_export_through_plugin`).
+        if isinstance(fmt, str):
+            fmt = _EXPORT_FORMATS[fmt]
         format_options = dict(format_options or {})
         # One helper for every door that selects patients, so
         # `patient_ids` means the same thing whichever format was named
@@ -9145,6 +9290,11 @@ class DicomSession:
             if len(group) < 2:
                 continue
             uid = group[0].instance.sop_instance_uid
+            # A DICOM path is named by the UID, so one path is one UID. A
+            # plugin names its own paths (#783): one path holding several
+            # UIDs is the second arm's case, read back from the file.
+            if any(task.instance.sop_instance_uid != uid for task in group):
+                continue
             if uid not in written and not os.path.exists(path):
                 continue
             # Flattened and pipe-escaped for the same reason as
@@ -9195,7 +9345,10 @@ class DicomSession:
         replaced = set()
         for group in by_identity.values():
             paths = {task.output_path for task in group}
-            if len(paths) < 2:
+            # Several paths of one file; or, for a plugin, one path that
+            # several instances of different UIDs returned (#783).
+            if len(paths) < 2 and len(
+                    {task.instance.sop_instance_uid for task in group}) < 2:
                 continue
             # Which instance the file holds is read from the file: the last
             # rename wins, and which was last varies by run. One read; every
@@ -9772,6 +9925,10 @@ class DicomSession:
                     # in its order, for the temporal marker's walk.
                     stamps = {**patient_attrs, **study_attrs, **series_attrs}
                     zones = self._redaction_zones_for(series)
+                    # What a plugin's `ExportItem` carries (#783).
+                    folder_names = export_folder_names(patient, study,
+                                                       series)
+                    carried_id = entities.exported_patient_id(patient)
                     policy_hash = (_burned_in_text_policy_hash(policy, zones)
                                    if policy is not None else None)
 
@@ -9839,7 +9996,9 @@ class DicomSession:
                             source_modality=series.modality,
                             # Its place in the plan, which orders the
                             # summary and the rows (#999).
-                            position=len(tasks)))
+                            position=len(tasks),
+                            folder_names=folder_names,
+                            exported_patient_id=carried_id))
 
         return tasks, patient_count, withheld, gated
 

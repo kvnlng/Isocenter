@@ -1,137 +1,167 @@
 # Exporter registry
 
-:::{admonition} Provisional
-:class: warning
-
-The exporter registry (`Exporter`, `register()`, `get_exporter()`,
-`available_formats()`) is **provisional until 1.1**. It is documented
-but internal (see [API stability](stability.md#the-exporter-registry-provisional-until-11)).
-Version 1.1 may replace these four names rather than extend them, with a
-`Breaking` CHANGELOG entry that names both spellings. A plugin written against 1.0
-should pin `isocenter>=1.0,<1.1`.
-:::
-
 `session.export(folder, format=...)` finds the exporter registered for
-`format` in this registry, and calls it. The two built-in formats, `dicom` and
-`wfdb`, register themselves when `isocenter.exporters` is imported, which
-`session.export()` does. Anything else
-can be registered too:
+`format` in this registry. The two built-in formats, `dicom` and `wfdb`,
+register themselves when `isocenter.exporters` is imported, which
+`session.export()` does. You can register a format of your own: a class
+whose `write()` method writes one instance.
+
+The contract (`Exporter`, `ExportItem`, `register()`, `get_exporter()`,
+`available_formats()`) is documented but internal
+([API stability](stability.md#the-exporter-contract)). A minor release
+can change it, with a `Breaking` CHANGELOG entry that names both
+spellings. A patch release never does. In 1.0 it was provisional, and
+1.1 replaced it ([#783](https://github.com/kvnlng/Isocenter/issues/783)).
+`register()` refuses a class written for 1.0, which implements
+`export(session, folder, **options)`, with `TypeError`.
+
+## An exporter is a class in a module
 
 ```python
+# acme_exporter.py
+import json
+import os
+
 from isocenter import exporters
 
 
 class AcmeExporter(exporters.Exporter):
-    def export(self, session, folder, **options):
-        written = []
-        # ... write files under `folder`, reading the graph, never changing it
-        return written
+    options = frozenset({"indent"})
 
+    def write(self, dataset, item, folder, **options):
+        out = os.path.join(folder, *item.folder_names)
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, f"{item.sop_instance_uid}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"PatientID": item.patient_id,
+                       "Modality": str(dataset.get("Modality", ""))},
+                      handle, indent=options.get("indent"))
+        return path
+```
+
+```python
+from isocenter import exporters
+from acme_exporter import AcmeExporter
 
 exporters.register("acme", AcmeExporter)
 print(exporters.available_formats())  # ['acme', 'dicom', 'wfdb']
 ```
 
-## What a third-party exporter receives
+`write()` runs once per instance, in an export worker process, in
+parallel, as the DICOM export's own writer does. The worker imports your
+class by its module and name. So the class must be defined at the top
+level of a module that a new Python process can import. A class defined
+in a notebook cell, in an interactive prompt or inside a function
+cannot be imported there, and `register()` refuses it with `TypeError`.
+If the module is a file in your working directory, put that directory
+on `sys.path` before the export: a worker starts with the `sys.path` of
+the process that started it.
 
-**The session's graph and nothing else.** That graph is not what the
-built-in formats write. Every export-time gate lives inside the built-in
-formats, and some of them change pixels and sequences on the way out.
-Before it dispatches, `export()` itself runs no gate. It clears the
-counts of the last export, which the report's **Instances Written** row
-reads. It finds the exporter for `format` in the registry. For an
-exporter other than the two built-in classes, it writes one `WARNING`
-audit row (see the next section) and logs the same text. So for any
-exporter other than the two built-in classes, none of the following
-runs:
+## What `write()` receives
 
-- The burned-in re-audit that withholds an instance still carrying an
-  identifier (`check_burned_in`).
-- The configured redaction zones. The DICOM export reads each series'
-  zones from the configuration in force. It applies them to a copy of
-  every frame it writes, whether or not `redact()` ran. For a plugin,
-  `instance.get_pixel_data()` holds only what `redact()` changed. With
-  zones configured and `redact()` not run, the pixels are unredacted.
-- The drop of nested icons. An Icon Image
-  Sequence `(0088,0200)` item is a downsampled copy of a frame, and nothing
-  scans or redacts one. The DICOM export drops an instance's own icon when
-  its pixels are redacted or have zones configured. It drops every other
-  nested icon when any instance in the store is redacted, or any
-  configured zone matches a series in the store. A plugin that copies
-  `instance.sequences` ships a thumbnail of what redaction removed,
-  **even after `redact()` ran**.
-- The recoverable-identity disclosure (`check_reversibility`). After
-  `lock_identities()`, the graph still carries the encrypted identity token
-  at `(0400,0500)`.
-- The de-identification markers `(0012,0062)`, `(0012,0063)` and
-  `(0028,0303)`, which Isocenter decides per instance at export time and
-  never puts in the graph.
-- The filter on `attributes` keys. The DICOM writer writes only keys shaped
-  `gggg,eeee` and drops every `_`-prefixed bookkeeping key. One of those,
-  `_ISOCENTER_SOURCE_SOP_UID` (`entities.SOURCE_SOP_UID_ATTR`), holds the
-  source SOP Instance UID that UID replacement removed. A plugin that
-  walks `instance.attributes` writes it.
-- The owner stamps: `(0010,0010)`, `(0010,0020)`, `(0008,0020)`,
-  `(0020,000D)` and `(0020,000E)` written from the patient, study and
-  series rather than from an instance's own copy.
-- The rule for a subject with no Patient ID. `patient.patient_id` can be
-  the synthetic key `"\no-patient-id\<Study Instance UID>"`, and
-  `exported_patient_id()` is the only reader for output.
-- The `patient_ids`/`subset` counting and the stale-policy notice, and the
-  `EXPORT` and export-time `DATA_LOSS` audit rows.
+- **`dataset`**: a `pydicom.dataset.FileDataset`, the instance as the
+  DICOM export would write it, before compression. The same worker code
+  builds it, so every write-side gate has applied:
+  - the configured redaction zones, applied to a copy of the pixels,
+    whether or not `redact()` ran;
+  - the drop of nested icons. An Icon Image Sequence `(0088,0200)` item
+    is a downsampled copy of a frame, and nothing scans or redacts one.
+    The instance's own icon is dropped when its pixels are redacted or
+    zones are configured for it. Every other nested icon is dropped when
+    any instance in the store is redacted, or a configured zone matches
+    a series in the store;
+  - only `gggg,eeee` keys. Isocenter's `_`-prefixed bookkeeping keys,
+    one of which holds the source SOP Instance UID that UID replacement
+    removed (`_ISOCENTER_SOURCE_SOP_UID`), are never in it;
+  - the owner stamps: `(0010,0010)`, `(0010,0020)`, `(0008,0020)`,
+    `(0020,000D)` and `(0020,000E)` from the patient, study and series;
+  - the rule for a subject with no Patient ID: Patient ID `''`;
+  - the de-identification markers `(0012,0062)`, `(0012,0063)` and
+    `(0028,0303)`, where the DICOM export would write them;
+  - the Type 2 fills, and native pixels with descriptors that describe
+    them.
+- **`item`**: an `ExportItem` with `sop_instance_uid`, `folder_names`
+  (the `Subject`/`Study`/`Series` folder names that both built-in
+  formats write under) and `patient_id` (the Patient ID the export
+  carries, `''` for a subject with none).
+- **`folder`**: the export folder that `export()` was given.
+- **`**options`**: the options that your class names in `options`, as
+  the caller passed them. An option name that is neither yours nor the
+  session's raises `TypeError` before anything runs. Each value must
+  pickle, because it goes to the worker.
 
-## How the report treats a third-party export
+`write()` never receives the session, its store, its configuration or
+its project secret. Changing `dataset` changes nothing in the session,
+because the worker holds a copy.
 
-Each run of an exporter that is not one of the two built-in classes writes
-one `WARNING` audit row before `export()` calls the exporter. The row
-names the format and the class, and says that Isocenter does not attest
-the exporter's output. The row is written even when the exporter then
-raises.
+The dataset is not passed through the DICOM export's conformance steps,
+which come after the cut: the IOD check, the resolution of ambiguous
+VRs, the relabelling of long values as `UN`, Encapsulated Document
+Length, `use_compression` and `verify_readback`. The rows that those
+steps write for a DICOM file are not written for a plugin either.
 
-**So in 1.0, no third-party export grades `PASS`.** A `WARNING` row grades
-the report `REVIEW_REQUIRED` (condition 2 in
-[How the grade is decided](../analytics.md#how-the-grade-is-decided)),
-however the plugin behaves. Isocenter writes no `EXPORT` row for a
-third-party export. So the same report also carries the "generated
-before any export" note, unless the store already holds an `EXPORT` row.
-An earlier `dicom` or `wfdb` export on the same store, in any session,
-can have written one.
+## What `export()` does around it
 
-The class decides, not the format name or the module. A subclass of a
-built-in, or a different class registered as `dicom`, is third-party.
-`DicomFormatExporter` registered again, under any name, is not.
+`session.export(folder, format="acme")` runs every export gate that does
+not depend on the format, as it does for `dicom`:
 
-Running the format-independent gates in `export()` before dispatch, so a
-plugin can grade `PASS`, is planned for 1.1
-([#783](https://github.com/kvnlng/Isocenter/issues/783)).
+- the options `patient_ids`, `subset`, `check_burned_in`,
+  `check_reversibility` and `show_progress`, read and refused as for
+  `dicom`. Under a `burned_in_text` policy, `check_burned_in=True` also
+  reads the pixels it will hand over;
+- the save, and the withheld, unmatched and stale-policy rows;
+- the refusal of a SOP Instance UID that cannot name a file. That
+  instance fails, with an `ERROR` row, before `write()` sees it;
+- one `ERROR` row for each instance whose `write()` raised, one
+  `DATA_LOSS` row for each element the dataset could not carry, and the
+  collision report;
+- the recoverable-identity disclosure, the delivery counters, one
+  `EXPORT` row and `ExportError` last, when no instance was written and
+  at least one failed.
+
+`export()` returns an `ExportSummary`, in plan order. The `EXPORT` row
+names your class, for example `acme export to out by
+acme_exporter.AcmeExporter: wrote 3 of 3 planned instances from 1
+patients.`
+
+An export through a plugin can grade `PASS`. Isocenter vouches for what
+it handed `write()`, as it vouches for what it hands pydicom's writer.
+It does not read back what `write()` wrote.
 
 ## Rules for an exporter author
 
-1. **Do not change the session's graph or store.** Export is a read.
-   Nothing checks this for a third-party exporter.
-2. **Write `exported_patient_id(patient)`, never `patient.patient_id`.**
-   Import it with `from isocenter.entities import exported_patient_id`.
-   Take a patient's, study's or series' identifiers from the owner object,
-   not from an instance's copy of them. Write only `gggg,eeee` keys from
-   `attributes`, never a `_`-prefixed one. Those keys are Isocenter's
-   bookkeeping, and one of them holds the source SOP Instance UID.
-3. **Do not write the de-identification markers.** Isocenter decides them
-   per instance from the PHI statuses it recorded. A plugin cannot
-   reproduce that decision.
+1. **Write from `dataset` and `item`, and import nothing from the
+   session or the store.** They are what the gates produced.
+2. **Return the path of the file that holds this instance**, as a
+   `str`. Return `None` when you write nothing for it: it is then
+   neither written nor failed, and the `EXPORT` row counts it apart.
+   Raise to fail the instance.
+3. **Give each instance its own file.** Instances that return one path
+   are reported as one file, with one `ERROR` row. Isocenter reads the
+   file's `(0008,0018)` back: the instance it names stays written, and
+   the others fail. A file that is not DICOM names none, so all of them
+   fail.
 4. **Decide deliberately what to do with `(0400,0500)`–`(0400,0520)`.**
-   They hold the recoverable identity.
-5. **Say what you wrote.** Your return value must let a caller detect that
-   nothing was written. Return an empty list or a zero count, or raise.
-6. **`register()` checks only that the class has an `export` attribute.**
-   Version 1.1 may check more.
-7. **Call `redact()` before exporting, and write no nested pixel payload.**
-   `export()` does not apply the configured zones for you. An Icon Image
-   Sequence `(0088,0200)` item, or any other pixel data nested in a
-   sequence, is never scanned or redacted. Leave it out.
+   After `lock_identities()` they hold the recoverable identity, and the
+   disclosure counts an instance whose file exists.
+5. **Define your class in an importable module**, at its top level.
+6. **Name your options in `options`.** A name that `export()` itself
+   takes (`patient_ids`, `subset`, `check_burned_in`,
+   `check_reversibility`, `show_progress`) is refused by `register()`.
 
-There is no reader or codec plugin point. Ingest reads through pydicom and
-Isocenter's own codec dispatch. The transfer syntaxes that Isocenter reads,
-and the two that it writes, are in
+`register()` raises `ValueError` for the names `dicom` and `wfdb`, which
+are the built-in formats'. It raises `TypeError` for a class that does
+not implement `write()` itself, for a class written for 1.0, for a class
+that a worker cannot import, and for an `options` that is not a
+`frozenset` of `str` or that names an option the session owns.
+Registering under another existing name replaces the class there.
+
+The built-in `wfdb` format is not a plugin. It writes records from the
+session's waveforms and stays behind the same session gates.
+
+There is no reader or codec plugin point, and none is planned. Ingest
+reads through pydicom and Isocenter's own codec dispatch. The transfer
+syntaxes that Isocenter reads, and the two that it writes, are in
 [Codec support](../codecs.md).
 
 ## Writing DICOM without the pipeline
@@ -159,5 +189,5 @@ behind it.
 
 ```{eval-rst}
 .. automodule:: isocenter.exporters
-   :members: Exporter, register, get_exporter, available_formats
+   :members: Exporter, ExportItem, register, get_exporter, available_formats
 ```

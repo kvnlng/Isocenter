@@ -10,7 +10,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from . import Exporter, register
+from . import Exporter, _install_built_in
 from ..config_manager import _vr_dummy
 from ..io_handlers import (export_folder_names, exported_number_text,
                            format_study_date, LOSS_SCOPE_STANDARD)
@@ -35,7 +35,11 @@ WFDB_ADC_ZERO = 0
 # The AST pin on the keys the body reads cannot see a name added to this
 # frozenset, so `tests/test_wfdb_option_strictness.py` pins the set
 # against that page: one pin on what is read, one on what is admitted.
-_WFDB_OPTIONS = frozenset({"patient_ids", "include_annotation_text"})
+#
+# `subset` and `check_burned_in` joined in 1.1 (#783, owner rulings Q10
+# and Q11): the session reads both, as for `dicom`.
+_WFDB_OPTIONS = frozenset({"patient_ids", "include_annotation_text",
+                           "subset", "check_burned_in"})
 
 
 def signal_checksum(channel_samples) -> int:
@@ -504,11 +508,13 @@ class WfdbExporter(Exporter):
         """Write WFDB records into `folder`.
 
         Saves the session (`save(sync=True)`) before the first record is
-        written and after both refusals under `Raises:`, as the `dicom`
-        format does; a refused call saves nothing.
+        written and after every refusal under `Raises:`, as the `dicom`
+        format does; a refused call saves nothing. The session runs the
+        gates the two formats share (`Session._export_pipeline`, #783).
 
         Args:
-            session (DicomSession): Active session.
+            session (DicomSession): Active session. Not a session-like
+                object: the gates are the session's.
             folder (str): Output root.
             **options: `patient_ids` (iterable, optional) limits the
                 export to those patients, read exactly as the `dicom`
@@ -528,8 +534,14 @@ class WfdbExporter(Exporter):
                 text; pass it when the study protocol permits their
                 release. Concepts from a published coding scheme are
                 unaffected either way.
+                `subset` selects as the `dicom` format's does, at every
+                level, with the same unmatched-value row (#783, since
+                1.1). `check_burned_in` (bool, default False) re-audits
+                the tags first and withholds each waveform instance that
+                still carries an identifier at any level, with one
+                `WARNING` row each, as for `dicom`. It reads no pixels.
 
-                Those two are the whole set. Any other name raises
+                Those four are the whole set. Any other name raises
                 `TypeError` before anything is written -- see `Raises:`
                 below.
 
@@ -552,9 +564,11 @@ class WfdbExporter(Exporter):
                 `_WFDB_OPTIONS`. Nothing is written when this raises.
                 Also when `patient_ids` is a bare `str` (wrap one ID in a
                 list), bytes-like, not iterable, or holds an element that
-                is not a `str`.
+                is not a `str`, and for a `subset` of a type the `dicom`
+                format refuses.
+            ValueError: For a `subset` query or DataFrame the `dicom`
+                format refuses.
         """
-        logger = get_logger()
         # First thing, before `patient_ids` is read and before any file
         # is written: a refusal raised after the walk arrives with the
         # cohort already on disk.
@@ -581,6 +595,8 @@ class WfdbExporter(Exporter):
         # against the page that freezes it.
         return session._export_pipeline(
             "wfdb", folder, patient_ids=options.get("patient_ids"),
+            subset=options.get("subset"),
+            check_burned_in=options.get("check_burned_in", False),
             format_options={"include_annotation_text": bool(
                 options.get("include_annotation_text", False))})
 
@@ -1077,4 +1093,4 @@ class WfdbExporter(Exporter):
         return WfdbExporter._instance_only_datetime(instance)
 
 
-register("wfdb", WfdbExporter)
+_install_built_in("wfdb", WfdbExporter)

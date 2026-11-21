@@ -1769,37 +1769,41 @@ def test_the_stability_page_says_what_the_freeze_covers():
 
 
 def test_the_plugins_pillar_says_what_the_registry_subsection_says():
-    """#26 x #527: the opening promise and the registry subsection agree.
+    """#26 x #527 x #783: the opening promise and the subsection agree.
 
-    #786 made the exporter registry provisional until 1.1 (1.1 may replace
-    the four names, a plugin pins `<1.1`, no third-party export grades
-    PASS) in its own subsection of tier 2. "What 1.0 promises" had been
-    written against the plain tier-2 wording ("changeable in 1.x"), so
-    its Plugins bullet must link to that subsection and use its terms,
-    or the page's first screen promises less caution than its body.
+    #786 made the exporter registry provisional until 1.1 in its own
+    subsection of tier 2, and the Plugins bullet of "What 1.0 promises"
+    linked to it in its terms. #783 replaced the registry in 1.1 (owner
+    rulings 2026-11-20): tier 2 and no longer provisional (Q13), a plugin
+    handed the dataset the DICOM export would write (Q4), and an export
+    that can grade PASS (Q7). The bullet now links to "The exporter
+    contract" and says those three things, or the page's first screen and
+    its body disagree.
 
     `entities.exported_patient_id()` is what the registry page tells a
     plugin author to call; it is tier 2 on the same terms, so it is
     listed with the other `entities` helpers and is not tier 1.
 
     Killing mutations: the bullet's link pointed back at the tier-2
-    heading; "provisional", the `<1.1` pin or the PASS sentence dropped
-    from the bullet; `exported_patient_id` dropped from the helpers
-    bullet or promoted into the module-level names.
+    heading or at the 1.0 subsection; the dataset, the PASS sentence or
+    "no longer provisional" dropped from the bullet; the 1.0 heading
+    restored; `exported_patient_id` dropped from the helpers bullet or
+    promoted into the module-level names.
     """
     page = (REPO / "docs" / "api" / "stability.md").read_text(encoding="utf-8")
     promises = page.split("## What 1.0 promises", 1)[1].split("\n## ", 1)[0]
     bullet = " ".join(
-        promises.split("- **Plugins, provisionally.**", 1)[1]
+        promises.split("- **Plugins.**", 1)[1]
         .split("\n- ", 1)[0].split())
-    assert "(#the-exporter-registry-provisional-until-11)" in bullet
+    assert "(#the-exporter-contract)" in bullet
     assert "(#documented-but-internal)" not in bullet
-    assert "provisional until 1.1" in bullet
-    assert "`isocenter>=1.0,<1.1`" in bullet
-    assert "no third-party export grades `PASS`" in bullet
+    assert "no longer provisional" in bullet
+    assert "the dataset that the DICOM export would write" in bullet
+    assert "Its export can grade `PASS`" in bullet
 
     headings = [line for line in page.splitlines() if line.startswith("### ")]
-    assert "### The exporter registry: provisional until 1.1" in headings
+    assert "### The exporter contract" in headings
+    assert "### The exporter registry: provisional until 1.1" not in headings
 
     frozen = " ".join(_frozen_section(page).split())
     internal = " ".join(page.split("## Documented but internal", 1)[1]
@@ -1892,7 +1896,7 @@ def test_the_stability_page_says_what_a_1x_may_rename_or_remove():
     tiers = _flat(page.split("## What 1.0 promises", 1)[0])
     internal = _flat(page.split("## Documented but internal", 1)[1]
                      .split("\n## Private", 1)[0])
-    registry = _flat(page.split("### The exporter registry: provisional until 1.1",
+    registry = _flat(page.split("### The exporter contract",
                                 1)[1].split("\n## ", 1)[0])
     assert anchor in tiers, "the tier bullets do not link the policy"
     # The tier-1 bullet says the same as the policy, so the page does not
