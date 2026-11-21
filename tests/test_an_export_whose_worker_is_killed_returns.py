@@ -1,13 +1,13 @@
 """`export()` returns, and says what it lost, when a worker of its recycling
 pool is killed while it writes (#887).
 
-Export always runs on `run_parallel(maxtasksperchild=25)`, a
+Export always runs on `run_parallel(maxtasksperchild=25)`, which was a
 `multiprocessing.Pool` that answered a dead worker by starting another and
 waiting for the dead one's task for good: the out-of-memory killer on one
 decoder held `export()` forever, before the pool's exit, where #860's bound
-never ran. The pool now watches every worker it starts, and a death fails
-the stream with `BrokenProcessPool`, which the export reports through its
-existing path (owner ruling Q2 on #887): one `ERROR` row, `Export worker
+never ran. Since #885 each worker is a one-worker executor whose task's
+future fails when it dies, and a death fails the stream with
+`BrokenProcessPool`, which the export reports through its existing path (owner ruling Q2 on #887): one `ERROR` row, `Export worker
 failed: BrokenProcessPool: ...`, so the run grades `REVIEW_REQUIRED`, and
 `ExportError` only if nothing was written.
 
@@ -28,7 +28,7 @@ from isocenter.session import DicomSession
 
 from support.ct_small_files import write_ct
 from support.project_secret import FIXED_A, load_fixed_secret
-from test_parallel_contract import _RecordedPool, _gone, _run_bounded
+from test_parallel_contract import _gone, _run_bounded
 
 
 def _kill_the_worker_writing(uid):
@@ -61,13 +61,15 @@ def test_an_export_whose_worker_is_killed_returns_and_reports_it(
     `BrokenProcessPool`, the chosen instance has no file, and no worker of
     the export's pool is left.
 
-    Killing mutation: the stream's watch removed (the export never returns).
+    Killing mutation: a death read from the worker's exit code alone, not
+    its task's future.
     """
     monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
     monkeypatch.setattr(parallel, "_POOL_WATCH_S", 0.2, raising=False)
     started = []
-    monkeypatch.setattr(_RecordedPool, "started", started)
-    monkeypatch.setattr(parallel, "_RecyclingPool", _RecordedPool)
+    # Every worker the recycling pool spawns, through its hook (#885).
+    monkeypatch.setattr(parallel._SlotPool, "_started",
+                        lambda self, process: started.append(process))
     for index in range(3):
         write_ct(tmp_path / "in" / f"{index}.dcm", f"P887{index}",
                  f"887{index}")

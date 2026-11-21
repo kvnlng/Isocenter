@@ -41,7 +41,6 @@ This module provides classes for:
 import concurrent.futures
 import contextlib
 import dataclasses
-import multiprocessing
 import os
 import pickle
 import sys
@@ -141,7 +140,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   offset_table_frame_count,
                                   refusal_before_decode)
 from .parallel import (run_parallel, _resolve_strategy,
-                       resolve_worker_initializer)
+                       new_spawn_process_pool)
 from .validation import IODValidator
 from .sidecar import SidecarManager
 from .waveform import filter_dangling_annotation_refs
@@ -4554,17 +4553,14 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
                 # A spawned `ProcessPoolExecutor`, built here, never
                 # `run_parallel(executor=None)`: that path is threads on
                 # 3.14t, where a file that ends its process ends the
-                # parent with it, and `multiprocessing.Pool` under
+                # parent with it, and the recycling pool under
                 # `ISOCENTER_MAX_TASKS_PER_CHILD`, which fails the whole
-                # stream on a killed worker (#887). The spawn pin is the shared pool's,
-                # and so is the initializer -- resolved
-                # through this module's binding, deliberately, and not
-                # `strategy.worker_initializer`, which is the same
-                # function read through `parallel`'s.
-                pool = concurrent.futures.ProcessPoolExecutor(
-                    max_workers=1 if alone else strategy.max_workers,
-                    mp_context=multiprocessing.get_context("spawn"),
-                    initializer=resolve_worker_initializer(strategy.disable_gc))
+                # stream on a killed worker (#887). The spawn pin and the
+                # initializer are the shared pool's, through the one
+                # helper (#667); `disable_gc` is the strategy's.
+                pool = new_spawn_process_pool(
+                    1 if alone else strategy.max_workers,
+                    disable_gc=strategy.disable_gc)
                 round_executor = pool
                 round_strategy = retry_strategy
                 batch = pending[:alone] if alone else pending
@@ -5946,8 +5942,9 @@ class DicomImporter:
         # `ProcessPoolExecutor(max_tasks_per_child=)` DEADLOCKS `map` on
         # 3.12, the floor, the first time a worker actually has to be
         # replaced (macOS spawn; 3.14 and 3.14t are fine), so it would
-        # hang `ingest()` rather than recycle it; on 3.12 only
-        # `multiprocessing.Pool` recycles. And the pool is built once at
+        # hang `ingest()` rather than recycle it; the recycling pool
+        # replaces whole one-worker processes instead (#885), which a
+        # warm shared pool is not. And the pool is built once at
         # `Session()`: a variable read there would be the one
         # construction-time read of a precedence lever in the package,
         # and set after the session opened it would be ignored in the
