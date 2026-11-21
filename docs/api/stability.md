@@ -280,6 +280,9 @@ runs inside `export(check_burned_in=True)`, so that call merges too.
 - `IngestSummary(ingested, failures, declined, skipped, hidden)` plus
   `failed`.
 - `ExportSummary(written_uids, failures)` plus `written` and `failed`.
+  `written_uids` and `failures` list instances in plan order: the
+  store's patient, study, series and instance order, which is the order
+  of the output tree (#999).
   `written_uids` holds the SOP Instance UID of each written instance and
   nothing else. An instance with no UID is not written and is in
   `failures`. So is an instance whose file another instance's write

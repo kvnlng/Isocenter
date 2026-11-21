@@ -6,6 +6,7 @@ sidecar behind it, and the worker pools the heavy passes run on.
 """
 import copy
 import gc
+import bisect
 import os
 import re
 import json
@@ -1291,6 +1292,36 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
     # gone from the file, the source's claim is the source's and stays.
     return (_SOURCE_CLAIM_WITHDRAWN
             if _a_date_this_store_took(instance, stamps) else None)
+
+
+def _insert_failure_in_plan_order(summary, task, failure) -> None:
+    """Put `failure` into `summary.failures` at `task`'s plan position (#999).
+
+    `summary._failure_positions` runs parallel to `failures`; the entry goes
+    after every failure planned at or before it, and before any with a
+    later position or none (a worker that died before it named its
+    instance). A task with no position goes last.
+
+    Args:
+        summary (ExportSummary): Edited in place.
+        task (ExportContext): The instance that failed.
+        failure (tuple): `(entity_uid, details)`.
+    """
+    positions = summary._failure_positions
+    if len(positions) != len(summary.failures):
+        # A summary built by hand carries no positions: nothing to keep
+        # in step with, so append as before.
+        summary.failures.append(failure)
+        return
+    position = getattr(task, "position", None)
+    if position is None:
+        at = len(positions)
+    else:
+        # `bisect` over the positioned prefix only: None sorts last.
+        named = sum(1 for p in positions if p is not None)
+        at = bisect.bisect_right(positions, position, 0, named)
+    summary.failures.insert(at, failure)
+    positions.insert(at, position)
 
 
 def _delivered_file_identity(path: str) -> Optional[Tuple[int, int]]:
@@ -8145,7 +8176,9 @@ class DicomSession:
             exporter returns an
             :class:`ExportSummary <isocenter.io_handlers.ExportSummary>`.
             Its `written` counts the files that reached disk, and its
-            `failures` names the instances that did not. `written` is
+            `failures` names the instances that did not. Its
+            `written_uids` and `failures` are in plan order: the store's
+            patient, study, series and instance order (#999). `written` is
             counted over *de-duplicated* UIDs, because the UID names the
             output file. Two instances that share one UID are two
             successful write operations and one file, because the second
@@ -8936,10 +8969,12 @@ class DicomSession:
                     continue
                 # By task, one occurrence each: a loser may share the
                 # survivor's UID, which then stays in the list once.
+                # `remove` in place keeps `written_uids` in plan order, so
+                # it is not sorted again.
                 if task.instance.sop_instance_uid in summary.written_uids:
                     summary.written_uids.remove(task.instance.sop_instance_uid)
-                summary.failures.append(
-                    (task.instance.sop_instance_uid, detail))
+                _insert_failure_in_plan_order(
+                    summary, task, (task.instance.sop_instance_uid, detail))
                 # Known to be absent from the folder only when the file was
                 # read and names another UID. A loser sharing the
                 # survivor's UID may be the one the file holds: which of
@@ -9536,7 +9571,10 @@ class DicomSession:
                             # for the missing-pixel guard, and for the
                             # `check_burned_in=True` read's scope check
                             # (#1121).
-                            source_modality=series.modality))
+                            source_modality=series.modality,
+                            # Its place in the plan, which orders the
+                            # summary and the rows (#999).
+                            position=len(tasks)))
 
         return tasks, patient_count, withheld, gated
 

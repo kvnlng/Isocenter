@@ -7095,6 +7095,12 @@ class ExportContext:
     #: so the refusal is reported as every failed write is. Both context
     #: builders set it. None, the default, is an instance to write.
     refusal: Optional[BaseException] = None
+    #: This context's index in its plan, copied onto the worker's
+    #: `ExportOutcome` so that `export_batch` can put the results back in
+    #: plan order (#999), whatever order the workers finished in. Used for
+    #: that and for nothing else. Both context builders set it. None, for a
+    #: context built by hand, sorts after every planned one.
+    position: Optional[int] = None
 
     def __post_init__(self):
         # The worker asks again: a dataclass can be edited after this runs.
@@ -7150,15 +7156,24 @@ class ExportOutcome:
     #: read as a shortcoming of ours.
     warnings: List[str] = field(default_factory=list)
     error: Optional[BaseException] = None
+    #: The `ExportContext.position` of the context this answers (#999).
+    #: Every return of the worker sets it, the refusal raised first and the
+    #: failure arm included, because the parent orders the results by it.
+    position: Optional[int] = None
 
 
 @dataclass
 class ExportSummary:
     """What `export(format="dicom")` wrote, and what it did not.
 
+    Both lists are in plan order (#999): the store's patient, study,
+    series and instance order, which is the order of the output tree. A
+    failure from a worker that died before it named its instance (keyed
+    `UNKNOWN`) comes after every named one.
+
     Attributes:
         written_uids (List[str]): The SOP Instance UID of each instance
-            that reached disk, and nothing else. An instance with no UID is
+            that reached disk, and nothing else, in plan order. An instance with no UID is
             not written and is in `failures`. An instance whose UID cannot
             name a file (`export_file_name`) is in `failures` too, under
             that UID. When the volume resolves two file names to one file,
@@ -7166,9 +7181,9 @@ class ExportSummary:
             `session.export()`, the instance whose file was replaced is in
             `failures` too, and the instance that the file holds is here.
         failures (List[Tuple[str, str]]): `(entity_uid, details)` per
-            instance that did not reach disk, each with an audit row. The
-            instances of one replaced file share one row, which names them
-            all.
+            instance that did not reach disk, each with an audit row, in
+            plan order. The instances of one replaced file share one row,
+            which names them all; each is listed at its own place.
         written (int): Files that reached disk, counted over distinct
             UIDs. Two instances that share a UID write one file.
         failed (int): `len(failures)`.
@@ -7176,13 +7191,21 @@ class ExportSummary:
     # UIDs rather than a count: the count is derivable from them and the
     # identities are not, and the disclosure has to say which files went
     # out.
-    #: SOP Instance UID of each instance that reached disk, and nothing else. A write
-    #: needs the UID for its file meta, so an instance without one fails and is in
-    #: `failures`, keyed UNKNOWN. It is never an output path, which names the Patient ID.
+    #: SOP Instance UID of each instance that reached disk, and nothing else, in
+    #: plan order. A write needs the UID for its file meta, so an instance without
+    #: one fails and is in `failures`, keyed UNKNOWN. It is never an output path,
+    #: which names the Patient ID.
     written_uids: List[str] = field(default_factory=list)
-    #: `(entity_uid, details)` per instance that did not reach disk,
-    #: already audited by `_report_export_failures`.
+    #: `(entity_uid, details)` per instance that did not reach disk, in plan
+    #: order, already audited by `_report_export_failures`.
     failures: List[Tuple[str, str]] = field(default_factory=list)
+    # The plan position of each entry of `failures`, kept beside it so
+    # that `Session._report_export_collisions` can insert a loser at its
+    # own place rather than append it (#999). None for a worker that died
+    # before it named its instance. Private: not a field a caller reads,
+    # and `repr`/`==` leave it out.
+    _failure_positions: List[Optional[int]] = field(
+        default_factory=list, repr=False, compare=False)
 
     @property
     def written(self) -> int:
@@ -7294,6 +7317,9 @@ class ExportError(RuntimeError):
     disclosure, the delivery counters, the `EXPORT` audit row and `Done.`.
     The WFDB path has none of the first three. It raises after each
     record's `ERROR` or `DATA_LOSS` row and its own `EXPORT` row.
+
+    `failures` is in plan order (#999), so the message's `First:` names the
+    first planned instance that failed.
 
     It is a `RuntimeError` subclass, so `except RuntimeError` catches it.
     `write_tree` raises a bare `RuntimeError` instead, for "this
@@ -9581,7 +9607,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         return ExportOutcome(ok=True, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
-                             warnings=warnings)
+                             warnings=warnings,
+                             position=getattr(ctx, "position", None))
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
         # Report the failure back for the parent to count and raise on.
@@ -9602,7 +9629,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         return ExportOutcome(ok=False, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
-                             warnings=warnings, error=e)
+                             warnings=warnings, error=e,
+                             position=getattr(ctx, "position", None))
 
 
 class _J2kFrameRefusal(RuntimeError):
@@ -12677,6 +12705,26 @@ def _numeric_arm(vr, value):
     raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
+def _in_plan_order(results) -> list:
+    """`results` sorted by plan position, stably (#999).
+
+    An `ExportOutcome` with a position comes first, by that position. Every
+    other result (a bare exception from a lost worker, an outcome whose
+    position is None) follows, in the order it arrived.
+
+    Args:
+        results (Iterable): What `run_parallel` returned for an export.
+
+    Returns:
+        list: The same results, reordered.
+    """
+    def key(item):
+        position = getattr(item, "position", None) \
+            if isinstance(item, ExportOutcome) else None
+        return (1, 0) if position is None else (0, position)
+    return sorted(results, key=key)
+
+
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -12786,6 +12834,8 @@ class DicomExporter:
                         drop_foreign_icons=drop_foreign_icons,
                         source_modality=se.modality,
                         refusal=refusal,
+                        # As `Session._build_export_plan` sets it (#999).
+                        position=len(contexts),
                     )
                     contexts.append(ctx)
         return contexts
@@ -13203,7 +13253,17 @@ class DicomExporter:
             yield_exceptions=True)
 
         # Two passes -- see the note in `write_tree`.
-        results = list(results)
+        #
+        # Then into plan order (#999), here, in the parent, and never by
+        # asking the pool for order: on the ordered path the results held
+        # behind a dead worker's index are lost (#887). Everything below
+        # walks this list, so one sort orders the audit rows, `failures`,
+        # `written_uids` and `ExportError`'s `First:` alike. Stable, so
+        # what has no position (a bare exception from a lost worker, or a
+        # context built by hand) keeps its arrival order after the rest.
+        # By position, never by UID: an instance whose UID is `''` or
+        # None fails keyed UNKNOWN and still has its place.
+        results = _in_plan_order(results)
         DicomExporter._report_export_losses(results, store_backend)
         DicomExporter._report_export_warnings(results, store_backend)
         DicomExporter._report_export_corrections(results)
@@ -13225,7 +13285,13 @@ class DicomExporter:
             written_uids=[r.sop_instance_uid
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],
-            failures=failures)
+            failures=failures,
+            # Parallel to `failures`: `_report_export_failures` appends one
+            # entry per result that is not an `ok` outcome, in this order.
+            _failure_positions=[
+                r.position if isinstance(r, ExportOutcome) else None
+                for r in results
+                if not (isinstance(r, ExportOutcome) and r.ok)])
 
         logger.info(f"Export Complete. Success: {summary.written}/{total or '?'}")
         return summary
