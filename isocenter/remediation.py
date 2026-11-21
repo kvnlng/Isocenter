@@ -108,12 +108,12 @@ class RemediationService:
     def apply_remediation(self, findings: List[PhiFinding]):
         """Apply the remediation proposal of each finding, as one pass.
 
-        Findings without a proposal are skipped, and findings on the same
-        attribute (`_remediation_key`) are applied once. Entity-level
+        Findings without a proposal are skipped. Findings on the same
+        attribute (`_remediation_key`) are decided once, by the first that
+        does not decline: applied, folded or satisfied (#636). Entity-level
         findings (Patient, Study, Series) run first; an instance finding on
         a copy an owner's write already reached is folded into that write
-        rather than run. A proposal that raises is logged and recorded as
-        a decline, and the pass continues.
+        rather than run. A raise is logged and recorded as a decline.
 
         Side effects: writes each value onto the graph in memory and marks
         the entities it changed modified; stamps each remediated entity
@@ -133,7 +133,7 @@ class RemediationService:
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
         self._declined_entities, self._satisfied_keys = [], set()
-        self._owner_copies = {}
+        self._owner_copies, self._pending_stamps = {}, {}
         # Entity-level findings first, everything else after in its own
         # relative order. The owner's write has to land before the
         # instance findings on the same copies are judged, or which value
@@ -165,10 +165,10 @@ class RemediationService:
             # every unnamed config entry. `entity_path` is in the key
             # because a finding inside a sequence carries its instance's
             # UID, so two items holding the same tag would otherwise
-            # collide. One spelling, shared with the scan tally that
-            # settles the pass.
+            # collide. Shared with the scan tally. A satisfied key is done
+            # too (#636); a decline claims no key, so the next one runs.
             key = _remediation_key(finding)
-            if key in processed_entities or key in folded_keys:
+            if key in processed_entities or key in folded_keys or key in self._satisfied_keys:
                 continue
 
             # Folded, not applied: an owner's write in this pass already
@@ -308,8 +308,8 @@ class RemediationService:
                 # the arm: a line there would move the line-cited
                 # `mark_modified()` calls.
                 reason = self._replace_attr_refused(entity, proposal)
-                self.logger.warning(
-                    f"Remediation declined for {self._log_subject(finding)}: {reason}")
+                self._log_refusal(
+                    finding, reason)
                 self._record_decline(finding, reason, audit_buffer)
                 return False
 
@@ -800,11 +800,11 @@ class RemediationService:
         Returns:
             bool: True when `entity` is an `Instance` that holds exactly
             `value` at `tag` and its remediation record vouches for
-            it (`remediation_vouches_for`). False for a nested item,
-            which keeps no record, so a nested `REPLACE` still writes
-            again; and for a value the element holds with no record,
-            a source value that happens to equal the rule's, which is
-            written once so that the record exists.
+            it (`remediation_vouches_for`), or a nested item that holds
+            exactly `value` (#991). False for a top-level value the
+            element holds with no record, a source value that happens to
+            equal the rule's, which is written once so that the record
+            exists.
         """
         # The record is the gate, not equality: `lock_identities()` reads
         # the record to tell a replacement from an original, so a value
@@ -815,9 +815,22 @@ class RemediationService:
         # value is not the end state of a proposal that writes another.
         vouches = getattr(entity, "remediation_vouches_for", None)
         attributes = getattr(entity, "attributes", None)
-        if vouches is None or not isinstance(attributes, dict) or tag not in attributes:
+        if not isinstance(attributes, dict) or tag not in attributes:
             return False
         held = attributes[tag]
+        if vouches is None:
+            # A nested item keeps no record, and by owner ruling (#991, Q2)
+            # none is stored for it: equality is the gate there. The scan
+            # never raises a REPLACE whose value already equals the rule's
+            # (`privacy.py`'s REPLACE arm), so at this depth equality means
+            # this pipeline wrote it, or a hand edit after the audit set
+            # exactly the rule's value. Either way the item, and the file,
+            # already hold it; skipping the write loses a row, not data.
+            # The lock, the one reader of the record, reads top-level values
+            # only. A UID replacement needs nothing more: the caller checked
+            # `new_value` is this store's replacement of `original_value`
+            # (`_foreign_uid_refused`) before asking.
+            return isinstance(held, (str, bytes)) and held == value
         # Text and bytes only, which is every value a REPLACE writes. The
         # test is defensive and no test turns on it: `set_attr` can leave
         # an n-d array at a tag, and `array == "ANONYMIZED"` is an array,
@@ -908,11 +921,13 @@ class RemediationService:
         changed here. It is named even with no store backend, when no row
         is written.
 
-        Two reasons from `_owner_stamps_copy` are not declines and write
-        no row: a `_CopyLeftEmpty` is routed to `_satisfied`, and an
-        `_OwnerNotHandedIn` does nothing, leaving the finding unhandled
-        for the scan tally. Its three callers -- REPLACE, SHIFT and,
-        since #764, a REMOVE that reached no arm -- all route them here.
+        Three reasons are not declines and write no row. A
+        `_CopyLeftEmpty` (from `_owner_stamps_copy`) and an
+        `_AlreadyThere` (from `_replace_attr_refused` and
+        `_shift_target_moved`) are routed to `_satisfied`. An
+        `_OwnerNotHandedIn` leaves the finding unhandled for the scan
+        tally. Its three callers -- REPLACE, SHIFT and, since #764, a
+        REMOVE that reached no arm -- all route them here.
 
         Args:
             finding (PhiFinding): The finding that declined.
@@ -927,12 +942,14 @@ class RemediationService:
         # end demotes instead. The entity is named before the no-backend
         # return because the demotion is about the graph, not the audit
         # table. `element_tag` is for `SCAN_GAP` rows only.
-        if isinstance(reason, _CopyLeftEmpty):
+        if isinstance(reason, (_CopyLeftEmpty, _AlreadyThere)):
             # Not a decline either: an owner-stamped copy left empty, as
             # its owner holds no value, with nothing handed in to write
             # one -- nothing remains in the graph or the file, so the
-            # finding is satisfied. Routed through here so the arms'
-            # line-cited `mark_modified()` calls do not move.
+            # finding is satisfied; or the end state the proposal asks
+            # for is already there with the record to vouch for it (#990,
+            # #1196). Routed through here so the arms' line-cited
+            # `mark_modified()` calls do not move.
             self._satisfied(finding, None)
             return
         if isinstance(reason, _OwnerNotHandedIn):
@@ -996,10 +1013,15 @@ class RemediationService:
         target is already gone (`_remove_is_satisfied`).
 
         When `declined` is falsy the entity (and the instance holding a
-        nested item) is stamped REMEDIATED and the key is counted as
-        handled for the scan tally. No row is written, nothing is counted
-        as applied, and nothing is marked modified. When `declined` is
-        set, nothing is stamped.
+        nested item) is to be stamped REMEDIATED, and the key is counted
+        as handled for the scan tally and **decides the key for the rest
+        of the pass** (#636): `apply_remediation` runs no later proposal
+        on it. Inside a pass the stamp waits for the pass end
+        (`_stamp_at_pass_end`), where `_settle_statuses` records it net
+        of the demotions, so an entity whose status does not change is
+        not touched (#989). No row is written, nothing is counted as
+        applied, and nothing is marked modified. When `declined` is set,
+        nothing is stamped and the key is not claimed.
 
         Args:
             finding (PhiFinding): The finding whose end state is there.
@@ -1015,13 +1037,90 @@ class RemediationService:
         # `_apply_single_remediation` call never passes the reset in
         # `apply_remediation`.
         if not declined:
-            finding.entity.record_phi_status(PhiStatus.REMEDIATED)
+            self._stamp_at_pass_end(finding.entity)
             owner = self._instance_owners.get(id(finding.entity))
             if owner is not None:
-                owner.record_phi_status(PhiStatus.REMEDIATED)
+                self._stamp_at_pass_end(owner)
             self._satisfied_keys = (self._satisfied_keys
                                     | {_remediation_key(finding)})
         return False
+
+    #: The entities a satisfied finding is to stamp REMEDIATED, by `id()`,
+    #: held from `apply_remediation`'s reset to `_settle_statuses` (#989).
+    #: None outside a pass: a direct `_apply_single_remediation` call has
+    #: no pass end, so it stamps at once. Keyed by `id()` of live entities
+    #: for one pass only. No lock: one session's `anonymize()` from two
+    #: threads at once is unsupported (`_working_tally` says so).
+    _pending_stamps = None
+
+    def _stamp_at_pass_end(self, entity) -> None:
+        """Stamp `entity` REMEDIATED at the pass end, or at once outside a
+        pass.
+
+        Args:
+            entity: The entity a satisfied finding settles.
+        """
+        # A satisfied finding changed nothing, so stamping at once and then
+        # being demoted at the pass end moved the revision twice and left a
+        # saved entity with something to save (#989). Takes no
+        # `audit_buffer` (the frozen-surface Pin A).
+        if self._pending_stamps is None:
+            entity.record_phi_status(PhiStatus.REMEDIATED)
+        else:
+            self._pending_stamps[id(entity)] = entity
+
+    def _log_refusal(self, finding: PhiFinding, reason) -> None:
+        """Log why the REPLACE attribute arm wrote nothing.
+
+        Args:
+            finding (PhiFinding): The finding.
+            reason: `_replace_attr_refused`'s answer.
+        """
+        # INFO for an end state already there: nothing is wrong. A WARNING
+        # otherwise, as before. Takes no `audit_buffer` (Pin A).
+        if isinstance(reason, _AlreadyThere):
+            self.logger.info(f"{reason} on {self._log_subject(finding)} already "
+                             "holds what the proposal writes; nothing to write")
+        else:
+            self.logger.warning(
+                f"Remediation declined for {self._log_subject(finding)}: {reason}")
+
+    def _copies_hold(self, entity, field: str) -> bool:
+        """Whether every instance copy an owner's write of `field` would
+        reach already holds the owner's value, with the instance's
+        remediation record to vouch for it.
+
+        Args:
+            entity: The Patient, Study or Series.
+            field (str): The owner's field.
+
+        Returns:
+            bool: True when each instance beneath `entity`
+            (`_instances_beneath`, the walk `_write_to_instances` writes)
+            that holds the field's tag at the top level holds the value
+            `_write_to_instances` would write there, and
+            `remediation_vouches_for` it. True for a field with no
+            exported tag, and for an owner with no copies.
+        """
+        # Why the copies are in the owner's gate: an owner that skips its
+        # write no longer reaches its copies, so a copy no remediation wrote
+        # (a file ingested into the study after the pass, #894) would be
+        # left as ingested. With the copies in the gate, that owner writes,
+        # and its row says so. Takes no `audit_buffer` (Pin A).
+        tag = self.ENTITY_FIELD_TAGS.get(field)
+        if tag is None:
+            return True
+        value = getattr(entity, field, None)
+        if hasattr(value, "strftime"):
+            from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
+            value = format_study_date(value)
+        for instance in self._instances_beneath(entity):
+            if tag not in instance.attributes:
+                continue
+            if (instance.attributes[tag] != value
+                    or not instance.remediation_vouches_for(tag, value)):
+                return False
+        return True
 
     def _shift_target_moved(self, entity, finding: PhiFinding,
                             new_date) -> Optional[str]:
@@ -1049,6 +1148,10 @@ class RemediationService:
           declines, absent included. An unparseable original (`new_date`
           None) on a target still holding it passes, so the arm's own
           invalid-format decline is the one row.
+        - **Already there** (#990, #1196): a target that holds `new_date`
+          with the record of that shift is satisfied, an `_AlreadyThere`
+          (`_shift_already_there`). Equal with no record is written once,
+          so that the record exists.
 
         A `DicomItem` is read at the canonical key; a key holding None is
         gone. A `Study` is compared through `normalize_study_date`, so
@@ -1118,13 +1221,63 @@ class RemediationService:
             reason = (f"{attr} is no longer on the {type(entity).__name__}, "
                       "so there is no date to shift")
         elif held in admitted:
-            return None
+            return self._shift_already_there(entity, finding, attr, held, new_date)
         else:
             reason = (f"{attr} changed after the finding was raised, so a "
                       "shift of the value it held then is not written over it")
         self.logger.warning(
             f"Date shift declined for {self._log_subject(finding)}: {reason}")
         return reason
+
+    def _shift_already_there(self, entity, finding: PhiFinding, attr: str,
+                             held, new_date) -> Optional[str]:
+        """`_AlreadyThere` when a date shift's target holds `new_date` with
+        the record of the shift, else None.
+
+        On an item the record is its shift record (`date_shift_vouches_for`,
+        at any depth) or, on an `Instance`, the remediation record that an
+        owner's write onto its copy left (`remediation_vouches_for`). On a
+        `Study` it is `date_shifted`, the Study's shift record, and every
+        instance copy holding the date with its record (`_copies_hold`).
+
+        Args:
+            entity: The `DicomItem` or `Study` holding the date.
+            finding (PhiFinding): The finding, for the log line.
+            attr (str): The canonical tag, or the Study's field.
+            held: The value the target holds (normalised for a Study).
+            new_date: The shift the arm would write, or None.
+
+        Returns:
+            Optional[str]: An `_AlreadyThere`, or None when the arm may
+            write.
+        """
+        # The record is the gate, never equality: a date set by hand to the
+        # shifted value carries no record and is shifted once, so that the
+        # record exists (the line-cited `mark_modified()` pin
+        # `test_a_shift_onto_a_date_already_there_still_saves_its_record`).
+        # Takes no `audit_buffer` (Pin A).
+        from .entities import normalize_study_date  # pylint: disable=import-outside-toplevel
+
+        if new_date is None:
+            return None
+        if hasattr(entity, "set_attr"):
+            vouched = held == new_date and (
+                entity.date_shift_vouches_for(attr, held)
+                # An owner's write onto an instance's `0008,0020` copy leaves
+                # a remediation record, not a shift record. Once the Study's
+                # own shift is satisfied it no longer writes the copy, so the
+                # copy's finding no longer folds and is judged here.
+                or (hasattr(entity, "remediation_vouches_for")
+                    and entity.remediation_vouches_for(attr, held)))
+        else:
+            vouched = (held == normalize_study_date(new_date)
+                       and getattr(entity, "date_shifted", False)
+                       and entity.date_shift_vouches_for(getattr(entity, attr, None))
+                       and self._copies_hold(entity, attr))
+        if not vouched:
+            return None
+        self.logger.info(f"{attr} on {self._log_subject(finding)} already holds its shift")
+        return _AlreadyThere(attr)
 
     def _replace_attr_refused(self, entity, proposal) -> Optional[str]:
         """Why a `REPLACE_TAG` must not write a Python attribute, or None
@@ -1150,6 +1303,17 @@ class RemediationService:
         anything else refuses, whatever produced it. A service used without
         a session checks nothing. Finally a UID replacement is checked by
         `_foreign_uid_refused`.
+
+        **Already there, last** (#990): when nothing refuses, a field that
+        is not None and already holds `new_value` (a Study Date compared
+        as `format_study_date` renders it), every instance copy of which
+        holds the value with its record (`_copies_hold`), answers
+        `_AlreadyThere`, which `_record_decline` routes to `_satisfied`.
+        For `patient_id` and the owned UIDs the refusals have already
+        checked that the value is this store's mint; for any other field
+        the copies vouch, and an owner with no copies is read on equality:
+        the write would assign an equal value, reach no copy and record
+        nothing anywhere.
 
         Pure: changes nothing and writes no row.
 
@@ -1182,7 +1346,25 @@ class RemediationService:
                 and not self._is_holders_pseudonym(proposal, self._holders.get(id(entity)))):
             return (f"{attr}: the value is not this store's pseudonym for the "
                     "patient it would be written to, so it is not written")
-        return self._foreign_uid_refused(proposal)
+        refused = self._foreign_uid_refused(proposal)
+        if refused:
+            return refused
+        # After every refusal, so a foreign value equal to the held one is
+        # still refused with its row. The None test is load-bearing:
+        # `format_study_date(None)` is `""`, and an EMPTY on a cleared field
+        # writes `""` with its row
+        # (`test_empty_on_a_none_attribute_writes_an_empty_value`).
+        current = getattr(entity, attr)
+        if current is None or proposal.new_value is None:
+            return None
+        if attr == "study_date":
+            from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
+            same = format_study_date(current) == format_study_date(proposal.new_value)
+        else:
+            same = current == proposal.new_value
+        if same and self._copies_hold(entity, attr):
+            return _AlreadyThere(attr)
+        return None
 
     def _foreign_uid_refused(self, proposal) -> Optional[str]:
         """Why a UID replacement must not be written, or None when it may.
@@ -1526,7 +1708,11 @@ class RemediationService:
         # The tally is keyed on scan-time `entity_uid` strings, not live
         # entities, because a patient's `patient_id` changes during the
         # pass. `getattr` on the status, because a hand-built entity need
-        # carry no status.
+        # carry no status. The satisfied stamps held for the pass end
+        # (#989) are read and cleared first, so a direct
+        # `_apply_single_remediation` call after the pass stamps at once.
+        pending = self._pending_stamps or {}
+        self._pending_stamps = None
         by_uid = {}
         for key in handled | self._satisfied_keys | self._gone_keys:
             by_uid.setdefault(key[0], set()).add(key)
@@ -1581,9 +1767,11 @@ class RemediationService:
             from .privacy import _owned_uid_is_open  # pylint: disable=import-outside-toplevel
             before = self._status_revisions_at_start
             for series, _ in self._series_at_start:
+                # A satisfied stamp still pending is one this pass recorded,
+                # though its revision has not moved yet (#989).
                 stamped = [instance for instance in series.instances
                            if getattr(instance, "_phi_status_revision", None)
-                           != before.get(id(instance))]
+                           != before.get(id(instance)) or id(instance) in pending]
                 if stamped and _owned_uid_is_open(
                         self._series_policy, "0020,000e",
                         getattr(series, "series_instance_uid", None),
@@ -1594,8 +1782,18 @@ class RemediationService:
         demote = [bearer for entity in demote
                   for bearer in ([entity, *entity.instances] if isinstance(entity, Series)
                                  else [entity])]
+        # The held satisfied stamps land now, net of the demotions: an
+        # entity to be demoted is not stamped REMEDIATED first, so one whose
+        # status ends where it began records nothing and its revision does
+        # not move (#989). A pending entity in the list ends IDENTIFIED, as
+        # it did when its stamp landed at once and was then demoted.
+        demoted = {id(entity) for entity in demote}
+        for key, entity in pending.items():
+            if key not in demoted:
+                entity.record_phi_status(PhiStatus.REMEDIATED)
         for entity in demote:
-            if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
+            if (getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED
+                    or id(entity) in pending):
                 entity.record_phi_status(PhiStatus.IDENTIFIED)
 
     def _live_uid(self, entity) -> Optional[str]:
@@ -2162,8 +2360,9 @@ class RemediationService:
     #: for `_instance_owners`' reason.
     _scan_tally = None
     #: Keys of the proposals whose end state the graph already held this
-    #: pass, counted as handled by the tally. Rebound, never
-    #: mutated, so the class default is safe to share.
+    #: pass, counted as handled by the tally; each ends its key for the
+    #: rest of the pass (#636). Rebound, never mutated, so the class
+    #: default is safe to share.
     _satisfied_keys = frozenset()
     #: `id(Patient) -> patient_id` as the pass began, for `_live_uid`.
     #: Set with the tally; read-only for `_instance_owners`' reason.
@@ -2423,6 +2622,11 @@ class RemediationService:
         # would claim the key, and its REMOVE would never fold. Counting
         # per `(key, removed)` instead would over-claim: a REMOVE and a
         # REPLACE on one tag would be two folds waiting.
+        #
+        # A satisfied proposal claims its key too (#636). That leaves the
+        # count as it was because, on every scanned shape, no non-REMOVE
+        # is satisfied on a copy an owner's write removed: REPLACE and
+        # SHIFT reach `_owner_stamps_copy` there and decline.
         #
         # A finding that raises claims no key. On a value copy a REMOVE
         # that raises leaves the key to a later non-REMOVE, which folds and
@@ -2948,6 +3152,18 @@ class _CopyLeftEmpty(str):
 
     Truthy, so both arms stop, and routed by type in `_record_decline` to
     `_satisfied`. Carries the tag only.
+    """
+
+
+class _AlreadyThere(str):
+    """The reason `_replace_attr_refused` and `_shift_target_moved` give
+    when the end state a proposal asks for is already on the entity, with
+    the record that a remediation left it there, and on every copy the
+    owner's write would reach (#990, #1196).
+
+    Truthy, so the arms stop as at a decline; `_record_decline` routes it
+    by type to `_satisfied`: no row, not counted, and the key is decided.
+    Carries the attribute or tag only, never a value.
     """
 
 

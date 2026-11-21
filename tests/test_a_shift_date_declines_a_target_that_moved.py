@@ -239,7 +239,7 @@ PRIVATE_DATE = "0009,1042"
 
 
 @pytest.mark.parametrize("mode", MODES, indirect=True)
-def test_a_private_date_the_first_call_removed_is_not_recreated_by_the_second(
+def test_a_private_date_the_first_call_removed_is_not_recreated_and_writes_nothing_on_the_second(
         tmp_path, mode):
     """No hand edit: the scan's own output, applied twice.
 
@@ -247,9 +247,13 @@ def test_a_private_date_the_first_call_removed_is_not_recreated_by_the_second(
     default private-tag removal plus a `JITTER` rule on that tag, the scan
     raises a REMOVE and a SHIFT on one dedup key. The first
     `anonymize(report)` runs the REMOVE and skips the SHIFT as a
-    duplicate. On the second call the REMOVE matches nothing and claims no
-    key, so the SHIFT runs. Red before: it re-created the removed private
-    tag with a shifted date, and that date was exported."""
+    duplicate. On the second call the REMOVE finds the tag gone and is
+    satisfied, and a satisfied proposal decides its key (#636, owner
+    ruling 2026-11-20), so the SHIFT does not run. Red before #569: it
+    re-created the removed private tag with a shifted date, and that date
+    was exported. Red before #636: the SHIFT ran, declined "no longer on
+    the Instance" with a row, and demoted the instance. With #990 and
+    #991 the second call writes no row of any kind."""
     src = tmp_path / "src"
     src.mkdir()
     ds = pydicom.dcmread(get_testdata_file("JPEG2000.dcm"))
@@ -271,17 +275,26 @@ def test_a_private_date_the_first_call_removed_is_not_recreated_by_the_second(
                       and f.entity_path in (None, ())) == ["REMOVE_TAG", "SHIFT_DATE"]
         session.anonymize(report)
         assert PRIVATE_DATE not in instance.attributes, mode
+        session.store_backend.flush_audit_queue()
+        with sqlite3.connect(session.store_backend.db_path) as conn:
+            rows_before = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
         session.anonymize(report)
 
         assert PRIVATE_DATE not in instance.attributes, mode
-        # The row names the instance as the report did, by the UID it was
-        # scanned under: the first call replaced it (#544).
+        # A decline would name the instance as the report did, by the UID
+        # it was scanned under: the first call replaced it (#544).
         uid = instance.attributes[SOURCE_SOP_UID_ATTR]
         assert uid != instance.sop_instance_uid
-        gone = [d for d in _declines_on(session, uid, PRIVATE_DATE) if "no longer on" in d]
-        assert len(gone) == 1, _rows(session, "REMEDIATION_DECLINED")
+        assert _declines_on(session, uid, PRIVATE_DATE) == []
         assert [d for u, d in _rows(session, "REMEDIATION_SHIFT_DATE")
                 if PRIVATE_DATE in d] == []
+        assert instance.phi_status is PhiStatus.REMEDIATED
+        session.store_backend.flush_audit_queue()
+        with sqlite3.connect(session.store_backend.db_path) as conn:
+            assert conn.execute(
+                "SELECT action_type, details FROM audit_log ORDER BY rowid "
+                "LIMIT -1 OFFSET ?",
+                (rows_before,)).fetchall() == []
         assert (0x0009, 0x1042) not in _exported(session, tmp_path)
 
 

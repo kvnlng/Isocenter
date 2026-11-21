@@ -141,10 +141,11 @@ def test_audit_batching():
     mock_store = MagicMock()
     service = RemediationService(store_backend=mock_store, project_secret=FIXED_A)
 
-    # Create dummy findings
+    # Create dummy findings. One Patient each: ten REPLACEs of one field
+    # on one Patient are one write and nine already there since #990.
     findings = []
-    patient = Patient("P1", "Test")
     for i in range(10):
+        patient = Patient(f"P{i}", "Test")
         # Create fake finding
         f = PhiFinding(
             entity_uid=f"e_{i}",
@@ -152,7 +153,7 @@ def test_audit_batching():
             field_name=f"field_{i}",
             value="sensitive",
             reason="testing",
-            patient_id="P1",
+            patient_id=f"P{i}",
             entity=patient,
             remediation_proposal=PhiRemediation(
                 action_type="REPLACE_TAG",
