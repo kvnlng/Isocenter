@@ -548,13 +548,14 @@ def test_a_declined_finding_on_an_instance_whose_uid_moves_keeps_it_identified(
 
 @pytest.mark.parametrize("owner", ["study", "series"])
 def test_a_reloaded_owners_uid_replacement_is_saved(owner):
-    """Pins `entity.mark_modified()` at remediation.py line 299 for the
-    owners' UIDs (#544), on a *reloaded* owner: one the store hands back
-    REMEDIATED, where the status stamp at the end of the pass
-    short-circuits and the bump is the only thing that makes the next save
-    write the new UID (#173's shape). The Study and Series replacement
-    goes through that Python-attribute arm rather than a sixth
-    `mark_modified()` of its own, so no pinned line moved."""
+    """The owners' UIDs (#544) replaced on a *reloaded* owner: one the
+    store hands back REMEDIATED, where the status stamp at the end of the
+    pass short-circuits and the revision bump is the only thing that makes
+    the next save write the new UID (#173's shape). The Study and Series
+    replacement goes through the `REPLACE_TAG` Python-attribute arm. That
+    arm's `mark_modified()` was deleted in #987: both UIDs are tracked
+    fields, so the assignment marks the owner (#767), and this test is
+    what says so."""
     from isocenter.entities import Series, Study
     from isocenter.privacy import PhiFinding, PhiRemediation
     from isocenter.remediation import RemediationService

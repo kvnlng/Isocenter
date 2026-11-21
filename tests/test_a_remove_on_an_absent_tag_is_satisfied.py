@@ -323,8 +323,6 @@ def _misspelled(spelling, held_tag=ABSENT):
     pytest.param(_bare, id="bare"),
     pytest.param(_bare_with_a_tag, id="bare_with_a_tag"),
     pytest.param(_unknown_action, id="unknown_action"),
-    pytest.param(_uppercase_attribute, id="uppercase_attribute"),
-    pytest.param(_uppercase_sequence, id="uppercase_sequence"),
     pytest.param(_misspelled("00080080"), id="no_comma"),
     pytest.param(_misspelled("(0008,0080)"), id="parenthesised"),
     pytest.param(_misspelled("0008, 0080"), id="inner_space"),
@@ -340,10 +338,10 @@ def _misspelled(spelling, held_tag=ABSENT):
 ])
 def test_a_remove_that_matched_no_arm_still_declines(build):
     """The other ways to the bottom `else` stay declines: no `attributes`
-    dict, an action the arm does not implement, a raw key the arms did
-    not match while the canonical one is still held -- an attribute or a
-    sequence -- and any key that is not a well-formed `gggg,eeee` tag
-    once lower-cased. In each the value is still there and is not stamped
+    dict, an action the arm does not implement, and any key that is not
+    a well-formed `gggg,eeee` tag once lower-cased. (An upper-case key
+    the canonical one holds is removed since #1012:
+    `test_an_upper_case_key_is_removed_at_its_canonical_key`.) In each the value is still there and is not stamped
     over.
 
     The malformed spellings are the review of #626 (M1): measured on
@@ -355,8 +353,7 @@ def test_a_remove_that_matched_no_arm_still_declines(build):
     element they name.
 
     Kills: the action-type check dropped; the `attributes` guard dropped
-    (`bare_with_a_tag`); the canonical key read raw; the sequences half
-    of the predicate dropped; the well-formed-tag check dropped, or
+    (`bare_with_a_tag`); the well-formed-tag check dropped, or
     weakened to a comma or to a length of nine (`nine_characters`), or
     to a length of nine and a comma with no hex check (`letter_o`)."""
     entity, action, tag, still_there = build()
@@ -370,6 +367,26 @@ def test_a_remove_that_matched_no_arm_still_declines(build):
     assert [a for a, *_ in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
     assert NO_ARM in rows.rows[0][2], rows.rows
     assert getattr(entity, "phi_status", None) is before
+
+
+@pytest.mark.parametrize("build", [
+    pytest.param(_uppercase_attribute, id="uppercase_attribute"),
+    pytest.param(_uppercase_sequence, id="uppercase_sequence"),
+])
+def test_an_upper_case_key_is_removed_at_its_canonical_key(build):
+    """Since #1012 (owner ruling Q3) the REMOVE arms read the canonical
+    key, as REPLACE and SHIFT do: an upper-case spelling of a held
+    attribute or sequence removes it with a `REMEDIATION_REMOVE` row.
+    Until then each declined "matched no applicable arm"."""
+    entity, action, tag, _ = build()
+    rows = _Rows()
+
+    applied = _service(rows).apply_remediation([_finding(entity, action, tag)])
+
+    assert applied == 1
+    assert tag.lower() not in entity.attributes
+    assert tag.lower() not in entity.sequences
+    assert [a for a, *_ in rows.rows] == ["REMEDIATION_REMOVE"], rows.rows
 
 
 def test_a_key_holding_none_is_still_removed():

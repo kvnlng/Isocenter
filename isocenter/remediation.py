@@ -295,8 +295,8 @@ class RemediationService:
             # 2. A Python attribute (`Patient.patient_name`, `Study.study_date`).
             elif self._replace_attr_refused(entity, proposal) is None:
                 setattr(entity, proposal.target_attr, proposal.new_value)
-                if hasattr(entity, "mark_modified"):
-                    entity.mark_modified()
+                # No `mark_modified()` here (#987): every field this arm may
+                # write is a tracked one, so the assignment marks the entity.
                 details = f"Remediated {
                     finding.entity_uid}: {
                     proposal.target_attr} -> {
@@ -417,7 +417,7 @@ class RemediationService:
             if hasattr(entity, "attributes") and isinstance(entity.attributes, dict):
                 if self._holds_tag_to_remove(entity, proposal.target_attr):
                     self._record_what_is_left(entity, proposal.target_attr, None)
-                    del entity.attributes[proposal.target_attr]
+                    del entity.attributes[_canonical_tag(proposal.target_attr)]
                     # `attributes` is a plain dict, so `del` bumps no revision,
                     # unlike `set_attr`, and after a reload the REMEDIATED
                     # stamp below short-circuits on an unchanged status.
@@ -427,7 +427,7 @@ class RemediationService:
                     entity.mark_modified()
                     details = f"Removed Tag {_tag_and_creator(proposal)} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
-                elif proposal.target_attr in getattr(entity, "sequences", {}):
+                elif _canonical_tag(proposal.target_attr) in getattr(entity, "sequences", {}):
                     # A private sequence is a private tag, and the sweep
                     # asks for it by name. Without this arm the finding
                     # is filed, the report says the block was removed,
@@ -444,7 +444,7 @@ class RemediationService:
                     # spelling would split one behaviour across two rows
                     # of the report's section 2. The `details` text
                     # carries the distinction.
-                    del entity.sequences[proposal.target_attr]
+                    del entity.sequences[_canonical_tag(proposal.target_attr)]
                     entity.mark_modified()
                     details = (f"Removed Sequence {proposal.target_attr} "
                                f"from {finding.entity_uid}")
@@ -460,7 +460,7 @@ class RemediationService:
         if action_type:
             # A Patient, Study or Series field was written, so the same
             # value goes onto each instance's own copy of the tag. Here
-            # and not in the arms above: the arms end in the four
+            # and not in the arms above: the arms end in the three
             # line-cited `mark_modified()` calls, and this block sits
             # below all of them. Before the REMEDIATED stamp below, which
             # is only about `entity`; the instances keep their own status.
@@ -926,7 +926,8 @@ class RemediationService:
         `_AlreadyThere` (from `_replace_attr_refused` and
         `_shift_target_moved`) are routed to `_satisfied`. An
         `_OwnerNotHandedIn` leaves the finding unhandled for the scan
-        tally. Its three callers -- REPLACE, SHIFT and, since #764, a
+        tally and names the entity for the pass-end demotion (#960). Its
+        three callers -- REPLACE, SHIFT and, since #764, a
         REMOVE that reached no arm -- all route them here.
 
         Args:
@@ -954,8 +955,16 @@ class RemediationService:
             return
         if isinstance(reason, _OwnerNotHandedIn):
             # Not a decline: an owner-stamped copy whose owner this pass
-            # was not handed. No row and no demotion; the
-            # finding stays unhandled for the scan tally.
+            # was not handed. No row, and the finding stays unhandled for
+            # the scan tally. The instance is named for the pass-end
+            # demotion all the same (#960, owner ruling Q5 option D): a
+            # plain list after a reopen carries no tally, and without this
+            # the instance's other successes left it REMEDIATED over a
+            # file carrying the source value. With a tally it is what the
+            # tally already does. No row, so nothing permanent: the owner
+            # handed later, then a re-audit, clears it.
+            if finding.entity is not None:
+                self._declined_entities.append(finding.entity)
             return
         if finding.entity is not None:
             self._declined_entities.append(finding.entity)
@@ -1175,7 +1184,7 @@ class RemediationService:
         # of what the target holds now, so without this check a date
         # deleted, blanked or edited between `audit()` and `anonymize()`
         # would be re-created or overwritten. The warning is logged here
-        # rather than in the arm, so the arm adds no line above the four
+        # rather than in the arm, so the arm adds no line above the three
         # line-cited `mark_modified()` calls.
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
 
@@ -1283,16 +1292,17 @@ class RemediationService:
         """Why a `REPLACE_TAG` must not write a Python attribute, or None
         when it may.
 
-        A name the entity lacks refuses. A slots field holding None (a
-        value the caller cleared after `audit()`) refuses a value, so the
-        rule's value is not re-created where the caller cleared one; it
-        takes `""`, because the exporter writes None and `""` as the same
-        zero-length element, and the entity then holds `""` with a row
-        that says so. A present but empty value is not a cleared one and
-        is written. Generic over every entity field (`Study.study_date`,
-        `Patient.patient_name`, `Series.modality`, ...). The reasons name
-        the attribute and the type and never a value: they are persisted
-        in the row and rendered into the report.
+        A name the entity lacks refuses, and so does a name that is not a
+        field the export writes from the entity (`ENTITY_FIELD_TAGS`:
+        Patient's Name and ID, Study Date, the Study and Series Instance
+        UIDs; #987). A slots field holding None (a value the caller
+        cleared after `audit()`) refuses a value, so the rule's value is
+        not re-created where the caller cleared one; it takes `""`,
+        because the exporter writes None and `""` as the same zero-length
+        element, and the entity then holds `""` with a row that says so.
+        A present but empty value is not a cleared one and is written. The
+        reasons name the attribute and the type and never a value: they
+        are persisted in the row and rendered into the report.
 
         **A Patient ID that is not this store's pseudonym for the patient
         refuses.** In a session the value written must be the one this
@@ -1333,6 +1343,18 @@ class RemediationService:
         attr = proposal.target_attr
         if not hasattr(entity, attr):
             return f"{type(entity).__name__} has no attribute or setter for {attr}"
+        # Only the fields the export writes from the entity (#987, owner
+        # rulings Q1a-Q1c), as #679 made the REMOVE arm do. The arm is a
+        # bare `setattr`, so any other name the entity carries was written
+        # too: `Patient.studies` set to a string left every later `save()`,
+        # `export()` and `generate_report()` raising `AttributeError`, and a
+        # private field (`_jitter_scheme`) was written and saved.
+        # `Series.modality` reached no exported byte, and `Study.date_shifted`
+        # is bookkeeping no scan raises. The three store keys stay allowed:
+        # REPLACE writes them (the pseudonym, the keyed UIDs).
+        if attr not in self.ENTITY_FIELD_TAGS:
+            return (f"{attr} is not a field the export writes from the "
+                    f"{type(entity).__name__}, so it is not written")
         if getattr(entity, attr) is None and proposal.new_value not in (None, ""):
             return (f"{attr} is no longer set on the {type(entity).__name__}, "
                     "so the rule's value is not written where the caller "
@@ -1432,14 +1454,15 @@ class RemediationService:
         Returns:
             bool: True when the arm should delete the element.
         """
-        # Pure, with no `audit_buffer`, and defined below the four
+        # Pure, with no `audit_buffer`, and defined below the three
         # line-cited `mark_modified()` calls so the arm's condition stays
         # one same-line call, as `_holds_attr_to_remove` is for the arm
-        # below it. The raw key, as the arm has always read it: a tag
-        # spelled in upper case falls past. In the bottom `else` an
-        # owner-stamped one (`0020,000D`) is decided by
-        # `_owner_stamps_removal`, which canonicalises it; any other
-        # declines.
+        # below it. The canonical key since #1012 (owner ruling Q3), as
+        # REPLACE and SHIFT read it: a tag spelled in upper case is removed
+        # as the lower-case spelling is, where it used to fall past to a
+        # `matched no applicable arm` decline, or for an owned UID under an
+        # emptied owner to a copy left `''` with no row.
+        tag = _canonical_tag(tag)
         return tag in entity.attributes and not self._owner_stamps_a_value(entity, tag)
 
     @classmethod
@@ -1464,7 +1487,7 @@ class RemediationService:
         # `hasattr` alone is True of a slots field holding None, so a
         # removal of a field already cleared would write a row and count as
         # applied for work nothing did. Pure, with no `audit_buffer`, as
-        # `_replace_attr_refused` is, and defined below the four line-cited
+        # `_replace_attr_refused` is, and defined below the three line-cited
         # `mark_modified()` calls so the arm's condition stays a same-line
         # call.
         #
@@ -1626,10 +1649,10 @@ class RemediationService:
         Returns:
             bool: True when the target is already gone.
         """
-        # Read canonically because the REMOVE arms above test the raw
-        # `target_attr`: a hand-built upper-case tag the item holds
-        # lower-case falls past them, and read raw here it would count as
-        # satisfied over a value still there. Well-formed because absence
+        # Read canonically, as the REMOVE arms above read it since #1012:
+        # read raw here, a hand-built upper-case tag the item holds
+        # lower-case would count as satisfied over a value still there,
+        # should anything let it fall past them. Well-formed because absence
         # under a key is evidence only for the key the graph would store
         # the element under: `00080080`, `(0008,0080)`, `InstitutionName`
         # or `patient_id` lower-case onto keys no item has, and would read
@@ -1804,7 +1827,8 @@ class RemediationService:
         `entity_uid` -- as the pass began (`_pass_start_uids`); read now
         (`_uid_of`) only for an entity the snapshot does not hold. A
         patient's is its `patient_id` as the pass began
-        (`_pass_start_ids`).
+        (`_pass_start_ids`), read back through `_scan_time_patient_id`
+        when an earlier pass left this store's pseudonym there.
 
         Args:
             entity: A Patient, Study, Series, Instance or nested item.
@@ -1818,9 +1842,11 @@ class RemediationService:
         # *through* the finding's `entity_uid`, so an item has one only
         # when that name is already its instance's UID. A patient's ID is
         # read from the snapshot because the pass may already have replaced
-        # it with the pseudonym.
+        # it with the pseudonym; a pseudonym an earlier pass left is read
+        # back to the ID the audit raised under (#582, L-1).
         if isinstance(entity, Patient):
-            return self._pass_start_ids.get(id(entity))
+            return self._scan_time_patient_id(
+                entity, self._pass_start_ids.get(id(entity)))
         # As the pass began, like a patient's: the pass itself moves an
         # instance's, a study's and a series' UID, and read now
         # it would be the replacement, under which the audit raised
@@ -1828,6 +1854,61 @@ class RemediationService:
         if id(entity) in self._pass_start_uids:
             return self._pass_start_uids[id(entity)]
         return self._uid_of(entity)
+
+    #: Per pass, per jitter scheme: this store's pseudonym of each uid the
+    #: tally holds -> that uid. Built lazily by `_scan_time_patient_id`,
+    #: reset by `_use_scan_tally`, so a re-audit's tally is never read
+    #: through an earlier audit's map.
+    _pseudonym_map = None
+
+    def _scan_time_patient_id(self, patient, patient_id):
+        """The ID the audit raised `patient`'s findings under.
+
+        `patient_id` as the pass began, unless it is this store's
+        pseudonym (`privacy._is_replacement_id`) for an ID the tally
+        holds and the tally does not hold the pseudonym itself: then that
+        ID. The pseudonym is minted under the patient's own scheme, keyed
+        (`_replacement_id_for`) or legacy unkeyed
+        (`_unkeyed_replacement_id_for`).
+
+        Args:
+            patient: The Patient.
+            patient_id: Its `patient_id` as the pass began, or None.
+
+        Returns:
+            The ID to settle the patient under.
+        """
+        # Without this a patient whose ID an earlier pass replaced was
+        # settled under the pseudonym, under which the audit raised
+        # nothing, so a hand-built finding filed under a wrong uid stamped
+        # it REMEDIATED over what the audit raised under its real ID. One
+        # HMAC per uid the tally holds, once per pass and scheme, and only
+        # on a pass that meets such a patient. Takes no `audit_buffer`
+        # (Pin A).
+        tally = self._scan_tally
+        if (tally is None or not isinstance(patient_id, str)
+                or tally.raised_under(patient_id)):
+            return patient_id
+        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _is_replacement_id, _replacement_id_for, _unkeyed_replacement_id_for)
+
+        if not _is_replacement_id(patient_id):
+            return patient_id
+        scheme = getattr(patient, "_jitter_scheme", None)
+        unkeyed = scheme == JITTER_SCHEME_UNKEYED
+        if not unkeyed and not self.project_secret:
+            return patient_id
+        if self._pseudonym_map is None:
+            self._pseudonym_map = {}
+        if unkeyed not in self._pseudonym_map:
+            uids = [uid for uid in list(tally._raised)  # pylint: disable=protected-access
+                    if isinstance(uid, str)]
+            self._pseudonym_map[unkeyed] = {
+                (_unkeyed_replacement_id_for(uid) if unkeyed
+                 else _replacement_id_for(uid, self.project_secret)): uid
+                for uid in uids}
+        return self._pseudonym_map[unkeyed].get(patient_id, patient_id)
 
     @staticmethod
     def _uid_of(entity) -> Optional[str]:
@@ -1865,7 +1946,7 @@ class RemediationService:
     #:
     #: A class attribute this far down the class rather than a module
     #: constant at the top, on purpose: a line added above the success
-    #: block of `_apply_single_remediation` moves the four line-cited
+    #: block of `_apply_single_remediation` moves the three line-cited
     #: `mark_modified()` calls.
     ENTITY_FIELD_TAGS = {
         "patient_name": "0010,0010",
@@ -1929,7 +2010,7 @@ class RemediationService:
     #: UID. Read-only: it is a class attribute, so an in-place write would
     #: reach every service in the process; the setter replaces it. Here
     #: rather than in `__init__` for `ENTITY_FIELD_TAGS`' reason above:
-    #: nothing is added above the four line-cited `mark_modified()` calls
+    #: nothing is added above the three line-cited `mark_modified()` calls
     #: -- which is also why `MappingProxyType` is imported here and not
     #: with the module's imports.
     #: No reset in `apply_remediation` for the same reason, and none is
@@ -2078,14 +2159,10 @@ class RemediationService:
         owner was handed in: an owner whose removal ran has not declined.
         The copy is absent by then on every scanned path, because the
         `REMOVE_TAG` arm removes a present copy under such an owner
-        before this is asked (`_holds_tag_to_remove`, #948). Read from
-        the code, not measured: one hand-built path still reaches here
-        with the copy present, a finding that spells an owned UID in
-        upper case (`0020,000D`, which the arm's raw-key test falls
-        past) under an owner whose UID was emptied by hand; that copy is
-        left `''`, as #958 left every one. An owner still holding a
-        value gives the two answers below, the decline in a sentence of
-        its own.
+        before this is asked (`_holds_tag_to_remove`, #948), whatever the
+        spelling of its tag since #1012. An owner still holding a value
+        gives the two answers below, the decline in a sentence of its
+        own.
 
         Otherwise the copy is first set to what the export writes: the
         owner's current value, rendered as the export renders it
@@ -2112,7 +2189,8 @@ class RemediationService:
           `_CopyLeftEmpty`, which `_record_decline` routes to `_satisfied`.
         - **Not handed in otherwise:** returns an `_OwnerNotHandedIn`,
           which `_record_decline` writes no row for; the finding is left
-          unhandled for the scan tally, so the instance stays IDENTIFIED
+          unhandled for the scan tally, and the instance is named for the
+          pass-end demotion, tally or none (#960), so it stays IDENTIFIED
           until the owner is acted on and a re-audit runs.
 
         Writes no audit row itself: the callers return the reason and the
@@ -2210,8 +2288,8 @@ class RemediationService:
         if removal and value == "":
             # The owner holds no value, so the export writes the element
             # empty, and the copy is absent (the arm removes a present
-            # one, #948) or, for an owned UID spelled in upper case, `''`
-            # (synced above): nothing is left in the graph or the file,
+            # one, #948, at its canonical key since #1012): nothing is
+            # left in the graph or the file,
             # which is the end state REMOVE asks for. Whether or not the owner was handed
             # in: an owner whose own removal ran, or was already there,
             # has not declined, and a row here would grade a report
@@ -2384,16 +2462,17 @@ class RemediationService:
         finding filed under a wrong uid or none is still settled under the
         patient's real one; each other entity's UID is snapshotted likewise
         (`_pass_start_uids`). A patient whose ID an earlier pass already
-        replaced is snapshotted as its pseudonym, which the tally does not
-        hold, so a mis-named finding on it has no opinion.
+        replaced is snapshotted as its pseudonym, which the settle reads
+        back to the ID the audit raised under (#582,
+        `_scan_time_patient_id`).
 
         Args:
             tally (_ScanTally): The last audit's tally, or None.
             findings: The pass's findings.
         """
         # Here and not at the top of `apply_remediation`, which would move
-        # the four line-cited `mark_modified()` calls.
-        self._scan_tally = tally
+        # the three line-cited `mark_modified()` calls.
+        self._scan_tally, self._pseudonym_map = tally, None
         self._pass_start_ids = self._MappingProxyType({
             id(f.entity): f.entity.patient_id for f in findings
             if isinstance(f.entity, Patient)})
@@ -2898,11 +2977,13 @@ def _remediation_key(finding: PhiFinding) -> tuple:
 _TALLY_MASK = (1 << 64) - 1
 
 
-# Imported here, not at the top: a line added above this module's four
-# `mark_modified()` calls moves them, and each is cited by line number.
+# Imported here, not at the top: a line added above this module's three
+# line-cited `mark_modified()` calls moves them, and each is cited by line
+# number.
 import hashlib  # pylint: disable=wrong-import-position,wrong-import-order
 import json  # pylint: disable=wrong-import-position,wrong-import-order
 import uuid  # pylint: disable=wrong-import-position,wrong-import-order
+from .entities import _canonical_tag  # pylint: disable=wrong-import-position
 
 
 #: One encoder for every key: `json.dumps` with non-default arguments
@@ -3009,8 +3090,9 @@ class _ScanTally:
       (`RemediationService._settle_statuses`), so a wrong or missing name
       reaches None only when that own UID is not one the audit raised
       under either: an instance `redact()` gave a new UID since, a
-      patient whose ID an earlier pass already replaced, or a nested
-      item.
+      hand-built patient whose ID the audit never saw, or a nested item.
+      (A patient whose ID an earlier pass replaced is read back to the
+      ID the audit raised under, #582.)
     - **True**: the handled keys, merged with those earlier passes since
       the same audit handled, are exactly the raised set. The uid is dropped,
       so a later pass over it has no opinion either.
@@ -3172,7 +3254,8 @@ class _OwnerNotHandedIn(str):
     owner-stamped copy whose owner the pass was not handed.
 
     Truthy, so both arms stop as at a decline, and told apart by type in
-    `_record_decline`, which then writes no row. Carries the tag only.
+    `_record_decline`, which then writes no row but names the instance
+    for the pass-end demotion (#960). Carries the tag only.
     """
 
 

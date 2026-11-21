@@ -216,18 +216,16 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
                  id="patient_name"),
     pytest.param(lambda: (Patient(None, "Doe^J"), "P1", "Patient", "patient_id", "ANON_X"),
                  id="patient_id"),
-    pytest.param(lambda: (Series("1.2.3.4", None, 1), "1.2.3.4", "Series", "modality", "OT"),
-                 id="modality"),
     pytest.param(lambda: (Study("1.2.3", None), "1.2.3", "Study", "study_date", VALUE),
                  id="study_date"),
-    pytest.param(lambda: (Study("1.2.3", "20040119"), "1.2.3", "Study", "study_time", "120000"),
-                 id="study_time"),
 ])
 def test_a_none_attribute_refuses_a_value(build):
-    """Every field the arm reaches, at None, under a value: one decline
+    """Fields the arm reaches, at None, under a value: one decline
     naming the attribute and the type, the field still None, nothing
-    applied, the status untouched. Red before on all five: written,
-    `REMEDIATION_REPLACE`, REMEDIATED."""
+    applied, the status untouched. Red before: written,
+    `REMEDIATION_REPLACE`, REMEDIATED. `Series.modality` and
+    `Study.study_time` were cases here until #987 took them off the arm
+    (`test_a_replace_reaches_only_the_exported_fields.py`)."""
     entity, uid, entity_type, attr, value = build()
     before = entity.phi_status
 

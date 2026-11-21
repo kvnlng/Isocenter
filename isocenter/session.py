@@ -7894,6 +7894,14 @@ class DicomSession:
         scheme). Otherwise the finding declines. The findings passed are not
         modified.
 
+        A finding whose end state is already there, with the record that a
+        remediation left it there, is satisfied: it writes no row, is not
+        counted, and no later finding on the same attribute runs in that
+        pass. So a report handed a second time writes nothing and returns
+        0. The findings are settled against the session's last `audit()`
+        when there is one, so a report from an earlier or a different
+        audit can leave an entity IDENTIFIED until the next `audit()`.
+
         A patient, study or instance edited after its last scan and before
         this pass is not stamped by the pass. It keeps the status that the
         scan left, and still reads `UNSCANNED` afterwards. So it grades
@@ -7910,7 +7918,7 @@ class DicomSession:
         Returns:
             int: How many remediations were applied. Failures are logged and
             excluded, so a caller can tell a clean run from a partial
-            one.
+            one, and so are findings already satisfied.
 
         Raises:
             ValueError: If `configuration.date_jitter` is a range that the

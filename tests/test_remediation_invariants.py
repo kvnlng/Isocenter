@@ -275,33 +275,30 @@ def test_replacing_a_second_patient_attribute_after_a_reload_still_needs_a_save(
         "the database")
 
 
-def test_replacing_a_field_the_entity_does_not_track_still_needs_a_save():
-    """Pins `entity.mark_modified()` at remediation.py line 299.
-
-    That is the `REPLACE_TAG` Python-attribute arm, on the one path its
-    call bears: a stored field outside the entity's `_TRACKED_FIELDS`.
-    `Study.date_shifted` is one (a `studies` column, written by
-    remediation beside its own `mark_modified()`), so assigning it marks
-    nothing, and without the call the flag is `True` in memory while the
-    next save skips the study's row.
-
-    The path is hand-built only: no scan raises a REPLACE on
-    `date_shifted`. The arm allows it because `_replace_attr_refused` is
-    generic over every entity field; whether REPLACE should take #679's
-    allowlist, as REMOVE did, is an open question, and if it does this
-    test's subject goes with it. Until then the call is load-bearing here.
+def test_every_field_the_replace_arm_may_write_is_a_tracked_field():
+    """Stands where the pin of the `REPLACE_TAG` Python-attribute arm's
+    `mark_modified()` stood. That call bore one path: a stored field
+    outside the entity's `_TRACKED_FIELDS`, `Study.date_shifted`, which a
+    hand-built REPLACE could write. #987 (owner rulings Q1a-Q1c) gave the
+    arm `ENTITY_FIELD_TAGS` as its allowlist, as #679 did the REMOVE arm,
+    so `date_shifted` declines and the call was deleted: every field the
+    arm may write is tracked, and assigning a tracked field marks the
+    entity (#767). Untrack one, or widen the allowlist to an untracked
+    field, and this is red before a written field goes unsaved.
     """
     study = _as_reloaded(Study("S1", "20230101"))
-    assert study.date_shifted is False
 
-    RemediationService().apply_remediation(
+    applied = RemediationService().apply_remediation(
         [_finding(study, "REPLACE_TAG", "date_shifted",
                   new_value=True, original=False)])
 
-    assert study.date_shifted is True
-    assert study.has_unsaved_changes, (
-        "the flag was written in memory but the study still looks saved, "
-        "so the next save skips its row and the store keeps the old flag")
+    assert applied == 0
+    assert study.date_shifted is False
+    for field in sorted(RemediationService.ENTITY_FIELD_TAGS):
+        cls = _class_declaring(field)
+        assert field in cls._TRACKED_FIELDS, (
+            f"{cls.__name__}.{field} can be written by a REPLACE but an "
+            "assignment to it marks nothing, so the next save skips it")
 
 
 def _shift(study, original):
