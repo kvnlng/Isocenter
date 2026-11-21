@@ -44,11 +44,13 @@ says how a behaviour came to be.
 - **The configuration.** Every 1.x loads a file that 1.0 loads. A 1.x
   that applies an unchanged file differently raises the schema's minor
   version ([Data promises](#frozen-at-10)).
-- **Plugins, provisionally.** The exporter registry is usable and
-  provisional until 1.1. Version 1.1 may replace it rather than extend
-  it. A plugin written against 1.0 should pin `isocenter>=1.0,<1.1`.
-  In 1.0, no third-party export grades `PASS`
-  ([The exporter registry](#the-exporter-registry-provisional-until-11)).
+- **Plugins.** Since 1.1, an exporter plugin implements
+  `write(dataset, item, folder, **options)` and is handed, per instance,
+  the dataset that the DICOM export would write, behind every export
+  gate. Its export can grade `PASS`. The contract is documented but
+  internal, and no longer provisional; 1.1 replaced the 1.0 registry, so
+  a plugin written against 1.0 does not register on 1.1
+  ([The exporter contract](#the-exporter-contract)).
 
 ## Renames and removals after 1.0
 
@@ -205,7 +207,8 @@ frozen with the method. The `dicom` options are
 `use_compression=True, check_burned_in=False,
 check_reversibility=True, patient_ids=None, show_progress=True,
 subset=None, verify_readback=False`. The `wfdb` options are
-`patient_ids` and `include_annotation_text`. An option name that the
+`patient_ids`, `subset`, `check_burned_in` and `include_annotation_text`
+(`subset` and `check_burned_in` since 1.1, #783). An option name that the
 format does not recognise raises `TypeError`, and `export()` writes
 nothing. The two formats do not accept the same options. So a caller
 that forwards one options dict to both must split it per format.
@@ -280,6 +283,9 @@ runs inside `export(check_burned_in=True)`, so that call merges too.
 - `IngestSummary(ingested, failures, declined, skipped, hidden)` plus
   `failed`.
 - `ExportSummary(written_uids, failures)` plus `written` and `failed`.
+  `written_uids` and `failures` list instances in plan order: the
+  store's patient, study, series and instance order, which is the order
+  of the output tree (#999).
   `written_uids` holds the SOP Instance UID of each written instance and
   nothing else. An instance with no UID is not written and is in
   `failures`. So is an instance whose file another instance's write
@@ -891,8 +897,10 @@ names both spellings
   constant `SOURCE_SOP_UID_ATTR`. That constant is the `attributes` key
   under which an instance keeps the SOP Instance UID it held before its
   UID first changed (the ingested one, unless `sop_instance_uid` was
-  assigned first). `exported_patient_id` is on the registry's
-  provisional terms (below).
+  assigned first). A plugin exporter does not need
+  `exported_patient_id`: since 1.1 the export applies it before `write`
+  gets the dataset, and `ExportItem.patient_id` holds its answer
+  ([The exporter contract](#the-exporter-contract)).
 - **The [OCR API](ocr.md) page**: `DiscoveryCandidate`,
   `ZoneDiscoverer.group_boxes`,
   `RedactionVerifier` (`__init__`, `get_matching_rule`, `is_covered`,
@@ -906,8 +914,8 @@ names both spellings
   `visualize_heatmap`, `analyze_temporal_stability` and
   `inspect_clusters`, and its attributes `candidates` and `n_sources`.
 - **`DicomExporter.write_tree()`** (the serializer alone) and the
-  exporter registry `Exporter`, `register()`, `get_exporter()`,
-  `available_formats()`, which is provisional (below).
+  exporter contract `Exporter`, `ExportItem`, `register()`,
+  `get_exporter()` and `available_formats()` (below).
 - **`RedactionService.apply_redaction_to_array`** (static).
 - **`PhiRemediation`**, the proposal a `PhiFinding` carries in
   `remediation_proposal`. Its `action_type` words are frozen (above).
@@ -923,28 +931,30 @@ names both spellings
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
 
-### The exporter registry: provisional until 1.1
+### The exporter contract
 
-`Exporter`, `register()`, `get_exporter()` and `available_formats()` are
-**provisional**. A real plugin API is planned for 1.1. Version 1.1 may
-replace these four names rather than extend them. As for anything in
-this section, the change will be a `Breaking` CHANGELOG entry that
-names both spellings. A plugin written against 1.0 should pin
-`isocenter>=1.0,<1.1`. `entities.exported_patient_id()` is documented
-but internal on the same terms. The [exporter registry](exporters.md)
-page tells plugin authors to call it.
+`Exporter`, `ExportItem`, `register()`, `get_exporter()` and
+`available_formats()` are documented but internal. As for anything in
+this section, a change is a `Breaking` CHANGELOG entry that names both
+spellings, in a minor release only. They are not provisional. In 1.0
+they were, and 1.1 replaced them
+([#783](https://github.com/kvnlng/Isocenter/issues/783)): a plugin
+implements `write(dataset, item, folder, **options)`, and `register()`
+refuses the 1.0 shape, `export(session, folder, **options)`, with
+`TypeError`. `entities.exported_patient_id()` is documented but internal
+on the same terms.
 
-Every export gate lives inside the two built-in formats, so a
-third-party exporter receives the graph with none of them applied. Each
-run of such an exporter writes one `WARNING` audit row, and **in 1.0 no
-third-party export grades `PASS`**. The [Exporter registry](exporters.md)
-page lists what does not run for such an exporter, and the rules for
-its author. Running the gates above dispatch is
-[#783](https://github.com/kvnlng/Isocenter/issues/783).
+`session.export()` runs every export gate for a plugin, as for the
+built-in formats. Each `write()` call gets the pydicom dataset that the
+DICOM export would write for one instance, before compression, in an
+export worker process, and never the session. Such an export writes its
+own `EXPORT` row, which names the plugin's class, and can grade `PASS`.
+The [Exporter registry](exporters.md) page says what the dataset holds,
+what it does not, and the rules for a plugin's author.
 
-There is no read-side seam. Ingest reads through pydicom and the
-library's own codec dispatch. A reader or codec plugin point is 1.1 or
-later.
+There is no read-side seam, and none is planned (owner ruling on
+[#527](https://github.com/kvnlng/Isocenter/issues/527), 2026-09-12).
+Ingest reads through pydicom and the library's own codec dispatch.
 
 ## Private
 

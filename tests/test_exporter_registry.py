@@ -38,61 +38,54 @@ def test_registration_is_idempotent_for_the_same_class(_clean_registry):
     no-op -- and re-registering the identical class again afterward is
     genuinely idempotent (no error, same class still wins).
 
-    The original version of this test registered the SAME class twice
-    and asserted only that the name was still present. That passes
-    identically whether `register()` does `_REGISTRY[name] = cls`
+    Registering the SAME class twice and asserting only that the name is
+    present passes whether `register()` does `_REGISTRY[name] = cls`
     (real update) or `_REGISTRY.setdefault(name, cls)` (silently keeps
-    whatever was registered FIRST and ignores every later call) --
-    because with the same class object either way, the end state is
-    bit-identical. Registering two DISTINCT classes under one name is
-    the only way to tell them apart: `setdefault` would keep `First`
-    and silently ignore `Second`.
+    whatever was registered FIRST). Registering two DISTINCT classes under
+    one name is the only way to tell them apart. Since #783 the classes
+    live in `tests/support/plugin_exporters.py`, because `register()`
+    refuses a class an export worker cannot import.
     """
-    class First:
-        def export(self, session, folder, **options):
-            return []
+    from support.plugin_exporters import Declining, Recorder
 
-    class Second:
-        def export(self, session, folder, **options):
-            return []
+    exporters.register("dummy", Recorder)
+    assert exporters.get_exporter("dummy").__class__ is Recorder
 
-    exporters.register("dummy", First)
-    assert exporters.get_exporter("dummy").__class__ is First
-
-    exporters.register("dummy", Second)
-    assert exporters.get_exporter("dummy").__class__ is Second, (
+    exporters.register("dummy", Declining)
+    assert exporters.get_exporter("dummy").__class__ is Declining, (
         "re-registering under an existing name did not replace the "
         "stored class -- looks like setdefault semantics, which "
         "silently ignore updates after the first registration")
 
-    # Re-registering the SAME (Second) class again: genuinely idempotent.
-    exporters.register("dummy", Second)
-    assert exporters.get_exporter("dummy").__class__ is Second
+    exporters.register("dummy", Declining)
+    assert exporters.get_exporter("dummy").__class__ is Declining
     assert "dummy" in exporters.available_formats()
 
 
-def test_registering_a_class_without_export_is_rejected():
+def test_registering_a_class_without_write_is_rejected():
+    """Was `..._without_export_...` until #783: the method a plugin must
+    implement is now `write`."""
     class NotAnExporter:
         pass
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="write"):
         exporters.register("bogus", NotAnExporter)
+    assert "bogus" not in exporters.available_formats()
 
 
-# ------------------------------------------------ #527: provisional at 1.0
+# ------------------------------------------- #783: the contract since 1.1
 #
-# Owner ruling Q1 (2026-09-23): the registry is marked provisional in the
-# documentation only -- a named tier-2 subsection on the stability page,
-# the two docstrings, and its own page in the API reference. No runtime
-# warning: both built-ins register at import, so one would fire on every
-# `import isocenter` (PEP 411 marks provisional packages the same way).
-# These pin that the marking is there; the prose is the reviewer's.
+# #786 marked the registry provisional until 1.1 in the documentation
+# only. #783 replaced it (owner rulings 2026-11-20): tier 2, no longer
+# provisional (Q13), and no read-side seam is planned (Q14). These pin that
+# the pages say so; the prose is the reviewer's.
 
 import pathlib  # noqa: E402
 import re  # noqa: E402
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
-_REGISTRY_NAMES = ("Exporter", "register", "get_exporter", "available_formats")
+_REGISTRY_NAMES = ("Exporter", "ExportItem", "register", "get_exporter",
+                   "available_formats")
 
 
 def _section(text, heading):
@@ -105,19 +98,22 @@ def _section(text, heading):
     return text[start:end.start() if end else len(text)]
 
 
-def test_the_stability_page_names_the_registry_provisional_in_tier_two():
-    """In "Documented but internal", under its own heading: tier 2 is
-    what "may change in a 1.x with a CHANGELOG entry" already means, and
-    the subsection is what says the change is expected."""
+def test_the_stability_page_names_the_contract_in_tier_two():
+    """In "Documented but internal", under its own heading, no longer
+    provisional, and with no read-side seam planned."""
     page = (_REPO / "docs/api/stability.md").read_text(encoding="utf-8")
     tier_two = _section(page, "## Documented but internal")
-    sub = _section(tier_two, "### The exporter registry: provisional until 1.1")
+    sub = " ".join(_section(tier_two, "### The exporter contract").split())
     for name in _REGISTRY_NAMES:
         assert f"`{name}" in sub, name
-    assert "provisional" in sub
+    assert "They are not provisional." in sub
+    assert "provisional until 1.1" not in sub
     assert "exporters.md" in sub
     assert "#783" in sub
-    assert "isocenter>=1.0,<1.1" in sub
+    assert "`TypeError`" in sub
+    assert "can grade `PASS`" in sub
+    assert "none is planned" in sub
+    assert "1.1 or later" not in sub
 
 
 def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
@@ -127,7 +123,7 @@ def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
     assert toctree and re.search(r"^(?:.*<)?exporters>?$", toctree.group(1),
                                  re.MULTILINE), landing
     page = (_REPO / "docs/api/exporters.md").read_text(encoding="utf-8")
-    assert ":::{admonition} Provisional\n:class: warning\n" in page
+    assert ":::{admonition} Provisional" not in page
     assert re.search(r"^\.\. automodule:: isocenter\.exporters$", page,
                      re.MULTILINE)
     members = re.search(r"^\.\. automodule:: isocenter\.exporters\n"
@@ -137,14 +133,15 @@ def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
     for name in _REGISTRY_NAMES:
         assert name in rendered, name
     assert "#783" in page
-    assert "REVIEW_REQUIRED" in page
-    # The two pixel gates a plugin misses (review of #786).
+    # What the dataset a plugin gets has been through (#783).
     assert "redaction zones" in page
     assert "(0088,0200)" in page
-    # ...and the bookkeeping key holding the replaced source UID (#544).
     assert "_ISOCENTER_SOURCE_SOP_UID" in page
+    assert "def write(self, dataset, item, folder, **options)" in page
 
 
-def test_the_two_docstrings_say_provisional():
+def test_the_two_docstrings_name_the_contract():
     for obj in (exporters.Exporter, exporters.register):
-        assert "provisional until 1.1" in obj.__doc__.lower(), obj
+        doc = obj.__doc__.lower()
+        assert "provisional" not in doc, obj
+        assert "write" in doc, obj
