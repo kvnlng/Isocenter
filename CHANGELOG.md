@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | the same under `basic` | 5 | 0 |
   | the same under `none` plus `0010,0010: REMOVE` | 2 | 0 |
   | the same, pydicom's JPEG2000.dcm, the floor plus `0009,1042: JITTER` | 6 | 0 |
+  | the instance findings handed a second time, CT_small, `none` plus `0008,0023: JITTER` (#1196) | 1 | 0 |
+  | the same, with a Content Date inside a sequence item as well (#1196) | 2 | 0 |
+  | the instance findings handed a second time, CT_small with one sequence item, `basic` (#991) | 4 | 0 |
+  | `anonymize(report)` on a saved and reopened store whose report the first session applied (CT_small and MR_small, `0010,0010` and `0008,0020` REMOVE) | 6 | 0 |
+  | N hand-built `REPLACE_TAG`s of one field on one owner to one value, under different `entity_uid`s (three `patient_name -> "ZZZ"` on a patient with an instance copy) | 3 | 1 |
   | a hand-built `REPLACE_TAG` naming a Patient, Study or Series attribute the export does not write (`studies`, `series`, `instances`, `modality`, `date_shifted`, `study_time`, `_jitter_scheme`, …) | 1 | 0 |
   | a hand-built instance `REMOVE_TAG` spelling a held tag in upper case (`0008,103E`, or `0020,000D` under a Study whose UID was emptied by hand) | 0 | 1 |
 

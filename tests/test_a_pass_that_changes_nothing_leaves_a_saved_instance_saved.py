@@ -99,6 +99,33 @@ def test_a_satisfied_entity_ends_where_the_pass_settles_it(tmp_path, start):
         assert instance.phi_status is PhiStatus[start.upper()]
 
 
+@pytest.mark.parametrize("start", ["cleared", "remediated", "identified"])
+def test_a_satisfied_entity_that_is_demoted_ends_identified(tmp_path, start):
+    """An instance the last audit's tally holds incomplete, handed only one
+    satisfied finding (a REMOVE of a tag it does not hold): the satisfied
+    stamp is held for the pass end, the tally demotes the instance, and it
+    ends IDENTIFIED whatever status it started with -- as it did when the
+    stamp landed at once and was then demoted. The CLEARED start is the
+    one a demotion of "REMEDIATED only" would leave CLEARED, because the
+    held stamp never landed."""
+    with _session(tmp_path, "none") as session:
+        report = session.audit()
+        instance = _instance(session)
+        # Non-vacuity: the audit raised something on the instance.
+        assert any(f.entity is instance for f in report.findings)
+        instance.record_phi_status(PhiStatus[start.upper()])
+        absent = PhiFinding(
+            entity_uid=instance.sop_instance_uid, entity_type="Instance",
+            field_name="0009,9999", value=None, reason="test", tag="0009,9999",
+            entity=instance,
+            remediation_proposal=PhiRemediation(action_type="REMOVE_TAG",
+                                                target_attr="0009,9999"))
+
+        assert session.anonymize([absent]) == 0
+
+        assert instance.phi_status is PhiStatus.IDENTIFIED
+
+
 def test_a_direct_apply_single_remediation_still_stamps_a_satisfied_entity():
     """Outside a pass there is no pass end to settle a stamp, so a
     satisfied finding stamps its entity at once, as before."""

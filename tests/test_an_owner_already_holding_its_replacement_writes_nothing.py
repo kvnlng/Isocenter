@@ -120,6 +120,9 @@ def test_an_unrecorded_copy_under_an_owner_already_replaced_is_written_once(tmp_
         assert len(new) == 1
         assert not new[0].remediation_vouches_for("0020,000d",
                                                   new[0].attributes.get("0020,000d"))
+        shifted = (study.study_date.strftime("%Y%m%d")
+                   if hasattr(study.study_date, "strftime") else study.study_date)
+        assert new[0].attributes.get("0008,0020") != shifted
         before = len(_rows(session))
 
         session.anonymize(report)
@@ -128,6 +131,42 @@ def test_an_unrecorded_copy_under_an_owner_already_replaced_is_written_once(tmp_
         assert new[0].remediation_vouches_for("0020,000d", study.study_instance_uid)
         rows = [d for a, d in _rows(session)[before:] if a == "REMEDIATION_REPLACE"]
         assert any(": study_instance_uid -> " in d for d in rows), rows
+        # The Study's date shift has the same gate: its copies are in it.
+        assert new[0].attributes["0008,0020"] == shifted
+        assert new[0].remediation_vouches_for("0008,0020", shifted)
+        shifts = [d for a, d in _rows(session)[before:] if a == "REMEDIATION_SHIFT_DATE"]
+        assert any("study_date" in d for d in shifts), shifts
+
+
+def test_a_copy_holding_the_owners_value_without_a_record_is_written_once(tmp_path):
+    """The record half of the copies gate: under `basic` the Patient holds
+    `ANONYMIZED`, and so does its instance's `0010,0010` copy, but with the
+    copy's remediation record taken away. The owner is not already there,
+    so it writes once, with its row, and the copy gets its record; read on
+    equality alone, the owner would be satisfied and the copy's own
+    finding would decline over a value no record vouches for."""
+    with _session(tmp_path, "basic") as session:
+        report = session.audit()
+        session.anonymize(report)
+        session.save(sync=True)
+        patient = session.store.patients[0]
+        instance = patient.studies[0].series[0].instances[0]
+        held = instance.attributes["0010,0010"]
+        assert held == patient.patient_name
+        instance._remediated_values = {  # pylint: disable=protected-access
+            k: v for k, v in (instance._remediated_values or {}).items()  # pylint: disable=protected-access
+            if k != "0010,0010"}
+        assert not instance.remediation_vouches_for("0010,0010", held)
+        before = len(_rows(session))
+
+        session.anonymize(report)
+
+        rows = _rows(session)[before:]
+        assert [d for a, d in rows if a == "REMEDIATION_DECLINED"] == [], rows
+        names = [d for a, d in rows
+                 if a == "REMEDIATION_REPLACE" and ": patient_name -> " in d]
+        assert len(names) == 1, rows
+        assert instance.remediation_vouches_for("0010,0010", held)
 
 
 def test_a_foreign_pseudonym_equal_to_the_held_value_is_still_refused(tmp_path):

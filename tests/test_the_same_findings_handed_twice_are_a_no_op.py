@@ -139,6 +139,22 @@ def _session(tmp_path, source, policy):
 @pytest.mark.parametrize("policy", sorted(POLICIES))
 @pytest.mark.parametrize("source", sorted(SOURCES))
 def test_the_second_call_changes_nothing(tmp_path, source, policy, handed, save_between):
+    _second_call_changes_nothing(tmp_path, source, policy, handed, save_between)
+
+
+@pytest.mark.parametrize("policy", sorted(POLICIES))
+@pytest.mark.parametrize("source", sorted(SOURCES))
+def test_the_second_call_changes_nothing_under_processes(
+        tmp_path, monkeypatch, source, policy):
+    """The scan's process path (3.12's default), on the whole report saved
+    between the calls: the findings cross a process boundary and are
+    rehydrated, and the second call is still a no-op."""
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    _second_call_changes_nothing(tmp_path, source, policy, "whole", True)
+
+
+def _second_call_changes_nothing(tmp_path, source, policy, handed, save_between):
     session = _session(tmp_path, source, policy)
     with session:
         report = session.audit()
